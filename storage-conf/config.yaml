@@ -1,0 +1,9 @@
+# A set of configuration
+defaults:
+ - _self_
+ - workload: 
+ - override hydra/job_logging: disabled  
+ - override hydra/hydra_logging: disabled
+hydra:
+  run:
+    dir: ./results/${workload.model}/${now:%Y-%m-%d}-${now:%H-%M-%S}
