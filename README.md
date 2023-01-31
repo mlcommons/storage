@@ -208,6 +208,14 @@ Below table displays the list of configurable paramters for the benchmark.
 | **Storage params**		|								|   |
 | storage.storage_root		| The storage root directory  					| ./|
 | storage.storage_type		| The storage type  						|local_fs|
+=======
+## Overview
+
+Storage benchmark suite uses DLIO as a submodule inorder to 
+
+1. Generate synthetic data
+2. Run the benchmark on the generated data
+3. Create reports from the benchmark results
 
 ## Releases
 The benchmark preview package will be released soon. Stay tuned!
