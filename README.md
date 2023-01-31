@@ -72,7 +72,7 @@ Options:
   -c, --category		Benchmark category to be submitted. Possible options are 'closed'(default)
   -w, --workload		Workload dataset to be generated. Possible options are 'unet3d', 'bert'
   -n, --num-parallel		Number of parallel jobs used to generate the dataset
-  -r, --results-dir		Location to the results directory
+  -r, --results-dir		Location to the results directory. Default is ./results/workload.model/DATE-TIME
   -p, --param			DLIO param when set, will override the config file value
 ```
 
@@ -99,7 +99,7 @@ Options:
   -w, --workload		Workload to be run. Possible options are 'unet3d', 'bert'
   -g, --accelerator-type	Simulated accelerator type used for the benchmark. Possible options are 'v100-32gb'(default)
   -n, --num-accelerators	Simulated number of accelerators of same accelerator type
-  -r, --results-dir		Location to the results directory
+  -r, --results-dir		Location to the results directory. Default is ./results/workload.model/DATE-TIME
   -p, --param			DLIO param when set, will override the config file value
 ```
 

@@ -47,7 +47,7 @@ datagen_usage() {
 	echo -e "  -c, --category\t\tBenchmark category to be submitted. Possible options are 'closed'(default)"
 	echo -e "  -w, --workload\t\tWorkload dataset to be generated. Possible options are 'unet3d', 'bert' "
 	echo -e "  -n, --num-parallel\t\tNumber of parallel jobs used to generate the dataset"
-	echo -e "  -r, --results-dir\t\tLocation to the results directory"
+	echo -e "  -r, --results-dir\t\tLocation to the results directory. Default is ./results/workload.model/DATE-TIME"
 	echo -e "  -p, --param\t\t\tDLIO param when set, will override the config file value"
 }
 
@@ -60,7 +60,7 @@ run_usage() {
 	echo -e "  -w, --workload\t\tWorkload to be run. Possible options are 'unet3d', 'bert' "
 	echo -e "  -g, --accelerator-type\tSimulated accelerator type used for the benchmark. Possible options are 'v100-32gb'(default) "
 	echo -e "  -n, --num-accelerators\tSimulated number of accelerators of same accelerator type"
-	echo -e "  -r, --results-dir\t\tLocation to the results directory"
+	echo -e "  -r, --results-dir\t\tLocation to the results directory. Default is ./results/workload.model/DATE-TIME"
 	echo -e "  -p, --param\t\t\tDLIO param when set, will override the config file value"
 }
 
