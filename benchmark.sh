@@ -23,6 +23,7 @@ OPEN_CATEGORY_PARAMS=(
 HYDRA_OUTPUT_CONFIG_DIR="configs"
 EXTRA_PARAMS=(
 	# benchmark do not rely on any profilers
+	++workload.workflow.profiling=False
 	++workload.profiling.profiler=none
 	# config directory inside results used during runs
 	++hydra.output_subdir=$HYDRA_OUTPUT_CONFIG_DIR
