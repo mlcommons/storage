@@ -23,10 +23,22 @@ To that end we have defined two classes of submissions: CLOSED and OPEN.
 CLOSED represents a level playing field where all(*) results are comparable across submissions.  CLOSED explicitly forfeits flexibility in order to enable easy comparability.  (*) Since the benchmark supports both PyTorch and TensorFlow data formats, and those formats apply such different loads to the storage system, cross-format comparisons are not appropriate, even with CLOSED submissions.  Thus, only comparisons between CLOSED PyTorch runs, or comparisons between CLOSED TensorFlow runs, are comparable.  As new data formats like PyTorch and TensorFlow are added to the benchmark that categorization will grow.
  
 OPEN allows more flexibility to tune and change both the benchmark and the storage system configuration to show off new approaches or new features that will benefit the AI/ML Community.  OPEN explicitly forfeits comparability to allow showcasing innovation.
- 
+
+**Benchmark output metric**
+
+For each workload, the benchmark output metric is *accelerator under-utilization*, where lower is better. Accelerator under-utilization is computed as follows. The total ideal compute time is derived from the batch size, total dataset size, number of simulated accelerators, and sleep time: total_compute_time = (records/file * total_files)/simulated_accelerators/batch_size * sleep_time.
+
+Then, accelerator_under_utilization = (total_benchmark_running_time - total_compute_time)/total_compute_time.
+
+Note that the sleep time has been determined by running the workloads including the compute step on real hardware and is dependent on the accelerator type. In this preview package we include sleep times for NVIDIA V100 GPUs, as measured in an NVIDIA DGX-1 system.
+
+**Future work**
+
 In a future version of the benchmark, the MLPerf Storage WG plans to add support for the “data preparation” phase of AI/ML workload as we believe that is a significant load on a storage system and is not well represented by existing AI/ML benchmarks, but the current version only requires a static copy of the dataset exist on the storage system before the start of the run.
  
 In a future version of the benchmark, the MLPerf Storage WG plans to add support for benchmarking a storage system while running more than one MLPerf Storage benchmark at the same time (ie: more than one Training job type, such as 3DUnet and Recommender at the same time), but the current version requires that a submission only include one such job type per submission.
+
+In a future version of the benchmark, we aim to include sleep times for different accelerator types, including different types of GPUs and other ASICS.
 
 
 ## Installation 
