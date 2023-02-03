@@ -53,10 +53,10 @@ For eg: when running on Ubuntu OS,
 sudo apt-get install mpich sysstat
 ```
 
-Clone the [MLCommons Storage](https://github.com/mlcommons/storage) repository and install Python dependencies.
+Clone the latest release from [MLCommons Storage](https://github.com/mlcommons/storage) repository and install Python dependencies.
 
 ```bash
-git clone --recurse-submodules https://github.com/mlcommons/storage.git 
+git clone -b v0.5-rc0 --recurse-submodules https://github.com/mlcommons/storage.git
 cd storage
 pip3 install -r dlio_benchmark/requirements.txt
 ```
@@ -238,5 +238,8 @@ Below table displays the list of configurable paramters for the benchmark.
 
 
 ## Releases
-The benchmark preview package will be released soon. Stay tuned!
+
+### [v0.5-rc0](https://github.com/mlcommons/storage/releases/tag/v0.5-rc0) (2022-02-03)
+
+First MLPerf Storage benchmark preview release
 
