@@ -26,11 +26,15 @@ OPEN allows more flexibility to tune and change both the benchmark and the stora
 
 **Benchmark output metric**
 
-For each workload, the benchmark output metric is *accelerator under-utilization*, where lower is better. Accelerator under-utilization is computed as follows. The total ideal compute time is derived from the batch size, total dataset size, number of simulated accelerators, and sleep time: total_compute_time = (records/file * total_files)/simulated_accelerators/batch_size * sleep_time.
+For each workload, the benchmark output metric is *accelerator under-utilization* (```AUU```), where lower is better. ```AUU``` is computed as follows. The total ideal compute time is derived from the batch size, total dataset size, number of simulated accelerators, and sleep time: ```total_compute_time = (records/file * total_files)/simulated_accelerators/batch_size * sleep_time```. Then ```AUU``` is computed as follows: 
 
-Then, accelerator_under_utilization = (total_benchmark_running_time - total_compute_time)/total_compute_time.
+```
+AUU = (total_benchmark_running_time - total_compute_time)/total_compute_time
+```
 
 Note that the sleep time has been determined by running the workloads including the compute step on real hardware and is dependent on the accelerator type. In this preview package we include sleep times for NVIDIA V100 GPUs, as measured in an NVIDIA DGX-1 system.
+
+In addition to ```AUU```, submissions are expected to report details such as the number of MPI processes run on the DLIO host, as well as the amount of main memory on the DLIO host.
 
 **Future work**
 
@@ -73,7 +77,7 @@ The working directory structure is as follows
                |---bert.yaml
 ```
 
-The configuration of each workload is specified through a yaml file. You can see the configs of all workloads in `storage-conf` folder.
+The benchmark simulation will be performed through the [dlio_benchmark](https://github.com/argonne-lcf/dlio_benchmark) code, a benchmark suite for emulating I/O patterns for deep learning workloads. [dlio_benchmark](https://github.com/argonne-lcf/dlio_benchmark) currently is listed as a submodule to this MLPerf Storage repo. The DLIO configuration of each workload is specified through a yaml file. You can see the configs of all MLPerf Storage workloads in the `storage-conf` folder. ```benchmark.sh``` is a wrapper script which launches [dlio_benchmark](https://github.com/argonne-lcf/dlio_benchmark) to perform the benchmark for MLPerf Storage workloads. 
 
 ```bash
 ./benchmark.sh -h
@@ -81,6 +85,7 @@ The configuration of each workload is specified through a yaml file. You can see
 Usage: ./benchmark.sh [datagen/run/configview/reportgen] [options]
 Script to launch the MLPerf Storage benchmark.
 ```
+
 ## Configuration
 
 The benchmark suite consists of 3 distinct phases
