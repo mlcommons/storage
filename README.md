@@ -1,5 +1,5 @@
 # MLPerf™ Storage Benchmark Suite
-MLPerf Storage is a benchmark suite to characterize performance of storage systems that support machine learning workloads.
+MLPerf Storage is a benchmark suite to characterize the performance of storage systems that support machine learning workloads.
 
 - [Overview](#Overview) 
 - [Installation](#Installation)
