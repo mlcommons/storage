@@ -32,6 +32,8 @@ Then, accelerator_under_utilization = (total_benchmark_running_time - total_comp
 
 Note that the sleep time has been determined by running the workloads including the compute step on real hardware and is dependent on the accelerator type. In this preview package we include sleep times for NVIDIA V100 GPUs, as measured in an NVIDIA DGX-1 system.
 
+In addition to the accelerator_under_utilization, submissions will be expected to include the number of MPI processes run by the DLIO host, as well as the amount of the DLIO host's main memory.
+
 **Future work**
 
 In a future version of the benchmark, the MLPerf Storage WG plans to add support for the “data preparation” phase of AI/ML workload as we believe that is a significant load on a storage system and is not well represented by existing AI/ML benchmarks, but the current version only requires a static copy of the dataset exist on the storage system before the start of the run.
