@@ -1,0 +1,29 @@
+{
+    "num_accelerators": 2,
+    "hostname": "ubuntu",
+    "metric": {
+        "train_au_percentage": [
+            99.7665615300507,
+            99.76498948164247,
+            99.71307508036237,
+            99.73095472123265,
+            99.54703907796966
+        ],
+        "train_au_mean_percentage": 99.70452397825157,
+        "train_au_stdev_percentage": 0.08133625793235097,
+        "train_throughput_samples_per_second": [
+            4.991565529991643,
+            5.042987089042813,
+            4.8112529163844595,
+            4.946724013252261,
+            4.919730091570759
+        ],
+        "train_throughput_mean_samples_per_second": 4.942451928048387,
+        "train_throughput_stdev_samples_per_second": 0.07780382730754626,
+        "train_io_mean_MB_per_second": 1105.6000998207287,
+        "train_io_stdev_MB_per_second": 17.404300636591998
+    },
+    "start": "2023-04-04T11:40:10.008277",
+    "end": "2023-04-04T11:41:00.657318",
+    "epochs": 5
+}

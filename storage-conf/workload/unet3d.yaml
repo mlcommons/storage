@@ -23,7 +23,7 @@ reader:
   sample_shuffle: seed
 
 train:
-  epochs: 10
+  epochs: 5
   computation_time: 1.3604
 
 checkpoint:
