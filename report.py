@@ -110,6 +110,7 @@ class StorageReport(object):
                     au = summary[1]
                     if float(au) < AU_THRESHOLD:
                         logging.error(f"Error: AU value didn't pass the threshold in the run reported by {summary_file}")
+                        sys.exit(1)
                     num_acclerators.append(summary[0])
                     train_throughput_sps.append(summary[1])
                     train_throughput_mps.append(summary[3])
