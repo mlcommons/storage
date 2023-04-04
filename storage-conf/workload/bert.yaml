@@ -18,7 +18,7 @@ dataset:
 
 train:
   computation_time: 0.968
-  total_training_steps: 5000
+  total_training_steps: 1000
  
 reader:
   data_loader: tensorflow
@@ -31,5 +31,5 @@ reader:
 
 checkpoint:
   checkpoint_folder: checkpoints/bert
-  steps_between_checkpoints: 1250
+  steps_between_checkpoints: 250
   model_size: 4034713312

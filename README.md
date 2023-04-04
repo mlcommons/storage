@@ -49,12 +49,11 @@ In a future version of the benchmark, we aim to include sleep times for differen
 
 Install dependencies using your system package manager.
 - `mpich` for MPI package
-- `sysstat` for iostat package
 
 For eg: when running on Ubuntu OS,
 
 ```
-sudo apt-get install mpich sysstat
+sudo apt-get install mpich
 ```
 
 Clone the latest release from [MLCommons Storage](https://github.com/mlcommons/storage) repository and install Python dependencies.
@@ -82,15 +81,38 @@ The benchmark simulation will be performed through the [dlio_benchmark](https://
 ```bash
 ./benchmark.sh -h
 
-Usage: ./benchmark.sh [datagen/run/configview/reportgen] [options]
+Usage: ./benchmark.sh [datasize/datagen/run/configview/reportgen] [options]
 Script to launch the MLPerf Storage benchmark.
 ```
 
 ## Configuration
 
-The benchmark suite consists of 3 distinct phases
+The benchmark suite consists of 4 distinct phases
 
-1. Synthetic data is generated based on the workload requested by the user.
+1. Calculate the minimum dataset size required for the benchmark run
+
+```bash
+./benchmark.sh datasize -h
+Usage: ./benchmark.sh datasize [options]
+Get minimum dataset size required for the benchmark run.
+
+
+Options:
+  -h, --help			Print this message
+  -w, --workload		Workload dataset to be generated. Possible options are 'unet3d', 'bert'
+  -n, --num-accelerators	Simulated number of accelerators per node of same accelerator type
+  -m, --host-memory-in-gb	Memory available in the client where benchmark is run
+```
+
+Example:
+
+To calculate minimum dataset size for a `unet3d` workload on a client machine with 128 GB with 8 simulated accelerators,
+
+```bash
+./benchmark.sh datasize --workload unet3d --num-accelerators 8 --host-memory-in-gb 128
+```
+
+2. Synthetic data is generated based on the workload requested by the user.
 
 ```bash
 ./benchmark.sh datagen -h
@@ -116,7 +138,7 @@ For generating training data for `unet3d` workload into `unet3d_data` directory 
 ./benchmark.sh datagen --workload unet3d --num-parallel 8 --param dataset.num_subfolders_train=10 --param dataset.data_folder=unet3d_data
 ```
 
-2. Benchmark is run on the generated data. Device stats are collected continuously using iostat profiler during the benchmark run.
+3. Benchmark is run on the generated data.
 
 ```bash
 ./benchmark.sh run -h
@@ -143,19 +165,60 @@ For running benchmark on `unet3d` workload with data located in `unet3d_data` di
 ./benchmark.sh run --workload unet3d --num-accelerators 4 --results-dir unet3d_results --param dataset.data_folder=unet3d_data
 ```
 
-3. Reports are generated from the benchmark results
+4. Reports are generated from the benchmark results
 
 ```bash
 ./benchmark.sh reportgen -h
 
 Usage: ./benchmark.sh reportgen [options]
-Generate a report from the benchmark results.
+Generate a report from the benchmark results. Supports single host and multi host run.
 
 
 Options:
   -h, --help			Print this message
   -r, --results-dir		Location to the results directory
 ```
+
+For single host run, the `results-dir` need to contain `summary.json` file.
+
+
+```bash
+./benchmark.sh reportgen --results-dir  sample-results/run0/2023-04-04-11-33-37/
+```
+For multi-host run, the results need to be in the following structure. See `sample-results` folder
+
+```
+|---run-1
+       |---host-1
+                |---summary.json
+       |---host-2
+                |---summary.json
+          ....
+       |---host-n
+                |---summary.json
+|---run-2
+       |---host-1
+                |---summary.json
+       |---host-2
+                |---summary.json
+          ....
+       |---host-n
+                |---summary.json
+      ......
+|---run-n
+       |---host-1
+                |---summary.json
+       |---host-2
+                |---summary.json
+          ....
+       |---host-n
+                |---summary.json
+```
+
+```bash
+./benchmark.sh reportgen --results-dir  sample-results/
+```
+
 
 ## Workloads
 Currently, the storage benchmark suite supports benchmarking of 3 deep learning workloads
@@ -165,22 +228,22 @@ Currently, the storage benchmark suite supports benchmarking of 3 deep learning 
 
 ### U-Net3D Workload
 
+Calculate minimum dataset size required for the benchmark run
+
+```bash
+./benchmark.sh datasize --workload unet3d --num-accelerators 8 --host-memory-in-gb 128
+```
+
 Generate data for the benchmark run
 
 ```bash
-./benchmark.sh datagen --workload unet3d --num-parallel 8
-```
-  
-Flush the filesystem caches before benchmark run
-
-```bash
-sudo sync && echo 3 | sudo tee /proc/sys/vm/drop_caches
+./benchmark.sh datagen --workload unet3d --num-parallel 8 --param dataset.num_files_train=3200
 ```
   
 Run the benchmark.
 
 ```bash
-./benchmark.sh run --workload unet3d --num-accelerators 8
+./benchmark.sh run --workload unet3d --num-accelerators 8 --param dataset.num_files_train=3200
 ```
 
 All results will be stored in ```results/unet3d/$DATE-$TIME``` folder or in the directory when overriden using `--results-dir`(or `-r`) argument. To generate the final report, one can do
@@ -188,24 +251,25 @@ All results will be stored in ```results/unet3d/$DATE-$TIME``` folder or in the 
 ```bash 
 ./benchmark.sh reportgen --results-dir results/unet3d/$DATE-$TIME
 ```
-This will generate ```DLIO_$model_report.txt``` in the output folder. 
+This will generate ```mlperf_storage_report.json``` in the output folder.
 
 ### BERT Workload
+
+Calculate minimum dataset size required for the benchmark run
+
+```bash
+./benchmark.sh datasize --workload bert --num-accelerators 8 --host-memory-in-gb 128
+```
 
 Generate data for the benchmark run
 
 ```bash
-./benchmark.sh datagen --workload bert --num-parallel 8
-```
-  
-Flush the filesystem caches before benchmark run
-```bash
-sudo sync && echo 3 | sudo tee /proc/sys/vm/drop_caches
+./benchmark.sh datagen --workload bert --num-parallel 8 --param dataset.num_files_train=350
 ```
   
 Run the benchmark
 ```bash
-./benchmark.sh run --workload bert --num-accelerators 8
+./benchmark.sh run --workload bert --num-accelerators 8 --param dataset.num_files_train=350
 ```
 
 All results will be stored in ```results/bert/$DATE-$TIME``` folder or in the directory when overriden using `--results-dir`(or `-r`) argument. To generate the final report, one can do
@@ -213,7 +277,7 @@ All results will be stored in ```results/bert/$DATE-$TIME``` folder or in the di
 ```bash 
 ./benchmark.sh reportgen -r results/bert/$DATE-$TIME
 ```
-This will generate ```DLIO_$model_report.txt``` in the output folder. 
+This will generate ```mlperf_storage_report.json``` in the output folder.
 
 
 ### DLRM Workload
@@ -230,11 +294,9 @@ Below table displays the list of configurable paramters for the benchmark.
 | dataset.num_files_train       | Number of files for the training set  		        | --|
 | dataset.num_subfolders_train  | Number of subfolders that the training set is stored	        |0|
 | dataset.data_folder           | The path where dataset is stored				| --|
-| dataset.keep_files  		| Flag whether to keep the dataset files afer the run	        |True|
 | **Reader params**				|						|   |
 | reader.read_threads		| Number of threads to load the data                            | --|
 | reader.computation_threads    | Number of threads to preprocess the data(only for bert)       | --|
-| reader.prefetch_size		| Number of batch to prefetch 			                |0|
 | **Checkpoint params**		|								|   |
 | checkpoint.checkpoint_folder	| The folder to save the checkpoints  				| --|
 | **Storage params**		|								|   |

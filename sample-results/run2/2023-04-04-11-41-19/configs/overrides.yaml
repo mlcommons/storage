@@ -1,0 +1,6 @@
+- workload=unet3d
+- ++workload.workflow.generate_data=False
+- ++workload.workflow.train=True
+- ++workload.dataset.num_files_train=50
+- ++workload.workflow.profiling=False
+- ++workload.profiling.profiler=none
