@@ -26,15 +26,15 @@ OPEN allows more flexibility to tune and change both the benchmark and the stora
 
 **Benchmark output metric**
 
-For each workload, the benchmark output metric is *accelerator under-utilization* (```AUU```), where lower is better. ```AUU``` is computed as follows. The total ideal compute time is derived from the batch size, total dataset size, number of simulated accelerators, and sleep time: ```total_compute_time = (records/file * total_files)/simulated_accelerators/batch_size * sleep_time```. Then ```AUU``` is computed as follows: 
+For each workload, the benchmark output metric is samples per second, subject to a minimum *accelerator utilization* (```AU```), where higher is better. To pass a benchmark run, ```AU``` should be 90% or higher. ```AU``` is computed as follows. The total ideal compute time is derived from the batch size, total dataset size, number of simulated accelerators, and sleep time: ```total_compute_time = (records/file * total_files)/simulated_accelerators/batch_size * sleep_time```. Then ```AU``` is computed as follows: 
 
 ```
-AUU = (total_benchmark_running_time - total_compute_time)/total_compute_time
+AU (percentage) = (total_compute_time/total_benchmark_running_time) * 100
 ```
 
 Note that the sleep time has been determined by running the workloads including the compute step on real hardware and is dependent on the accelerator type. In this preview package we include sleep times for NVIDIA V100 GPUs, as measured in an NVIDIA DGX-1 system.
 
-In addition to ```AUU```, submissions are expected to report details such as the number of MPI processes run on the DLIO host, as well as the amount of main memory on the DLIO host.
+In addition to ```AU```, submissions are expected to report details such as the number of MPI processes run on the DLIO host, as well as the amount of main memory on the DLIO host.
 
 **Future work**
 
