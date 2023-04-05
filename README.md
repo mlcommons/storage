@@ -179,41 +179,38 @@ Options:
   -r, --results-dir		Location to the results directory
 ```
 
-For single host run, the `results-dir` need to contain `summary.json` file.
-
-
-```bash
-./benchmark.sh reportgen --results-dir  sample-results/run0/2023-04-04-11-33-37/
-```
-For multi-host run, the results need to be in the following structure. See `sample-results` folder
+For multi-host run, the results need to be in the following structure.
 
 ```
-|---run-1
-       |---host-1
-                |---summary.json
-       |---host-2
-                |---summary.json
-          ....
-       |---host-n
-                |---summary.json
-|---run-2
-       |---host-1
-                |---summary.json
-       |---host-2
-                |---summary.json
-          ....
-       |---host-n
-                |---summary.json
-      ......
-|---run-n
-       |---host-1
-                |---summary.json
-       |---host-2
-                |---summary.json
-          ....
-       |---host-n
-                |---summary.json
+sample-results
+	|---run-1
+	       |---host-1
+	                |---summary.json
+	       |---host-2
+	                |---summary.json
+	          ....
+	       |---host-n
+	                |---summary.json
+	|---run-2
+	       |---host-1
+ 	               |---summary.json
+	       |---host-2
+	                |---summary.json
+	          ....
+ 	       |---host-n
+ 	               |---summary.json
+	    .....
+	|---run-n
+	       |---host-1
+	                |---summary.json
+	       |---host-2
+ 	               |---summary.json
+ 	          ....
+ 	       |---host-n
+ 	               |---summary.json
 ```
+
+To generate multi host report,
 
 ```bash
 ./benchmark.sh reportgen --results-dir  sample-results/
