@@ -59,7 +59,7 @@ sudo apt-get install mpich
 Clone the latest release from [MLCommons Storage](https://github.com/mlcommons/storage) repository and install Python dependencies.
 
 ```bash
-git clone -b v0.5-rc0 --recurse-submodules https://github.com/mlcommons/storage.git
+git clone -b v0.5-rc1 --recurse-submodules https://github.com/mlcommons/storage.git
 cd storage
 pip3 install -r dlio_benchmark/requirements.txt
 ```
@@ -299,11 +299,4 @@ Below table displays the list of configurable paramters for the benchmark.
 | **Storage params**		|								|   |
 | storage.storage_root		| The storage root directory  					| ./|
 | storage.storage_type		| The storage type  						|local_fs|
-
-
-## Releases
-
-### [v0.5-rc0](https://github.com/mlcommons/storage/releases/tag/v0.5-rc0) (2022-02-03)
-
-First MLPerf Storage benchmark preview release
 
