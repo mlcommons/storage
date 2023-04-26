@@ -23,6 +23,7 @@ reader:
   sample_shuffle: seed
 
 train:
+  seed_change_epoch: False
   epochs: 5
   computation_time: 1.3604
 
