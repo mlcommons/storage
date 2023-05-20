@@ -10,7 +10,7 @@ WORKLOADS=("unet3d" "bert")
 UNET3D_CONFIG_FILE=${CONFIG_PATH}/workload/unet3d.yaml
 BERT_CONFIG_FILE=${CONFIG_PATH}/workload/bert.yaml
 # Currently only "closed" category is supported
-CATEGORIES=("closed")
+CATEGORIES=("closed" "open")
 DEFAULT_CATEGORY="closed"
 CLOSED_CATEGORY_PARAMS=(
 	# dataset params
@@ -25,6 +25,12 @@ CLOSED_CATEGORY_PARAMS=(
 OPEN_CATEGORY_PARAMS=(
 	# all closed params
 	"${CLOSED_CATEGORY_PARAMS[@]}"
+	# framework params
+	"framework"
+	# dataset params
+	"dataset.format" "dataset.num_samples_per_file"
+	# reader params
+	"reader.data_loader" "reader.transfer_size"
 )
 HYDRA_OUTPUT_CONFIG_DIR="configs"
 EXTRA_PARAMS=(
@@ -272,7 +278,7 @@ configview() {
 
 postprocess() {
 	local results_dir=$1
-	python3 report.py --result-dir $results_dir --multi-host --create-report
+	python3 report.py --result-dir $results_dir
 }
 
 main() {

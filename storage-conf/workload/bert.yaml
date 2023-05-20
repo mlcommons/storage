@@ -29,6 +29,7 @@ reader:
   batch_size: 48
   file_shuffle: seed
   sample_shuffle: seed
+  shuffle_size: 1024
 
 checkpoint:
   checkpoint_folder: checkpoints/bert
