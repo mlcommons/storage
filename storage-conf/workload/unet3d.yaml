@@ -21,8 +21,10 @@ reader:
   read_threads: 4
   file_shuffle: seed
   sample_shuffle: seed
+  shuffle_size: 4
 
 train:
+  seed_change_epoch: False
   epochs: 5
   computation_time: 1.3604
 
