@@ -11,7 +11,6 @@ MLPerf Storage is a benchmark suite to characterize the performance of storage s
 - [Parameters](#parameters)
 	- [CLOSED](#closed)
 	- [OPEN](#open)
-- [Releases](#releases)
 - [Submission Rules](#submission-rules)
 ## Overview
 
