@@ -77,11 +77,12 @@ class StorageReport(object):
         train_throughput = []
         train_au = []
         for summary_file in summary_files:
-            path = summary_file.split("/")
-            if len(path) != 4:
+            run_path = os.path.relpath(summary_file, self.result_dir)
+            run_dir = run_path.split("/")
+            if len(run_dir) != 3:
                 logging.error(f"Error: Directory structure {summary_file} is not correct. It has be in format result_dir/run(1..n)/host(1..n)/summary.json")
                 sys.exit(1)
-            run_name = path[1]
+            run_name = run_dir[0]
             if run_name not in runs:
                 runs[run_name] = [summary_file]
             else:
