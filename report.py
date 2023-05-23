@@ -96,6 +96,7 @@ class StorageReport(object):
             sys.exit(1)
         num_hosts = host_arr[0]
         for run_name in runs:
+            models = []
             num_acclerators = []
             train_throughput_sps = []
             train_throughput_mps = []
@@ -110,6 +111,7 @@ class StorageReport(object):
                 if float(au) < AU_THRESHOLD:
                     logging.error(f"Error: AU value didn't pass the threshold in the run reported by {summary_file}")
                     sys.exit(1)
+                models.append(summary['model'])
                 num_acclerators.append(summary['num_accelerators'])
                 train_throughput_sps.append(summary['metric']['train_throughput_mean_samples_per_second'])
                 train_throughput_mps.append(summary['metric']['train_io_mean_MB_per_second'])
@@ -120,14 +122,17 @@ class StorageReport(object):
             if len(set(host_names)) != len(host_names):
                 logging.warning(f"Warning: Hostnames in results of run {run_name} are not unique.")
 
+            if not check_unique(models):
+                logging.error(f"Error: The model name is different across hosts")
+                sys.exit(1)
             if not check_unique(num_acclerators):
-                logging.error(f"Error: Number of accelerators are different across hosts")
+                logging.error(f"Error: The number of accelerators is different across hosts")
                 sys.exit(1)
             if not check_unique(num_files_train):
-                logging.error(f"Error: Number of training files are different across hosts")
+                logging.error(f"Error: The number of training files is different across hosts")
                 sys.exit(1)
             if not check_unique(num_samples_per_file):
-                logging.error(f"Error: Number of samples per file are different across hosts")
+                logging.error(f"Error: The number of samples per file is different across hosts")
                 sys.exit(1)
             if not check_timestamps(start_host_timestamp):
                 logging.error(f"Error: Start timestamps of all hosts in each run must be within {MAX_START_TIMESTAMP_GAP} sec")
@@ -136,25 +141,31 @@ class StorageReport(object):
             results["runs"][run_name]["train_throughput_samples_per_second"] = np.sum(np.array(train_throughput_sps))
             results["runs"][run_name]["train_throughput_MB_per_second"] = np.sum(np.array(train_throughput_mps))
             results["runs"][run_name]["train_num_accelerators"] = np.sum(np.array(num_acclerators))
+            results["runs"][run_name]["model"] = models[0]
             results["runs"][run_name]["num_files_train"] = num_files_train[0]
             results["runs"][run_name]["num_samples_per_file"] = num_samples_per_file[0]
 
         overall_train_throughput_sps = [results["runs"][run_name]["train_throughput_samples_per_second"] for run_name in results["runs"]]
         overall_train_throughput_mps = [results["runs"][run_name]["train_throughput_MB_per_second"] for run_name in results["runs"]]
+        overall_model = [results["runs"][run_name]["model"] for run_name in results["runs"]]
         overall_train_num_accelerators = [results["runs"][run_name]["train_num_accelerators"] for run_name in results["runs"]]
         overall_num_files_train = [results["runs"][run_name]["num_files_train"] for run_name in results["runs"]]
         overall_num_samples_per_file = [results["runs"][run_name]["num_samples_per_file"] for run_name in results["runs"]]
 
+        if not check_unique(overall_model):
+            logging.error(f"Error: The model name is different across runs")
+            sys.exit(1)
         if not check_unique(overall_train_num_accelerators):
-            logging.error(f"Error: Number of accelerators are different across runs")
+            logging.error(f"Error: The number of accelerators is different across runs")
             sys.exit(1)
         if not check_unique(overall_num_files_train):
-            logging.error(f"Error: Number of training files are different across runs")
+            logging.error(f"Error: The number of training files is different across runs")
             sys.exit(1)
         if not check_unique(overall_num_samples_per_file):
-            logging.error(f"Error: Number of samples per file are different across runs")
+            logging.error(f"Error: The number of samples per file is different across runs")
             sys.exit(1)
 
+        results["overall"]["model"] = overall_model[0]
         results["overall"]["num_client_hosts"] = num_hosts
         results["overall"]["num_benchmark_runs"] = len(results["runs"])
         results["overall"]["train_num_accelerators"] =  overall_train_num_accelerators[0]
@@ -165,6 +176,7 @@ class StorageReport(object):
         results["overall"]["train_throughput_mean_MB_per_second"] = np.mean(overall_train_throughput_mps)
         results["overall"]["train_throughput_stdev_MB_per_second"] = np.std(overall_train_throughput_mps)
         logging.info("------------------------------")
+        logging.info(f'Model: {results["overall"]["model"]}')
         logging.info(f'Number of client hosts: {results["overall"]["num_client_hosts"]}')
         logging.info(f'Number of benchmark runs: {results["overall"]["num_benchmark_runs"]}')
         logging.info(f'Overall number of accelerators: {results["overall"]["train_num_accelerators"]}')
