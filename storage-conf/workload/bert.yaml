@@ -17,6 +17,7 @@ dataset:
   file_prefix: part
 
 train:
+  seed_change_epoch: False
   computation_time: 0.968
   total_training_steps: 1000
  
