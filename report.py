@@ -3,6 +3,7 @@ import sys
 import json
 import logging
 import argparse
+import subprocess
 import numpy as np
 from dateutil import parser
 
@@ -61,6 +62,24 @@ class StorageReport(object):
         # summary file create
         self.result_dir = args.result_dir
 
+    # extract local git hash and git diff if it's not a clean git repo
+    def get_git_info(self, results):
+        results['git'] = {}
+        # get git hash from a system call
+        try:
+            git_hash = subprocess.check_output(['git', 'describe', '--always', '--dirty']).decode('ascii').strip()
+            results['git']['hash'] = git_hash
+        except subprocess.CalledProcessError as e:
+            logging.error("Error: git describe failed - {}".format(e))
+            return
+        if git_hash.endswith("-dirty"):
+            # get git diff from a system call
+            try:
+                git_diff = subprocess.check_output(['git', 'diff']).decode('ascii').strip()
+                results['git']['diff'] = git_diff
+            except subprocess.CalledProcessError as e:
+                logging.error("Error: git diff failed - {}".format(e))
+
     # accumulate results from multiple directories in case of multi hosts
     # report benchmark success or failure in case of a single host
     def generate_report(self):
@@ -72,6 +91,7 @@ class StorageReport(object):
 
         # accumulate results from multiple directories in case of multi hosts
         results={}
+        self.get_git_info(results)
         results["overall"] = {}
         results["runs"] = {}
         train_throughput = []
