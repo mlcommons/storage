@@ -22,7 +22,9 @@ This benchmark attempts to balance two goals:
  
 To that end we have defined two classes of submissions: CLOSED and OPEN.
  
-CLOSED represents a level playing field where all(*) results are comparable across submissions.  CLOSED explicitly forfeits flexibility in order to enable easy comparability.  (*) Since the benchmark supports both PyTorch and TensorFlow data formats, and those formats apply such different loads to the storage system, cross-format comparisons are not appropriate, even with CLOSED submissions.  Thus, only comparisons between CLOSED PyTorch runs, or comparisons between CLOSED TensorFlow runs, are comparable.  As new data formats like PyTorch and TensorFlow are added to the benchmark that categorization will grow.
+CLOSED represents a level playing field where all<sup>*</sup> results are comparable across submissions.  CLOSED explicitly forfeits flexibility in order to enable easy comparability. 
+
+<sup>*</sup> The benchmark supports both PyTorch and TensorFlow data formats, however these formats substantially different loads to the storage system such that cross-format comparisons are not appropriate, even with CLOSED submissions.  Therefore only comparisons of storage systems using the same data format are valid (e.g., two CLOSED PyTorch runs or two CLOSED TensorFlow runs.  As new data formats like PyTorch and TensorFlow are added to the benchmark that categorization will grow.
  
 OPEN allows more flexibility to tune and change both the benchmark and the storage system configuration to show off new approaches or new features that will benefit the AI/ML Community.  OPEN explicitly forfeits comparability to allow showcasing innovation.
 
