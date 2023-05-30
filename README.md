@@ -7,7 +7,6 @@ MLPerf Storage is a benchmark suite to characterize the performance of storage s
 - [Workloads](#workloads)
 	- [U-Net3D](#u-net3d)
 	- [BERT](#bert)
-	- [DLRM](#dlrm)
 - [Parameters](#parameters)
 	- [CLOSED](#closed)
 	- [OPEN](#open)
@@ -224,10 +223,9 @@ To generate the benchmark report,
 For reference, a sample result directory structure can be found [here](https://github.com/johnugeorge/mlperf-storage-sample-results). 
 
 ## Workloads
-Currently, the storage benchmark suite supports benchmarking of 3 deep learning workloads
+Currently, the storage benchmark suite supports benchmarking of 2 deep learning workloads
 - Image segmentation using U-Net3D model ([unet3d](./storage-conf/workloads/unet3d.yaml))
 - Natural language processing using BERT model ([bert](./storage-conf/workloads/bert.yaml))
-- Recommendation using DLRM model (TODO)
 
 ### U-Net3D
 
@@ -281,11 +279,6 @@ All results will be stored in ```results/bert/$DATE-$TIME``` folder or in the di
 ./benchmark.sh reportgen -r results/bert/$DATE-$TIME
 ```
 This will generate ```mlperf_storage_report.json``` in the output folder.
-
-
-### DLRM
-
-To be added
 
 ## Parameters 
 
