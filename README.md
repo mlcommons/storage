@@ -224,8 +224,8 @@ For reference, a sample result directory structure can be found [here](https://g
 
 ## Workloads
 Currently, the storage benchmark suite supports benchmarking of 2 deep learning workloads
-- Image segmentation using U-Net3D model ([unet3d](./storage-conf/workloads/unet3d.yaml))
-- Natural language processing using BERT model ([bert](./storage-conf/workloads/bert.yaml))
+- Image segmentation using U-Net3D model ([unet3d](./storage-conf/workload/unet3d.yaml))
+- Natural language processing using BERT model ([bert](./storage-conf/workload/bert.yaml))
 
 ### U-Net3D
 
