@@ -7,7 +7,6 @@ MLPerf Storage is a benchmark suite to characterize the performance of storage s
 - [Workloads](#workloads)
 	- [U-Net3D](#u-net3d)
 	- [BERT](#bert)
-	- [DLRM](#dlrm)
 - [Parameters](#parameters)
 	- [CLOSED](#closed)
 	- [OPEN](#open)
@@ -22,7 +21,9 @@ This benchmark attempts to balance two goals:
  
 To that end we have defined two classes of submissions: CLOSED and OPEN.
  
-CLOSED represents a level playing field where all(*) results are comparable across submissions.  CLOSED explicitly forfeits flexibility in order to enable easy comparability.  (*) Since the benchmark supports both PyTorch and TensorFlow data formats, and those formats apply such different loads to the storage system, cross-format comparisons are not appropriate, even with CLOSED submissions.  Thus, only comparisons between CLOSED PyTorch runs, or comparisons between CLOSED TensorFlow runs, are comparable.  As new data formats like PyTorch and TensorFlow are added to the benchmark that categorization will grow.
+CLOSED represents a level playing field where all<sup>*</sup> results are comparable across submissions.  CLOSED explicitly forfeits flexibility in order to enable easy comparability. 
+
+<sup>*</sup> The benchmark supports both PyTorch and TensorFlow data formats, however these formats substantially different loads to the storage system such that cross-format comparisons are not appropriate, even with CLOSED submissions.  Therefore only comparisons of storage systems using the same data format are valid (e.g., two CLOSED PyTorch runs or two CLOSED TensorFlow runs.  As new data formats like PyTorch and TensorFlow are added to the benchmark that categorization will grow.
  
 OPEN allows more flexibility to tune and change both the benchmark and the storage system configuration to show off new approaches or new features that will benefit the AI/ML Community.  OPEN explicitly forfeits comparability to allow showcasing innovation.
 
@@ -222,10 +223,9 @@ To generate the benchmark report,
 For reference, a sample result directory structure can be found [here](https://github.com/johnugeorge/mlperf-storage-sample-results). 
 
 ## Workloads
-Currently, the storage benchmark suite supports benchmarking of 3 deep learning workloads
-- Image segmentation using U-Net3D model ([unet3d](./storage-conf/workloads/unet3d.yaml))
-- Natural language processing using BERT model ([bert](./storage-conf/workloads/bert.yaml))
-- Recommendation using DLRM model (TODO)
+Currently, the storage benchmark suite supports benchmarking of 2 deep learning workloads
+- Image segmentation using U-Net3D model ([unet3d](./storage-conf/workload/unet3d.yaml))
+- Natural language processing using BERT model ([bert](./storage-conf/workload/bert.yaml))
 
 ### U-Net3D
 
@@ -279,11 +279,6 @@ All results will be stored in ```results/bert/$DATE-$TIME``` folder or in the di
 ./benchmark.sh reportgen -r results/bert/$DATE-$TIME
 ```
 This will generate ```mlperf_storage_report.json``` in the output folder.
-
-
-### DLRM
-
-To be added
 
 ## Parameters 
 
