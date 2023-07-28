@@ -296,7 +296,7 @@ division 3D U-Net workload at only 12% less than optimal performance.”
 A **successful run result** consists of a mean samples/second measurement (```train_throughput_mean_samples_per_second```) for a complete benchmark run that achieves 
 mean accelerator utilization (train_au_mean_percentage) **larger than 90%.**
 
-**Submissions are made via this link: [https://mlperf.netlify.app/](https://mlperf.netlify.app/)**
+**Submissions are made via this link: [https://submissions-ui.mlcommons.org/index](https://submissions-ui.mlcommons.org/index)**
 
 **Before submitting it is mandatory to complete the [Intention to submit form](https://docs.google.com/forms/d/e/1FAIpQLSfVgc1x1moe8LqkEprf0OzCYuefufIQkh2wlSWVDXenmwGkGw/viewform), as this is how we will collect email addresses to contact submitters.**
 
