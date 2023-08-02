@@ -316,4 +316,4 @@ In addition to what can be changed in the CLOSED category, the following paramet
 
 ## Submission Rules
 
-MLPerf™ Storage Benchmark submission rules are described in this [doc](https://docs.google.com/document/d/1QOaCLiWb82H9cwdVX5KyeDZWt0781y4SgMQPhoij-b4/edit). If you have questions, please contact [Storage WG chairs](https://mlcommons.org/en/groups/research-storage/).
+MLPerf™ Storage Benchmark submission rules are described in this [doc](https://github.com/mlcommons/storage/blob/main/Submission_guidelines.md). If you have questions, please contact [Storage WG chairs](https://mlcommons.org/en/groups/research-storage/).
