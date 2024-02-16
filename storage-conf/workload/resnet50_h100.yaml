@@ -1,0 +1,27 @@
+model: resnet50
+
+framework: pytorch
+
+workflow:
+ generate_data: False
+ train: True
+
+dataset:
+ num_files_train: 1281167
+ num_files_eval: 50000
+ num_samples_per_file: 1
+ record_length: 114660.07
+ record_length_std: 136075.82
+ record_length_resize: 150528
+ data_folder: data/resnet50
+ format: png
+
+train: 
+ computation_time: 0.103
+ 
+reader:
+ data_loader: pytorch
+ read_threads: 8
+ computation_threads: 8
+ batch_size: 64
+ batch_size_eval: 128

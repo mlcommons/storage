@@ -6,7 +6,6 @@ MLPerf Storage is a benchmark suite to characterize the performance of storage s
 - [Configuration](#configuration)
 - [Workloads](#workloads)
 	- [U-Net3D](#u-net3d)
-	- [BERT](#bert)
 - [Parameters](#parameters)
 	- [CLOSED](#closed)
 	- [OPEN](#open)
@@ -50,6 +49,8 @@ In a future version of the benchmark, we aim to include sleep times for differen
 
 ## Installation 
 
+The installation and the execution steps described in this README are validated against Ubuntu 22.04 server running python 3.10.12.
+
 Install dependencies using your system package manager.
 - `mpich` for MPI package
 
@@ -62,7 +63,7 @@ sudo apt-get install mpich
 Clone the latest release from [MLCommons Storage](https://github.com/mlcommons/storage) repository and install Python dependencies.
 
 ```bash
-git clone -b v0.5 --recurse-submodules https://github.com/mlcommons/storage.git
+git clone -b v1.0-rc0 --recurse-submodules https://github.com/mlcommons/storage.git
 cd storage
 pip3 install -r dlio_benchmark/requirements.txt
 ```
@@ -72,12 +73,10 @@ The working directory structure is as follows
 ```
 |---storage
        |---benchmark.sh
-	   |---report.py
        |---dlio_benchmark
        |---storage-conf
            |---workload(folder contains configs of all workloads)
-               |---unet3d.yaml
-               |---bert.yaml
+
 ```
 
 The benchmark simulation will be performed through the [dlio_benchmark](https://github.com/argonne-lcf/dlio_benchmark) code, a benchmark suite for emulating I/O patterns for deep learning workloads. [dlio_benchmark](https://github.com/argonne-lcf/dlio_benchmark) currently is listed as a submodule to this MLPerf Storage repo. The DLIO configuration of each workload is specified through a yaml file. You can see the configs of all MLPerf Storage workloads in the `storage-conf` folder. ```benchmark.sh``` is a wrapper script which launches [dlio_benchmark](https://github.com/argonne-lcf/dlio_benchmark) to perform the benchmark for MLPerf Storage workloads. 
@@ -102,18 +101,20 @@ Get minimum dataset size required for the benchmark run.
 
 
 Options:
-  -h, --help			Print this message
-  -w, --workload		Workload dataset to be generated. Possible options are 'unet3d', 'bert'
-  -n, --num-accelerators	Simulated number of accelerators per node of same accelerator type
-  -m, --host-memory-in-gb	Memory available in the client where benchmark is run
+  -h, --help			        Print this message
+  -w, --workload		        Workload dataset to be generated. Possible options are 'unet3d', 'cosmoflow' 'resnet50'
+  -g, --accelerator-type	        Simulated accelerator type used for the benchmark. Possible options are 'a100' 'h100'
+  -n, --num-accelerators	        Simulated number of accelerators(of same accelerator type)
+  -c, --num-client-hosts	        Number of participating client hosts
+  -m, --client-host-memory-in-gb	Memory available in the client where benchmark is run
 ```
 
 Example:
 
-To calculate minimum dataset size for a `unet3d` workload on a client machine with 128 GB with 8 simulated accelerators,
+To calculate minimum dataset size for a `unet3d` workload running on 2 client machines with 128 GB each with overall 8 simulated a100 accelerators
 
 ```bash
-./benchmark.sh datasize --workload unet3d --num-accelerators 8 --host-memory-in-gb 128
+./benchmark.sh datasize --workload unet3d --accelerator-type a100 --num-accelerators 8 --num-client-hosts 2 --client-host-memory-in-gb 128
 ```
 
 2. Synthetic data is generated based on the workload requested by the user.
@@ -128,7 +129,8 @@ Generate benchmark dataset based on the specified options.
 Options:
   -h, --help			Print this message
   -c, --category		Benchmark category to be submitted. Possible options are 'closed'(default)
-  -w, --workload		Workload dataset to be generated. Possible options are 'unet3d', 'bert'
+  -w, --workload		Workload dataset to be generated. Possible options are 'unet3d', 'cosmoflow' 'resnet50'
+  -g, --accelerator-type	Simulated accelerator type used for the benchmark. Possible options are 'a100' 'h100'
   -n, --num-parallel		Number of parallel jobs used to generate the dataset
   -r, --results-dir		Location to the results directory. Default is ./results/workload.model/DATE-TIME
   -p, --param			DLIO param when set, will override the config file value
@@ -136,10 +138,10 @@ Options:
 
 Example:
 
-For generating training data for `unet3d` workload into `unet3d_data` directory with 10 subfolders using 8 parallel jobs, 
+For generating training data for `unet3d` workload into `unet3d_data` directory using 8 parallel jobs for h100 simulated accelerator, 
 
 ```bash
-./benchmark.sh datagen --workload unet3d --num-parallel 8 --param dataset.num_subfolders_train=10 --param dataset.data_folder=unet3d_data
+./benchmark.sh datagen --workload unet3d --accelerator-type h100 --num-parallel 8 --param dataset.num_files_train=1200 --param dataset.data_folder=unet3d_data
 ```
 
 3. Benchmark is run on the generated data.
@@ -153,20 +155,21 @@ Run benchmark on the generated dataset based on the specified options.
 
 Options:
   -h, --help			Print this message
+  -s, --hosts			Comma separated IP addresses of the participating hosts(without space). eg: '192.168.1.1,192.168.2.2'
   -c, --category		Benchmark category to be submitted. Possible options are 'closed'(default)
-  -w, --workload		Workload to be run. Possible options are 'unet3d', 'bert'
-  -g, --accelerator-type	Simulated accelerator type used for the benchmark. Possible options are 'v100-32gb'(default)
-  -n, --num-accelerators	Simulated number of accelerators of same accelerator type
-  -r, --results-dir		Location to the results directory. Default is ./results/workload.model/DATE-TIME
+  -w, --workload		Workload to be run. Possible options are 'unet3d', 'cosmoflow' 'resnet50'
+  -g, --accelerator-type	Simulated accelerator type used for the benchmark. Possible options are 'a100' 'h100'
+  -n, --num-accelerators	Simulated number of accelerators(of same accelerator type)
+  -r, --results-dir		Location to the results directory.
   -p, --param			DLIO param when set, will override the config file value
 ```
 
 Example:
 
-For running benchmark on `unet3d` workload with data located in `unet3d_data` directory using 4 accelerators and results on `unet3d_results` directory , 
+For running benchmark on `unet3d` workload with data located in `unet3d_data` directory using 2 h100 accelerators spread across 2 client hosts(with IPs 10.117.61.121,10.117.61.165) and results on `unet3d_results` directory, 
 
 ```bash
-./benchmark.sh run --workload unet3d --num-accelerators 4 --results-dir unet3d_results --param dataset.data_folder=unet3d_data
+./benchmark.sh run -s 10.117.61.121,10.117.61.165 --workload unet3d --accelerator-type h100 --num-accelerators 2 --results-dir resultsdir --param dataset.num_files_train=1200 --param dataset.data_folder=unet3d_data
 ```
 
 4. Benchmark submission report is generated by aggregating the individual run results.
@@ -182,103 +185,43 @@ Options:
   -h, --help			Print this message
   -r, --results-dir		Location to the results directory
 ```
-
-The result directory needs to be in the following structure which must include 5 runs.
-
-```
-sample-results
-	|---run-1
-	       |---host-1
-	                |---summary.json
-	       |---host-2
-	                |---summary.json
-	          ....
-	       |---host-n
-	                |---summary.json
-	|---run-2
-	       |---host-1
- 	               |---summary.json
-	       |---host-2
-	                |---summary.json
-	          ....
- 	       |---host-n
- 	               |---summary.json
-	    .....
-	|---run-5
-	       |---host-1
-	                |---summary.json
-	       |---host-2
- 	               |---summary.json
- 	          ....
- 	       |---host-n
- 	               |---summary.json
-```
-
 To generate the benchmark report,
 
 ```bash
-./benchmark.sh reportgen --results-dir  sample-results/
+./benchmark.sh reportgen --results-dir  resultsdir
 ```
 
-For reference, a sample result directory structure can be found [here](https://github.com/johnugeorge/mlperf-storage-sample-results). 
+Note: results directory must contain `summary.json`
 
 ## Workloads
-Currently, the storage benchmark suite supports benchmarking of 2 deep learning workloads
-- Image segmentation using U-Net3D model ([unet3d](./storage-conf/workload/unet3d.yaml))
-- Natural language processing using BERT model ([bert](./storage-conf/workload/bert.yaml))
+Currently, the storage benchmark suite supports benchmarking of 3 deep learning workloads
+- Image segmentation using U-Net3D model 
 
 ### U-Net3D
 
 Calculate minimum dataset size required for the benchmark run
 
 ```bash
-./benchmark.sh datasize --workload unet3d --num-accelerators 8 --host-memory-in-gb 128
+./benchmark.sh datasize --workload unet3d --accelerator-type a100 --num-accelerators 8 --num-client-hosts 2 --client-host-memory-in-gb 128
 ```
 
 Generate data for the benchmark run
 
 ```bash
-./benchmark.sh datagen --workload unet3d --num-parallel 8 --param dataset.num_files_train=3200
+./benchmark.sh datagen --workload unet3d --accelerator-type h100 --num-parallel 8 --param dataset.num_files_train=1200 --param dataset.data_folder=unet3d_data
 ```
   
 Run the benchmark.
 
 ```bash
-./benchmark.sh run --workload unet3d --num-accelerators 8 --param dataset.num_files_train=3200
+./benchmark.sh run -s 10.117.61.121,10.117.61.165 --workload unet3d --accelerator-type h100 --num-accelerators 2 --results-dir resultsdir --param dataset.num_files_train=1200 --param dataset.data_folder=unet3d_data
 ```
 
-All results will be stored in ```results/unet3d/$DATE-$TIME``` folder or in the directory when overridden using `--results-dir`(or `-r`) argument. To generate the final report, one can do
+All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the host where `summary.json` is generated. 
 
 ```bash 
-./benchmark.sh reportgen --results-dir results/unet3d/$DATE-$TIME
+./benchmark.sh reportgen --results-dir resultsdir
 ```
-This will generate ```mlperf_storage_report.json``` in the output folder.
-
-### BERT
-
-Calculate minimum dataset size required for the benchmark run
-
-```bash
-./benchmark.sh datasize --workload bert --num-accelerators 8 --host-memory-in-gb 128
-```
-
-Generate data for the benchmark run
-
-```bash
-./benchmark.sh datagen --workload bert --num-parallel 8 --param dataset.num_files_train=350
-```
-  
-Run the benchmark
-```bash
-./benchmark.sh run --workload bert --num-accelerators 8 --param dataset.num_files_train=350
-```
-
-All results will be stored in ```results/bert/$DATE-$TIME``` folder or in the directory when overridden using `--results-dir`(or `-r`) argument. To generate the final report, one can do
-
-```bash 
-./benchmark.sh reportgen -r results/bert/$DATE-$TIME
-```
-This will generate ```mlperf_storage_report.json``` in the output folder.
 
 ## Parameters 
 
@@ -293,7 +236,7 @@ Below table displays the list of configurable parameters for the benchmark in th
 | dataset.data_folder           | The path where dataset is stored				| --|
 | **Reader params**				|						|   |
 | reader.read_threads		| Number of threads to load the data                            | --|
-| reader.computation_threads    | Number of threads to preprocess the data(only for Bert)       | --|
+| reader.computation_threads    | Number of threads to preprocess the data(for TensorFlow)      | --|
 | **Checkpoint params**		|								|   |
 | checkpoint.checkpoint_folder	| The folder to save the checkpoints  				| --|
 | **Storage params**		|								|   |
@@ -306,13 +249,13 @@ In addition to what can be changed in the CLOSED category, the following paramet
 
 | Parameter                      | Description                                                 |Default|
 | ------------------------------ | ------------------------------------------------------------ |-------|
-| framework		| The machine learning framework		|Pytorch for 3D U-Net, Tensorflow for Bert |
+| framework		| The machine learning framework		|Pytorch for 3D U-Net |
 | **Dataset params**		|								|   |
-| dataset.format       | Format of the dataset  		        | .npz for 3D U-Net and tfrecord for Bert|
-| dataset.num_samples_per_file       | Number of samples per file(only for Tensorflow using tfrecord datasets)  		        | For 3D U-Net: 1 and for Bert: 313532|
+| dataset.format       | Format of the dataset  		        | .npz for 3D U-Net |
+| dataset.num_samples_per_file       | Number of samples per file(only for Tensorflow using tfrecord datasets)  		        | 1 for 3D U-Net |
 | **Reader params**		|
-| reader.data_loader       | Data loader type(Tensorflow or PyTorch or custom) 		        | PyTorch for 3D U-Net, and Tensorflow for Bert|
-| reader.transfer_size       | Number of bytes in the read buffer(only for Tensorflow)  		        | For BERT: 262144|
+| reader.data_loader       | Data loader type(Tensorflow or PyTorch or custom) 		        | PyTorch for 3D U-Net |
+| reader.transfer_size       | Number of bytes in the read buffer(only for Tensorflow)  		        | |
 
 ## Submission Rules
 
