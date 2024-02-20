@@ -2,6 +2,7 @@
 MLPerf Storage is a benchmark suite to characterize the performance of storage systems that support machine learning workloads.
 
 - [Overview](#overview)
+- [Prerequisite](#prerequisite)
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [Workloads](#workloads)
@@ -46,10 +47,18 @@ In a future version of the benchmark, the MLPerf Storage WG plans to add support
 
 In a future version of the benchmark, we aim to include sleep times for different accelerator types, including different types of GPUs and other ASICS.
 
+## Prerequisite
+
+The installation and the configuration steps described in this README are validated against clients running Ubuntu 22.04 server with python 3.10.12. The benchmark script has to be run only in one participating client host(any) which internally calls `mpirun` to launch the distributed training across multiple client hosts. The launcher client host also participates in the distributed training process.
+
+Following prerequisites must be satisfied
+
+1. Pick one host to act as the launcher client host. Passwordless ssh must be setup from the launcher client host to all other participating client hosts.  `ssh-copy-id` is a useful tool.
+2. The code and data location(discussed in further sections) must be exactly same in every client host including the launcher host. This is because, the same benchmark command is automatically triggered in every participating client host during the distributed training process.
 
 ## Installation 
 
-The installation and the execution steps described in this README are validated against Ubuntu 22.04 server running python 3.10.12.
+**Note**: Steps described in this sections must be run in every client host.
 
 Install dependencies using your system package manager.
 - `mpich` for MPI package
@@ -89,6 +98,8 @@ Script to launch the MLPerf Storage benchmark.
 ```
 
 ## Configuration
+
+**Note**: Steps described in this section must be run only in one client host(launcher client).
 
 The benchmark suite consists of 4 distinct phases
 
@@ -191,7 +202,7 @@ To generate the benchmark report,
 ./benchmark.sh reportgen --results-dir  resultsdir
 ```
 
-Note: results directory must contain `summary.json`
+Note: The `reportgen` script must be run in the launcher client host. 
 
 ## Workloads
 Currently, the storage benchmark suite supports benchmarking of 3 deep learning workloads
@@ -217,7 +228,7 @@ Run the benchmark.
 ./benchmark.sh run --hosts 10.117.61.121,10.117.61.165 --workload unet3d --accelerator-type h100 --num-accelerators 2 --results-dir resultsdir --param dataset.num_files_train=1200 --param dataset.data_folder=unet3d_data
 ```
 
-All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the host where `summary.json` is generated. 
+All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
 
 ```bash 
 ./benchmark.sh reportgen --results-dir resultsdir
