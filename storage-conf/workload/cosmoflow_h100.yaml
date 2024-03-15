@@ -9,7 +9,6 @@ workflow:
 dataset:
  data_folder: data/cosmoflow_pt
  num_files_train: 524288
- num_files_eval: 65536
  num_samples_per_file: 1
  record_length: 2828486
  record_length_stdev: 71311
@@ -19,7 +18,10 @@ reader:
  data_loader: dali
  read_threads: 4
  batch_size: 1
- 
+ dont_use_mmap: True
+ file_shuffle: seed
+ sample_shuffle: seed
+
 train: 
-  epochs: 4
+  epochs: 5
   computation_time: 0.00350

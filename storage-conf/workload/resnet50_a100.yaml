@@ -7,21 +7,20 @@ workflow:
  train: True
 
 dataset:
- num_files_train: 1281167
- num_files_eval: 50000
- num_samples_per_file: 1
+ num_files_train: 1024
+ num_samples_per_file: 1251
  record_length: 114660.07
- record_length_std: 136075.82
  record_length_resize: 150528
  data_folder: data/resnet50
- format: png
+ format: tfrecord
 
 train: 
- computation_time: 0.151
+ computation_time: 0.435
+ epochs: 5
  
 reader:
- data_loader: pytorch
+ data_loader: dali
  read_threads: 8
  computation_threads: 8
- batch_size: 64
- batch_size_eval: 128
+ batch_size: 400
+ dont_use_mmap: True
