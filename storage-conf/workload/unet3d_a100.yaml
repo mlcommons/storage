@@ -18,14 +18,14 @@ dataset:
   
 reader: 
   data_loader: pytorch
-  batch_size: 4
+  batch_size: 7
   read_threads: 4
   file_shuffle: seed
   sample_shuffle: seed
 
 train:
   epochs: 5
-  computation_time: 0.375
+  computation_time: 0.636
 
 checkpoint:
   checkpoint_folder: checkpoints/unet3d
