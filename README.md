@@ -7,6 +7,8 @@ MLPerf Storage is a benchmark suite to characterize the performance of storage s
 - [Configuration](#configuration)
 - [Workloads](#workloads)
 	- [U-Net3D](#u-net3d)
+   	- [ResNet-50](#resnet-50)
+   	- [CosmoFlow](#cosmoflow)
 - [Parameters](#parameters)
 	- [CLOSED](#closed)
 	- [OPEN](#open)
@@ -207,10 +209,12 @@ Note: The `reportgen` script must be run in the launcher client host.
 ## Workloads
 Currently, the storage benchmark suite supports benchmarking of 3 deep learning workloads
 - Image segmentation using U-Net3D model 
+- Image classification using Resnet-50 model
+- Cosmology parameter prediction using CosmoFlow model
 
 ### U-Net3D
 
-Calculate minimum dataset size required for the benchmark run
+Calculate minimum dataset size required for the benchmark run based on your client configuration
 
 ```bash
 ./benchmark.sh datasize --workload unet3d --accelerator-type a100 --num-accelerators 8 --num-client-hosts 2 --client-host-memory-in-gb 128
@@ -226,6 +230,58 @@ Run the benchmark.
 
 ```bash
 ./benchmark.sh run --hosts 10.117.61.121,10.117.61.165 --workload unet3d --accelerator-type h100 --num-accelerators 2 --results-dir resultsdir --param dataset.num_files_train=1200 --param dataset.data_folder=unet3d_data
+```
+
+All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
+
+```bash 
+./benchmark.sh reportgen --results-dir resultsdir
+```
+
+### ResNet-50
+
+Calculate minimum dataset size required for the benchmark run based on your client configuration
+
+```bash
+./benchmark.sh datasize --workload resnet50 --accelerator-type a100 --num-accelerators 8 --num-client-hosts 2 --client-host-memory-in-gb 128
+```
+
+Generate data for the benchmark run
+
+```bash
+./benchmark.sh datagen --workload resnet50 --accelerator-type h100 --num-parallel 8 --param dataset.num_files_train=1200 --param dataset.data_folder=resnet50_data
+```
+  
+Run the benchmark.
+
+```bash
+./benchmark.sh run --hosts 10.117.61.121,10.117.61.165 --workload resnet50 --accelerator-type h100 --num-accelerators 2 --results-dir resultsdir --param dataset.num_files_train=1200 --param dataset.data_folder=resnet50_data
+```
+
+All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
+
+```bash 
+./benchmark.sh reportgen --results-dir resultsdir
+```
+
+### CosmoFlow
+
+Calculate minimum dataset size required for the benchmark run based on your client configuration
+
+```bash
+./benchmark.sh datasize --workload cosmoflow --accelerator-type a100 --num-accelerators 8 --num-client-hosts 2 --client-host-memory-in-gb 128
+```
+
+Generate data for the benchmark run
+
+```bash
+./benchmark.sh datagen --workload cosmoflow --accelerator-type h100 --num-parallel 8 --param dataset.num_files_train=1200 --param dataset.data_folder=cosmoflow_data
+```
+  
+Run the benchmark.
+
+```bash
+./benchmark.sh run --hosts 10.117.61.121,10.117.61.165 --workload cosmoflow --accelerator-type h100 --num-accelerators 2 --results-dir resultsdir --param dataset.num_files_train=1200 --param dataset.data_folder=cosmoflow_data
 ```
 
 All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
