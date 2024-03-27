@@ -72,6 +72,7 @@ datagen_usage() {
 	echo -e "Generate benchmark dataset based on the specified options.\n"
 	echo -e "\nOptions:"
 	echo -e "  -h, --help\t\t\tPrint this message"
+	echo -e "  -s, --hosts\t\t\tComma separated IP addresses of the participating hosts(without space). eg: '192.168.1.1,192.168.2.2'"
 	echo -e "  -c, --category\t\tBenchmark category to be submitted. Possible options are 'closed'(default)"
 	echo -e "  -w, --workload\t\tWorkload dataset to be generated. Possible options are 'unet3d', 'cosmoflow' 'resnet50' "
 	echo -e "  -g, --accelerator-type\tSimulated accelerator type used for the benchmark. Possible options are 'a100' 'h100' "
@@ -234,6 +235,7 @@ datasize() {
 }
 
 datagen() {
+	local hosts=$1;shift
 	local category=$1; shift
 	local workload=$1;shift
 	local accelerator_type=$1;shift
@@ -253,7 +255,7 @@ datagen() {
 	fi
 	config_name=$(get_config_file $workload $accelerator_type)
 	prefixed_array=$(add_prefix_params ${params[@]})
-	mpirun -np $parallel python3 dlio_benchmark/dlio_benchmark/main.py --config-path=$CONFIG_PATH workload=$config_name ++workload.workflow.generate_data=True ++workload.workflow.train=False ${prefixed_array[@]} ${EXTRA_PARAMS[@]}
+	mpirun -hosts $hosts -np $parallel python3 dlio_benchmark/dlio_benchmark/main.py --config-path=$CONFIG_PATH workload=$config_name ++workload.workflow.generate_data=True ++workload.workflow.train=False ${prefixed_array[@]} ${EXTRA_PARAMS[@]}
 }
 
 run() {
@@ -319,7 +321,8 @@ main() {
 		params=()
 		while [ $# -gt 0 ]; do
 			case "$1" in
-				-h | --help ) datagen_usage; exit 0 ;;
+			        -h | --help ) datagen_usage; exit 0 ;;
+				-s | --hosts ) hosts="$2"; shift 2 ;;
 				-c | --category ) category="$2"; shift 2 ;;
 				-w | --workload ) workload="$2"; shift 2 ;;
 				-g | --accelerator-type ) accelerator_type="$2"; shift 2 ;;
@@ -330,10 +333,11 @@ main() {
 			esac
 		done
 		category=${category:-$DEFAULT_CATEGORY}
+		validate_non_empty "hosts" $hosts
 		validate_non_empty "workload" $workload
 		validate_non_empty "accelerator-type" $accelerator_type
 		parallel=${parallel:-1}
-		datagen $category $workload $accelerator_type $parallel "$results_dir" "${params[@]}"
+		datagen $hosts $category $workload $accelerator_type $parallel "$results_dir" "${params[@]}"
 	elif [ "$mode" = "run" ]
 	then
 		params=()
