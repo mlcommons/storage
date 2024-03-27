@@ -141,6 +141,7 @@ Generate benchmark dataset based on the specified options.
 
 Options:
   -h, --help			Print this message
+  -s, --hosts			Comma separated IP addresses of the participating hosts(without space). eg: '192.168.1.1,192.168.2.2'
   -c, --category		Benchmark category to be submitted. Possible options are 'closed'(default)
   -w, --workload		Workload dataset to be generated. Possible options are 'unet3d', 'cosmoflow' 'resnet50'
   -g, --accelerator-type	Simulated accelerator type used for the benchmark. Possible options are 'a100' 'h100'
@@ -151,10 +152,10 @@ Options:
 
 Example:
 
-For generating training data for `unet3d` workload into `unet3d_data` directory using 8 parallel jobs for h100 simulated accelerator, 
+For generating training data for `unet3d` workload into `unet3d_data` directory using 8 parallel jobs distributed on 2 nodes for h100 simulated accelerator,
 
 ```bash
-./benchmark.sh datagen --workload unet3d --accelerator-type h100 --num-parallel 8 --param dataset.num_files_train=1200 --param dataset.data_folder=unet3d_data
+./benchmark.sh datagen --hosts 10.117.61.121,10.117.61.165 --workload unet3d --accelerator-type h100 --num-parallel 8 --param dataset.num_files_train=1200 --param dataset.data_folder=unet3d_data
 ```
 
 3. Benchmark is run on the generated data.
@@ -223,7 +224,7 @@ Calculate minimum dataset size required for the benchmark run based on your clie
 Generate data for the benchmark run
 
 ```bash
-./benchmark.sh datagen --workload unet3d --accelerator-type h100 --num-parallel 8 --param dataset.num_files_train=1200 --param dataset.data_folder=unet3d_data
+./benchmark.sh datagen --hosts 10.117.61.121,10.117.61.165 --workload unet3d --accelerator-type h100 --num-parallel 8 --param dataset.num_files_train=1200 --param dataset.data_folder=unet3d_data
 ```
   
 Run the benchmark.
@@ -249,7 +250,7 @@ Calculate minimum dataset size required for the benchmark run based on your clie
 Generate data for the benchmark run
 
 ```bash
-./benchmark.sh datagen --workload resnet50 --accelerator-type h100 --num-parallel 8 --param dataset.num_files_train=1200 --param dataset.data_folder=resnet50_data
+./benchmark.sh datagen --hosts 10.117.61.121,10.117.61.165 --workload resnet50 --accelerator-type h100 --num-parallel 8 --param dataset.num_files_train=1200 --param dataset.data_folder=resnet50_data
 ```
   
 Run the benchmark.
@@ -275,7 +276,7 @@ Calculate minimum dataset size required for the benchmark run based on your clie
 Generate data for the benchmark run
 
 ```bash
-./benchmark.sh datagen --workload cosmoflow --accelerator-type h100 --num-parallel 8 --param dataset.num_files_train=1200 --param dataset.data_folder=cosmoflow_data
+./benchmark.sh datagen --hosts 10.117.61.121,10.117.61.165 --workload cosmoflow --accelerator-type h100 --num-parallel 8 --param dataset.num_files_train=1200 --param dataset.data_folder=cosmoflow_data
 ```
   
 Run the benchmark.
