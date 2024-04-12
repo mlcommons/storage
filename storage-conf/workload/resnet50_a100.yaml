@@ -1,6 +1,6 @@
 model: resnet50
 
-framework: pytorch
+framework: tensorflow
 
 workflow:
  generate_data: False
@@ -19,7 +19,7 @@ train:
  epochs: 5
  
 reader:
- data_loader: dali
+ data_loader: tensorflow
  read_threads: 8
  computation_threads: 8
  batch_size: 400
