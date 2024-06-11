@@ -74,7 +74,7 @@ sudo apt-get install mpich
 Clone the latest release from [MLCommons Storage](https://github.com/mlcommons/storage) repository and install Python dependencies.
 
 ```bash
-git clone -b rc2-fix --recurse-submodules https://github.com/mlcommons/storage.git
+git clone -b rc3 --recurse-submodules https://github.com/mlcommons/storage.git
 cd storage
 pip3 install -r dlio_benchmark/requirements.txt
 ```
