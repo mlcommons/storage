@@ -23,4 +23,7 @@ reader:
  read_threads: 8
  computation_threads: 8
  batch_size: 400
- dont_use_mmap: True
+
+
+metric:
+ au: 0.90

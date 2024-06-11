@@ -18,10 +18,13 @@ reader:
  data_loader: tensorflow
  read_threads: 4
  batch_size: 1
- dont_use_mmap: True
  file_shuffle: seed
  sample_shuffle: seed
-
+ shuffle_size: 2
+ 
 train: 
   epochs: 5
   computation_time: 0.00350
+
+metric:
+  au: 0.70
