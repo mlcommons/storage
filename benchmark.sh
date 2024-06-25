@@ -390,13 +390,7 @@ main() {
 			esac
 		done
 		validate_non_empty "results-dir" $results_dir
-		if [ -e "$results_dir/summary.json" ]; then
-			echo "File 'summary.json' found in the result directory '$results_dir'."
-
-		else
-			echo "Error: File 'summary.json' not found in the result directory '$results_dir'."
-			echo "The report must be generated from the rank 0 host or the first host in the hosts argument"
-		fi
+		python3 ${SCRIPT_DIR}/report.py --result-dir $results_dir
 	else
 		usage; exit 1
 	fi

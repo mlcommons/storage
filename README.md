@@ -74,7 +74,7 @@ sudo apt-get install mpich
 Clone the latest release from [MLCommons Storage](https://github.com/mlcommons/storage) repository and install Python dependencies.
 
 ```bash
-git clone -b rc3 --recurse-submodules https://github.com/mlcommons/storage.git
+git clone -b v1.0 --recurse-submodules https://github.com/mlcommons/storage.git
 cd storage
 pip3 install -r dlio_benchmark/requirements.txt
 ```
@@ -218,7 +218,7 @@ Currently, the storage benchmark suite supports benchmarking of 3 deep learning 
 Calculate minimum dataset size required for the benchmark run based on your client configuration
 
 ```bash
-./benchmark.sh datasize --workload unet3d --accelerator-type a100 --num-accelerators 8 --num-client-hosts 2 --client-host-memory-in-gb 128
+./benchmark.sh datasize --workload unet3d --accelerator-type h100 --num-accelerators 8 --num-client-hosts 2 --client-host-memory-in-gb 128
 ```
 
 Generate data for the benchmark run
@@ -230,13 +230,13 @@ Generate data for the benchmark run
 Run the benchmark.
 
 ```bash
-./benchmark.sh run --hosts 10.117.61.121,10.117.61.165 --workload unet3d --accelerator-type h100 --num-accelerators 2 --results-dir resultsdir --param dataset.num_files_train=1200 --param dataset.data_folder=unet3d_data
+./benchmark.sh run --hosts 10.117.61.121,10.117.61.165 --workload unet3d --accelerator-type h100 --num-accelerators 2 --results-dir unet3d_h100 --param dataset.num_files_train=1200 --param dataset.data_folder=unet3d_data
 ```
 
 All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
 
 ```bash 
-./benchmark.sh reportgen --results-dir resultsdir
+./benchmark.sh reportgen --results-dir unet3d_h100
 ```
 
 ### ResNet-50
@@ -244,7 +244,7 @@ All results will be stored in the directory configured using `--results-dir`(or 
 Calculate minimum dataset size required for the benchmark run based on your client configuration
 
 ```bash
-./benchmark.sh datasize --workload resnet50 --accelerator-type a100 --num-accelerators 8 --num-client-hosts 2 --client-host-memory-in-gb 128
+./benchmark.sh datasize --workload resnet50 --accelerator-type h100 --num-accelerators 8 --num-client-hosts 2 --client-host-memory-in-gb 128
 ```
 
 Generate data for the benchmark run
@@ -256,13 +256,13 @@ Generate data for the benchmark run
 Run the benchmark.
 
 ```bash
-./benchmark.sh run --hosts 10.117.61.121,10.117.61.165 --workload resnet50 --accelerator-type h100 --num-accelerators 2 --results-dir resultsdir --param dataset.num_files_train=1200 --param dataset.data_folder=resnet50_data
+./benchmark.sh run --hosts 10.117.61.121,10.117.61.165 --workload resnet50 --accelerator-type h100 --num-accelerators 2 --results-dir resnet50_h100 --param dataset.num_files_train=1200 --param dataset.data_folder=resnet50_data
 ```
 
 All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
 
 ```bash 
-./benchmark.sh reportgen --results-dir resultsdir
+./benchmark.sh reportgen --results-dir resnet50_h100
 ```
 
 ### CosmoFlow
@@ -270,7 +270,7 @@ All results will be stored in the directory configured using `--results-dir`(or 
 Calculate minimum dataset size required for the benchmark run based on your client configuration
 
 ```bash
-./benchmark.sh datasize --workload cosmoflow --accelerator-type a100 --num-accelerators 8 --num-client-hosts 2 --client-host-memory-in-gb 128
+./benchmark.sh datasize --workload cosmoflow --accelerator-type h100 --num-accelerators 8 --num-client-hosts 2 --client-host-memory-in-gb 128
 ```
 
 Generate data for the benchmark run
@@ -282,13 +282,13 @@ Generate data for the benchmark run
 Run the benchmark.
 
 ```bash
-./benchmark.sh run --hosts 10.117.61.121,10.117.61.165 --workload cosmoflow --accelerator-type h100 --num-accelerators 2 --results-dir resultsdir --param dataset.num_files_train=1200 --param dataset.data_folder=cosmoflow_data
+./benchmark.sh run --hosts 10.117.61.121,10.117.61.165 --workload cosmoflow --accelerator-type h100 --num-accelerators 2 --results-dir cosmoflow_h100 --param dataset.num_files_train=1200 --param dataset.data_folder=cosmoflow_data
 ```
 
 All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
 
 ```bash 
-./benchmark.sh reportgen --results-dir resultsdir
+./benchmark.sh reportgen --results-dir cosmoflow_h100
 ```
 
 ## Parameters 
@@ -304,7 +304,9 @@ Below table displays the list of configurable parameters for the benchmark in th
 | dataset.data_folder           | The path where dataset is stored				| --|
 | **Reader params**				|						|   |
 | reader.read_threads		| Number of threads to load the data                            | --|
-| reader.computation_threads    | Number of threads to preprocess the data(for TensorFlow)      | --|
+| reader.computation_threads    | Number of threads to preprocess the data(for TensorFlow)      |1|
+| reader.prefetch_size    | Number of batches to prefetch      |2|
+| reader.transfer_size       | Number of bytes in the read buffer(only for Tensorflow)  		        | |
 | **Checkpoint params**		|								|   |
 | checkpoint.checkpoint_folder	| The folder to save the checkpoints  				| --|
 | **Storage params**		|								|   |
@@ -323,7 +325,7 @@ In addition to what can be changed in the CLOSED category, the following paramet
 | dataset.num_samples_per_file       | Number of samples per file(only for Tensorflow using tfrecord datasets)  		        | 1 for 3D U-Net |
 | **Reader params**		|
 | reader.data_loader       | Data loader type(Tensorflow or PyTorch or custom) 		        | PyTorch for 3D U-Net |
-| reader.transfer_size       | Number of bytes in the read buffer(only for Tensorflow)  		        | |
+
 
 ## Submission Rules
 
