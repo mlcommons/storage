@@ -15,8 +15,6 @@ SUMMARY_FILE = "summary.json"
 # config files containing workload details
 CONFIG_OVERRIDES_FILE = "configs/overrides.yaml"
 
-CONFIG_WORKLOAD_FILE = "configs/config.yaml"
-
 # minimum runs required for the submission
 REQUIRED_BENCHMARK_RUNS = 5
 
@@ -144,7 +142,7 @@ class StorageReport(object):
             logging.error(f"Error: The model name is different across runs")
             sys.exit(1)
         if not check_unique(overall_accelerator):
-            logging.error(f"Error: The model name is different across runs")
+            logging.error(f"Error: The accelerator name is different across runs")
             sys.exit(1)
         if not check_unique(overall_train_num_accelerators):
             logging.error(f"Error: The number of accelerators is different across runs")
