@@ -20,10 +20,10 @@ CLOSED_CATEGORY_PARAMS=(
 	# dataset params
 	"dataset.num_files_train" "dataset.num_subfolders_train" "dataset.data_folder"
 	# reader params
-	"reader.read_threads" "reader.computation_threads"
+	"reader.read_threads" "reader.computation_threads" "reader.transfer_size" "reader.prefetch_size"
 	# checkpoint params
 	"checkpoint.checkpoint_folder"
-	#storage params
+	# storage params
 	"storage.storage_type" "storage.storage_root")
 
 OPEN_CATEGORY_PARAMS=(
@@ -34,7 +34,7 @@ OPEN_CATEGORY_PARAMS=(
 	# dataset params
 	"dataset.format" "dataset.num_samples_per_file"
 	# reader params
-	"reader.data_loader" "reader.transfer_size"
+	"reader.data_loader"
 )
 HYDRA_OUTPUT_CONFIG_DIR="configs"
 EXTRA_PARAMS=(
@@ -46,7 +46,7 @@ EXTRA_PARAMS=(
 )
 
 ACCELERATOR_TYPES=("a100" "h100")
-STEPS_PER_EPOCH=100
+STEPS_PER_EPOCH=500
 # host memory multiplier for dataset generation
 HOST_MEMORY_MULTIPLIER=5
 
@@ -142,13 +142,17 @@ validate_params() {
 	for param in "${params[@]}"
 	do
 		param_name=$(echo $param | cut -d '=' -f 1)
+		param_value=$(echo $param | cut -d '=' -f 2)
+		validate_non_empty $param_name $param_value
 		if [[ " ${category} " =~ " open " ]]; then
 			validate_in_list "params" $param_name "${OPEN_CATEGORY_PARAMS[@]}"
 		elif [[ " ${category} " =~ " closed " ]]; then
 			validate_in_list "params" $param_name "${CLOSED_CATEGORY_PARAMS[@]}"
+			if [[ "$param_name" == "reader.prefetch_size" && "$param_value" -gt 2 ]]; then
+				echo "reader.prefetch_size value should not exceed 2"
+				exit 1
+			fi
 		fi
-		param_value=$(echo $param | cut -d '=' -f 2)
-		validate_non_empty $param_name $param_value
 	done
 }
 
@@ -386,15 +390,7 @@ main() {
 			esac
 		done
 		validate_non_empty "results-dir" $results_dir
-		if [ -e "$results_dir/summary.json" ]; then
-			timestamp=$(date "+%Y%m%d%H%M%S")
-			submission_pkg="submission-$timestamp.tar.gz"
-			tar -czvf "$submission_pkg" "$results_dir"
-			echo "Submission package created: $submission_pkg"
-		else
-			echo "Error: File 'summary.json' not found in the result directory '$results_dir'."
-			echo "The report must be generated from the first host in the hosts argument"
-		fi
+		python3 ${SCRIPT_DIR}/report.py --result-dir $results_dir
 	else
 		usage; exit 1
 	fi
