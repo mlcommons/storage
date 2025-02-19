@@ -1,0 +1,142 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2022 Dell Inc, or its subsidiaries.
+---
+- name: Install MLPerf™ Storage Benchmark Suite
+  hosts: clients
+  become: true
+  tasks:
+    - name: COMMON | Ensure common required packages are installed
+      ansible.builtin.package:
+        state: present
+        name:
+          - bc
+          - cmake
+          - curl
+          - git
+          - mpich
+          - sshpass
+          - sysstat
+
+    - name: Download UV installer
+      ansible.builtin.get_url:
+        url: https://astral.sh/uv/0.6.1/install.sh
+        dest: /tmp/install.sh
+        mode: '0755'
+
+    - name: Install UV
+      ansible.builtin.command: "sh /tmp/install.sh"
+
+    - name: Recursively remove directory
+      ansible.builtin.file:
+        path: /root/venv/
+        state: absent
+
+    - name: Create virtual python environment based on 3.12
+      ansible.builtin.command: /root/.local/bin/uv venv --python 3.12 /root/venv/
+
+    - name: DEBIAN | Custom block of commands
+      when: ansible_os_family == 'Debian'
+      block:
+        - name: DEBIAN | Remove Open MPI
+          ansible.builtin.package:
+            state: absent
+            name:
+              - libopenmpi-dev
+        - name: DEBIAN | Install packages
+          ansible.builtin.package:
+            state: present
+            name:
+              - build-essential
+              - libhwloc-dev
+              - libmpich-dev
+              - openssh-client
+
+        - name: DEBIAN | Install mpi4py
+          ansible.builtin.command: /root/.local/bin/uv pip install mpi4py
+          args:
+            chdir: /root/venv/
+
+    - name: RHEL | Custom block of commands
+      when: ansible_os_family == "RedHat"
+      block:
+        - name: RHEL | Remove Open MPI
+          ansible.builtin.package:
+            state: absent
+            name:
+              - openmpi-devel
+        - name: RHEL | Install packages
+          ansible.builtin.package:
+            state: present
+            name:
+              - hwloc-devel
+              - mpich-devel
+              - openssh-clients
+
+        - name: RHEL | Install development tools
+          ansible.builtin.yum:
+            name: "@Development tools"
+            state: present
+
+        - name: RHEL | Install mpi4py
+          ansible.builtin.command: /root/.local/bin/uv pip install mpi4py
+          args:
+            chdir: /root/venv/
+          environment:
+            CC: /usr/lib64/mpich/bin/mpicc
+
+    - name: SLES | Custom block of commands
+      when: ansible_os_family == "Suse"
+      block:
+        - name: SLES | Remove Open MPI
+          ansible.builtin.package:
+            state: absent
+            name:
+              - openmpi-devel
+        - name: SLES | Install packages
+          ansible.builtin.package:
+            state: present
+            name:
+              - hwloc-devel
+              - mpich-devel
+              - openssh-clients
+              - gcc12-c++
+              - gcc12
+              - cpp12
+
+        - name: SLES | Install development tools
+          community.general.zypper:
+            name: devel_basis
+            state: present
+            type: pattern
+
+        - name: SLES | Install mpi4py
+          ansible.builtin.command: /root/.local/bin/uv pip install mpi4py
+          args:
+            chdir: /root/venv/
+          environment:
+            CC: /usr/lib64/mpi/gcc/mpich/bin/mpicc
+
+        - name: SLES | Configure gcc alternatives
+          community.general.alternatives: name={{ item.name }} link={{ item.link }} path={{ item.path }}
+          with_items:
+          - { name: gcc, link: /usr/bin/gcc, path: "/usr/bin/gcc-12", priority: "80" }
+          - { name: cpp, link: /usr/bin/cpp, path: "/usr/bin/cpp-12", priority: "80" }
+          - { name: g++, link: /usr/bin/g++, path: "/usr/bin/g++-12", priority: "80" }
+          - { name: c++, link: /usr/bin/c++, path: "/usr/bin/g++-12", priority: "80" }
+
+        - name: SLES | Install dlio_profiler_py
+          ansible.builtin.command: /root/.local/bin/uv pip install dlio_profiler_py==0.0.3
+          args:
+            chdir: /root/venv/
+
+    - name: Checkout beckchmark code
+      ansible.builtin.git:
+        repo: 'https://github.com/mlcommons/storage.git'
+        dest: /root/storage
+        recursive: true
+        version: v1.0
+
+    - name: Install DLIO python requirements
+      ansible.builtin.command: /root/.local/bin/uv pip install -r /root/storage/dlio_benchmark/requirements.txt
+      args:
+        chdir: /root/venv/
