@@ -45,6 +45,7 @@ MPI_CMDS = [MPIRUN, MPIEXEC]
 
 STEPS_PER_EPOCH = 500
 MOST_MEMORY_MULTIPLIER = 5
+MAX_READ_THREADS_TRAINING = 32
 
 DEFAULT_HOSTS = "127.0.0.1"
 
@@ -54,6 +55,12 @@ ALLOW_RUN_AS_ROOT = True
 class EXEC_TYPE(enum.Enum):
     MPI = "mpi"
     DOCKER = "docker"
+
+
+class PARAM_VALIDATION(enum.Enum):
+    CLOSED = "closed"
+    OPEN = "open"
+    INVALID = "invalid"
 
 
 DATETIME_STR = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -115,6 +122,7 @@ def parse_arguments():
     )
 
     parser = argparse.ArgumentParser(description="Script to launch the MLPerf Storage benchmark")
+    parser.add_argument("--allow-invalid-params", "-aip", action="store_true", help="Do not fail on invalid parameters.")
     sub_programs = parser.add_subparsers(dest="program", required=True, help="Sub-programs")
     sub_programs.required = True
 
@@ -216,6 +224,30 @@ def generate_mpi_prefix_cmd(mpi_cmd, hosts, num_processes, oversubscribe, allow_
     return prefix
 
 
+def validate_dlio_parameter(model, param, value):
+    if model in MODELS:
+        # Allowed to change data_folder and number of files to train depending on memory requirements
+        if param.startswith('dataset'):
+            left, right = param.split('.')
+            if right in ('data_folder', 'num_files_train'):
+                # TODO: Add check of min num_files for given memory config
+                return PARAM_VALIDATION.CLOSED
+
+        # Allowed to set number of read threads
+        if param.startswith('reader'):
+            left, right = param.split('.')
+            if right == "read_threads":
+                if 0 < value < MAX_READ_THREADS_TRAINING:
+                    return PARAM_VALIDATION.CLOSED
+
+    elif model in LLM_MODELS:
+        # TODO: Define params that can be modified in closed
+        pass
+
+    return PARAM_VALIDATION.INVALID
+
+
+
 class Benchmark:
     def run(self):
         """
@@ -231,7 +263,8 @@ class TrainingBenchmark(Benchmark):
 
     def __init__(self, command, category=None, model=None, hosts=None, accelerator_type=None, num_accelerators=None,
                  client_host_memory_in_gb=None, num_client_hosts=None, params=None, oversubscribe=False,
-                 allow_run_as_root=True, data_dir=None, results_dir=None, run_number=0, *args, **kwargs):
+                 allow_run_as_root=True, data_dir=None, results_dir=None, run_number=0, allow_invalid_params=False,
+                 *args, **kwargs):
         mllogger.event(f'Initializing the Training Benchmark class...', metadata=kwargs)
 
         # This allows each command to map to a specific wrapper method. When meethods are created, repalce the default
@@ -255,6 +288,7 @@ class TrainingBenchmark(Benchmark):
         self.params_dict = None if not params else {k: v for k, v in (item.split("=") for item in params)}
         self.oversubscribe = oversubscribe
         self.allow_run_as_root = allow_run_as_root
+        self.allow_invalid_params = allow_invalid_params
 
         self.results_dir = results_dir
         self.data_dir = data_dir
@@ -322,7 +356,21 @@ class TrainingBenchmark(Benchmark):
     def validate_args(self):
         # Add code here for validation processes. We do not need to validate an option is in a list as the argparse
         #  option "choices" accomplishes this for us.
-        pass
+        validation_results = dict()
+        any_non_closed = False
+        for param, value in self.params_dict.items():
+            validation_results[param] = [self.model, value, validate_dlio_parameter(self.model, param, value)]
+            if validation_results[param][2] != PARAM_VALIDATION.CLOSED:
+                any_non_closed = True
+
+        if any_non_closed:
+            error_string = "\n\t".join([f"{p} = {v[1]}" for p, v in validation_results.items()])
+            mllogger.logger.error(f'\nNot all parameters allowed in closed submission: \n'
+                                  f'\t{error_string}')
+            if not self.allow_invalid_params:
+                print("Invalid parameters found. Please check the command and parameters.")
+                sys.exit(1)
+
 
     def generate_command(self):
         cmd = ""
