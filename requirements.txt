@@ -1,0 +1,2 @@
+dlio-benchmark==2.0.0
+vectordb-bench==0.0.22
