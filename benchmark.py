@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 
 import argparse
+import concurrent.futures
 import datetime
 import enum
 import os
@@ -247,6 +248,56 @@ def validate_dlio_parameter(model, param, value):
     return PARAM_VALIDATION.INVALID
 
 
+class ClusterInformation:
+    def __init__(self, hosts):
+        self.hosts = hosts
+        self.info = self.collect_info()
+
+    def collect_info(self):
+        info = {}
+        with concurrent.futures.ThreadPoolExecutor() as executor:
+            future_to_host = {executor.submit(self.get_host_info, host): host for host in self.hosts}
+            for future in concurrent.futures.as_completed(future_to_host):
+                host = future_to_host[future]
+                cpu_core_count, memory_info = future.result()
+                info[host] = {
+                    'cpu_core_count': cpu_core_count,
+                    'memory_info': memory_info
+                }
+        return info
+
+    def get_host_info(self, host):
+        cpu_core_count = self.get_cpu_core_count(host)
+        memory_info = self.get_memory_info(host)
+        return cpu_core_count, memory_info
+
+    def get_cpu_core_count(self, host):
+        cpu_core_count = 0
+        cpu_info_path = f"ssh {host} cat /proc/cpuinfo"
+        try:
+            output = os.popen(cpu_info_path).read()
+            cpu_core_count = output.count('processor')
+        except Exception as e:
+            print(f"Error getting CPU core count for host {host}: {e}")
+        return cpu_core_count
+
+    def get_memory_info(self, host):
+        memory_info = {}
+        meminfo_path = f"ssh {host} cat /proc/meminfo"
+        try:
+            output = os.popen(meminfo_path).read()
+            lines = output.split('\n')
+            for line in lines:
+                if line.startswith('MemTotal:'):
+                    memory_info['total'] = int(line.split()[1])
+                elif line.startswith('MemFree:'):
+                    memory_info['free'] = int(line.split()[1])
+                elif line.startswith('MemAvailable:'):
+                    memory_info['available'] = int(line.split()[1])
+        except Exception as e:
+            print(f"Error getting memory information for host {host}: {e}")
+        return memory_info
+
 
 class Benchmark:
     def run(self):
@@ -280,7 +331,7 @@ class TrainingBenchmark(Benchmark):
         self.command = command
         self.category = category
         self.model = model
-        self.hosts = hosts
+        self.hosts = hosts.split(',')
         self.accelerator_type = accelerator_type
         self.num_accelerators = num_accelerators
         self.client_host_memory_in_gb = client_host_memory_in_gb
@@ -307,6 +358,7 @@ class TrainingBenchmark(Benchmark):
         mllogger.logger.info(f'yaml params: {self.yaml_params}')
 
         self.validate_args()
+        self.cluster_information = self.get_cluster_information()
 
         mllogger.event(f'Running the command {self.command}')
 
@@ -358,10 +410,11 @@ class TrainingBenchmark(Benchmark):
         #  option "choices" accomplishes this for us.
         validation_results = dict()
         any_non_closed = False
-        for param, value in self.params_dict.items():
-            validation_results[param] = [self.model, value, validate_dlio_parameter(self.model, param, value)]
-            if validation_results[param][2] != PARAM_VALIDATION.CLOSED:
-                any_non_closed = True
+        if self.params_dict:
+            for param, value in self.params_dict.items():
+                validation_results[param] = [self.model, value, validate_dlio_parameter(self.model, param, value)]
+                if validation_results[param][2] != PARAM_VALIDATION.CLOSED:
+                    any_non_closed = True
 
         if any_non_closed:
             error_string = "\n\t".join([f"{p} = {v[1]}" for p, v in validation_results.items()])
@@ -371,6 +424,10 @@ class TrainingBenchmark(Benchmark):
                 print("Invalid parameters found. Please check the command and parameters.")
                 sys.exit(1)
 
+    def get_cluster_information(self):
+        cluster_info = ClusterInformation(hosts=self.hosts)
+        mllogger.logger.info(f'Cluster information: {cluster_info.info}')
+        return cluster_info.info
 
     def generate_command(self):
         cmd = ""
