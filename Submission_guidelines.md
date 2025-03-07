@@ -1,5 +1,29 @@
 # MLPerf™ Storage V1.0 Benchmark Rules
 ——————————————————————————————————————————
+# MLPerf Storage Benchmark Submission Guidelines v1.0
+
+- [1. Introduction](#1-introduction)
+- [2. Benchmark Overview](#2-benchmark-overview)
+- [3. Benchmark Objectives](#3-benchmark-objectives)
+- [4. Benchmark Scope](#4-benchmark-scope)
+- [5. Benchmark Configuration](#5-benchmark-configuration)
+- [6. Benchmark Execution](#6-benchmark-execution)
+  - [6.1. Closed Division](#61-closed-division)
+  - [6.2. Open Division](#62-open-division)
+- [7. Submission](#7-submission)
+  - [7.1. Successful Run Result](#71-successful-run-result)
+  - [7.2. Submission Requirements](#72-submission-requirements)
+  - [7.3. Directory Structure for CLOSED or OPEN Submissions](#73-directory-structure-for-closed-or-open-submissions)
+    - [System Description JSON](#system-description-json)
+    - [System Description PDF](#system-description-pdf)
+- [8. Review](#8-review)
+  - [8.1. Visibility of Results and Code During Review](#81-visibility-of-results-and-code-during-review)
+  - [8.2. Filing Objections](#82-filing-objections)
+  - [8.3. Resolving Objections](#83-resolving-objections)
+  - [8.4. Fixing Objections](#84-fixing-objections)
+  - [8.5. Withdrawing Results / Changing Division](#85-withdrawing-results--changing-division)
+- [9. Roadmap for Future MLPerf Storage Releases](#9-roadmap-for-future-mlperf-storage-releases)
+
 ## 1. Overview
 
 MLPerf™ Storage is a benchmark suite to characterize the performance of storage systems that support machine learning workloads. MLPerf Storage does not require running of the actual training jobs. 
