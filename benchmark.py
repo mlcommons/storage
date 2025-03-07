@@ -6,11 +6,92 @@ import datetime
 import enum
 import os
 import os.path
+import pprint
 import subprocess
 import sys
 import yaml
 
 from mlperf_logging import mllog
+
+import logging
+
+# Define the custom log levels
+STATUS = 25
+VERBOSE = 13
+VERBOSER = 12
+VERBOSEST = 11
+
+STREAM_LOG_LEVEL = logging.DEBUG
+
+COLOR_MAP = {
+    'normal': "\033[0m",
+    'white': "\033[37m",
+    "green": "\033[32m",
+    "yellow": "\033[33m",
+    "red": "\033[31m",
+    "magenta": "\033[35m",
+    "cyan": "\033[36m",
+    'intense_purple': '\033[1;95m',
+}
+
+# Create a custom logger
+logger = logging.getLogger('custom_logger')
+logger.setLevel(STREAM_LOG_LEVEL)
+
+# Define the custom log levels
+logging.addLevelName(VERBOSE, "VERBOSE")
+logging.addLevelName(VERBOSER, "VERBOSER")
+logging.addLevelName(VERBOSEST, "VERBOSEST")
+logging.addLevelName(STATUS, "STATUS")
+
+
+# Define the custom log level methods
+def verbose(self, message, *args, **kwargs):
+    if self.isEnabledFor(VERBOSE):
+        self._log(VERBOSE, message, args, **kwargs)
+
+
+def verboser(self, message, *args, **kwargs):
+    if self.isEnabledFor(VERBOSER):
+        self._log(VERBOSER, message, args, **kwargs)
+
+
+def verbosest(self, message, *args, **kwargs):
+    if self.isEnabledFor(VERBOSEST):
+        self._log(VERBOSEST, message, args, **kwargs)
+
+
+def status(self, message, *args, **kwargs):
+    if self.isEnabledFor(STATUS):
+        self._log(STATUS, message, args, **kwargs)
+
+
+# Create a custom formatter for the logger
+class ColoredFormatter(logging.Formatter):
+    def format(self, record):
+        color_map = {
+            logging.DEBUG: COLOR_MAP['white'],
+            logging.WARNING: COLOR_MAP['yellow'],
+            logging.ERROR: COLOR_MAP['red'],
+            logging.CRITICAL: COLOR_MAP['red'],
+            STATUS: COLOR_MAP['intense_purple'],
+        }
+        formatted_time = f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        color = color_map.get(record.levelno, COLOR_MAP['normal'])
+        return f"{color}{formatted_time}|{record.levelname}:{record.module}:{record.lineno}: " \
+               f"{record.getMessage()}{COLOR_MAP['normal']}"
+
+
+# Add the custom log level methods to the logger
+logging.Logger.verbose = verbose
+logging.Logger.verboser = verboser
+logging.Logger.verbosest = verbosest
+logging.Logger.status = status
+
+stream_handler = logging.StreamHandler()
+stream_handler.setFormatter(ColoredFormatter())
+stream_handler.setLevel(STREAM_LOG_LEVEL)
+logger.addHandler(stream_handler)
 
 
 # Define constants:
@@ -226,6 +307,9 @@ def generate_mpi_prefix_cmd(mpi_cmd, hosts, num_processes, oversubscribe, allow_
 
 
 def validate_dlio_parameter(model, param, value):
+    """
+    This function applies rules to the allowed changeable dlio parameters.
+    """
     if model in MODELS:
         # Allowed to change data_folder and number of files to train depending on memory requirements
         if param.startswith('dataset'):
@@ -238,7 +322,7 @@ def validate_dlio_parameter(model, param, value):
         if param.startswith('reader'):
             left, right = param.split('.')
             if right == "read_threads":
-                if 0 < value < MAX_READ_THREADS_TRAINING:
+                if 0 < int(value) < MAX_READ_THREADS_TRAINING:
                     return PARAM_VALIDATION.CLOSED
 
     elif model in LLM_MODELS:
@@ -246,6 +330,38 @@ def validate_dlio_parameter(model, param, value):
         pass
 
     return PARAM_VALIDATION.INVALID
+
+
+def update_nested_dict(original_dict, update_dict):
+    updated_dict = {}
+    for key, value in original_dict.items():
+        if key in update_dict:
+            if isinstance(value, dict) and isinstance(update_dict[key], dict):
+                updated_dict[key] = update_nested_dict(value, update_dict[key])
+            else:
+                updated_dict[key] = update_dict[key]
+        else:
+            updated_dict[key] = value
+    for key, value in update_dict.items():
+        if key not in original_dict:
+            updated_dict[key] = value
+    return updated_dict
+
+
+def create_nested_dict(flat_dict, parent_dict=None, separator='.'):
+    if parent_dict is None:
+        parent_dict = {}
+
+    for key, value in flat_dict.items():
+        keys = key.split(separator)
+        current_dict = parent_dict
+        for i, k in enumerate(keys[:-1]):
+            if k not in current_dict:
+                current_dict[k] = {}
+            current_dict = current_dict[k]
+        current_dict[keys[-1]] = value
+
+    return parent_dict
 
 
 class ClusterInformation:
@@ -316,7 +432,6 @@ class TrainingBenchmark(Benchmark):
                  client_host_memory_in_gb=None, num_client_hosts=None, params=None, oversubscribe=False,
                  allow_run_as_root=True, data_dir=None, results_dir=None, run_number=0, allow_invalid_params=False,
                  *args, **kwargs):
-        mllogger.event(f'Initializing the Training Benchmark class...', metadata=kwargs)
 
         # This allows each command to map to a specific wrapper method. When meethods are created, repalce the default
         # 'self.execute_command' with the command-specific method (like "self._datasize()")
@@ -336,7 +451,7 @@ class TrainingBenchmark(Benchmark):
         self.num_accelerators = num_accelerators
         self.client_host_memory_in_gb = client_host_memory_in_gb
         self.num_client_hosts = num_client_hosts
-        self.params_dict = None if not params else {k: v for k, v in (item.split("=") for item in params)}
+        self.params_dict = dict() if not params else {k: v for k, v in (item.split("=") for item in params)}
         self.oversubscribe = oversubscribe
         self.allow_run_as_root = allow_run_as_root
         self.allow_invalid_params = allow_invalid_params
@@ -346,7 +461,7 @@ class TrainingBenchmark(Benchmark):
         self.run_number = run_number
 
         self.base_command_path = f"{sys.executable} dlio_benchmark/dlio_benchmark/main.py"
-        self.exec_type = None #EXEC_TYPE.MPI
+        self.exec_type = None  #EXEC_TYPE.MPI
 
         self.config_path = f"{self.model}_{self.accelerator_type}.yaml"
         self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), self.TRAINING_CONFIG_PATH)
@@ -355,12 +470,18 @@ class TrainingBenchmark(Benchmark):
         self.run_result_output = self.generate_output_location()
 
         self.yaml_params = read_config_from_file(os.path.join(self.config_path, f"{self.config_name}.yaml"))
-        mllogger.logger.info(f'yaml params: {self.yaml_params}')
+        self.validate_params()
+        logger.info(f'nested: {create_nested_dict(self.params_dict)}')
+        self.combined_params = update_nested_dict(self.yaml_params, create_nested_dict(self.params_dict))
 
-        self.validate_args()
+        self.per_host_mem_kB = None
+        self.total_mem_kB = None
         self.cluster_information = self.get_cluster_information()
 
-        mllogger.event(f'Running the command {self.command}')
+        logger.debug(f'yaml params: \n{pprint.pformat(self.yaml_params)}')
+        logger.debug(f'combined params: \n{pprint.pformat(self.combined_params)}')
+        logger.debug(f'Instance params: \n{pprint.pformat(self.__dict__)}')
+        logger.status(f'Instantiated the Training Benchmark...')
 
     def generate_output_location(self):
         """
@@ -405,7 +526,7 @@ class TrainingBenchmark(Benchmark):
     def run(self):
         self.command_method_map[self.command]()
 
-    def validate_args(self):
+    def validate_params(self):
         # Add code here for validation processes. We do not need to validate an option is in a list as the argparse
         #  option "choices" accomplishes this for us.
         validation_results = dict()
@@ -418,7 +539,7 @@ class TrainingBenchmark(Benchmark):
 
         if any_non_closed:
             error_string = "\n\t".join([f"{p} = {v[1]}" for p, v in validation_results.items()])
-            mllogger.logger.error(f'\nNot all parameters allowed in closed submission: \n'
+            logger.error(f'\nNot all parameters allowed in closed submission: \n'
                                   f'\t{error_string}')
             if not self.allow_invalid_params:
                 print("Invalid parameters found. Please check the command and parameters.")
@@ -426,13 +547,14 @@ class TrainingBenchmark(Benchmark):
 
     def get_cluster_information(self):
         cluster_info = ClusterInformation(hosts=self.hosts)
-        mllogger.logger.info(f'Cluster information: {cluster_info.info}')
+        logger.verbose(f'Cluster information: \n{pprint.pformat(cluster_info.info)}')
+        # per_host_kb =
         return cluster_info.info
 
     def generate_command(self):
         cmd = ""
 
-        if self.command in ["datasize", "datagen", "run_benchmark"]:
+        if self.command in ["datagen", "run_benchmark"]:
             cmd = f"{self.base_command_path}"
             cmd += f" --config-dir={self.config_path}"
             cmd += f" --config-name={self.config_name}"
@@ -455,35 +577,48 @@ class TrainingBenchmark(Benchmark):
 
         if self.params_dict:
             for key, value in self.params_dict.items():
-                cmd += f" --{key} {value}"
+                cmd += f" ++{key}={value}"
 
         if self.exec_type == EXEC_TYPE.MPI:
             mpi_prefix = generate_mpi_prefix_cmd(MPIRUN, self.hosts, self.num_accelerators, self.oversubscribe, self.allow_run_as_root)
-            mllogger.event(f'Running command with MPI: \n\t{mpi_prefix} {cmd}')
             cmd = f"{mpi_prefix} {cmd}"
 
         return cmd
 
     def execute_command(self):
         cmd = self.generate_command()
-        mllogger.logger.info(f'Executing: {cmd}')
+        logger.info(f'Executing: {cmd}')
         subprocess.call(cmd, shell=True)
 
     def _datasize(self):
         """
-        Validate the parameters for the datasize operation and apply rules for a closed submission
+        Validate the parameters for the datasize operation and apply rules for a closed submission.
+
+        Requirements:
+          - Dataset needs to be 5x the amount of total memory
+          - Training needs to do at least 500 steps per epoch
+
+        Memory Ratio:
+          - Collect "Total Memory" from /proc/meminfo on each host
+          - sum it up
+          - multiply by 5
+          - divide by sample size
+          - divide by batch size
+
+        500 steps:
+          - 500 steps per ecpoch
+          - multiply by max number of processes
+          - multiply by batch size
         :return:
         """
-        mllogger.event(f'Got to datasize')
-        self.execute_command()
+
+        logger.info(f'Got to datasize')
+
 
 
 # Main function to handle command-line arguments and invoke the corresponding function.
 def main(args):
-    mllogger.event(f'Got to main')
     validate_args(args)
-    mllogger.logger.info(f'Args: {args}')
-
     program_switch_dict = dict(
         training=TrainingBenchmark,
     )
@@ -495,6 +630,6 @@ def main(args):
 
 if __name__ == "__main__":
     # Get the mllogger and args. Call main to run program
-    mllogger = mllog.get_mllogger()
     cli_args = parse_arguments()
+    logger.setLevel(logging.DEBUG)
     main(cli_args)
