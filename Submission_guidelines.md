@@ -156,9 +156,10 @@ Public results should be rounded normally, to two decimal places.
 The MLPerf Storage benchmark will create the dataset on the storage system, in the desired ``dataset format``, before the start of the benchmark run.  The data must reside on stable storage before the actual benchmark testing can run.
 
 ### 2.6. Caching
-Under all circumstances, caching of training data on the ``host node``(s) running MLPerf Storage before the benchmark begins is DISALLOWED. Caches in the ``host node``(s) must be cleared between two consecutive benchmark runs.
-
-On the one hand, we have sized the benchmark dataset to be 5x the size of DRAM on the ``host node``(s) running the benchmark code so that the randomness of the access pattern can defeat any significant levels of caching in local DRAM.  In that sense cache invalidation in the benchmark nodes should not be required, but out of an abundance of caution we do require it.  On the other hand, we believed that repeated real-world training runs with a given storage system might benefit from caching in the storage system under normal circumstances, so we have not required cache invalidation there.
+Caching of training data on ``host nodes`` running MLPerf Storage is controlled via a warm up run, dataset size to memory ratios, and changing random seeds between runs.
+1. All runs must use a warm-up run before the 5 test runs. 
+2. For Training benchmarks, the dataset size must be at least 5x larger than the sum of memory across all of the MLPerf Storage nodes
+3. The random seed must change for each run as controlled by the benchmark.py script
 
 ### 2.7. Replicability is mandatory
 Results that cannot be replicated are not valid results. Replicated results should be within 5% within 5 tries.
