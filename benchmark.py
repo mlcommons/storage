@@ -264,6 +264,17 @@ def parse_arguments():
 
     recovery = checkpointing_subparsers.add_parser('recovery', help=help_messages['recovery'])
 
+    # VectorDB Benchmark
+    vectordb_parsers = sub_programs.add_parser("vectordb", help="VectorDB benchmark options")
+    vectordb_parsers.add_argument('--hosts', '-s', type=str, help=help_messages['client_hosts'])
+
+    vectordb_subparsers = vectordb_parsers.add_subparsers(dest="command", required=True, help="Sub-commands")
+    vectordb_parsers.required = True
+
+    # Add specific VectorDB benchmark options here
+    throughput = vectordb_subparsers.add_parser('throughput', help=help_messages['vectordb_throughput'])
+    latency = vectordb_subparsers.add_parser('latency', help=help_messages['vectordb_latency'])
+
     return parser.parse_args()
 
 
@@ -615,12 +626,37 @@ class TrainingBenchmark(Benchmark):
         logger.info(f'Got to datasize')
 
 
+class VectorDBBenchmark(Benchmark):
+    VECTORDB_CONFIG_PATH = "configs/vector_db"
+
+    def __init__(self, command, category=None, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+
+        self.command_method_map = dict(
+            throughput=self._throughput,
+            latency=self._latency
+        )
+        self.command = command
+        self.category = category
+
+        self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), self.VECTORDB_CONFIG_PATH)
+
+    def run(self):
+        self.command_method_map[self.command]()
+
+    def _throughput(self):
+        logger.info(f'Got to throughput')
+
+    def _latency(self):
+        logger.info(f'Got to latency')
+
 
 # Main function to handle command-line arguments and invoke the corresponding function.
 def main(args):
     validate_args(args)
     program_switch_dict = dict(
         training=TrainingBenchmark,
+        vectordb=VectorDBBenchmark,
     )
 
     benchmark_class = program_switch_dict.get(args.program)
