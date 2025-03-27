@@ -59,12 +59,18 @@ def generate_mpi_prefix_cmd(mpi_cmd, hosts, num_processes, oversubscribe, allow_
 
 
 class ClusterInformation:
-    def __init__(self, hosts):
+    def __init__(self, hosts, debug=False):
+        self.debug = debug
         self.hosts = hosts
         self.info = self.collect_info()
 
     def collect_info(self):
         info = {}
+
+        if self.debug:
+            print(f"Collecting information for hosts: {self.hosts}")
+            return {host: {'cpu_core_count': 0,'memory_info': {}} for host in self.hosts}
+
         with concurrent.futures.ThreadPoolExecutor() as executor:
             future_to_host = {executor.submit(self.get_host_info, host): host for host in self.hosts}
             for future in concurrent.futures.as_completed(future_to_host):
@@ -242,7 +248,7 @@ class TrainingBenchmark(Benchmark):
                 sys.exit(1)
 
     def get_cluster_information(self):
-        cluster_info = ClusterInformation(hosts=self.hosts)
+        cluster_info = ClusterInformation(hosts=self.hosts, debug=self.debug)
         logger.verbose(f'Cluster information: \n{pprint.pformat(cluster_info.info)}')
         # per_host_kb =
         return cluster_info.info

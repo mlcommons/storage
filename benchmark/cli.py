@@ -1,5 +1,5 @@
 import argparse
-from config import MIN_RANKS_STR, MODELS, ACCELERATORS, DEFAULT_HOSTS, CATEGORIES, LLM_MODELS
+from benchmark.config import MIN_RANKS_STR, MODELS, ACCELERATORS, DEFAULT_HOSTS, CATEGORIES, LLM_MODELS
 
 help_messages = dict(
     model="Model to emulate. A specific model defines the sample size, sample container format, and data "
@@ -104,6 +104,8 @@ def add_training_arguments(training_parsers):
     for _parser in [datasize, datagen, run_benchmark, configview, reportgen]:
         _parser.add_argument('--results-dir', '-rd', type=str, help=help_messages['results_dir'])
         _parser.add_argument("--data-dir", '-dd', type=str, help="Filesystem location for data")
+        _parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+
 
 
 def add_checkpointing_arguments(checkpointing_parsers):
