@@ -25,6 +25,20 @@ from benchmark.utils import read_config_from_file, update_nested_dict, create_ne
 #
 # Add a log block at the start of datagen & run that output all the parms being used to be clear on what a run is.
 
+# Change num accelerators for datasize to "max num accelerators"
+# for datagen change to num generation processes
+# For run benchmark it stays the same
+
+
+# Remove accelerator type from datagen
+# datasize should output the datagen command to copy and paste
+
+# Add autosize parameter for run_benchmark and datasize
+# for run it's just size of dataset based on memory capacity
+# For datasize it needs an input of GB/s for the cluster and list of hosts
+
+# Keep a log of mlperfstorage commands executed in a mlperf.history file in results_dir
+
 
 def generate_mpi_prefix_cmd(mpi_cmd, hosts, num_processes, oversubscribe, allow_run_as_root):
     if mpi_cmd == MPIRUN:
@@ -111,7 +125,9 @@ class TrainingBenchmark(Benchmark):
     def __init__(self, command, category=None, model=None, hosts=None, accelerator_type=None, num_accelerators=None,
                  client_host_memory_in_gb=None, num_client_hosts=None, params=None, oversubscribe=False,
                  allow_run_as_root=True, data_dir=None, results_dir=None, run_number=0, allow_invalid_params=False,
-                 *args, **kwargs):
+                 debug=False, *args, **kwargs):
+
+        self.debug = debug
 
         # This allows each command to map to a specific wrapper method. When meethods are created, repalce the default
         # 'self.execute_command' with the command-specific method (like "self._datasize()")
@@ -268,6 +284,10 @@ class TrainingBenchmark(Benchmark):
     def execute_command(self):
         cmd = self.generate_command()
         logger.info(f'Executing: {cmd}')
+
+        if self.debug:
+            return
+
         subprocess.call(cmd, shell=True)
 
     def _datasize(self):
