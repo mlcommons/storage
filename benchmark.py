@@ -250,11 +250,22 @@ class TrainingBenchmark(Benchmark):
           - multiply by batch size
         :return:
         """
-        total_mem_KB = self.cluster_information.info['accumulated_mem_info']['total']
-        dataset_size_KB = 5 * total_mem_KB
-        file_size_B = self.combined_params['dataset']['num_samples_per_file'] * self.combined_params['dataset']['record_length_bytes']
+        measured_total_mem_bytes = self.cluster_information.info['accumulated_mem_info_bytes']['total']
+        if self.args.client_host_memory_in_gb and self.args.num_client_hosts:
+            per_host_memory_in_bytes = self.args.client_host_memory_in_gb * 1024 * 1024 * 1024
+            num_hosts = self.args.num_client_hosts
+            total_mem_bytes = per_host_memory_in_bytes * num_hosts
+        elif self.args.clienthost_host_memory_in_gb and not self.args.num_client_hosts:
+            per_host_memory_in_bytes = self.args.clienthost_host_memory_in_gb * 1024 * 1024 * 102
+            num_hosts = len(self.args.hosts)
+            total_mem_bytes = per_host_memory_in_bytes * num_hosts
+        else:
+            total_mem_bytes = measured_total_mem_bytes
 
-        min_num_files_by_bytes = (dataset_size_KB * 1024) // file_size_B
+        dataset_size_bytes = 5 * total_mem_bytes
+        file_size_bytes = self.combined_params['dataset']['num_samples_per_file'] * self.combined_params['dataset']['record_length_bytes']
+
+        min_num_files_by_bytes = dataset_size_bytes // file_size_bytes
         num_samples_by_bytes = min_num_files_by_bytes * self.combined_params['dataset']['num_samples_per_file']
         min_samples = 500 * self.args.num_processes * self.combined_params['reader']['batch_size']
         min_num_files_by_samples = min_samples // self.combined_params['dataset']['num_samples_per_file']
@@ -264,7 +275,7 @@ class TrainingBenchmark(Benchmark):
         logger.ridiculous(f'Required sample count: {min_samples}')
         logger.ridiculous(f'Min number of files by samples: {min_num_files_by_samples}')
         logger.ridiculous(f'Min number of files by size: {min_num_files_by_bytes}')
-        logger.ridiculous(f'Required dataset size: {required_file_count * file_size_B / 1024 / 1024} MB')
+        logger.ridiculous(f'Required dataset size: {required_file_count * file_size_bytes / 1024 / 1024} MB')
         logger.ridiculous(f'Number of Samples by size: {num_samples_by_bytes}')
         if min_num_files_by_bytes > min_num_files_by_samples:
             logger.result(f'Minimum file count dictated by dataset size to memory capacity ratio. Use {min_num_files_by_bytes} files.')
@@ -314,5 +325,5 @@ def main(args):
 if __name__ == "__main__":
     # Get the mllogger and args. Call main to run program
     cli_args = parse_arguments()
-    logger = setup_logging("MLPerfStorage")
+    logger = setup_logging("MLPerfStorage", cli_args.stream_log_level)
     main(cli_args)

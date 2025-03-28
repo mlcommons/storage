@@ -68,23 +68,25 @@ class COLORS(enum.Enum):
     normal = "\033[0m"
 
 
+level_to_color_map = {
+    ERROR: COLORS.bred,
+    CRITICAL: COLORS.bred,
+    WARNING: COLORS.yellow,
+    RESULT: COLORS.green,
+    STATUS: COLORS.bblue,
+    INFO: COLORS.normal,
+    VERBOSE: COLORS.normal,
+    VERBOSER: COLORS.normal,
+    VERBOSEST: COLORS.normal,
+    DEBUG: COLORS.normal,
+    RIDICULOUS: COLORS.normal,
+    LUDICROUS: COLORS.normal,
+    PLAID: COLORS.bipurple,
+}
+
+
 def get_level_color(level):
-    color_enum = {
-        ERROR: COLORS.bred,
-        CRITICAL: COLORS.bred,
-        WARNING: COLORS.yellow,
-        RESULT: COLORS.green,
-        STATUS: COLORS.bblue,
-        INFO: COLORS.normal,
-        VERBOSE: COLORS.normal,
-        VERBOSER: COLORS.normal,
-        VERBOSEST: COLORS.normal,
-        DEBUG: COLORS.normal,
-        RIDICULOUS: COLORS.normal,
-        LUDICROUS: COLORS.normal,
-        PLAID: COLORS.bipurple,
-    }.get(level, COLORS.normal)
-    return color_enum.value
+    return level_to_color_map.get(level, COLORS.normal).value
 
 
 for level_name, level_num in custom_levels.items():
@@ -149,6 +151,9 @@ logging.Logger.plaid = plaid
 
 
 def setup_logging(name=__name__, stream_log_level=DEFAULT_STREAM_LOG_LEVEL):
+    if isinstance(stream_log_level, str):
+        stream_log_level = logging.getLevelName(stream_log_level.upper())
+
     _logger = logging.getLogger(name)
     _logger.setLevel(logging.DEBUG)
 

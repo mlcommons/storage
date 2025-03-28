@@ -55,7 +55,7 @@ class ClusterInformation:
         self.username = username
         self.info = dict(
             host_info={},
-            accumulated_mem_info={},
+            accumulated_mem_info_bytes={},
             total_client_cpus=0,
         )
 
@@ -93,9 +93,9 @@ class ClusterInformation:
         for host_info in self.info["host_info"].values():
             self.info["total_client_cpus"] += host_info['cpu_core_count']
             for mem_key in host_info['memory_info']:
-                if mem_key not in self.info["accumulated_mem_info"]:
-                    self.info["accumulated_mem_info"][mem_key] = 0
-                self.info["accumulated_mem_info"][mem_key] += host_info['memory_info'][mem_key]
+                if mem_key not in self.info["accumulated_mem_info_bytes"]:
+                    self.info["accumulated_mem_info_bytes"][mem_key] = 0
+                self.info["accumulated_mem_info_bytes"][mem_key] += host_info['memory_info'][mem_key]
 
     @staticmethod
     def get_local_info(host=None):
@@ -127,11 +127,11 @@ class ClusterInformation:
             lines = output.split('\n')
             for line in lines:
                 if line.startswith('MemTotal:'):
-                    memory_info['total'] = int(line.split()[1])
+                    memory_info['total'] = int(line.split()[1]) * 1024
                 elif line.startswith('MemFree:'):
-                    memory_info['free'] = int(line.split()[1])
+                    memory_info['free'] = int(line.split()[1]) * 1024
                 elif line.startswith('MemAvailable:'):
-                    memory_info['available'] = int(line.split()[1])
+                    memory_info['available'] = int(line.split()[1]) * 1024
         except Exception as e:
             print(f"Error getting memory information for host {host}: {e}")
         return memory_info

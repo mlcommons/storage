@@ -81,6 +81,7 @@ def add_universal_arguments(parser):
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
     parser.add_argument("--allow-invalid-params", "-aip", action="store_true",
                         help="Do not fail on invalid parameters.")
+    parser.add_argument("--stream-log-level", type=str, default="INFO",)
 
 
 def add_mpi_group(parser):
