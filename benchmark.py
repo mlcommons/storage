@@ -11,14 +11,14 @@ from benchmark.cli import parse_arguments, validate_args
 from benchmark.config import *
 from benchmark.logging import setup_logging
 from benchmark.rules import validate_dlio_parameter
-from benchmark.utils import read_config_from_file, update_nested_dict, create_nested_dict
+from benchmark.utils import read_config_from_file, update_nested_dict, create_nested_dict, ClusterInformation
 
 
 # Capturing TODO Items:
 # Configure datasize to collect the memory information from the hosts instead of getting a number of hosts for the
 #   calculation
 #
-# Add logging module for better control of output messages
+# DONE Add logging module for better control of output messages
 #
 # Add function to generate DLIO command and manage execution
 #
@@ -56,63 +56,6 @@ def generate_mpi_prefix_cmd(mpi_cmd, hosts, num_processes, oversubscribe, allow_
         prefix += " --allow-run-as-root"
 
     return prefix
-
-
-class ClusterInformation:
-    def __init__(self, hosts, debug=False):
-        self.debug = debug
-        self.hosts = hosts
-        self.info = self.collect_info()
-
-    def collect_info(self):
-        info = {}
-
-        if self.debug:
-            print(f"Collecting information for hosts: {self.hosts}")
-            return {host: {'cpu_core_count': 0,'memory_info': {}} for host in self.hosts}
-
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_to_host = {executor.submit(self.get_host_info, host): host for host in self.hosts}
-            for future in concurrent.futures.as_completed(future_to_host):
-                host = future_to_host[future]
-                cpu_core_count, memory_info = future.result()
-                info[host] = {
-                    'cpu_core_count': cpu_core_count,
-                    'memory_info': memory_info
-                }
-        return info
-
-    def get_host_info(self, host):
-        cpu_core_count = self.get_cpu_core_count(host)
-        memory_info = self.get_memory_info(host)
-        return cpu_core_count, memory_info
-
-    def get_cpu_core_count(self, host):
-        cpu_core_count = 0
-        cpu_info_path = f"ssh {host} cat /proc/cpuinfo"
-        try:
-            output = os.popen(cpu_info_path).read()
-            cpu_core_count = output.count('processor')
-        except Exception as e:
-            print(f"Error getting CPU core count for host {host}: {e}")
-        return cpu_core_count
-
-    def get_memory_info(self, host):
-        memory_info = {}
-        meminfo_path = f"ssh {host} cat /proc/meminfo"
-        try:
-            output = os.popen(meminfo_path).read()
-            lines = output.split('\n')
-            for line in lines:
-                if line.startswith('MemTotal:'):
-                    memory_info['total'] = int(line.split()[1])
-                elif line.startswith('MemFree:'):
-                    memory_info['free'] = int(line.split()[1])
-                elif line.startswith('MemAvailable:'):
-                    memory_info['available'] = int(line.split()[1])
-        except Exception as e:
-            print(f"Error getting memory information for host {host}: {e}")
-        return memory_info
 
 
 class Benchmark(abc.ABC):
@@ -240,25 +183,29 @@ class TrainingBenchmark(Benchmark):
     def generate_command(self):
         cmd = ""
 
+        # Set the config file to use for params not passed via CLI
         if self.args.command in ["datagen", "run_benchmark"]:
             cmd = f"{self.base_command_path}"
             cmd += f" --config-dir={self.config_path}"
             cmd += f" --config-name={self.config_name}"
-            # cmd += f" --workload={self.model}"
         else:
             raise ValueError(f"Unsupported command: {self.args.command}")
 
+        # Run directory for Hydra to output log files
         cmd += f" ++hydra.run.dir={self.run_result_output}"
 
+        # Set the dataset directory and checkpoint directory
         if self.args.data_dir:
             cmd += f" ++workload.dataset.data_folder={self.args.data_dir}"
             cmd += f" ++workload.checkpoint.checkpoint_folder={self.args.data_dir}"
 
+        # Configure the workflow depending on command
         if self.args.command == "datagen":
             cmd += " ++workload.workflow.generate_data=True ++workload.workflow.train=False"
         elif self.args.command == "run_benchmark":
             cmd += " ++workload.workflow.generate_data=False ++workload.workflow.train=True"
 
+        # Training doesn't do checkpoints
         cmd += " ++workload.workflow.checkpoint=False"
 
         if self.params_dict:
