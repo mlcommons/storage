@@ -1,22 +1,28 @@
 import argparse
-from benchmark.config import MIN_RANKS_STR, MODELS, ACCELERATORS, DEFAULT_HOSTS, CATEGORIES, LLM_MODELS
+import sys
 
+from benchmark.config import MIN_RANKS_STR, MODELS, ACCELERATORS, DEFAULT_HOSTS, CATEGORIES, LLM_MODELS, MPI_CMDS, EXEC_TYPE
+
+# TODO: Get rid of this now that I'm not repeating arguments for different subparsers?
 help_messages = dict(
     model="Model to emulate. A specific model defines the sample size, sample container format, and data "
           "rates for each supported accelerator.",
     accelerator_type="Accelerator to simulate for the benchmark. A specific accelerator defines the data access "
                      "sizes and rates for each supported workload",
-    num_accelerators_datasize="Simulated number of accelerators. In multi-host configurations the accelerators "
+    num_accelerators_datasize="Max number of simulated accelerators. In multi-host configurations the accelerators "
                               "will be initiated in a round-robin fashion to ensure equal distribution of "
                               "simulated accelerator processes",
+    num_accelerators_run="Number of simulated accelerators. In multi-host configurations the accelerators "
+                         "will be initiated in a round-robin fashion to ensure equal distribution of "
+                         "simulated accelerator processes",
     num_accelerators_datagen="Number of parallel processes to use for dataset generation. Processes will be "
                              "initiated in a round-robin fashion across the configured client hosts",
     num_client_hosts="Number of participating client hosts. Simulated accelerators will be initiated on these "
                      "hosts in a round-robin fashion",
     client_host_mem_GB="Memory available in the client where the benchmark is run. The dataset needs to be 5x the "
                        "available memory for closed submissions.",
-    client_hosts="Comma separated IP addresses of the participating hosts (without spaces). "
-                 "eg: '192.168.1.1,192.168.1.2'",
+    client_hosts="Space-separated list of IP addresses or hostnames of the participating hosts. "
+                 "Example: '--hosts 192.168.1.1 192.168.1.2 192.168.1.3' or '--hosts host1 host2 host3'",
     category="Benchmark category to be submitted.",
     results_dir="Directory where the benchmark results will be saved.",
     params="Additional parameters to be passed to the benchmark. These will override the config file. For a closed "
@@ -43,6 +49,10 @@ help_messages = dict(
     # VectorDB help messages
     vectordb_throughput="The throughput command measures the throughput of the vector database workload",
     vectordb_latency="The latency command measures the latency of the vector database workload",
+
+    # MPI help messages
+    mpi_bin=f"Execution type for MPI commands. Supported options: {MPI_CMDS}",
+    exec_type=f"Execution type for benchmark commands. Supported options: {list(EXEC_TYPE)}",
 )
 
 
@@ -50,7 +60,6 @@ def parse_arguments():
     # Many of the help messages are shared between the subparsers. This dictionary prevents rewriting the same messages
     # in multiple places.
     parser = argparse.ArgumentParser(description="Script to launch the MLPerf Storage benchmark")
-    parser.add_argument("--allow-invalid-params", "-aip", action="store_true", help="Do not fail on invalid parameters.")
     sub_programs = parser.add_subparsers(dest="program", required=True, help="Sub-programs")
     sub_programs.required = True
 
@@ -70,6 +79,15 @@ def parse_arguments():
 
 def add_universal_arguments(parser):
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+    parser.add_argument("--allow-invalid-params", "-aip", action="store_true",
+                        help="Do not fail on invalid parameters.")
+
+
+def add_mpi_group(parser):
+    mpi_options = parser.add_argument_group("MPI")
+    mpi_options.add_argument('--mpi-bin', choices=MPI_CMDS, default="mpiexec", help=help_messages['mpi_bin'])
+    mpi_options.add_argument('--oversubscribe', action="store_true")
+    mpi_options.add_argument('--allow-run-as-root', action="store_true")
 
 
 def add_training_arguments(training_parsers):
@@ -82,30 +100,35 @@ def add_training_arguments(training_parsers):
     configview = training_subparsers.add_parser("configview", help=help_messages['configview'])
     reportgen = training_subparsers.add_parser("reportgen", help=help_messages['reportgen'])
 
-    for _parser in [datasize, datagen, run_benchmark, configview]:
-        _parser.add_argument('--params', '-p', nargs="+", type=str, help=help_messages['params'])
-
     for _parser in [datasize, datagen, run_benchmark]:
-        _parser.add_argument('--hosts', '-s', type=str, default=DEFAULT_HOSTS, help=help_messages['client_hosts'])
-
-        mpi_options = _parser.add_argument_group("MPI")
-        mpi_options.add_argument('--oversubscribe', action="store_true")
-        # mpi_options.add_argument('--allow-run-as-root', action="store_true")
-
-    for _parser in [datasize, run_benchmark]:
+        _parser.add_argument('--hosts', '-s', nargs="+", default=DEFAULT_HOSTS, help=help_messages['client_hosts'])
         _parser.add_argument('--model', '-m', choices=MODELS, required=True, help=help_messages['model'])
-        _parser.add_argument('--accelerator-type', '-g', choices=ACCELERATORS, required=True, help=help_messages['accelerator_type'])
-        _parser.add_argument('--num-accelerators', '-na', type=int, required=True, help=help_messages['num_accelerators_datasize'])
-        _parser.add_argument('--num-client-hosts', '-nc', type=int, required=True, help=help_messages['num_client_hosts'])
 
         # TODO: Add exclusive group for memory or auto-scaling
+        # For 'datagen' this should be used to ensure enough memory exists to do the generation. Probably unnecessary
+        # but putting it on all three just in case.
         _parser.add_argument('--client-host-memory-in-gb', '-cm', type=int, required=True, help=help_messages['client_host_mem_GB'])
+
+        _parser.add_argument('--exec-type', '-et', type=EXEC_TYPE, choices=list(EXEC_TYPE), default=EXEC_TYPE.MPI, help=help_messages['exec_type'])
+
+        add_mpi_group(_parser)
+
+    datagen.add_argument('--num-processes', '-np', type=int, required=True, help=help_messages['num_accelerators_datagen'])
+    datasize.add_argument('--max-accelerators', '-ma', type=int, required=True, help=help_messages['num_accelerators_datasize'])
+    run_benchmark.add_argument('--num-accelerators', '-na', type=int, required=True, help=help_messages['num_accelerators_run'])
+    configview.add_argument('--num-accelerators', '-na', type=int, required=True, help=help_messages['num_accelerators_run'])
+
+    for _parser in [datasize, run_benchmark]:
+        _parser.add_argument('--accelerator-type', '-g', choices=ACCELERATORS, required=True, help=help_messages['accelerator_type'])
+        _parser.add_argument('--num-client-hosts', '-nc', type=int, required=True, help=help_messages['num_client_hosts'])
+
+    for _parser in [datasize, datagen, run_benchmark, configview]:
+        _parser.add_argument('--params', '-p', nargs="+", type=str, help=help_messages['params'])
 
     for _parser in [datasize, datagen, run_benchmark, configview, reportgen]:
         _parser.add_argument('--results-dir', '-rd', type=str, help=help_messages['results_dir'])
         _parser.add_argument("--data-dir", '-dd', type=str, help="Filesystem location for data")
-        _parser.add_argument("--debug", action="store_true", help="Enable debug mode")
-
+        add_universal_arguments(_parser)
 
 
 def add_checkpointing_arguments(checkpointing_parsers):
@@ -145,6 +168,16 @@ def validate_args(args):
             print(msg)
 
         sys.exit(1)
+
+
+def update_args(args):
+    """
+    This method is an interface between the CLI and the benchmark class.
+    """
+    for arg in ['--num-processes', '--num-accelerators', '--max-accelerators']:
+        if hasattr(args, arg):
+            setattr(args, 'num_processes', int(getattr(args, arg)))
+            break
 
 
 if __name__ == "__main__":
