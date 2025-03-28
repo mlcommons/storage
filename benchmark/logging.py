@@ -98,44 +98,36 @@ logger.setLevel(DEFAULT_STREAM_LOG_LEVEL)
 
 
 def status(self, message, *args, **kwargs):
-    if self.isEnabledFor(STATUS):
-        self._log(STATUS, message, args, **kwargs)
+    self._log(STATUS, message, args, **kwargs)
 
 
 def result(self, msg, *args, **kwargs):
-    if self.isEnabledFor(RESULT):
-        self._log(RESULT, msg, args, **kwargs)
+    self._log(RESULT, msg, args, **kwargs)
 
 
 # Define the custom log level methods
 def verbose(self, message, *args, **kwargs):
-    if self.isEnabledFor(VERBOSE):
-        self._log(VERBOSE, message, args, **kwargs)
+    self._log(VERBOSE, message, args, **kwargs)
 
 
 def verboser(self, message, *args, **kwargs):
-    if self.isEnabledFor(VERBOSER):
-        self._log(VERBOSER, message, args, **kwargs)
+    self._log(VERBOSER, message, args, **kwargs)
 
 
 def verbosest(self, message, *args, **kwargs):
-    if self.isEnabledFor(VERBOSEST):
-        self._log(VERBOSEST, message, args, **kwargs)
+    self._log(VERBOSEST, message, args, **kwargs)
 
 
 def ridiculous(self, msg, *args, **kwargs):
-    if isEnabledFor(RIDICULOUS):
-        self._log(RIDICULOUS, msg, args, **kwargs)
+    self._log(RIDICULOUS, msg, args, **kwargs)
 
 
 def ludicrous(self, msg, *args, **kwargs):
-    if self.isEnabledFor(LUDICROUS):
-        self._log(LUDICROUS, msg, args, **kwargs)
+    self._log(LUDICROUS, msg, args, **kwargs)
 
 
 def plaid(self, msg, *args, **kwargs):
-    if self.isEnabledFor(PLAID):
-        self._log(PLAID, msg, args, **kwargs)
+    self._log(PLAID, msg, args, **kwargs)
 
 
 class ColoredFormatter(logging.Formatter):
