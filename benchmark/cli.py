@@ -123,6 +123,7 @@ def add_training_arguments(training_parsers):
         _parser.add_argument('--num-client-hosts', '-nc', type=int, required=True, help=help_messages['num_client_hosts'])
 
     for _parser in [datasize, datagen, run_benchmark, configview]:
+        _parser.add_argument('--ssh-username', '-u', type=str, help="Username for SSH for system information collection")
         _parser.add_argument('--params', '-p', nargs="+", type=str, help=help_messages['params'])
 
     for _parser in [datasize, datagen, run_benchmark, configview, reportgen]:
@@ -174,7 +175,7 @@ def update_args(args):
     """
     This method is an interface between the CLI and the benchmark class.
     """
-    for arg in ['--num-processes', '--num-accelerators', '--max-accelerators']:
+    for arg in ['num_processes', 'num_accelerators', 'max_accelerators']:
         if hasattr(args, arg):
             setattr(args, 'num_processes', int(getattr(args, arg)))
             break

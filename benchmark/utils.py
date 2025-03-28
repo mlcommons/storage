@@ -49,9 +49,10 @@ def create_nested_dict(flat_dict, parent_dict=None, separator='.'):
 
 
 class ClusterInformation:
-    def __init__(self, hosts, debug=False):
+    def __init__(self, hosts, username, debug=False):
         self.debug = debug
         self.hosts = hosts
+        self.username = username
         self.info = dict(
             host_info={},
             accumulated_mem_info={},
@@ -107,10 +108,9 @@ class ClusterInformation:
         memory_info = self.get_remote_memory_info(host)
         return cpu_core_count, memory_info
 
-    @staticmethod
-    def get_remote_cpu_core_count(host):
+    def get_remote_cpu_core_count(self, host):
         cpu_core_count = 0
-        cpu_info_path = f"ssh {host} cat /proc/cpuinfo"
+        cpu_info_path = f"ssh {self.username}@{host} cat /proc/cpuinfo"
         try:
             output = os.popen(cpu_info_path).read()
             cpu_core_count = output.count('processor')
@@ -118,10 +118,9 @@ class ClusterInformation:
             print(f"Error getting CPU core count for host {host}: {e}")
         return cpu_core_count
 
-    @staticmethod
-    def get_remote_memory_info(host):
+    def get_remote_memory_info(self, host):
         memory_info = {}
-        meminfo_path = f"ssh {host} cat /proc/meminfo"
+        meminfo_path = f"ssh {self.username}@{host} cat /proc/meminfo"
         try:
             output = os.popen(meminfo_path).read()
             lines = output.split('\n')
