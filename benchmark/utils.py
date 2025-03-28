@@ -52,9 +52,16 @@ class ClusterInformation:
     def __init__(self, hosts, debug=False):
         self.debug = debug
         self.hosts = hosts
-        import pdb
-        pdb.set_trace()
-        self.info = self.collect_info()
+        self.info = dict(
+            host_info={},
+            accumulated_mem_info={},
+            total_client_cpus=0,
+        )
+
+        if len(hosts) == 1 and hosts[0] in ['localhost', '127.0.0.1']:
+            self.collect_info(local=True)
+        else:
+            self.collect_info(local=False)
 
     def __str__(self):
         return pprint.pformat(self.info)
@@ -62,31 +69,35 @@ class ClusterInformation:
     def __repr__(self):
         return str(self.info)
 
-    def collect_info(self):
-        info = {}
-
+    def collect_info(self, local=False):
         if self.debug:
-            print(f"Collecting information for hosts: {self.hosts}")
-            return {host: {'cpu_core_count': 0,'memory_info': {}} for host in self.hosts}
+            print(f"DEBUG - pretending to collect information for hosts: {self.hosts}")
+            return
+
+        if local:
+            getter_func = self.get_local_info
+        else:
+            getter_func = self.get_remote_info
 
         with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_to_host = {executor.submit(self.get_host_info, host): host for host in self.hosts}
+            future_to_host = {executor.submit(getter_func, host): host for host in self.hosts}
             for future in concurrent.futures.as_completed(future_to_host):
                 host = future_to_host[future]
                 cpu_core_count, memory_info = future.result()
-                info[host] = {
+                self.info["host_info"][host] = {
                     'cpu_core_count': cpu_core_count,
                     'memory_info': memory_info
                 }
-        return info
 
-    def get_host_info(self, host):
-        if host in ['localhost', '127.0.0.1']:
-            return self.get_local_info()
-        else:
-            return self.get_remote_info(host)
+        for host_info in self.info["host_info"].values():
+            self.info["total_client_cpus"] += host_info['cpu_core_count']
+            for mem_key in host_info['memory_info']:
+                if mem_key not in self.info["accumulated_mem_info"]:
+                    self.info["accumulated_mem_info"][mem_key] = 0
+                self.info["accumulated_mem_info"][mem_key] += host_info['memory_info'][mem_key]
 
-    def get_local_info(self):
+    @staticmethod
+    def get_local_info(host=None):
         cpu_core_count = psutil.cpu_count(logical=False)
         memory_info = dict(psutil.virtual_memory()._asdict())
         return cpu_core_count, memory_info
