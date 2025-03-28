@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import abc
 import concurrent.futures
 import os.path
 import pprint
@@ -42,7 +43,7 @@ from benchmark.utils import read_config_from_file, update_nested_dict, create_ne
 
 def generate_mpi_prefix_cmd(mpi_cmd, hosts, num_processes, oversubscribe, allow_run_as_root):
     if mpi_cmd == MPIRUN:
-        prefix = f"{MPI_RUN_BIN} -n {num_processes} -host {hosts}"
+        prefix = f"{MPI_RUN_BIN} -n {num_processes} -host {','.join(hosts)}"
     elif mpi_cmd == MPIEXEC:
         raise NotImplementedError(f"Unsupported MPI command: {mpi_cmd}")
     else:
@@ -55,7 +56,6 @@ def generate_mpi_prefix_cmd(mpi_cmd, hosts, num_processes, oversubscribe, allow_
         prefix += " --allow-run-as-root"
 
     return prefix
-
 
 
 class ClusterInformation:
@@ -115,7 +115,14 @@ class ClusterInformation:
         return memory_info
 
 
-class Benchmark:
+class Benchmark(abc.ABC):
+
+    def __init__(self, args, run_number=None):
+        self.args = args
+        self.run_number = run_number
+        validate_args(args)
+
+    @abc.abstractmethod
     def run(self):
         """
         Run the command for the given benchmark
@@ -128,12 +135,8 @@ class TrainingBenchmark(Benchmark):
 
     TRAINING_CONFIG_PATH = "configs/dlio/training"
 
-    def __init__(self, command, category=None, model=None, hosts=None, accelerator_type=None, num_accelerators=None,
-                 client_host_memory_in_gb=None, num_client_hosts=None, params=None, oversubscribe=False,
-                 allow_run_as_root=True, data_dir=None, results_dir=None, run_number=0, allow_invalid_params=False,
-                 debug=False, *args, **kwargs):
-
-        self.debug = debug
+    def __init__(self, args):
+        super().__init__(args)
 
         # This allows each command to map to a specific wrapper method. When meethods are created, repalce the default
         # 'self.execute_command' with the command-specific method (like "self._datasize()")
@@ -145,40 +148,27 @@ class TrainingBenchmark(Benchmark):
             reportgen=self.execute_command,
         )
 
-        self.command = command
-        self.category = category
-        self.model = model
-        self.hosts = hosts.split(',')
-        self.accelerator_type = accelerator_type
-        self.num_accelerators = num_accelerators
-        self.client_host_memory_in_gb = client_host_memory_in_gb
-        self.num_client_hosts = num_client_hosts
-        self.params_dict = dict() if not params else {k: v for k, v in (item.split("=") for item in params)}
-        self.oversubscribe = oversubscribe
-        self.allow_run_as_root = allow_run_as_root
-        self.allow_invalid_params = allow_invalid_params
+        self.per_host_mem_kB = None
+        self.total_mem_kB = None
 
-        self.results_dir = results_dir
-        self.data_dir = data_dir
-        self.run_number = run_number
+        self.params_dict = dict() if not args.params else {k: v for k, v in (item.split("=") for item in args.params)}
 
         self.base_command_path = f"{sys.executable} dlio_benchmark/dlio_benchmark/main.py"
-        self.exec_type = None  #EXEC_TYPE.MPI
 
-        self.config_path = f"{self.model}_{self.accelerator_type}.yaml"
+        config_suffix = "datagen" if args.command == "datagen" else args.accelerator_type
+        self.config_path = f"{args.model}_{config_suffix}.yaml"
         self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), self.TRAINING_CONFIG_PATH)
-        self.config_name = f"{self.model}_{self.accelerator_type}"
+        self.config_name = f"{args.model}_{config_suffix}"
 
         self.run_result_output = self.generate_output_location()
 
         self.yaml_params = read_config_from_file(os.path.join(self.config_path, f"{self.config_name}.yaml"))
         self.validate_params()
+
         logger.info(f'nested: {create_nested_dict(self.params_dict)}')
         self.combined_params = update_nested_dict(self.yaml_params, create_nested_dict(self.params_dict))
 
-        self.per_host_mem_kB = None
-        self.total_mem_kB = None
-        self.cluster_information = self.get_cluster_information()
+        self.cluster_information = ClusterInformation(hosts=self.args.hosts, debug=self.args.debug)
 
         logger.debug(f'yaml params: \n{pprint.pformat(self.yaml_params)}')
         logger.debug(f'combined params: \n{pprint.pformat(self.combined_params)}')
@@ -215,18 +205,18 @@ class TrainingBenchmark(Benchmark):
         If benchmark.py is not doing multiple runs then the results will be in a directory run_0
         :return:
         """
-        output_location = self.results_dir
-        output_location = os.path.join(output_location, self.model)
-        output_location = os.path.join(output_location, self.command)
+        output_location = self.args.results_dir
+        output_location = os.path.join(output_location, self.args.model)
+        output_location = os.path.join(output_location, self.args.command)
         output_location = os.path.join(output_location, DATETIME_STR)
 
-        if self.command == "run":
+        if self.args.command == "run":
             output_location = os.path.join(output_location, f"run_{self.run_number}")
 
         return output_location
 
     def run(self):
-        self.command_method_map[self.command]()
+        self.command_method_map[self.args.command]()
 
     def validate_params(self):
         # Add code here for validation processes. We do not need to validate an option is in a list as the argparse
@@ -235,7 +225,7 @@ class TrainingBenchmark(Benchmark):
         any_non_closed = False
         if self.params_dict:
             for param, value in self.params_dict.items():
-                validation_results[param] = [self.model, value, validate_dlio_parameter(self.model, param, value)]
+                validation_results[param] = [self.args.model, value, validate_dlio_parameter(self.args.model, param, value)]
                 if validation_results[param][2] != PARAM_VALIDATION.CLOSED:
                     any_non_closed = True
 
@@ -243,36 +233,30 @@ class TrainingBenchmark(Benchmark):
             error_string = "\n\t".join([f"{p} = {v[1]}" for p, v in validation_results.items()])
             logger.error(f'\nNot all parameters allowed in closed submission: \n'
                                   f'\t{error_string}')
-            if not self.allow_invalid_params:
+            if not self.args.allow_invalid_params:
                 print("Invalid parameters found. Please check the command and parameters.")
                 sys.exit(1)
-
-    def get_cluster_information(self):
-        cluster_info = ClusterInformation(hosts=self.hosts, debug=self.debug)
-        logger.verbose(f'Cluster information: \n{pprint.pformat(cluster_info.info)}')
-        # per_host_kb =
-        return cluster_info.info
 
     def generate_command(self):
         cmd = ""
 
-        if self.command in ["datagen", "run_benchmark"]:
+        if self.args.command in ["datagen", "run_benchmark"]:
             cmd = f"{self.base_command_path}"
             cmd += f" --config-dir={self.config_path}"
             cmd += f" --config-name={self.config_name}"
             # cmd += f" --workload={self.model}"
         else:
-            raise ValueError(f"Unsupported command: {self.command}")
+            raise ValueError(f"Unsupported command: {self.args.command}")
 
         cmd += f" ++hydra.run.dir={self.run_result_output}"
 
-        if self.data_dir:
-            cmd += f" ++workload.dataset.data_folder={self.data_dir}"
-            cmd += f" ++workload.checkpoint.checkpoint_folder={self.data_dir}"
+        if self.args.data_dir:
+            cmd += f" ++workload.dataset.data_folder={self.args.data_dir}"
+            cmd += f" ++workload.checkpoint.checkpoint_folder={self.args.data_dir}"
 
-        if self.command == "datagen":
+        if self.args.command == "datagen":
             cmd += " ++workload.workflow.generate_data=True ++workload.workflow.train=False"
-        elif self.command == "run_benchmark":
+        elif self.args.command == "run_benchmark":
             cmd += " ++workload.workflow.generate_data=False ++workload.workflow.train=True"
 
         cmd += " ++workload.workflow.checkpoint=False"
@@ -281,19 +265,21 @@ class TrainingBenchmark(Benchmark):
             for key, value in self.params_dict.items():
                 cmd += f" ++{key}={value}"
 
-        if self.exec_type == EXEC_TYPE.MPI:
-            mpi_prefix = generate_mpi_prefix_cmd(MPIRUN, self.hosts, self.num_accelerators, self.oversubscribe, self.allow_run_as_root)
+        if self.args.exec_type == EXEC_TYPE.MPI:
+            mpi_prefix = generate_mpi_prefix_cmd(MPIRUN, self.args.hosts, self.args.num_processes,
+                                                 self.args.oversubscribe, self.args.allow_run_as_root)
             cmd = f"{mpi_prefix} {cmd}"
 
         return cmd
 
     def execute_command(self):
         cmd = self.generate_command()
-        logger.info(f'Executing: {cmd}')
 
-        if self.debug:
+        if self.args.debug:
+            logger.status(f'Executing: {cmd}')
             return
 
+        logger.info(f'Executing: {cmd}')
         subprocess.call(cmd, shell=True)
 
     def _datasize(self):
@@ -355,7 +341,7 @@ def main(args):
     )
 
     benchmark_class = program_switch_dict.get(args.program)
-    benchmark = benchmark_class(**args.__dict__)
+    benchmark = benchmark_class(args)
     benchmark.run()
 
 
