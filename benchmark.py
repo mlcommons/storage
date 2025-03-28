@@ -7,7 +7,7 @@ import pprint
 import subprocess
 import sys
 
-from benchmark.cli import parse_arguments, validate_args
+from benchmark.cli import parse_arguments, validate_args, update_args
 from benchmark.config import *
 from benchmark.logging import setup_logging
 from benchmark.rules import validate_dlio_parameter
@@ -111,7 +111,7 @@ class TrainingBenchmark(Benchmark):
         logger.info(f'nested: {create_nested_dict(self.params_dict)}')
         self.combined_params = update_nested_dict(self.yaml_params, create_nested_dict(self.params_dict))
 
-        self.cluster_information = ClusterInformation(hosts=self.args.hosts, debug=self.args.debug)
+        self.cluster_information = ClusterInformation(hosts=self.args.hosts, username=args.ssh_username, debug=self.args.debug)
 
         logger.debug(f'yaml params: \n{pprint.pformat(self.yaml_params)}')
         logger.debug(f'combined params: \n{pprint.pformat(self.combined_params)}')
@@ -250,8 +250,26 @@ class TrainingBenchmark(Benchmark):
           - multiply by batch size
         :return:
         """
+        total_mem_KB = self.cluster_information.info['accumulated_mem_info']['total']
+        dataset_size_KB = 5 * total_mem_KB
+        file_size_B = self.combined_params['dataset']['num_samples_per_file'] * self.combined_params['dataset']['record_length_bytes']
 
-        logger.info(f'Got to datasize')
+        min_num_files_by_bytes = (dataset_size_KB * 1024) // file_size_B
+        num_samples_by_bytes = min_num_files_by_bytes * self.combined_params['dataset']['num_samples_per_file']
+        min_samples = 500 * self.args.num_processes * self.combined_params['reader']['batch_size']
+        min_num_files_by_samples = min_samples // self.combined_params['dataset']['num_samples_per_file']
+
+        required_file_count = max(min_num_files_by_bytes, min_num_files_by_samples)
+        logger.ridiculous(f'Required file count: {required_file_count}')
+        logger.ridiculous(f'Required sample count: {min_samples}')
+        logger.ridiculous(f'Min number of files by samples: {min_num_files_by_samples}')
+        logger.ridiculous(f'Min number of files by size: {min_num_files_by_bytes}')
+        logger.ridiculous(f'Required dataset size: {required_file_count * file_size_B / 1024 / 1024} MB')
+        logger.ridiculous(f'Number of Samples by size: {num_samples_by_bytes}')
+        if min_num_files_by_bytes > min_num_files_by_samples:
+            logger.result(f'Minimum file count dictated by dataset size to memory capacity ratio. Use {min_num_files_by_bytes} files.')
+        else:
+            logger.result(f'Minimum file count dictated by 500 step requirement of given accelerator count and batch size. Use {min_num_files_by_samples} files.')
 
 
 class VectorDBBenchmark(Benchmark):
@@ -282,6 +300,7 @@ class VectorDBBenchmark(Benchmark):
 # Main function to handle command-line arguments and invoke the corresponding function.
 def main(args):
     validate_args(args)
+    update_args(args)
     program_switch_dict = dict(
         training=TrainingBenchmark,
         vectordb=VectorDBBenchmark,

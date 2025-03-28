@@ -104,6 +104,7 @@ class ClusterInformation:
         return cpu_core_count, memory_info
 
     def get_remote_info(self, host):
+        # TODO: Add proper handling if passwordless-ssh is not conffigured.
         cpu_core_count = self.get_remote_cpu_core_count(host)
         memory_info = self.get_remote_memory_info(host)
         return cpu_core_count, memory_info
