@@ -96,7 +96,7 @@ class TrainingBenchmark(Benchmark):
 
         self.params_dict = dict() if not args.params else {k: v for k, v in (item.split("=") for item in args.params)}
 
-        self.base_command_path = f"{sys.executable} dlio_benchmark/dlio_benchmark/main.py"
+        self.base_command_path = f"dlio_benchmark"
 
         config_suffix = "datagen" if args.command == "datagen" else args.accelerator_type
         self.config_path = f"{args.model}_{config_suffix}.yaml"
@@ -210,7 +210,7 @@ class TrainingBenchmark(Benchmark):
 
         if self.params_dict:
             for key, value in self.params_dict.items():
-                cmd += f" ++{key}={value}"
+                cmd += f" ++workload.{key}={value}"
 
         if self.args.exec_type == EXEC_TYPE.MPI:
             mpi_prefix = generate_mpi_prefix_cmd(MPIRUN, self.args.hosts, self.args.num_processes,
