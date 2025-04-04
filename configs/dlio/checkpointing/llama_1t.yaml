@@ -1,0 +1,51 @@
+# we mimic the checkpoint data for megatron-deepspeed
+model: 
+  name: llama_405b
+  type: transformer
+  num_layers: 128
+  model_datatype: fp16
+  optimizer_datatype: fp32
+  parallelism: 
+    tensor: 8
+    pipeline: 64
+    zero_stage: 1
+  transformer: 
+    vocab_size: 128256
+    hidden_size: 25872
+    ffn_hidden_size: 98304
+    num_attention_heads: 32
+    num_kv_heads: 32
+
+
+framework: pytorch
+
+workflow:
+  generate_data: True
+  train: True
+  checkpoint: True
+
+dataset: 
+  data_folder: data/llama_405b/
+  format: mmap_indexed_binary
+  num_files_train: 1
+  num_samples_per_file: 1048576
+  record_length_bytes: 2048
+  
+reader: 
+  data_loader: pytorch
+  batch_size: 16
+  read_threads: 1
+  file_shuffle: seed
+  sample_shuffle: seed
+
+train:
+  epochs: 3
+  computation_time: 5 # This is not actual measurement. Just set an interval so that checkpoint every 5 seconds
+  total_training_steps: 5
+
+
+checkpoint:
+  checkpoint_folder: checkpoints/llama_405b
+  time_between_checkpoints: 5
+  num_checkpoints: 10
+  recovery_after_steps: 2
