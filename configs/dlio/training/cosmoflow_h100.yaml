@@ -1,4 +1,5 @@
-model: cosmoflow
+model: 
+  name: cosmoflow
 
 framework: tensorflow
 
@@ -10,8 +11,8 @@ dataset:
  data_folder: data/cosmoflow
  num_files_train: 524288
  num_samples_per_file: 1
- record_length: 2828486
- record_length_stdev: 71311
+ record_length_bytes: 2828486
+ record_length_bytes_stdev: 71311
  format: tfrecord
 
 reader:
