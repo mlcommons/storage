@@ -1,6 +1,7 @@
 import datetime
 import enum
 import os
+import tempfile
 
 # Define constants:
 DATETIME_STR = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -44,6 +45,9 @@ DEFAULT_HOSTS = ["127.0.0.1",]
 MPI_RUN_BIN = os.environ.get("MPI_RUN_BIN", MPIRUN)
 ALLOW_RUN_AS_ROOT = True
 
+MAX_NUM_FILES_TRAIN = 128*1024
+
+DEFAULT_RESULTS_DIR = os.path.join(tempfile.gettempdir(), f"mlperf_storage_results")
 
 class EXEC_TYPE(enum.Enum):
     MPI = "mpi"
