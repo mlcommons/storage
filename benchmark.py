@@ -10,7 +10,7 @@ import sys
 from benchmark.cli import parse_arguments, validate_args, update_args
 from benchmark.config import *
 from benchmark.logging import setup_logging
-from benchmark.rules import validate_dlio_parameter
+from benchmark.rules import validate_dlio_parameter, calculate_training_data_size
 from benchmark.utils import read_config_from_file, update_nested_dict, create_nested_dict, ClusterInformation
 
 
@@ -84,7 +84,7 @@ class TrainingBenchmark(Benchmark):
         # This allows each command to map to a specific wrapper method. When meethods are created, repalce the default
         # 'self.execute_command' with the command-specific method (like "self._datasize()")
         self.command_method_map = dict(
-            datasize=self._datasize,
+            datasize=self.datasize,
             datagen=self.execute_command,
             run_benchmark=self.execute_command,
             configview=self.execute_command,
@@ -219,6 +219,40 @@ class TrainingBenchmark(Benchmark):
 
         return cmd
 
+    def generate_datagen_benchmark_command(self, num_files_train, num_subfolders_train, num_samples_per_file):
+        """
+        This function will generate the command to use to call this program with the training & datagen parameters.
+        """
+        kv_map = {
+            "num_files_train": num_files_train,
+            "num_subfolders_train": num_subfolders_train,
+            "num_samples_per_file": num_samples_per_file,
+        }
+
+        cmd = f"{sys.executable} {os.path.abspath(__file__)} training datagen"
+        if self.args.hosts:
+            cmd += f" --hosts={self.args.hosts}"
+        cmd += f" --model={self.args.model}"
+        cmd += f" --exec-type={self.args.exec_type}"
+        if self.args.ssh_username:
+            cmd += f" --ssh-username={self.args.ssh_username}"
+
+        if self.params_dict:
+            for key, value in self.params_dict.items():
+                if key in kv_map.keys():
+                    continue
+                cmd += f" --{key}={value}"
+
+        for key, value in kv_map.items():
+            cmd += f" --param {key}={value}"
+
+        # During datasize, this will be set to max_accelerators
+        cmd += f" --num-processes={self.args.num_processes}"
+        cmd += f" --results-dir={self.args.results_dir}"
+        cmd += f" --data-dir=<INSERT_DATA_DIR>"
+
+        return cmd
+
     def execute_command(self):
         cmd = self.generate_command()
 
@@ -229,58 +263,18 @@ class TrainingBenchmark(Benchmark):
         logger.info(f'Executing: {cmd}')
         subprocess.call(cmd, shell=True)
 
-    def _datasize(self):
-        """
-        Validate the parameters for the datasize operation and apply rules for a closed submission.
+    def datasize(self):
+        num_files_train, num_subfolders_train, num_samples_per_file = calculate_training_data_size(
+            self.args, self.cluster_information, self.combined_params['dataset'], self.combined_params['reader'], logger
+        )
+        logger.result(f'Number of training files: {num_files_train}')
+        logger.result(f'Number of training subfolders: {num_subfolders_train}')
+        logger.result(f'Number of training samples per file: {num_samples_per_file}')
 
-        Requirements:
-          - Dataset needs to be 5x the amount of total memory
-          - Training needs to do at least 500 steps per epoch
-
-        Memory Ratio:
-          - Collect "Total Memory" from /proc/meminfo on each host
-          - sum it up
-          - multiply by 5
-          - divide by sample size
-          - divide by batch size
-
-        500 steps:
-          - 500 steps per ecpoch
-          - multiply by max number of processes
-          - multiply by batch size
-        :return:
-        """
-        measured_total_mem_bytes = self.cluster_information.info['accumulated_mem_info_bytes']['total']
-        if self.args.client_host_memory_in_gb and self.args.num_client_hosts:
-            per_host_memory_in_bytes = self.args.client_host_memory_in_gb * 1024 * 1024 * 1024
-            num_hosts = self.args.num_client_hosts
-            total_mem_bytes = per_host_memory_in_bytes * num_hosts
-        elif self.args.clienthost_host_memory_in_gb and not self.args.num_client_hosts:
-            per_host_memory_in_bytes = self.args.clienthost_host_memory_in_gb * 1024 * 1024 * 102
-            num_hosts = len(self.args.hosts)
-            total_mem_bytes = per_host_memory_in_bytes * num_hosts
-        else:
-            total_mem_bytes = measured_total_mem_bytes
-
-        dataset_size_bytes = 5 * total_mem_bytes
-        file_size_bytes = self.combined_params['dataset']['num_samples_per_file'] * self.combined_params['dataset']['record_length_bytes']
-
-        min_num_files_by_bytes = dataset_size_bytes // file_size_bytes
-        num_samples_by_bytes = min_num_files_by_bytes * self.combined_params['dataset']['num_samples_per_file']
-        min_samples = 500 * self.args.num_processes * self.combined_params['reader']['batch_size']
-        min_num_files_by_samples = min_samples // self.combined_params['dataset']['num_samples_per_file']
-
-        required_file_count = max(min_num_files_by_bytes, min_num_files_by_samples)
-        logger.ridiculous(f'Required file count: {required_file_count}')
-        logger.ridiculous(f'Required sample count: {min_samples}')
-        logger.ridiculous(f'Min number of files by samples: {min_num_files_by_samples}')
-        logger.ridiculous(f'Min number of files by size: {min_num_files_by_bytes}')
-        logger.ridiculous(f'Required dataset size: {required_file_count * file_size_bytes / 1024 / 1024} MB')
-        logger.ridiculous(f'Number of Samples by size: {num_samples_by_bytes}')
-        if min_num_files_by_bytes > min_num_files_by_samples:
-            logger.result(f'Minimum file count dictated by dataset size to memory capacity ratio. Use {min_num_files_by_bytes} files.')
-        else:
-            logger.result(f'Minimum file count dictated by 500 step requirement of given accelerator count and batch size. Use {min_num_files_by_samples} files.')
+        cmd = self.generate_datagen_benchmark_command(num_files_train, num_subfolders_train, num_samples_per_file)
+        logger.result(f'Run the following command to generate data: \n{cmd}')
+        logger.warning(f'The parameter for --num-processes is the same as --max-accelerators. Adjust the value '
+                       f'according to your system.')
 
 
 class VectorDBBenchmark(Benchmark):
@@ -290,8 +284,8 @@ class VectorDBBenchmark(Benchmark):
         super().__init__(*args, **kwargs)
 
         self.command_method_map = dict(
-            throughput=self._throughput,
-            latency=self._latency
+            throughput=self.throughput,
+            latency=self.latency
         )
         self.command = command
         self.category = category
@@ -301,10 +295,10 @@ class VectorDBBenchmark(Benchmark):
     def run(self):
         self.command_method_map[self.command]()
 
-    def _throughput(self):
+    def throughput(self):
         logger.info(f'Got to throughput')
 
-    def _latency(self):
+    def latency(self):
         logger.info(f'Got to latency')
 
 
