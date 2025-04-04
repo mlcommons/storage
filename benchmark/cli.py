@@ -1,7 +1,8 @@
 import argparse
 import sys
 
-from benchmark.config import MIN_RANKS_STR, MODELS, ACCELERATORS, DEFAULT_HOSTS, CATEGORIES, LLM_MODELS, MPI_CMDS, EXEC_TYPE
+from benchmark.config import MIN_RANKS_STR, MODELS, ACCELERATORS, DEFAULT_HOSTS, CATEGORIES, LLM_MODELS, MPI_CMDS, \
+    EXEC_TYPE, DEFAULT_RESULTS_DIR
 
 # TODO: Get rid of this now that I'm not repeating arguments for different subparsers?
 help_messages = dict(
@@ -78,6 +79,7 @@ def parse_arguments():
 
 
 def add_universal_arguments(parser):
+    parser.add_argument('--results-dir', '-rd', type=str, default=DEFAULT_RESULTS_DIR ,help=help_messages['results_dir'])
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
     parser.add_argument("--allow-invalid-params", "-aip", action="store_true",
                         help="Do not fail on invalid parameters.")
@@ -106,9 +108,10 @@ def add_training_arguments(training_parsers):
         _parser.add_argument('--model', '-m', choices=MODELS, required=True, help=help_messages['model'])
 
         # TODO: Add exclusive group for memory or auto-scaling
-        # For 'datagen' this should be used to ensure enough memory exists to do the generation. Probably unnecessary
-        # but putting it on all three just in case.
-        _parser.add_argument('--client-host-memory-in-gb', '-cm', type=int, required=True, help=help_messages['client_host_mem_GB'])
+        # For 'datagen' this should be used to ensure enough memory exists to do the generation. The if statement
+        #  prevents it from being use today but change when we add the capability
+        if _parser != datagen:
+            _parser.add_argument('--client-host-memory-in-gb', '-cm', type=int, required=True, help=help_messages['client_host_mem_GB'])
 
         _parser.add_argument('--exec-type', '-et', type=EXEC_TYPE, choices=list(EXEC_TYPE), default=EXEC_TYPE.MPI, help=help_messages['exec_type'])
 
@@ -128,7 +131,6 @@ def add_training_arguments(training_parsers):
         _parser.add_argument('--params', '-p', nargs="+", type=str, help=help_messages['params'])
 
     for _parser in [datasize, datagen, run_benchmark, configview, reportgen]:
-        _parser.add_argument('--results-dir', '-rd', type=str, help=help_messages['results_dir'])
         _parser.add_argument("--data-dir", '-dd', type=str, help="Filesystem location for data")
         add_universal_arguments(_parser)
 
