@@ -1,21 +1,60 @@
-# MLPerf™ Storage V1.0 Benchmark Rules
+# MLPerf™ Storage V2.0 Benchmark Rules
 ——————————————————————————————————————————
-## 1. Overview
+# MLPerf Storage Benchmark Submission Guidelines v2.0
 
-MLPerf™ Storage is a benchmark suite to characterize the performance of storage systems that support machine learning workloads. MLPerf Storage does not require running of the actual training jobs. 
+- [MLPerf Storage Benchmark Submission Guidelines v2.0](#mlperf-storage-benchmark-submission-guidelines-v20)
+  - [1. Introduction](#1-introduction)
+    - [1.1 Timeline](#11-timeline)
+  - [2. Benchmark Overview](#2-benchmark-overview)
+    - [2.1 Training](#21-training)
+    - [2.2 Checkpointing](#22-checkpointing)
+    - [2.3 Vector Database](#23-vector-database)
+  - [3 Definitions](#3-definitions)
+  - [4. Performance Metrics](#4-performance-metrics)
+  - [5. Benchmark Code](#5-benchmark-code)
+  - [6. General Rules](#6-general-rules)
+    - [6.1. Strive to be fair](#61-strive-to-be-fair)
+    - [6.2. System and framework must be available](#62-system-and-framework-must-be-available)
+    - [6.3 Non-determinism](#63-non-determinism)
+    - [6.4. Result rounding](#64-result-rounding)
+    - [6.5. Stable storage must be used](#65-stable-storage-must-be-used)
+    - [6.6. Caching](#66-caching)
+    - [6.7. Replicability is mandatory](#67-replicability-is-mandatory)
+  - [7. Dataset Generation](#7-dataset-generation)
+  - [8. Single-host Submissions](#8-single-host-submissions)
+  - [9. Distributed Training Submissions](#9-distributed-training-submissions)
+  - [10. CLOSED and OPEN Divisions](#10-closed-and-open-divisions)
+    - [10.1 CLOSED: virtually all changes are disallowed](#101-closed:-virtually-all-changes-are-disallowed)
+    - [10.2 OPEN: changes are allowed but must be disclosed](#102-open:-changes-are-allowed-but-must-be-disclosed)
+  - [11. Submission](#11-submission)
+    - [11.1 What to submit - CLOSED submissions](#111-what-to-submit---closed-submissions)
+    - [11.2 What to submit - OPEN submissions](#112-what-to-submit---open-submissions)
+    - [11.3 Directory Structure for CLOSED or OPEN Submissions](#113-directory-structure-for-closed-or-open-submissions)
+    - [11.4 System Description](#114-system-description)
+      - [11.4.1 System Description JSON](#1141-system-description-json)
+      - [11.4.2 System Description PDF](#1142-system-description-pdf)
+  - [12. Review](#12-review)
+    - [12.1 Visibility of results and code during review](#121-visibility-of-results-and-code-during-review)
+    - [12.2 Filing objections](#122-filing-objections)
+    - [12.3 Resolving objections](#123-resolving-objections)
+    - [12.4 Fixing objections](#124-fixing-objections)
+    - [12.5 Withdrawing results / changing division](#125-withdrawing-results-/-changing-division)
+  - [13. Roadmap for future MLPerf Storage releases](#13-roadmap-for-future-mlperf-storage-releases)
 
-**Thus, submitters do not need to use hardware accelerators (e.g., GPUs, TPUs, and other ASICs) when running MLPerf Storage.**
+## 1. Introduction
 
-Instead, our benchmark tool replaces the training on the accelerator for a single batch of data with a ``sleep()`` call. The ``sleep()`` interval depends on the batch size and accelerator type and has been determined through measurement on a system running the actual training workload. The rest of the data ingestion pipeline (data loading, caching, checkpointing) is unchanged and runs in the same way as when the actual training is performed.
+MLPerf™ Storage is a benchmark suite to characterize the performance of storage systems that support machine learning workloads. The suite consists of 4 workload categories:
 
-There are two main advantages to accelerator emulation. First, MLPerf Storage allows testing different storage systems with different types of accelerators. To change the type of accelerator that the benchmark emulates (e.g., to switch to a system with NVIDIA H100 GPUs instead of A100 GPUs), it is enough to adjust the value of the ``sleep()`` parameter. The second advantage is that MLPerf Storage can put a high load on the storage system simply by increasing the number of emulated accelerators. This effectively allows for testing the behavior of the storage system in large-scale scenarios without purchasing/renting the commensurate compute infrastructure.
-
-This version of the benchmark does not include offline or online data pre-processing. We are aware that data pre-processing is an important part of the ML data pipeline and we will include it in a future version of the benchmark.
+1. Training
+2. Checkpointing
+3. Model Loading
+4. Vector Database
 
 This benchmark attempts to balance two goals. First, we aim for **comparability** between benchmark submissions to enable decision making by the AI/ML Community. Second, we aim for **flexibility** to enable experimentation and to show off unique storage system features that will benefit the AI/ML Community. To that end we have defined two classes of submissions: CLOSED and OPEN. 
+
 The MLPerf name and logo are trademarks of the MLCommons® Association ("MLCommons"). In order to refer to a result using the MLPerf name, the result must conform to the letter and spirit of the rules specified in this document. MLCommons reserves the right to solely determine if a use of its name or logos is acceptable.
 
-### Timeline
+### 1.1 Timeline
 
 | Date | Description |
 | ---- | ----------- |
@@ -25,7 +64,20 @@ The MLPerf name and logo are trademarks of the MLCommons® Association ("MLCommo
 | Aug 21, 2024 - Sep 11, 2024 | Review period. |
 | Sep 11, 2024 | **Benchmark competition results are published.** |
 
-### Benchmarks
+
+## 2. Benchmark Overview
+
+This version of the benchmark does not include offline or online data pre-processing. We are aware that data pre-processing is an important part of the ML data pipeline and we will include it in a future version of the benchmark.
+
+### 2.1 Training
+
+MLPerf Storage emulates accelerators for the training workloads with the tool DLIO developed by Argonne National Labs. DLIO uses the standard AI frameworks (PyTorch, Tensorflow, Numpy, etc) to load data from storage to memory at the same intensity as a given accelerator.
+
+**This emulation means that submitters do not need to use hardware accelerators (e.g., GPUs, TPUs, and other ASICs) when running MLPerf Storage - Training.**
+
+Instead, our benchmark tool replaces the training on the accelerator for a single batch of data with a ``sleep()`` call. The ``sleep()`` interval depends on the batch size and accelerator type and has been determined through measurement on a system running the real training workload. The rest of the data ingestion pipeline (data loading, caching, checkpointing) is unchanged and runs in the same way as when the actual training is performed.
+
+There are two main advantages to accelerator emulation. First, MLPerf Storage allows testing different storage systems with different types of accelerators. To change the type of accelerator that the benchmark emulates (e.g., to switch to a system with NVIDIA H100 GPUs instead of A100 GPUs), it is enough to adjust the batch size and ``sleep()`` parameter. The second advantage is that MLPerf Storage can put a high load on the storage system simply by increasing the number of emulated accelerators. This allows for testing the behavior of the storage system in large-scale scenarios without purchasing/renting the AI compute infrastructure.
 
 The benchmark suite provides workload [configurations](https://github.com/mlcommons/storage/tree/main/storage-conf/workload) that simulate the I/O patterns of selected workloads listed in Table 1. The I/O patterns for each MLPerf Storage benchmark correspond to the I/O patterns of the MLPerf Training and MLPerf HPC benchmarks (i.e., the I/O generated by our tool for 3D U-Net closely follows the I/O generated by actually running the 3D U-Net training workload). The benchmark suite can also generate synthetic datasets which show the same I/O load as the actual datasets listed in Table 1. 
 
@@ -41,7 +93,11 @@ Table 1: Benchmark description
 - Benchmark end point: The measurement ends after a predetermined number of epochs. *Note: data transfers from storage in this test terminate with the data in host DRAM; transfering data into the accelerator memory is not included in this benchmark.*
 - Configuration files for the workloads and dataset content can be found [here](https://github.com/mlcommons/storage/tree/main/storage-conf/workload).
 
-### Definitions 
+### 2.2 Checkpointing
+
+### 2.3 Vector Database
+
+## 3 Definitions 
 The following definitions are used throughout this document:
 
 - A **sample** is the unit of data on which training is run, e.g., an image, or a sentence.
@@ -70,7 +126,8 @@ The following definitions are used throughout this document:
   - **Object** – any solution accessed using an object protocol such as S3,  RADOS, etc.  This will be abbreviated “**Object**” in the results table.
   - **Other** – any solution whose access is not sufficiently described by the above categories.  This will be abbreviated “**Other**” in the results table.
 
-### Performance Metrics
+## 4. Performance Metrics
+TODO: Move to benchmark definitions with metrics for each?
 
 The benchmark performance metric is **samples per second, subject to a minimum accelerator utilization (AU) defined for that workload**. Higher samples per second is better. 
 
@@ -90,7 +147,7 @@ total_compute_time = (records_per_file * total_files) / simulated_accelerators /
 
 *NOTE: The sleep time has been determined by running the actual MLPerf training workloads including the compute step on real hardware and is dependent on the accelerator type. In this version of the benchmark we include sleep times for **NVIDIA A100 and H100 GPUs**. We plan on expanding the measurements to different accelerator types in future releases.*
 
-### Benchmark Code
+## 5. Benchmark Code
 
 The MLPerf Storage working group provides a benchmark implementation which includes:
 - Scripts to determine the minimum dataset size required for your system, for a given benchmark.
@@ -101,37 +158,38 @@ The MLPerf Storage working group provides a benchmark implementation which inclu
 
 More details on installation and running the benchmark can be found in the [Github repo](https://github.com/mlcommons/storage)
 
-## 2. General Rules
+## 6. General Rules
  
 The following apply to all results submitted for this benchmark.
-### 2.1. Strive to be fair
+### 6.1. Strive to be fair
   Benchmarking should be conducted to measure the framework and storage system performance as fairly as possible. Ethics and reputation matter.
-### 2.2. System and framework must be available
+### 6.2. System and framework must be available
 - **Available Systems**. If you are measuring the performance of a publicly available and widely-used system or framework, you must use publicly available and widely-used versions of the system or framework. This class of systems will be called Available Systems, and availability here means the system is a publicly available commercial storage system. If you are measuring the performance of a system that is not available at the time of the benchmark results submission, the system must become commercially available **within 6 months** from results publication. Otherwise, the results for that submission will be retracted from the MLCommons results dashboard.
 - **RDI Systems**. If you are measuring the performance of an experimental framework or system, you must make the system and framework you use available upon demand for replication by MLCommons. This class of systems will be called RDI (research, development, internal). 
 
-### 2.3 Non-determinism
+### 6.3 Non-determinism
 The data generator in DLIO uses a fixed random seed that must not be changed, to ensure that all submissions are working with the same dataset. Random number generators may be seeded from the following sources:
 - Clock
 - System source of randomness, e.g. /dev/random or /dev/urandom
 - Another random number generator initialized with an allowed seed
 Random number generators may be initialized repeatedly in multiple processes or threads. For a single run, the same seed may be shared across multiple processes or threads.
 
-### 2.4. Result rounding
+### 6.4. Result rounding
 Public results should be rounded normally, to two decimal places.
 
-### 2.5. Stable storage must be used
+### 6.5. Stable storage must be used
 The MLPerf Storage benchmark will create the dataset on the storage system, in the desired ``dataset format``, before the start of the benchmark run.  The data must reside on stable storage before the actual benchmark testing can run.
 
-### 2.6. Caching
-Under all circumstances, caching of training data on the ``host node``(s) running MLPerf Storage before the benchmark begins is DISALLOWED. Caches in the ``host node``(s) must be cleared between two consecutive benchmark runs.
+### 6.6. Caching
+Caching of training data on ``host nodes`` running MLPerf Storage is controlled via a warm up run, dataset size to memory ratios, and changing random seeds between runs.
+1. All runs must use a warm-up run before the 5 test runs. 
+2. For Training benchmarks, the dataset size must be at least 5x larger than the sum of memory across all of the MLPerf Storage nodes
+3. The random seed must change for each run as controlled by the benchmark.py script
 
-On the one hand, we have sized the benchmark dataset to be 5x the size of DRAM on the ``host node``(s) running the benchmark code so that the randomness of the access pattern can defeat any significant levels of caching in local DRAM.  In that sense cache invalidation in the benchmark nodes should not be required, but out of an abundance of caution we do require it.  On the other hand, we believed that repeated real-world training runs with a given storage system might benefit from caching in the storage system under normal circumstances, so we have not required cache invalidation there.
-
-### 2.7. Replicability is mandatory
+### 6.7. Replicability is mandatory
 Results that cannot be replicated are not valid results. Replicated results should be within 5% within 5 tries.
 
-## 3. Dataset Generation
+## 7. Dataset Generation
 MLPerf Storage uses DLIO to generate synthetic data. Instructions on how to generate the datasets for each benchmark are available [here](https://github.com/mlcommons/storage). The datasets are generated following the sample size distribution and structure of the dataset seeds (see Table 1) for each of the benchmarks. 
 
 **Minimum dataset size**. The MLPerf Storage benchmark script **must be used** to run the benchmarks since it calculates the minimum dataset size for each benchmark.  It does so using the provided number of simulated accelerators and the size of all of the ``host node``’s memory in GB. The minimum dataset size computation is as follows:
@@ -160,7 +218,7 @@ A minimum of ``min_total_files`` files are required which will consume ``min_fil
 
 Please note that the log file(s) output during the generation step needs to be included in the benchmark results submission package.
 
-## 4. Single-host Submissions
+## 8. Single-host Submissions
 
 Submitters can add load to the storage system in two orthogonal ways: (1) increase the number of simulated accelerators inside one ``host node`` (i.e., one machine), and/or (2) increase the number of ``host nodes`` connected to the storage system.
 
@@ -168,7 +226,7 @@ For single-host submissions, increase the number of simulated accelerators by ch
 
 For **single-host submissions**, CLOSED and OPEN division results must include benchmark runs for the maximum simulated accelerators that can be run on ONE HOST NODE, in ONE MLPerf Storage job, without going below the 90% accelerator utilization threshold.
 
-## 5. Distributed Training Submissions
+## 9. Distributed Training Submissions
 
 This setup simulates distributed training of a single training task, spread across multiple ``host nodes``, on a shared dataset. The current version of the benchmark only supports data parallelism, not model parallelism.
 
@@ -183,9 +241,9 @@ Here are a few practical suggestions on how to leverage a set of non-identical h
 
 For **distributed training submissions**, CLOSED and OPEN division results must include benchmark runs for the maximum number of simulated accelerators across all ``host nodes`` that can be run in the distributed training setup, without going below the 90% accelerator utilization threshold. Each ``host node`` must run the same number of simulated accelerators for the submission to be valid.
 
-## 6. CLOSED and OPEN Divisions
+## 10. CLOSED and OPEN Divisions
 
-### CLOSED: virtually all changes are disallowed
+### 10.1 CLOSED: virtually all changes are disallowed
 CLOSED represents a level playing field where all results are **comparable** across submissions. CLOSED explicitly forfeits flexibility in order to enable easy comparability. 
 
 In order to accomplish that, most of the optimizations and customizations to the AI/ML algorithms and framework that might typically be applied during benchmarking or even during production use must be disallowed.  Optimizations and customizations to the storage system are allowed in CLOSED.
@@ -215,7 +273,7 @@ Table 2: Alterable parameters for CLOSED submissions
 
 CLOSED division benchmarks must be referred to using the benchmark name plus the term CLOSED, e.g. “The system was able to support *N ACME X100* accelerators running a CLOSED division 3D U-Net workload at only 8% less than optimal performance.”
 
-### OPEN: changes are allowed but must be disclosed
+### 10.2 OPEN: changes are allowed but must be disclosed
 
 OPEN allows more **flexibility** to tune and change both the benchmark and the storage system configuration to show off new approaches or new features that will benefit the AI/ML Community. OPEN explicitly forfeits comparability to allow showcasing innovation.
 
@@ -240,7 +298,7 @@ In addition to what can be changed in the CLOSED submission, the following param
 
 OPEN division benchmarks must be referred to using the benchmark name plus the term OPEN, e.g. “The system was able to support N ACME X100 accelerators running an OPEN division 3D U-Net workload at only 8% less than optimal performance.”
 
-## 7. Submission
+## 11. Submission
 
 A **successful run result** consists of a mean samples/second measurement ``(train_throughput_mean_samples_per_second)`` for a complete benchmark run that achieves mean accelerator utilization ``(train_au_mean_percentage)`` equal to or higher than the minimum defined for that workload.
 
@@ -259,7 +317,7 @@ Submitters who are not members of MLCommons need to have signed:
 
 If an organization has already signed these agreements, they do not need to sign them again unless there have been changes to those agreements by MLCommons.  Please look at each document for clarification.
 
-### What to submit - CLOSED submissions
+### 11.1 What to submit - CLOSED submissions
 
 A complete submission for one workload (3D-Unet, ResNet, or Cosmoflow) contains 3 folders:
 1. **results** folder, containing, for each system:
@@ -274,12 +332,12 @@ A complete submission for one workload (3D-Unet, ResNet, or Cosmoflow) contains 
 3. **code** folder, containing:
    - Source code of the benchmark implementation. The submission source code and logs must be made available to other submitters for auditing purposes during the review period.
 
-### What to submit - OPEN submissions
+### 11.2 What to submit - OPEN submissions
 
 - Everything that is required for a CLOSED submission, following the same structure.
 - Additionally, the source code used for the OPEN Submission benchmark implementations must be available under a license that permits MLCommon to use the implementation for benchmarking.
 
-### Directory Structure for CLOSED or OPEN Submissions
+### 11.3 Directory Structure for CLOSED or OPEN Submissions
 ```
 root_folder (or any name you prefer)
 ├── Closed
@@ -357,7 +415,7 @@ root_folder (or any name you prefer)
 			system-name-2.pdf
 ```
 
-### System Description
+### 11.4 System Description
 
 The purpose of the system description is to provide sufficient detail on the storage system under test, and the ``host nodes`` running the test, plus the network connecting them, to enable full reproduction of the benchmark results by a third party. 
 
@@ -365,11 +423,11 @@ Each submission must contain a ``<system-name>.json`` file and a ``<system-name>
 
 Note that, during the review period, submitters may be asked to include additional details in the JSON and pdf to enable reproducibility by a third party.
 
-#### System Description JSON
+#### 11.4.1 System Description JSON
 
 The ``<system-name>.json`` file must be pass a validation check with the JSON schema in use for V1.0.  The [schema and two examples of it being used](https://drive.google.com/drive/folders/1ZXNUXN4L8amD0Ba38GoIOt761b73F8bs) are provided.  For example, ``check-jsonschema`` is a convenient tool that is present in many linux distributions, but other tools may be used.
 
-#### System Description PDF
+#### 11.4.2 System Description PDF
 
 The goal of the pdf is to complement the JSON file, providing additional detail on the system to enable full reproduction by a third party. We encourage submitters to add details that are more easily captured by diagrams and text description, rather than a JSON.
 
@@ -389,9 +447,9 @@ If the submission is for a commercial system, a pdf of the product spec document
   2. Hardware, and
   3. Settings.
 
-## 8. Review
+## 12. Review
 
-### Visibility of results and code during review
+### 12.1 Visibility of results and code during review
 
 During the review process, only certain groups are allowed to inspect results and code.
 | Group | Can Inspect |
@@ -400,23 +458,23 @@ During the review process, only certain groups are allowed to inspect results an
 | Submitters | All results, all code |
 | Public | No results, no code |
 
-### Filing objections
+### 12.2 Filing objections
 
 Submitters must officially file objections to other submitter’s code by creating a GitHub issue prior to the “Filing objections” deadline that cites the offending lines, the rules section violated, and, if pertinent, corresponding lines of the reference implementation that are not equivalent. Each submitter must file objections with a “by <org>” tag and a “against <org>” tag. Multiple organizations may append their “by <org>” to an existing objection if desired. If an objector comes to believe the objection is in error they may remove their “by <org>” tag. All objections with no “by <org>” tags at the end of the filing deadline will be closed. Submitters should file an objection, then discuss with the submitter to verify if the objection is correct. Following filing of an issue but before resolution, both objecting submitter and owning submitter may add comments to help the review committee understand the problem. If the owning submitter acknowledges the problem, they may append the “fix_required” tag and begin to fix the issue.
 
-### Resolving objections
+### 12.3 Resolving objections
 
 The review committee will review each objection, and either establish consensus or vote. If the committee votes to support an objection, it will provide some basic guidance on an acceptable fix and append the “fix_required” tag. If the committee votes against an objection, it will close the issue.
 
-### Fixing objections
+### 12.4 Fixing objections
 
 Code should be updated via a pull request prior to the “fixing objections” deadline. Following submission of all fixes, the objecting submitter should confirm that the objection has been addressed with the objector(s) and ask them to remove their “by <org> tags. If the objector is not satisfied by the fix, then the review committee will decide the issue at its final review meeting. The review committee may vote to accept a fix and close the issue, or reject a fix and request the submission be moved to open or withdrawn.
 
-### Withdrawing results / changing division
+### 12.5 Withdrawing results / changing division
 
 Anytime up until the final human readable deadline (typically within 2-3 business days before the press call, so June 5th, 2024, in this case), an entry may be withdrawn by amending the pull request.  Alternatively, an entry may be voluntarily moved from the closed division to the open division.  Each benchmark results submission is treated separately for reporting in the results table and in terms of withdrawing it.  For example, submitting a 3D-Unet run with 20 clients and 80 A100 accelerators is separate from submitting a 3D-Unet run with 19 clients and 76 accelerators.
 
-## 9. Roadmap for future MLPerf Storage releases
+## 13. Roadmap for future MLPerf Storage releases
 
 The Working Group is very interested in your feedback. Please contact storage-chairs@mlcommons.org with any suggestions.
 
