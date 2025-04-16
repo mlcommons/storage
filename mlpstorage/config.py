@@ -3,12 +3,9 @@ import enum
 import os
 import tempfile
 
-# VERSION
-VERSION = "2.0.0b1"
-__version__ = VERSION
-
 # Define constants:
 DATETIME_STR = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+CONFIGS_ROOT_DIR = os.path.join(os.path.split(os.path.abspath(os.path.dirname(__file__)))[0], "configs")
 
 COSMOFLOW = "cosmoflow"
 RESNET = "resnet50"
