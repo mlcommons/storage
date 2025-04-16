@@ -4,9 +4,11 @@ import psutil
 import os
 import yaml
 
+from mlpstorage.config import CONFIGS_ROOT_DIR
+
 
 def read_config_from_file(relative_path):
-    config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), relative_path)
+    config_path = os.path.join(CONFIGS_ROOT_DIR, relative_path)
     if not os.path.isfile(config_path):
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
 

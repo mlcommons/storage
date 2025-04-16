@@ -1,9 +1,11 @@
 import datetime
 import enum
 import os
+import tempfile
 
 # Define constants:
 DATETIME_STR = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+CONFIGS_ROOT_DIR = os.path.join(os.path.split(os.path.abspath(os.path.dirname(__file__)))[0], "configs")
 
 COSMOFLOW = "cosmoflow"
 RESNET = "resnet50"
@@ -44,6 +46,9 @@ DEFAULT_HOSTS = ["127.0.0.1",]
 MPI_RUN_BIN = os.environ.get("MPI_RUN_BIN", MPIRUN)
 ALLOW_RUN_AS_ROOT = True
 
+MAX_NUM_FILES_TRAIN = 128*1024
+
+DEFAULT_RESULTS_DIR = os.path.join(tempfile.gettempdir(), f"mlperf_storage_results")
 
 class EXEC_TYPE(enum.Enum):
     MPI = "mpi"
@@ -54,3 +59,15 @@ class PARAM_VALIDATION(enum.Enum):
     CLOSED = "closed"
     OPEN = "open"
     INVALID = "invalid"
+
+# Enum for supported search metric types of COSINE, L2, IP
+SEARCH_METRICS = ["COSINE", "L2", "IP"]
+
+# Supported Index Types is only DISKANN but more could be supported in the future
+INDEX_TYPES = ["DISKANN"]
+
+# Supported vector data types is currently only FLOAT_VECTOR but more could be supported in the future
+VECTOR_DTYPES = ["FLOAT_VECTOR"]
+
+# Supported distributions are currently uniform, normal, or zipfian
+DISTRIBUTIONS = ["uniform", "normal", "zipfian"]
