@@ -1,0 +1,29 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlperf-storage"
+dynamic = ["version"]
+description = "MLPerf Storage Benchmark Suite"
+readme = "README.md"
+requires-python = ">=3.9, <3.12"
+license = {file = "LICENSE.md"}
+authors = [
+    {name = "MLCommons Storage Working Group"}
+]
+dependencies = [
+    "dlio-benchmark==2.0.0",
+    "vectordb-bench==0.0.22",
+    "psutil>=5.9",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/mlcommons/storage"
+"Bug Tracker" = "https://github.com/mlcommons/storage/issues"
+
+[tool.setuptools]
+packages = ["benchmark"]
+
+[tool.setuptools.dynamic]
+version = {attr = "benchmark.__version__"}

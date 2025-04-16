@@ -3,6 +3,10 @@ import enum
 import os
 import tempfile
 
+# VERSION
+VERSION = "2.0.0b1"
+__version__ = VERSION
+
 # Define constants:
 DATETIME_STR = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
@@ -58,3 +62,15 @@ class PARAM_VALIDATION(enum.Enum):
     CLOSED = "closed"
     OPEN = "open"
     INVALID = "invalid"
+
+# Enum for supported search metric types of COSINE, L2, IP
+SEARCH_METRICS = ["COSINE", "L2", "IP"]
+
+# Supported Index Types is only DISKANN but more could be supported in the future
+INDEX_TYPES = ["DISKANN"]
+
+# Supported vector data types is currently only FLOAT_VECTOR but more could be supported in the future
+VECTOR_DTYPES = ["FLOAT_VECTOR"]
+
+# Supported distributions are currently uniform, normal, or zipfian
+DISTRIBUTIONS = ["uniform", "normal", "zipfian"]
