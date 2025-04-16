@@ -1,3 +1,4 @@
+#!/usr/bin/python3.9
 #!/usr/bin/env python3
 
 import abc
@@ -7,12 +8,15 @@ import pprint
 import subprocess
 import sys
 
-from benchmark.cli import parse_arguments, validate_args, update_args
-from benchmark.config import *
-from benchmark.logging import setup_logging
-from benchmark.rules import validate_dlio_parameter
-from benchmark.utils import read_config_from_file, update_nested_dict, create_nested_dict, ClusterInformation
+from os.path import dirname
 
+from mlpstorage.cli import parse_arguments, validate_args, update_args
+from mlpstorage.config import *
+from mlpstorage.logging import setup_logging
+from mlpstorage.rules import validate_dlio_parameter, calculate_training_data_size
+from mlpstorage.utils import read_config_from_file, update_nested_dict, create_nested_dict, ClusterInformation
+
+logger = setup_logging("MLPerfStorage")
 
 # Capturing TODO Items:
 # Configure datasize to collect the memory information from the hosts instead of getting a number of hosts for the
@@ -40,6 +44,8 @@ from benchmark.utils import read_config_from_file, update_nested_dict, create_ne
 
 # Keep a log of mlperfstorage commands executed in a mlperf.history file in results_dir
 
+# Add support for datagen to use subdirectories
+
 
 def generate_mpi_prefix_cmd(mpi_cmd, hosts, num_processes, oversubscribe, allow_run_as_root):
     if mpi_cmd == MPIRUN:
@@ -60,7 +66,7 @@ def generate_mpi_prefix_cmd(mpi_cmd, hosts, num_processes, oversubscribe, allow_
 
 class Benchmark(abc.ABC):
 
-    def __init__(self, args, run_number=None):
+    def __init__(self, args, run_number=0):
         self.args = args
         self.run_number = run_number
         validate_args(args)
@@ -76,7 +82,7 @@ class Benchmark(abc.ABC):
 
 class TrainingBenchmark(Benchmark):
 
-    TRAINING_CONFIG_PATH = "configs/dlio/training"
+    TRAINING_CONFIG_PATH = "dlio/training"
 
     def __init__(self, args):
         super().__init__(args)
@@ -84,9 +90,9 @@ class TrainingBenchmark(Benchmark):
         # This allows each command to map to a specific wrapper method. When meethods are created, repalce the default
         # 'self.execute_command' with the command-specific method (like "self._datasize()")
         self.command_method_map = dict(
-            datasize=self._datasize,
+            datasize=self.datasize,
             datagen=self.execute_command,
-            run_benchmark=self.execute_command,
+            run=self.execute_command,
             configview=self.execute_command,
             reportgen=self.execute_command,
         )
@@ -99,13 +105,13 @@ class TrainingBenchmark(Benchmark):
         self.base_command_path = f"dlio_benchmark"
 
         config_suffix = "datagen" if args.command == "datagen" else args.accelerator_type
-        self.config_path = f"{args.model}_{config_suffix}.yaml"
-        self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), self.TRAINING_CONFIG_PATH)
+        self.config_file = f"{args.model}_{config_suffix}.yaml"
         self.config_name = f"{args.model}_{config_suffix}"
+        self.config_path = os.path.join(CONFIGS_ROOT_DIR, self.TRAINING_CONFIG_PATH)
 
         self.run_result_output = self.generate_output_location()
 
-        self.yaml_params = read_config_from_file(os.path.join(self.config_path, f"{self.config_name}.yaml"))
+        self.yaml_params = read_config_from_file(os.path.join(self.TRAINING_CONFIG_PATH, self.config_file))
         self.validate_params()
 
         logger.info(f'nested: {create_nested_dict(self.params_dict)}')
@@ -184,7 +190,7 @@ class TrainingBenchmark(Benchmark):
         cmd = ""
 
         # Set the config file to use for params not passed via CLI
-        if self.args.command in ["datagen", "run_benchmark"]:
+        if self.args.command in ["datagen", "run"]:
             cmd = f"{self.base_command_path}"
             cmd += f" --config-dir={self.config_path}"
             cmd += f" --config-name={self.config_name}"
@@ -219,8 +225,47 @@ class TrainingBenchmark(Benchmark):
 
         return cmd
 
+    def generate_datagen_benchmark_command(self, num_files_train, num_subfolders_train, num_samples_per_file):
+        """
+        This function will generate the command to use to call this program with the training & datagen parameters.
+        """
+        kv_map = {
+            "num_files_train": num_files_train,
+            "num_subfolders_train": num_subfolders_train,
+            "num_samples_per_file": num_samples_per_file,
+        }
+
+        cmd = f"{sys.executable} {os.path.abspath(__file__)} training datagen"
+        if self.args.hosts:
+            cmd += f" --hosts={self.args.hosts}"
+        cmd += f" --model={self.args.model}"
+        cmd += f" --exec-type={self.args.exec_type}"
+        if self.args.ssh_username:
+            cmd += f" --ssh-username={self.args.ssh_username}"
+
+        if self.params_dict:
+            for key, value in self.params_dict.items():
+                if key in kv_map.keys():
+                    continue
+                cmd += f" --{key}={value}"
+
+        for key, value in kv_map.items():
+            cmd += f" --param {key}={value}"
+
+        # During datasize, this will be set to max_accelerators
+        cmd += f" --num-processes={self.args.num_processes}"
+        cmd += f" --results-dir={self.args.results_dir}"
+        cmd += f" --data-dir=<INSERT_DATA_DIR>"
+
+        return cmd
+
     def execute_command(self):
         cmd = self.generate_command()
+        if self.args.what_if:
+            logger.info(f'What-if mode: \n'
+                        f'CMD: {cmd}\n\n'
+                        f'Parameters: \n{pprint.pformat(self.combined_params)}')
+            return
 
         if self.args.debug:
             logger.status(f'Executing: {cmd}')
@@ -229,87 +274,138 @@ class TrainingBenchmark(Benchmark):
         logger.info(f'Executing: {cmd}')
         subprocess.call(cmd, shell=True)
 
-    def _datasize(self):
-        """
-        Validate the parameters for the datasize operation and apply rules for a closed submission.
+    def datasize(self):
+        num_files_train, num_subfolders_train, num_samples_per_file = calculate_training_data_size(
+            self.args, self.cluster_information, self.combined_params['dataset'], self.combined_params['reader'], logger
+        )
+        logger.result(f'Number of training files: {num_files_train}')
+        logger.result(f'Number of training subfolders: {num_subfolders_train}')
+        logger.result(f'Number of training samples per file: {num_samples_per_file}')
 
-        Requirements:
-          - Dataset needs to be 5x the amount of total memory
-          - Training needs to do at least 500 steps per epoch
-
-        Memory Ratio:
-          - Collect "Total Memory" from /proc/meminfo on each host
-          - sum it up
-          - multiply by 5
-          - divide by sample size
-          - divide by batch size
-
-        500 steps:
-          - 500 steps per ecpoch
-          - multiply by max number of processes
-          - multiply by batch size
-        :return:
-        """
-        measured_total_mem_bytes = self.cluster_information.info['accumulated_mem_info_bytes']['total']
-        if self.args.client_host_memory_in_gb and self.args.num_client_hosts:
-            per_host_memory_in_bytes = self.args.client_host_memory_in_gb * 1024 * 1024 * 1024
-            num_hosts = self.args.num_client_hosts
-            total_mem_bytes = per_host_memory_in_bytes * num_hosts
-        elif self.args.clienthost_host_memory_in_gb and not self.args.num_client_hosts:
-            per_host_memory_in_bytes = self.args.clienthost_host_memory_in_gb * 1024 * 1024 * 102
-            num_hosts = len(self.args.hosts)
-            total_mem_bytes = per_host_memory_in_bytes * num_hosts
-        else:
-            total_mem_bytes = measured_total_mem_bytes
-
-        dataset_size_bytes = 5 * total_mem_bytes
-        file_size_bytes = self.combined_params['dataset']['num_samples_per_file'] * self.combined_params['dataset']['record_length_bytes']
-
-        min_num_files_by_bytes = dataset_size_bytes // file_size_bytes
-        num_samples_by_bytes = min_num_files_by_bytes * self.combined_params['dataset']['num_samples_per_file']
-        min_samples = 500 * self.args.num_processes * self.combined_params['reader']['batch_size']
-        min_num_files_by_samples = min_samples // self.combined_params['dataset']['num_samples_per_file']
-
-        required_file_count = max(min_num_files_by_bytes, min_num_files_by_samples)
-        logger.ridiculous(f'Required file count: {required_file_count}')
-        logger.ridiculous(f'Required sample count: {min_samples}')
-        logger.ridiculous(f'Min number of files by samples: {min_num_files_by_samples}')
-        logger.ridiculous(f'Min number of files by size: {min_num_files_by_bytes}')
-        logger.ridiculous(f'Required dataset size: {required_file_count * file_size_bytes / 1024 / 1024} MB')
-        logger.ridiculous(f'Number of Samples by size: {num_samples_by_bytes}')
-        if min_num_files_by_bytes > min_num_files_by_samples:
-            logger.result(f'Minimum file count dictated by dataset size to memory capacity ratio. Use {min_num_files_by_bytes} files.')
-        else:
-            logger.result(f'Minimum file count dictated by 500 step requirement of given accelerator count and batch size. Use {min_num_files_by_samples} files.')
+        cmd = self.generate_datagen_benchmark_command(num_files_train, num_subfolders_train, num_samples_per_file)
+        logger.result(f'Run the following command to generate data: \n{cmd}')
+        logger.warning(f'The parameter for --num-processes is the same as --max-accelerators. Adjust the value '
+                       f'according to your system.')
 
 
 class VectorDBBenchmark(Benchmark):
-    VECTORDB_CONFIG_PATH = "configs/vector_db"
 
-    def __init__(self, command, category=None, *args, **kwargs):
-        super().__init__(*args, **kwargs)
+    VECTORDB_CONFIG_PATH = "vectordbbench"
+    VDBBENCH_BIN = "vdbbench"
+
+    def __init__(self, args):
+        super().__init__(args)
 
         self.command_method_map = dict(
-            throughput=self._throughput,
-            latency=self._latency
+            datagen=self.execute_datagen,
+            run=self.execute_run
         )
-        self.command = command
-        self.category = category
+        self.command = args.command
+        self.category = args.category if hasattr(args, 'category') else None
 
-        self.config_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), self.VECTORDB_CONFIG_PATH)
+        self.config_path = os.path.join(CONFIGS_ROOT_DIR, self.VECTORDB_CONFIG_PATH)
+        self.config_name = args.config if hasattr(args, 'config') and args.config else "default"
 
+        self.yaml_params = read_config_from_file(os.path.join(self.config_path, f"{self.config_name}.yaml"))
+        
+        self.run_result_output = self.generate_output_location()
+        
+        logger.status(f'Instantiated the VectorDB Benchmark...')
+        
+    def generate_output_location(self):
+        """
+        Generate the output directory structure for vector database benchmark results
+        """
+        output_location = self.args.results_dir
+        output_location = os.path.join(output_location, "vectordb")
+        output_location = os.path.join(output_location, self.command)
+        output_location = os.path.join(output_location, DATETIME_STR)
+        
+        if self.command == "run" and hasattr(self, 'run_number'):
+            output_location = os.path.join(output_location, f"run_{self.run_number}")
+            
+        return output_location
+    
     def run(self):
-        self.command_method_map[self.command]()
+        """Execute the appropriate command based on the command_method_map"""
+        if self.command in self.command_method_map:
+            self.command_method_map[self.command]()
+        else:
+            logger.error(f"Unsupported command: {self.command}")
+            sys.exit(1)
+    
+    def build_command(self, script_name, additional_params=None):
+        """
+        Build a command string for executing a script with appropriate parameters
+        
+        Args:
+            script_name (str): Name of the script to execute (e.g., "load_vdb.py" or "simple_bench.py")
+            additional_params (dict, optional): Additional parameters to add to the command
+            
+        Returns:
+            str: The complete command string
+        """
+        # Ensure output directory exists
+        os.makedirs(self.run_result_output, exist_ok=True)
+        
+        # Build the base command
+        config_file = os.path.join(self.config_path, f"{self.config_name}.yaml")
+        
+        cmd = f"{script_name}"
+        cmd += f" --config {config_file}"
+        cmd += f" --output-dir {self.run_result_output}"
+        
+        # Add host and port if provided (common to both datagen and run)
+        if hasattr(self.args, 'host') and self.args.host:
+            cmd += f" --host {self.args.host}"
+        if hasattr(self.args, 'port') and self.args.port:
+            cmd += f" --port {self.args.port}"
+            
+        # Add any additional parameters
+        if additional_params:
+            for param, attr in additional_params.items():
+                if attr:
+                    cmd += f" --{param} {attr}"
+                    
+        return cmd
+    
+    def execute_datagen(self):
+        """Execute the data generation command using load_vdb.py"""
+        cmd = self.build_command("load-vdb")
+            
+        logger.info(f'Executing data generation: {cmd}')
+        self.execute_command(cmd)
+    
+    def execute_run(self):
+        """Execute the benchmark run command using simple_bench.py"""
+        # Define additional parameters specific to the run command
+        additional_params = {
+            "processes": self.args.num_query_processes,
+            "runtime": self.args.runtime,
+            "queries": self.args.queries,
+        }
+        
+        cmd = self.build_command("vdbbench", additional_params)
+        
+        logger.info(f'Executing benchmark run: {cmd}')
+        self.execute_command(cmd)
 
-    def _throughput(self):
-        logger.info(f'Got to throughput')
-
-    def _latency(self):
-        logger.info(f'Got to latency')
+    def execute_command(self, cmd):
+        if self.args.what_if:
+            logger.info(f'What-if mode: \n'
+                        f'CMD: {cmd}\n\n'
+                        f'Parameters: \n{pprint.pformat(vars(self.args))}')
+            return
+        logger.debug(f'Executing: {cmd}')
+        subprocess.call(cmd, shell=True)
 
 
 # Main function to handle command-line arguments and invoke the corresponding function.
-def main(args):
+def main():
+    args = parse_arguments()
+
+    logger.handlers[0].setLevel(args.stream_log_level)
+
     validate_args(args)
     update_args(args)
     program_switch_dict = dict(
@@ -323,7 +419,4 @@ def main(args):
 
 
 if __name__ == "__main__":
-    # Get the mllogger and args. Call main to run program
-    cli_args = parse_arguments()
-    logger = setup_logging("MLPerfStorage", cli_args.stream_log_level)
-    main(cli_args)
+    main()
