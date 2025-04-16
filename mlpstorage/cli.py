@@ -1,11 +1,13 @@
 import argparse
 import sys
 
-from benchmark.config import MIN_RANKS_STR, MODELS, ACCELERATORS, DEFAULT_HOSTS, CATEGORIES, LLM_MODELS, MPI_CMDS, \
-    EXEC_TYPE, DEFAULT_RESULTS_DIR
+from mlpstorage.config import MIN_RANKS_STR, MODELS, ACCELERATORS, DEFAULT_HOSTS, CATEGORIES, LLM_MODELS, MPI_CMDS, \
+    EXEC_TYPE, DEFAULT_RESULTS_DIR, SEARCH_METRICS, INDEX_TYPES, VECTOR_DTYPES, DISTRIBUTIONS
 
 # TODO: Get rid of this now that I'm not repeating arguments for different subparsers?
 help_messages = dict(
+    # General help messages
+    sub_commands="Select a subcommand for the benchmark.",
     model="Model to emulate. A specific model defines the sample size, sample container format, and data "
           "rates for each supported accelerator.",
     accelerator_type="Accelerator to simulate for the benchmark. A specific accelerator defines the data access "
@@ -31,7 +33,7 @@ help_messages = dict(
            "--params key1=value1 key2=value2 key3=value3",
     datasize="The datasize command calculates the number of samples needed for a given workload, accelerator type,"
              " number of accelerators, and client host memory.",
-    datagen="The datagen command generates a dataset for a given workload and number of parallel generation "
+    training_datagen="The datagen command generates a dataset for a given workload and number of parallel generation "
             "processes.",
     run_benchmark="Run the benchmark with the specified parameters.",
     configview="View the final config based on the specified options.",
@@ -48,42 +50,91 @@ help_messages = dict(
                                 f"\n{MIN_RANKS_STR}",
 
     # VectorDB help messages
-    vectordb_throughput="The throughput command measures the throughput of the vector database workload",
-    vectordb_latency="The latency command measures the latency of the vector database workload",
+    db_ip_address=f"IP address of the VectorDB instance. If not provided, a local VectorDB instance will be used.",
+    db_port=f"Port number of the VectorDB instance.",
+    db_collection=f"Collection name for the VectorDB instance.",
+    dimension=f"Dimensionality of the vectors.",
+    num_shards=f"Number of shards for the collection. Recommended is 1 for every 1 Million vectors",
+    vector_dtype=f"Data type of the vectors. Supported options: {VECTOR_DTYPES}",
+    num_vectors=f"Number of vectors to be inserted into the collection.",
+    distribution=f"Distribution of the vectors. Supported options: {DISTRIBUTIONS}",
+    vdb_datagen_batch_size=f"Batch size for data insertion.",
+    vdb_datagen_chunk_size="Number of vectors to generate in each insertion chunk. Tune for memory management.",
+
+    vdb_run_benchmark="Run the VectorDB benchmark with the specified parameters.",
+    vdb_datagen="Generate a dataset for the VectorDB benchmark.",
+    num_query_processes=f"Number of parallel processes to use for query execution.",
+    query_batch_size=f"Number of vectors to query in each batch (per process).",
 
     # MPI help messages
     mpi_bin=f"Execution type for MPI commands. Supported options: {MPI_CMDS}",
     exec_type=f"Execution type for benchmark commands. Supported options: {list(EXEC_TYPE)}",
 )
 
+prog_descriptions = dict(
+    training="Run the MLPerf Storage training benchmark",
+    checkpointing="Run the MLPerf Storage checkpointing benchmark",
+    vectordb="Run the MLPerf Storage VectorDB benchmark",
+)
 
 def parse_arguments():
     # Many of the help messages are shared between the subparsers. This dictionary prevents rewriting the same messages
     # in multiple places.
     parser = argparse.ArgumentParser(description="Script to launch the MLPerf Storage benchmark")
-    sub_programs = parser.add_subparsers(dest="program", required=True, help="Sub-programs")
+    sub_programs = parser.add_subparsers(dest="program", required=True)
     sub_programs.required = True
 
-    training_parsers = sub_programs.add_parser("training", help="Training benchmark options")
-    checkpointing_parsers = sub_programs.add_parser("checkpointing", help="Checkpointing benchmark options")
-    vectordb_parsers = sub_programs.add_parser("vectordb", help="VectorDB benchmark options")
+    training_parsers = sub_programs.add_parser("training", description=prog_descriptions['training'],
+                                               help="Training benchmark options")
+    checkpointing_parsers = sub_programs.add_parser("checkpointing", description=prog_descriptions['checkpointing'],
+                                                    help="Checkpointing benchmark options")
+    vectordb_parsers = sub_programs.add_parser("vectordb", description=prog_descriptions['vectordb'],
+                                               help="VectorDB benchmark options")
+
+    sub_programs_map = dict(training=training_parsers,
+                            checkpointing=checkpointing_parsers,
+                            vectordb=vectordb_parsers)
 
     add_training_arguments(training_parsers)
     add_checkpointing_arguments(checkpointing_parsers)
     add_vectordb_arguments(vectordb_parsers)
 
-    for _parser in [training_parsers, checkpointing_parsers, vectordb_parsers]:
+    for _parser in sub_programs_map.values():
         add_universal_arguments(_parser)
+
+    if len(sys.argv) == 1:
+        parser.print_help(sys.stderr)
+        sys.exit(1)
+
+    if len(sys.argv) == 2 and sys.argv[1] in sub_programs_map.keys():
+        sub_programs_map[sys.argv[1]].print_help(sys.stderr)
+        sys.exit(1)
 
     return parser.parse_args()
 
 
 def add_universal_arguments(parser):
-    parser.add_argument('--results-dir', '-rd', type=str, default=DEFAULT_RESULTS_DIR ,help=help_messages['results_dir'])
-    parser.add_argument("--debug", action="store_true", help="Enable debug mode")
-    parser.add_argument("--allow-invalid-params", "-aip", action="store_true",
+    standard_args = parser.add_argument_group("Standard Arguments")
+    standard_args.add_argument('--results-dir', '-rd', type=str, default=DEFAULT_RESULTS_DIR, help=help_messages['results_dir'])
+
+    # Create a mutually exclusive group for closed/open options
+    submission_group = standard_args.add_mutually_exclusive_group()
+    submission_group.add_argument("--open", action="store_false", dest="closed", default=False,
+                                  help="Run as an open submission")
+    submission_group.add_argument("--closed", action="store_true", help="Run as a closed submission")
+
+    output_control = parser.add_argument_group("Output Control")
+    output_control.add_argument("--debug", action="store_true", help="Enable debug mode")
+    output_control.add_argument("--verbose", action="store_true", help="Enable verbose mode")
+    output_control.add_argument("--version", action="version", version="%(prog)s 0.1")
+    output_control.add_argument("--stream-log-level", type=str, default="INFO",)
+
+    output_control.add_argument("--allow-invalid-params", "-aip", action="store_true",
                         help="Do not fail on invalid parameters.")
-    parser.add_argument("--stream-log-level", type=str, default="INFO",)
+
+    view_only_args = parser.add_argument_group("View Only")
+    view_only_args.add_argument("--what-if", action="store_true", help="View the configuration that would execute and "
+                                                                       "the associated command.")
 
 
 def add_mpi_group(parser):
@@ -94,11 +145,11 @@ def add_mpi_group(parser):
 
 
 def add_training_arguments(training_parsers):
-    training_subparsers = training_parsers.add_subparsers(dest="command", required=True, help="Sub-commands")
+    training_subparsers = training_parsers.add_subparsers(dest="command", required=True)
     training_parsers.required = True
 
     datasize = training_subparsers.add_parser("datasize", help=help_messages['datasize'])
-    datagen = training_subparsers.add_parser("datagen", help=help_messages['datagen'])
+    datagen = training_subparsers.add_parser("datagen", help=help_messages['training_datagen'])
     run_benchmark = training_subparsers.add_parser("run", help=help_messages['run_benchmark'])
     configview = training_subparsers.add_parser("configview", help=help_messages['configview'])
     reportgen = training_subparsers.add_parser("reportgen", help=help_messages['reportgen'])
@@ -152,15 +203,39 @@ def add_checkpointing_arguments(checkpointing_parsers):
 
 def add_vectordb_arguments(vectordb_parsers):
     # VectorDB Benchmark
-
-    vectordb_parsers.add_argument('--hosts', '-s', type=str, help=help_messages['client_hosts'])
-
-    vectordb_subparsers = vectordb_parsers.add_subparsers(dest="command", required=True, help="Sub-commands")
+    vectordb_subparsers = vectordb_parsers.add_subparsers(dest="command", required=True, help="sub_commands")
     vectordb_parsers.required = True
 
+    datagen = vectordb_subparsers.add_parser('datagen', help=help_messages['vdb_datagen'])
+    run_benchmark = vectordb_subparsers.add_parser('run', help=help_messages['vdb_run_benchmark'])
+
+    for _parser in [datagen, run_benchmark]:
+        _parser.add_argument('--host', '-s', type=str, default="127.0.0.1", help=help_messages['db_ip_address'])
+        _parser.add_argument('--port', '-p', type=int, default=19530, help=help_messages['db_port'])
+        _parser.add_argument('--config')
+        _parser.add_argument('--collection', type=str, help=help_messages['db_collection'])
+
+    # Datagen specific arguments
+    datagen.add_argument('--dimension', type=int, default=1536, help=help_messages['dimension'])
+    datagen.add_argument('--num-shards', type=int, default=1, help=help_messages['num_shards'])
+    datagen.add_argument('--vector-dtype', choices=VECTOR_DTYPES, default="FLOAT_VECTOR", help=help_messages['vector_dtype'])
+    datagen.add_argument('--num-vectors', type=int, default=1_000_000, help=help_messages['num_vectors'])
+    datagen.add_argument('--distribution', choices=DISTRIBUTIONS, default="uniform", help=help_messages['distribution'])
+    datagen.add_argument('--batch-size', type=int, default=10, help=help_messages['vdb_datagen_batch_size'])
+    datagen.add_argument('--chunk-size', type=int, default=10_000, help=help_messages['vdb_datagen_chunk_size'])
+
     # Add specific VectorDB benchmark options here
-    throughput = vectordb_subparsers.add_parser('throughput', help=help_messages['vectordb_throughput'])
-    latency = vectordb_subparsers.add_parser('latency', help=help_messages['vectordb_latency'])
+    run_benchmark.add_argument('--num-query-processes', type=int, default=1, help=help_messages['num_query_processes'])
+    run_benchmark.add_argument('--batch-size', type=int, default=1, help=help_messages['query_batch_size'])
+
+    end_group = run_benchmark.add_argument_group("Provide an end condition of runtime (in seconds) or total number of "
+                                                 "queries to execute. The default is to run for 60 seconds")
+    end_condition = end_group.add_mutually_exclusive_group()
+    end_condition.add_argument("--runtime", type=int, help="Run for a specific duration in seconds")
+    end_condition.add_argument("--queries", type=int, help="Run for a specific number of queries")
+
+    for _parser in [datagen, run_benchmark]:
+        add_universal_arguments(_parser)
 
 
 def validate_args(args):
@@ -182,6 +257,9 @@ def update_args(args):
         if hasattr(args, arg):
             setattr(args, 'num_processes', int(getattr(args, arg)))
             break
+
+    if not args.runtime and not args.queries:
+        args.runtime = 60  # Default runtime if not provided
 
 
 if __name__ == "__main__":
