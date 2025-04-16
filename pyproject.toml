@@ -4,7 +4,6 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlpstorage"
-#dynamic = ["version"]
 version = "2.0.0b1"
 description = "MLPerf Storage Benchmark Suite"
 readme = "README.md"
@@ -12,11 +11,11 @@ authors = [
     {name = "MLCommons Storage Working Group"}
 ]
 
-#dependencies = [
-#    "dlio-benchmark==2.0.0",
-#    "vectordb-bench==0.0.22",
-#    "psutil>=5.9",
-#]
+dependencies = [
+    "dlio-benchmark==2.0.0",
+    "psutil>=5.9",
+    "vdbbench @ git+https://github.com/wvaske/vdb-bench.git",
+]
 
 [project.urls]
 "Homepage" = "https://github.com/mlcommons/storage"
@@ -27,11 +26,3 @@ packages = {find = {}}
 
 [project.scripts]
 mlpstorage = 'mlpstorage.benchmark:main'
-#load_vdb = 'vdbbench/load_vdb.py'
-#simple_bench = 'vdbbench/simple_bench.py'
-#compact_and_watch = 'vdbbench/compact_and_watch.py'
-
-
-#
-#[tool.setuptools.dynamic]
-#version = {attr = "mlpstorage.benchmark.__version__"}
