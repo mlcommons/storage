@@ -1,8 +1,18 @@
 import concurrent.futures
+import io
+import logging
+import os
 import pprint
 import psutil
-import os
+import subprocess
+import shlex
+import select
+import signal
+import sys
+import threading
 import yaml
+
+from typing import List, Union, Optional, Dict, Tuple, Set
 
 from mlpstorage.config import CONFIGS_ROOT_DIR
 
@@ -48,6 +58,173 @@ def create_nested_dict(flat_dict, parent_dict=None, separator='.'):
         current_dict[keys[-1]] = value
 
     return parent_dict
+
+
+class CommandExecutor:
+    """
+    A class to execute shell commands in a subprocess with live output streaming and signal handling.
+    
+    This class allows:
+    - Executing commands as a string or list of arguments
+    - Capturing stdout and stderr
+    - Optionally printing stdout and stderr in real-time
+    - Handling signals to gracefully terminate the process
+    """
+    
+    def __init__(self, logger: logging.Logger, debug: bool = False):
+        """
+        Initialize the CommandExecutor.
+        
+        Args:
+            debug: If True, enables debug mode with additional logging
+        """
+        self.logger = logger
+        self.debug = debug
+        self.process = None
+        self.terminated_by_signal = False
+        self.signal_received = None
+        self._original_handlers = {}
+        self._stop_event = threading.Event()
+    
+    def execute(self, 
+                command: Union[str, List[str]], 
+                print_stdout: bool = False,
+                print_stderr: bool = False,
+                watch_signals: Optional[Set[int]] = None) -> Tuple[str, str, int]:
+        """
+        Execute a command and return its stdout, stderr, and return code.
+        
+        Args:
+            command: The command to execute (string or list of strings)
+            print_stdout: If True, prints stdout in real-time
+            print_stderr: If True, prints stderr in real-time
+            watch_signals: Set of signals to watch for (e.g., {signal.SIGINT, signal.SIGTERM})
+                          If any of these signals are received, the process will be terminated
+        
+        Returns:
+            Tuple of (stdout_content, stderr_content, return_code)
+        """
+
+        self.logger.debug(f"DEBUG - Executing command: {command}")
+        
+        # Parse command if it's a string
+        if isinstance(command, str):
+            cmd_args = shlex.split(command)
+        else:
+            cmd_args = command
+        
+        # Set up signal handlers if requested
+        if watch_signals:
+            self._setup_signal_handlers(watch_signals)
+        
+        # Reset state
+        self._stop_event.clear()
+        self.terminated_by_signal = False
+        self.signal_received = None
+        
+        # Initialize output buffers
+        stdout_buffer = io.StringIO()
+        stderr_buffer = io.StringIO()
+        return_code = None
+        
+        try:
+            # Start the process
+            self.process = subprocess.Popen(
+                cmd_args,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                bufsize=1  # Line buffered
+            )
+            
+            # Get file descriptors for select
+            stdout_fd = self.process.stdout.fileno()
+            stderr_fd = self.process.stderr.fileno()
+            
+            # Process output until completion or signal
+            while self.process.poll() is None and not self._stop_event.is_set():
+                # Wait for output with timeout to allow checking for signals
+                readable, _, _ = select.select(
+                    [self.process.stdout, self.process.stderr], 
+                    [], 
+                    [], 
+                    0.1
+                )
+                
+                for stream in readable:
+                    line = stream.readline()
+                    if not line:  # EOF
+                        continue
+                        
+                    if stream.fileno() == stdout_fd:
+                        stdout_buffer.write(line)
+                        if print_stdout:
+                            sys.stdout.write(line)
+                            sys.stdout.flush()
+                    elif stream.fileno() == stderr_fd:
+                        stderr_buffer.write(line)
+                        if print_stderr:
+                            sys.stderr.write(line)
+                            sys.stderr.flush()
+            
+            # Read any remaining output
+            stdout_remainder = self.process.stdout.read()
+            if stdout_remainder:
+                stdout_buffer.write(stdout_remainder)
+                if print_stdout:
+                    sys.stdout.write(stdout_remainder)
+                    sys.stdout.flush()
+                    
+            stderr_remainder = self.process.stderr.read()
+            if stderr_remainder:
+                stderr_buffer.write(stderr_remainder)
+                if print_stderr:
+                    sys.stderr.write(stderr_remainder)
+                    sys.stderr.flush()
+            
+            # Get the return code
+            return_code = self.process.poll()
+            
+            # Check if we were terminated by a signal
+            if self.terminated_by_signal:
+                self.logger.debug(f"DEBUG - Process terminated by signal: {self.signal_received}")
+                
+            return stdout_buffer.getvalue(), stderr_buffer.getvalue(), return_code
+            
+        finally:
+            # Clean up
+            if self.process and self.process.poll() is None:
+                self.process.terminate()
+                try:
+                    self.process.wait(timeout=5)
+                except subprocess.TimeoutExpired:
+                    self.process.kill()
+            
+            # Restore original signal handlers
+            self._restore_signal_handlers()
+    
+    def _setup_signal_handlers(self, signals: Set[int]):
+        """Set up signal handlers for the specified signals."""
+        self._original_handlers = {}
+        
+        def signal_handler(sig, frame):
+            self.logger.debug(f"DEBUG - Received signal: {sig}")
+            self.terminated_by_signal = True
+            self.signal_received = sig
+            self._stop_event.set()
+            
+            if self.process and self.process.poll() is None:
+                self.process.terminate()
+        
+        for sig in signals:
+            self._original_handlers[sig] = signal.getsignal(sig)
+            signal.signal(sig, signal_handler)
+    
+    def _restore_signal_handlers(self):
+        """Restore original signal handlers."""
+        for sig, handler in self._original_handlers.items():
+            signal.signal(sig, handler)
+        self._original_handlers = {}
 
 
 class ClusterInformation:
