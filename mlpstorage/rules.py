@@ -13,12 +13,16 @@ class BenchmarkVerifier:
     def verify(self):
         # Training Verification
         if self.benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.training:
-            return self._verify_training_params()
+            validation = self._verify_training_params()
 
         elif self.benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.vector_database:
-            return self._verify_vector_database_params()
+            validation = self._verify_vector_database_params()
+        else:
+            validation = PARAM_VALIDATION.INVALID
 
-    def _verify_training_params(self):
+        self.logger.status(f'Benchmark verification: {validation.name}')
+
+    def _verify_training_params(self) -> PARAM_VALIDATION:
         # Add code here for validation processes. We do not need to validate an option is in a list as the argparse
         #  option "choices" accomplishes this for us.
 
@@ -34,18 +38,21 @@ class BenchmarkVerifier:
                 if validation_results[param][2] != PARAM_VALIDATION.CLOSED:
                     any_non_closed = True
 
-        if any_non_closed:
+        # Add code to verify the other parameters here. Use cluster information and data size commands to verify
+        # that the number of processes is appropriate fo the given datasize
+        validation_set = set(v[2] for v in validation_results.values())
+        if validation_set == {PARAM_VALIDATION.CLOSED}:
+            return PARAM_VALIDATION.CLOSED
+        elif PARAM_VALIDATION.INVALID in validation_set:
             error_string = "\n\t".join([f"{p} = {v[1]}" for p, v in validation_results.items()])
             self.logger.error(f'\nNot all parameters allowed in closed submission: \n'
-                                  f'\t{error_string}')
-            if not self.benchmark.args.allow_invalid_params:
-                self.logger.error("Invalid parameters found. Please check the command and parameters.")
-                return False
+                              f'\t{error_string}')
+            return PARAM_VALIDATION.INVALID
+        else:
+            # All open or closed:
+            return PARAM_VALIDATION.OPEN
 
-        return True
-
-    @staticmethod
-    def _verify_training_optional_param(model, param, value):
+    def _verify_training_optional_param(self, model, param, value):
         if model in MODELS:
             # Allowed to change data_folder and number of files to train depending on memory requirements
             if param.startswith('dataset'):
@@ -61,18 +68,26 @@ class BenchmarkVerifier:
                     if 0 < int(value) < MAX_READ_THREADS_TRAINING:
                         return PARAM_VALIDATION.CLOSED
 
-    @staticmethod
-    def _verify_checkpointing_optional_param(model, param, value):
+            self.logger.error(f'Invalid parameter {param} for model {model} with value {value}.')
+            return PARAM_VALIDATION.INVALID
+
+    def _verify_checkpointing_optional_param(self, model, param, value):
         if model in LLM_MODELS:
             # TODO: Define params that can be modified in closed
             pass
 
-        # Defaulting to invalid until we define what can be changed in closed.
-        return PARAM_VALIDATION.INVALID
+        # Rules to Implement:
+        # Minimum of 4 processes per physical host during checkpointing
+        self.logger.info(f'Need to implement checkpointing parameter validation.')
+
+        # Defaulting to closed until we define what can be changed in closed.
+        return PARAM_VALIDATION.CLOSED
 
     def _verify_vector_database_params(self):
         # TODO: Implement validation for vector database parameters.
-        return True
+        # Use Cluster Information to verify the size of dataset against the number of clients?
+        self.logger.info(f'Need to implement vector database parameter validation.')
+        return PARAM_VALIDATION.CLOSED
 
 
 def calculate_training_data_size(args, cluster_information, dataset_params, reader_params, logger):

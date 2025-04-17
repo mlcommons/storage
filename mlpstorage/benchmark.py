@@ -114,10 +114,21 @@ class Benchmark(abc.ABC):
     def verify_benchmark(self):
         if not self.BENCHMARK_TYPE:
             raise ValueError(f'No benchmark specified. Unable to verify benchmark')
-        valid = self.benchmark_verifier.verify()
-        if not valid:
-            logger.error(f"Benchmark verification failed. Please check the logs for details.")
+        validation = self.benchmark_verifier.verify()
+        if validation == PARAM_VALIDATION.CLOSED:
+            return True
+        if validation == PARAM_VALIDATION.INVALID:
+            if self.args.allow_invalid_config:
+                logger.warning(f'Invalid configuration found. Allowing the benchmark to proceed.')
+                return True
             sys.exit(1)
+        if validation == PARAM_VALIDATION.OPEN:
+            if self.args.closed == False:
+                # "--open" was passed
+                logger.status(f'Running as allowed open configuration')
+            else:
+                logger.warning(f'Parameters allowed for open but not closed. Use --open and rerun the benchmark.')
+                sys.exit(1)
 
     @abc.abstractmethod
     def run(self):
