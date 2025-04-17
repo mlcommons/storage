@@ -19,7 +19,7 @@ from typing import List, Dict, Union, Optional, Tuple
 from mlpstorage.cli import parse_arguments, validate_args, update_args
 from mlpstorage.config import *
 from mlpstorage.logging import setup_logging, apply_logging_options
-from mlpstorage.rules import validate_dlio_parameter, calculate_training_data_size, generate_output_location
+from mlpstorage.rules import calculate_training_data_size, generate_output_location, BenchmarkVerifier
 from mlpstorage.utils import read_config_from_file, update_nested_dict, create_nested_dict, ClusterInformation, \
     CommandExecutor
 
@@ -52,6 +52,7 @@ logger = setup_logging("MLPerfStorage")
 # Keep a log of mlperfstorage commands executed in a mlperf.history file in results_dir
 
 # Add support for datagen to use subdirectories
+# Capture cluster information and write to a json document in outputdir. Figure out how to get all clients for milvus
 
 
 def generate_mpi_prefix_cmd(mpi_cmd, hosts, num_processes, oversubscribe, allow_run_as_root):
@@ -80,6 +81,7 @@ class Benchmark(abc.ABC):
         self.run_number = run_number
         validate_args(args)
 
+        self.benchmark_verifier = BenchmarkVerifier(self, logger=logger)
         self.cmd_executor = CommandExecutor(logger=logger, debug=args.debug)
 
     def _execute_command(self, command, print_stdout=True, print_stderr=True) -> Tuple[str, str, int]:
@@ -109,6 +111,13 @@ class Benchmark(abc.ABC):
             raise ValueError(f'No benchmark specified. Unable to generate output location')
         return generate_output_location(self, DATETIME_STR)
 
+    def verify_benchmark(self):
+        if not self.BENCHMARK_TYPE:
+            raise ValueError(f'No benchmark specified. Unable to verify benchmark')
+        valid = self.benchmark_verifier.verify()
+        if not valid:
+            logger.error(f"Benchmark verification failed. Please check the logs for details.")
+            sys.exit(1)
 
     @abc.abstractmethod
     def run(self):
@@ -127,7 +136,7 @@ class TrainingBenchmark(Benchmark):
     def __init__(self, args):
         super().__init__(args)
 
-        # This allows each command to map to a specific wrapper method. When meethods are created, repalce the default
+        # This allows each command to map to a specific wrapper method. When methods are created, replace the default
         # 'self.execute_command' with the command-specific method (like "self._datasize()")
         self.command_method_map = dict(
             datasize=self.datasize,
@@ -152,12 +161,14 @@ class TrainingBenchmark(Benchmark):
         self.run_result_output = self.generate_output_location()
 
         self.yaml_params = read_config_from_file(os.path.join(self.TRAINING_CONFIG_PATH, self.config_file))
-        self.validate_params()
 
         logger.info(f'nested: {create_nested_dict(self.params_dict)}')
         self.combined_params = update_nested_dict(self.yaml_params, create_nested_dict(self.params_dict))
 
-        self.cluster_information = ClusterInformation(hosts=self.args.hosts, username=args.ssh_username, debug=self.args.debug)
+        self.cluster_information = ClusterInformation(hosts=self.args.hosts, username=args.ssh_username,
+                                                      debug=self.args.debug)
+
+        self.verify_benchmark()
 
         logger.debug(f'yaml params: \n{pprint.pformat(self.yaml_params)}')
         logger.debug(f'combined params: \n{pprint.pformat(self.combined_params)}')
@@ -169,25 +180,6 @@ class TrainingBenchmark(Benchmark):
 
     def run(self):
         self.command_method_map[self.args.command]()
-
-    def validate_params(self):
-        # Add code here for validation processes. We do not need to validate an option is in a list as the argparse
-        #  option "choices" accomplishes this for us.
-        validation_results = dict()
-        any_non_closed = False
-        if self.params_dict:
-            for param, value in self.params_dict.items():
-                validation_results[param] = [self.args.model, value, validate_dlio_parameter(self.args.model, param, value)]
-                if validation_results[param][2] != PARAM_VALIDATION.CLOSED:
-                    any_non_closed = True
-
-        if any_non_closed:
-            error_string = "\n\t".join([f"{p} = {v[1]}" for p, v in validation_results.items()])
-            logger.error(f'\nNot all parameters allowed in closed submission: \n'
-                                  f'\t{error_string}')
-            if not self.args.allow_invalid_params:
-                print("Invalid parameters found. Please check the command and parameters.")
-                sys.exit(1)
 
     def generate_command(self):
         cmd = ""
@@ -299,6 +291,8 @@ class VectorDBBenchmark(Benchmark):
         self.config_name = args.config if hasattr(args, 'config') and args.config else "default"
         self.yaml_params = read_config_from_file(os.path.join(self.config_path, f"{self.config_name}.yaml"))
         self.run_result_output = self.generate_output_location()
+
+        self.verify_benchmark()
         
         logger.status(f'Instantiated the VectorDB Benchmark...')
         

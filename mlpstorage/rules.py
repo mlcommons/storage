@@ -4,30 +4,75 @@ from datetime import datetime
 from .config import MODELS, PARAM_VALIDATION, MAX_READ_THREADS_TRAINING, LLM_MODELS, MAX_NUM_FILES_TRAIN, BENCHMARK_TYPES
 
 
-def validate_dlio_parameter(model, param, value):
-    """
-    This function applies rules to the allowed changeable dlio parameters.
-    """
-    if model in MODELS:
-        # Allowed to change data_folder and number of files to train depending on memory requirements
-        if param.startswith('dataset'):
-            left, right = param.split('.')
-            if right in ('data_folder', 'num_files_train'):
-                # TODO: Add check of min num_files for given memory config
-                return PARAM_VALIDATION.CLOSED
+class BenchmarkVerifier:
 
-        # Allowed to set number of read threads
-        if param.startswith('reader'):
-            left, right = param.split('.')
-            if right == "read_threads":
-                if 0 < int(value) < MAX_READ_THREADS_TRAINING:
+    def __init__(self, benchmark, logger):
+        self.benchmark = benchmark
+        self.logger = logger
+
+    def verify(self):
+        # Training Verification
+        if self.benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.training:
+            return self._verify_training_params()
+
+        elif self.benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.vector_database:
+            return self._verify_vector_database_params()
+
+    def _verify_training_params(self):
+        # Add code here for validation processes. We do not need to validate an option is in a list as the argparse
+        #  option "choices" accomplishes this for us.
+
+        # We will walk through all the params and see if they're valid for open, closed, or invalid.
+        # Then we compare the set of validations against open/closed and exit if not a valid configuration.
+        validation_results = dict()
+
+        any_non_closed = False
+        if self.benchmark.params_dict:
+            for param, value in self.benchmark.params_dict.items():
+                param_validation = self._verify_training_optional_param(self.benchmark.args.model, param, value)
+                validation_results[param] = [self.benchmark.args.model, value, param_validation]
+                if validation_results[param][2] != PARAM_VALIDATION.CLOSED:
+                    any_non_closed = True
+
+        if any_non_closed:
+            error_string = "\n\t".join([f"{p} = {v[1]}" for p, v in validation_results.items()])
+            self.logger.error(f'\nNot all parameters allowed in closed submission: \n'
+                                  f'\t{error_string}')
+            if not self.benchmark.args.allow_invalid_params:
+                self.logger.error("Invalid parameters found. Please check the command and parameters.")
+                return False
+
+        return True
+
+    @staticmethod
+    def _verify_training_optional_param(model, param, value):
+        if model in MODELS:
+            # Allowed to change data_folder and number of files to train depending on memory requirements
+            if param.startswith('dataset'):
+                left, right = param.split('.')
+                if right in ('data_folder', 'num_files_train'):
+                    # TODO: Add check of min num_files for given memory config
                     return PARAM_VALIDATION.CLOSED
 
-    elif model in LLM_MODELS:
-        # TODO: Define params that can be modified in closed
-        pass
+            # Allowed to set number of read threads
+            if param.startswith('reader'):
+                left, right = param.split('.')
+                if right == "read_threads":
+                    if 0 < int(value) < MAX_READ_THREADS_TRAINING:
+                        return PARAM_VALIDATION.CLOSED
 
-    return PARAM_VALIDATION.INVALID
+    @staticmethod
+    def _verify_checkpointing_optional_param(model, param, value):
+        if model in LLM_MODELS:
+            # TODO: Define params that can be modified in closed
+            pass
+
+        # Defaulting to invalid until we define what can be changed in closed.
+        return PARAM_VALIDATION.INVALID
+
+    def _verify_vector_database_params(self):
+        # TODO: Implement validation for vector database parameters.
+        return True
 
 
 def calculate_training_data_size(args, cluster_information, dataset_params, reader_params, logger):
