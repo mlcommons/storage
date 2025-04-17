@@ -1,4 +1,7 @@
-from .config import MODELS, PARAM_VALIDATION, MAX_READ_THREADS_TRAINING, LLM_MODELS, MAX_NUM_FILES_TRAIN
+import os
+
+from datetime import datetime
+from .config import MODELS, PARAM_VALIDATION, MAX_READ_THREADS_TRAINING, LLM_MODELS, MAX_NUM_FILES_TRAIN, BENCHMARK_TYPES
 
 
 def validate_dlio_parameter(model, param, value):
@@ -93,3 +96,63 @@ def calculate_training_data_size(args, cluster_information, dataset_params, read
         logger.result(f'Minimum file count dictated by 500 step requirement of given accelerator count and batch size.')
 
     return required_file_count, required_subfolders_count, required_samples_per_file
+
+
+def generate_output_location(benchmark, datetime_str=None, **kwargs):
+    """
+    Generate a standardized output location for benchmark results.
+
+    Output structure follows this pattern:
+    RESULTS_DIR:
+      <benchmark_name>:
+        <command>:
+            <subcommand> (Optional)
+                <datetime>:
+                    run_<run_number>
+
+    Args:
+        benchmark (Benchmark): benchmark (e.g., 'training', 'vectordb', 'checkpoint')
+        datetime_str (str, optional): Datetime string for the run. If None, current datetime is used.
+        **kwargs: Additional benchmark-specific parameters:
+            - model (str): For training benchmarks, the model name (e.g., 'unet3d', 'resnet50')
+            - category (str): For vectordb benchmarks, the category (e.g., 'throughput', 'latency')
+
+    Returns:
+        str: The full path to the output location
+    """
+    if datetime_str is None:
+        datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    output_location = benchmark.args.results_dir
+    if hasattr(benchmark, "run_number"):
+        run_number = benchmark.run_number
+    else:
+        run_number = 0
+
+    # Handle different benchmark types
+    if benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.training:
+        if not benchmark.args.get("model", None):
+            raise ValueError("Model name is required for training benchmark output location")
+
+        output_location = os.path.join(output_location, benchmark.args.model)
+        output_location = os.path.join(output_location, benchmark.args.command)
+        output_location = os.path.join(output_location, datetime_str)
+
+        if benchmark.args.command == "run":
+            output_location = os.path.join(output_location, f"run_{run_number}")
+
+    elif benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.vector_database:
+        output_location = os.path.join(output_location, "vectordb")
+        output_location = os.path.join(output_location, benchmark.args.command)
+        output_location = os.path.join(output_location, datetime_str)
+
+        if benchmark.args.command == "run-search":
+            output_location = os.path.join(output_location, f"run_{run_number}")
+
+    elif benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.checkpointing:
+        raise NotImplementedError
+
+    else:
+        raise NotImplementedError
+
+    return output_location

@@ -19,7 +19,7 @@ from typing import List, Dict, Union, Optional, Tuple
 from mlpstorage.cli import parse_arguments, validate_args, update_args
 from mlpstorage.config import *
 from mlpstorage.logging import setup_logging, apply_logging_options
-from mlpstorage.rules import validate_dlio_parameter, calculate_training_data_size
+from mlpstorage.rules import validate_dlio_parameter, calculate_training_data_size, generate_output_location
 from mlpstorage.utils import read_config_from_file, update_nested_dict, create_nested_dict, ClusterInformation, \
     CommandExecutor
 
@@ -73,6 +73,8 @@ def generate_mpi_prefix_cmd(mpi_cmd, hosts, num_processes, oversubscribe, allow_
 
 class Benchmark(abc.ABC):
 
+    BENCHMARK_TYPE = None
+
     def __init__(self, args, run_number=0):
         self.args = args
         self.run_number = run_number
@@ -102,6 +104,12 @@ class Benchmark(abc.ABC):
                                                                     print_stdout=print_stdout, print_stderr=print_stderr)
             return stdout, stderr, return_code
 
+    def _generate_output_location(self):
+        if not self.BENCHMARK_TYPE:
+            raise ValueError(f'No benchmark specified. Unable to generate output location')
+        return generate_output_location(self, DATETIME_STR)
+
+
     @abc.abstractmethod
     def run(self):
         """
@@ -114,6 +122,7 @@ class Benchmark(abc.ABC):
 class TrainingBenchmark(Benchmark):
 
     TRAINING_CONFIG_PATH = "dlio/training"
+    BENCHMARK_TYPE = BENCHMARK_TYPES.training
 
     def __init__(self, args):
         super().__init__(args)
@@ -156,44 +165,7 @@ class TrainingBenchmark(Benchmark):
         logger.status(f'Instantiated the Training Benchmark...')
 
     def generate_output_location(self):
-        """
-        Output structure:
-        RESULTS_DIR:
-          unet3d:
-            training:
-              DATETIME:
-                run_1
-                ...
-                run_5
-            datagen:
-              DATETIME:
-                log_files
-          llama3
-            checkpoint
-              DATETIME:
-                run_1
-                ...
-                run_10
-            recovery
-              DATETIME:
-                run_1
-                ...
-                run_5
-          vectordb:
-            throughput:
-
-        If benchmark.py is not doing multiple runs then the results will be in a directory run_0
-        :return:
-        """
-        output_location = self.args.results_dir
-        output_location = os.path.join(output_location, self.args.model)
-        output_location = os.path.join(output_location, self.args.command)
-        output_location = os.path.join(output_location, DATETIME_STR)
-
-        if self.args.command == "run":
-            output_location = os.path.join(output_location, f"run_{self.run_number}")
-
-        return output_location
+        return self._generate_output_location()
 
     def run(self):
         self.command_method_map[self.args.command]()
@@ -312,6 +284,7 @@ class VectorDBBenchmark(Benchmark):
 
     VECTORDB_CONFIG_PATH = "vectordbbench"
     VDBBENCH_BIN = "vdbbench"
+    BENCHMARK_TYPE = BENCHMARK_TYPES.vector_database
 
     def __init__(self, args):
         super().__init__(args)
@@ -333,15 +306,7 @@ class VectorDBBenchmark(Benchmark):
         """
         Generate the output directory structure for vector database benchmark results
         """
-        output_location = self.args.results_dir
-        output_location = os.path.join(output_location, "vectordb")
-        output_location = os.path.join(output_location, self.command)
-        output_location = os.path.join(output_location, DATETIME_STR)
-        
-        if self.command == "run" and hasattr(self, 'run_number'):
-            output_location = os.path.join(output_location, f"run_{self.run_number}")
-            
-        return output_location
+        return self._generate_output_location()
     
     def run(self):
         """Execute the appropriate command based on the command_method_map"""

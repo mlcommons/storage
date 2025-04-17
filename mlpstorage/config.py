@@ -60,6 +60,12 @@ class PARAM_VALIDATION(enum.Enum):
     OPEN = "open"
     INVALID = "invalid"
 
+
+class BENCHMARK_TYPES(enum.Enum):
+    training = "training"
+    vector_database = "vector_database"
+    checkpointing = "checkpointing"
+
 # Enum for supported search metric types of COSINE, L2, IP
 SEARCH_METRICS = ["COSINE", "L2", "IP"]
 
