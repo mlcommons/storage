@@ -1,6 +1,7 @@
 import datetime
 import enum
 import logging
+import sys
 
 # Define the custom log levels
 CRITICAL = logging.CRITICAL
@@ -132,7 +133,14 @@ def plaid(self, msg, *args, **kwargs):
     self._log(PLAID, msg, args, **kwargs)
 
 
-class ColoredFormatter(logging.Formatter):
+class ColoredStandardFormatter(logging.Formatter):
+    def format(self, record):
+        formatted_time = f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        color = get_level_color(record.levelno)
+        return f"{color}{formatted_time}|{record.levelname}: {record.getMessage()}{COLORS['normal'].value}"
+
+
+class ColoredDebugFormatter(logging.Formatter):
     def format(self, record):
         formatted_time = f"{datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         color = get_level_color(record.levelno)
@@ -158,9 +166,29 @@ def setup_logging(name=__name__, stream_log_level=DEFAULT_STREAM_LOG_LEVEL):
     _logger.setLevel(logging.DEBUG)
 
     stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(ColoredFormatter())
+    stream_handler.setFormatter(ColoredStandardFormatter())
     stream_handler.setLevel(stream_log_level)  # Adjust this level as needed
     _logger.addHandler(stream_handler)
 
     return _logger
 
+
+def apply_logging_options(logger, args):
+    # Set log level to VERBOSE unless the current log level is higher. In which case set it 1 level higher
+    stream_handlers = [h for h in logger.handlers if not hasattr(h, 'baseFilename')]
+    log_levels = sorted([v for k, v in sys.modules[__name__].__dict__.items() if type(v) is int])
+
+    if args.stream_log_level:
+        for stream_handler in stream_handlers:
+            stream_handler.setLevel(args.stream_log_level)
+
+    if args.verbose:
+        for stream_handler in stream_handlers:
+            if stream_handler.level > VERBOSE:
+                stream_handler.setLevel(VERBOSE)
+
+    if args.debug:
+        for stream_handler in stream_handlers:
+            stream_handler.setFormatter(ColoredDebugFormatter())
+            if stream_handler.level > DEBUG:
+                stream_handler.setLevel(DEBUG)
