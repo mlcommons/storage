@@ -3,18 +3,25 @@
 
 import abc
 import concurrent.futures
+import io
 import os.path
 import pprint
+import select
+import shlex
+import signal
 import subprocess
 import sys
+import time
 
 from os.path import dirname
+from typing import List, Dict, Union, Optional, Tuple
 
 from mlpstorage.cli import parse_arguments, validate_args, update_args
 from mlpstorage.config import *
-from mlpstorage.logging import setup_logging
+from mlpstorage.logging import setup_logging, apply_logging_options
 from mlpstorage.rules import validate_dlio_parameter, calculate_training_data_size
-from mlpstorage.utils import read_config_from_file, update_nested_dict, create_nested_dict, ClusterInformation
+from mlpstorage.utils import read_config_from_file, update_nested_dict, create_nested_dict, ClusterInformation, \
+    CommandExecutor
 
 logger = setup_logging("MLPerfStorage")
 
@@ -71,6 +78,30 @@ class Benchmark(abc.ABC):
         self.run_number = run_number
         validate_args(args)
 
+        self.cmd_executor = CommandExecutor(logger=logger, debug=args.debug)
+
+    def _execute_command(self, command, print_stdout=True, print_stderr=True) -> Tuple[str, str, int]:
+        """
+        Execute the given command and return stdout, stderr, and return code.
+        :param command: Command to execute
+        :param print_stdout: Whether to print stdout
+        :param print_stderr: Whether to print stderr
+        :return: (stdout, stderr, return code)
+        """
+
+        if self.args.what_if:
+            logger.debug(f'Executing command in --what-if mode means no execution will be performed.')
+            log_message = f'What-if mode: \nCommand: {command}'
+            if self.args.debug:
+                log_message += f'\n\nParameters: \n{pprint.pformat(vars(self.args))}'
+            logger.info(log_message)
+            return "", "", 0
+        else:
+            watch_signals = {signal.SIGINT, signal.SIGTERM}
+            stdout, stderr, return_code = self.cmd_executor.execute(command, watch_signals=watch_signals,
+                                                                    print_stdout=print_stdout, print_stderr=print_stderr)
+            return stdout, stderr, return_code
+
     @abc.abstractmethod
     def run(self):
         """
@@ -91,10 +122,10 @@ class TrainingBenchmark(Benchmark):
         # 'self.execute_command' with the command-specific method (like "self._datasize()")
         self.command_method_map = dict(
             datasize=self.datasize,
-            datagen=self.execute_command,
-            run=self.execute_command,
-            configview=self.execute_command,
-            reportgen=self.execute_command,
+            datagen=self._execute_command,
+            run=self._execute_command,
+            configview=self._execute_command,
+            reportgen=self._execute_command,
         )
 
         self.per_host_mem_kB = None
@@ -261,18 +292,7 @@ class TrainingBenchmark(Benchmark):
 
     def execute_command(self):
         cmd = self.generate_command()
-        if self.args.what_if:
-            logger.info(f'What-if mode: \n'
-                        f'CMD: {cmd}\n\n'
-                        f'Parameters: \n{pprint.pformat(self.combined_params)}')
-            return
-
-        if self.args.debug:
-            logger.status(f'Executing: {cmd}')
-            return
-
-        logger.info(f'Executing: {cmd}')
-        subprocess.call(cmd, shell=True)
+        self._execute_command(cmd)
 
     def datasize(self):
         num_files_train, num_subfolders_train, num_samples_per_file = calculate_training_data_size(
@@ -295,19 +315,16 @@ class VectorDBBenchmark(Benchmark):
 
     def __init__(self, args):
         super().__init__(args)
+        self.command_method_map = {
+            "datagen": self.execute_datagen,
+            "run-search": self.execute_run
+        }
 
-        self.command_method_map = dict(
-            datagen=self.execute_datagen,
-            run=self.execute_run
-        )
         self.command = args.command
         self.category = args.category if hasattr(args, 'category') else None
-
         self.config_path = os.path.join(CONFIGS_ROOT_DIR, self.VECTORDB_CONFIG_PATH)
         self.config_name = args.config if hasattr(args, 'config') and args.config else "default"
-
         self.yaml_params = read_config_from_file(os.path.join(self.config_path, f"{self.config_name}.yaml"))
-        
         self.run_result_output = self.generate_output_location()
         
         logger.status(f'Instantiated the VectorDB Benchmark...')
@@ -329,6 +346,7 @@ class VectorDBBenchmark(Benchmark):
     def run(self):
         """Execute the appropriate command based on the command_method_map"""
         if self.command in self.command_method_map:
+            logger.verboser(f"Executing command: {self.command}")
             self.command_method_map[self.command]()
         else:
             logger.error(f"Unsupported command: {self.command}")
@@ -373,8 +391,8 @@ class VectorDBBenchmark(Benchmark):
         """Execute the data generation command using load_vdb.py"""
         cmd = self.build_command("load-vdb")
             
-        logger.info(f'Executing data generation: {cmd}')
-        self.execute_command(cmd)
+        logger.verbose(f'Executing data generation.')
+        self._execute_command(cmd)
     
     def execute_run(self):
         """Execute the benchmark run command using simple_bench.py"""
@@ -386,25 +404,15 @@ class VectorDBBenchmark(Benchmark):
         }
         
         cmd = self.build_command("vdbbench", additional_params)
-        
-        logger.info(f'Executing benchmark run: {cmd}')
-        self.execute_command(cmd)
-
-    def execute_command(self, cmd):
-        if self.args.what_if:
-            logger.info(f'What-if mode: \n'
-                        f'CMD: {cmd}\n\n'
-                        f'Parameters: \n{pprint.pformat(vars(self.args))}')
-            return
-        logger.debug(f'Executing: {cmd}')
-        subprocess.call(cmd, shell=True)
+        logger.verbose(f'Execuging benchmark run.')
+        self._execute_command(cmd)
 
 
 # Main function to handle command-line arguments and invoke the corresponding function.
 def main():
     args = parse_arguments()
 
-    logger.handlers[0].setLevel(args.stream_log_level)
+    apply_logging_options(logger, args)
 
     validate_args(args)
     update_args(args)
