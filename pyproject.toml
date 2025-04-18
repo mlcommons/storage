@@ -25,4 +25,4 @@ dependencies = [
 packages = {find = {}}
 
 [project.scripts]
-mlpstorage = 'mlpstorage.benchmark:main'
+mlpstorage = 'mlpstorage.main:main'
