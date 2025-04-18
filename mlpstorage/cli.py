@@ -61,7 +61,7 @@ help_messages = dict(
     vdb_datagen_batch_size=f"Batch size for data insertion.",
     vdb_datagen_chunk_size="Number of vectors to generate in each insertion chunk. Tune for memory management.",
 
-    vdb_run_benchmark="Run the VectorDB benchmark with the specified parameters.",
+    vdb_run_search="Run the VectorDB Search benchmark with the specified parameters.",
     vdb_datagen="Generate a dataset for the VectorDB benchmark.",
     num_query_processes=f"Number of parallel processes to use for query execution.",
     query_batch_size=f"Number of vectors to query in each batch (per process).",
@@ -207,9 +207,9 @@ def add_vectordb_arguments(vectordb_parsers):
     vectordb_parsers.required = True
 
     datagen = vectordb_subparsers.add_parser('datagen', help=help_messages['vdb_datagen'])
-    run_benchmark = vectordb_subparsers.add_parser('run', help=help_messages['vdb_run_benchmark'])
+    run_search = vectordb_subparsers.add_parser('run-search', help=help_messages['vdb_run_search'])
 
-    for _parser in [datagen, run_benchmark]:
+    for _parser in [datagen, run_search]:
         _parser.add_argument('--host', '-s', type=str, default="127.0.0.1", help=help_messages['db_ip_address'])
         _parser.add_argument('--port', '-p', type=int, default=19530, help=help_messages['db_port'])
         _parser.add_argument('--config')
@@ -225,16 +225,16 @@ def add_vectordb_arguments(vectordb_parsers):
     datagen.add_argument('--chunk-size', type=int, default=10_000, help=help_messages['vdb_datagen_chunk_size'])
 
     # Add specific VectorDB benchmark options here
-    run_benchmark.add_argument('--num-query-processes', type=int, default=1, help=help_messages['num_query_processes'])
-    run_benchmark.add_argument('--batch-size', type=int, default=1, help=help_messages['query_batch_size'])
+    run_search.add_argument('--num-query-processes', type=int, default=1, help=help_messages['num_query_processes'])
+    run_search.add_argument('--batch-size', type=int, default=1, help=help_messages['query_batch_size'])
 
-    end_group = run_benchmark.add_argument_group("Provide an end condition of runtime (in seconds) or total number of "
-                                                 "queries to execute. The default is to run for 60 seconds")
+    end_group = run_search.add_argument_group("Provide an end condition of runtime (in seconds) or total number of "
+                                              "queries to execute. The default is to run for 60 seconds")
     end_condition = end_group.add_mutually_exclusive_group()
     end_condition.add_argument("--runtime", type=int, help="Run for a specific duration in seconds")
     end_condition.add_argument("--queries", type=int, help="Run for a specific number of queries")
 
-    for _parser in [datagen, run_benchmark]:
+    for _parser in [datagen, run_search]:
         add_universal_arguments(_parser)
 
 
