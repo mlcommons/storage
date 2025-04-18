@@ -314,3 +314,20 @@ class ClusterInformation:
         except Exception as e:
             print(f"Error getting memory information for host {host}: {e}")
         return memory_info
+
+
+def generate_mpi_prefix_cmd(mpi_cmd, hosts, num_processes, oversubscribe, allow_run_as_root):
+    if mpi_cmd == MPIRUN:
+        prefix = f"{MPI_RUN_BIN} -n {num_processes} -host {','.join(hosts)}"
+    elif mpi_cmd == MPIEXEC:
+        raise NotImplementedError(f"Unsupported MPI command: {mpi_cmd}")
+    else:
+        raise ValueError(f"Unsupported MPI command: {mpi_cmd}")
+
+    if oversubscribe:
+        prefix += " --oversubscribe"
+
+    if allow_run_as_root:
+        prefix += " --allow-run-as-root"
+
+    return prefix

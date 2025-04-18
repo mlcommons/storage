@@ -1,3 +1,4 @@
+import collections
 import datetime
 import enum
 import logging
@@ -21,6 +22,8 @@ LUDICROUS = 5
 PLAID = 3
 NOTSET = logging.NOTSET
 
+DEFAULT_STREAM_LOG_LEVEL = logging.INFO
+
 custom_levels = {
     'RESULT': RESULT,
     'STATUS': STATUS,
@@ -31,6 +34,7 @@ custom_levels = {
     'LUDICROUS': LUDICROUS,
     'PLAID': PLAID
 }
+
 
 # Custom colors for various logging levels
 class COLORS(enum.Enum):
@@ -90,47 +94,18 @@ def get_level_color(level):
     return level_to_color_map.get(level, COLORS.normal).value
 
 
-for level_name, level_num in custom_levels.items():
-    logging.addLevelName(level_num, level_name)
+def log_level_factory(level_name):
+    level_num = custom_levels.get(level_name, logging.NOTSET)
+
+    def log_func(self, message, *args, **kwargs):
+        self._log(level_num, message, args, **kwargs)
+    return log_func
 
 
-# Create a custom logger
-logger = logging.getLogger('custom_logger')
-DEFAULT_STREAM_LOG_LEVEL = logging.DEBUG
-logger.setLevel(DEFAULT_STREAM_LOG_LEVEL)
-
-
-def status(self, message, *args, **kwargs):
-    self._log(STATUS, message, args, **kwargs)
-
-
-def result(self, msg, *args, **kwargs):
-    self._log(RESULT, msg, args, **kwargs)
-
-
-# Define the custom log level methods
-def verbose(self, message, *args, **kwargs):
-    self._log(VERBOSE, message, args, **kwargs)
-
-
-def verboser(self, message, *args, **kwargs):
-    self._log(VERBOSER, message, args, **kwargs)
-
-
-def verbosest(self, message, *args, **kwargs):
-    self._log(VERBOSEST, message, args, **kwargs)
-
-
-def ridiculous(self, msg, *args, **kwargs):
-    self._log(RIDICULOUS, msg, args, **kwargs)
-
-
-def ludicrous(self, msg, *args, **kwargs):
-    self._log(LUDICROUS, msg, args, **kwargs)
-
-
-def plaid(self, msg, *args, **kwargs):
-    self._log(PLAID, msg, args, **kwargs)
+# Add the custom levels to the logger
+for custom_name, custom_num in custom_levels.items():
+    logging.addLevelName(custom_num, custom_name)
+    setattr(logging.Logger, custom_name.lower(), log_level_factory(custom_name))
 
 
 class ColoredStandardFormatter(logging.Formatter):
@@ -148,16 +123,6 @@ class ColoredDebugFormatter(logging.Formatter):
                f"{record.getMessage()}{COLORS['normal'].value}"
 
 
-logging.Logger.result = result
-logging.Logger.status = status
-logging.Logger.verbose = verbose
-logging.Logger.verboser = verboser
-logging.Logger.verbosest = verbosest
-logging.Logger.ridiculous = ridiculous
-logging.Logger.ludicrous = ludicrous
-logging.Logger.plaid = plaid
-
-
 def setup_logging(name=__name__, stream_log_level=DEFAULT_STREAM_LOG_LEVEL):
     if isinstance(stream_log_level, str):
         stream_log_level = logging.getLevelName(stream_log_level.upper())
@@ -173,9 +138,9 @@ def setup_logging(name=__name__, stream_log_level=DEFAULT_STREAM_LOG_LEVEL):
     return _logger
 
 
-def apply_logging_options(logger, args):
+def apply_logging_options(_logger, args):
     # Set log level to VERBOSE unless the current log level is higher. In which case set it 1 level higher
-    stream_handlers = [h for h in logger.handlers if not hasattr(h, 'baseFilename')]
+    stream_handlers = [h for h in _logger.handlers if not hasattr(h, 'baseFilename')]
     log_levels = sorted([v for k, v in sys.modules[__name__].__dict__.items() if type(v) is int])
 
     if args.stream_log_level:
