@@ -63,6 +63,7 @@ help_messages = dict(
 
     vdb_run_search="Run the VectorDB Search benchmark with the specified parameters.",
     vdb_datagen="Generate a dataset for the VectorDB benchmark.",
+    vdb_report_count="Number of batches between print statements",
     num_query_processes=f"Number of parallel processes to use for query execution.",
     query_batch_size=f"Number of vectors to query in each batch (per process).",
 
@@ -221,12 +222,14 @@ def add_vectordb_arguments(vectordb_parsers):
     datagen.add_argument('--vector-dtype', choices=VECTOR_DTYPES, default="FLOAT_VECTOR", help=help_messages['vector_dtype'])
     datagen.add_argument('--num-vectors', type=int, default=1_000_000, help=help_messages['num_vectors'])
     datagen.add_argument('--distribution', choices=DISTRIBUTIONS, default="uniform", help=help_messages['distribution'])
-    datagen.add_argument('--batch-size', type=int, default=10, help=help_messages['vdb_datagen_batch_size'])
+    datagen.add_argument('--batch-size', type=int, default=1_000, help=help_messages['vdb_datagen_batch_size'])
     datagen.add_argument('--chunk-size', type=int, default=10_000, help=help_messages['vdb_datagen_chunk_size'])
+    datagen.add_argument("--force", action="store_true", help="Force recreate collection if it exists")
 
     # Add specific VectorDB benchmark options here
     run_search.add_argument('--num-query-processes', type=int, default=1, help=help_messages['num_query_processes'])
     run_search.add_argument('--batch-size', type=int, default=1, help=help_messages['query_batch_size'])
+    run_search.add_argument('--report-count', type=int, default=100, help=help_messages['vdb_report_count'])
 
     end_group = run_search.add_argument_group("Provide an end condition of runtime (in seconds) or total number of "
                                               "queries to execute. The default is to run for 60 seconds")
@@ -258,8 +261,9 @@ def update_args(args):
             setattr(args, 'num_processes', int(getattr(args, arg)))
             break
 
-    if not args.runtime and not args.queries:
-        args.runtime = 60  # Default runtime if not provided
+    if hasattr(args, 'runtime') and hasattr(args, 'queries'):
+        if not args.runtime and not args.queries:
+            args.runtime = 60  # Default runtime if not provided
 
 
 if __name__ == "__main__":
