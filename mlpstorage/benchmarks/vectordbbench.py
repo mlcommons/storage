@@ -1,4 +1,5 @@
 import os
+import sys
 
 from mlpstorage.benchmarks.base import Benchmark
 from mlpstorage.config import CONFIGS_ROOT_DIR, BENCHMARK_TYPES
@@ -63,7 +64,10 @@ class VectorDBBenchmark(Benchmark):
 
         cmd = f"{script_name}"
         cmd += f" --config {config_file}"
-        cmd += f" --output-dir {self.run_result_output}"
+
+        if script_name == "load-vdb":
+            if self.args.force:
+                cmd += " --force"
 
         # Add host and port if provided (common to both datagen and run)
         if hasattr(self.args, 'host') and self.args.host:
@@ -81,7 +85,16 @@ class VectorDBBenchmark(Benchmark):
 
     def execute_datagen(self):
         """Execute the data generation command using load_vdb.py"""
-        cmd = self.build_command("load-vdb")
+        additional_params = {
+            "dimension": self.args.dimension,
+            "num-shards": self.args.num_shards,
+            "vector-dtype": self.args.vector_dtype,
+            "num-vectors": self.args.num_vectors,
+            "distribution": self.args.distribution,
+            "batch-size": self.args.batch_size,
+            "chunk-size": self.args.chunk_size,
+        }
+        cmd = self.build_command("load-vdb", additional_params)
 
         self.logger.verbose(f'Executing data generation.')
         self._execute_command(cmd)
@@ -91,8 +104,11 @@ class VectorDBBenchmark(Benchmark):
         # Define additional parameters specific to the run command
         additional_params = {
             "processes": self.args.num_query_processes,
+            "batch-size": self.args.batch_size,
             "runtime": self.args.runtime,
             "queries": self.args.queries,
+            "report-count": self.args.report_count,
+            "output-dir": self.run_result_output,
         }
 
         cmd = self.build_command("vdbbench", additional_params)
