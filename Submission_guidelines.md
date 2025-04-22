@@ -437,17 +437,60 @@ The ``<system-name>.json`` file must be pass a validation check with the JSON sc
 
 The goal of the pdf is to complement the JSON file, providing additional detail on the system to enable full reproduction by a third party. We encourage submitters to add details that are more easily captured by diagrams and text description, rather than a JSON.
 
-This file is supposed to include everything that a third party would need in order to recreate the results in the submission, including product model numbers or hardware config details, unit counts of drives and/or components, system and network topologies, software used with version numbers, and any non-default configuration options used by any of the above.
-
-The following *recommended* structure of systems.pdf provides a starting point and is optional. Submitters are free to adjust this structure as they see fit.
+This file is should include everything that a third party would need in order to recreate the results in the submission, including product model numbers or hardware config details, unit counts of drives and/or components, system and network topologies, software used with version numbers, and any non-default configuration options used by any of the above.
 
 A great example of a system description pdf can be found [here](https://github.com/mlcommons/storage_results_v0.5/tree/main/closed/DDN/systems).
+
+The following information is required to be included in the system description PDF:
+
+
+**Cover page**
+
+- System name of the submission
+- Submitter name
+- Submission date
+- Version of the benchmark
+- Solution type of the submission
+- Submission division (OPEN or CLOSED)
+
+**Mandatory Power requirements**
+
+- Systems that require customer provisioning of power (solutions of type "") shall include a “Power Requirements Table” that lists all hardware devices required to operate the storage system. Shared network equipment also used for client network communication and optional storage management systems do not need to be included. The power requirements table shall include every PSU for each system component, along with the PSU nameplate rated power, and for redundant PSUs, the provisioned power.
+
+Two examples of a power requirements tables are shown below:
+
+**Power Requirements Table** (large system example)
+
+| System component     | Power supply unit | Nameplate rated power | Design power   |
+| -------------------- | ----------------- | --------------------- | -------------- |
+| Storage controller 1 | Power supply 1    | 1200 watts            | 3600 watts     |
+|                      | Power supply 2    | 1200 watts            |                |
+|                      | Power supply 3    | 1200 watts            |                |
+|                      | Power supply 4    | 1200 watts            |                |
+| Storage shelf 1      | Power supply 1    | 1000 watts            | 1000 watts     |
+|                      | Power supply 2    | 1000 watts            |                |
+| Network switch 1     | Power supply 1    | 1200 watts            | 1200 watts     |
+|                      | Power supply 2    | 1200 watts            |                |
+| **Totals**           |                   | **9200 watts**        | **5800 watts** |
+
+**Power Requirements Table** (Direct-attached media system example)
+
+| System component     | Power supply unit | Nameplate rated power | Design power   |
+| -------------------- | ----------------- | --------------------- | -------------- |
+| NVMe SSD 1           | 12VDC supply      | 10 watts              | 10 watts       |
+|                      | 3.3VDC supply     | 2 watts               | 2 watts        |
+| **Totals**           |                   | **12 watts**          | **12 watts**   |
+
+System component and power supply unit names in the above tables are examples. Consistent names should be used in bill-of-material documentation, system diagrams and descriptive text.
+
+**Optional information**
+
+The following *recommended* structure of systems.pdf provides a starting point for additional optional information. Submitters are free to adjust this structure as they see fit.
 
 If the submission is for a commercial system, a pdf of the product spec document can add significant value.  If it is a system that does not have a spec document (e.g., a research system, HPC etc), or the product spec pdf doesn’t include all the required detail, the document can contain (all these are optional):
 
 - Recommended: High-level system diagram e.g., showing the ``host node``(s), storage system main components, and network topology used when connecting everything (e.g., spine-and-leaf, butterfly, etc.), and any non-default configuration options that were set during the benchmark run.
 - Optional: Additional text description of the system, if the information is not captured in the JSON, e.g., the storage system’s components (make and model, optional features, capabilities, etc) and all configuration settings that are relevant to ML/AI benchmarks.  If the make/model doesn’t specify all the components of the hardware platform it is running on, eg: it’s an Software-Defined-Storage product, then those should be included here (just like the client component list).
-- Optional: power requirements – If the system requires the physical deployment of hardware, consider including the “not to exceed” power requirements for the system to run the MLCommons storage benchmark workload. Additional information can include the total nameplate power rating and the peak power consumption during the benchmark.
 - Optional: physical requirements – If the system requires the physical deployment of hardware, consider including the number of rack units, required supporting equipment, and any physical constraints on how the equipment must be installed into an industry-standard rack, such as required spacing, weight constraints, etc. We recommended the following three categories for the text description:
   1. Software, 
   2. Hardware, and
