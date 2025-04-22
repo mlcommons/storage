@@ -11,7 +11,7 @@ dataset:
   dimension: 1536
   distribution: uniform
   batch_size: 10
-  chunk_size: 1000
+  chunk_size: 100_000
   num_shards: 1
   vector_dtype: FLOAT_VECTOR
 
