@@ -443,10 +443,10 @@ This file is should include everything that a third party would need in order to
 
 A great example of a system description pdf can be found [here](https://github.com/mlcommons/storage_results_v0.5/tree/main/closed/DDN/systems).
 
-The following information is required to be included in the system description PDF:
-
 
 **Cover page**
+
+The following information is required to be included in the system description PDF:
 
 - System name of the submission
 - Submitter name
@@ -457,7 +457,7 @@ The following information is required to be included in the system description P
 
 **Mandatory Power requirements**
 
-- Systems that require customer provisioning of power (for example, systems intended to be deployed in on-premises data centers or in co-located data centers) shall include a “Power Requirements Table”. Systems designed to only run in a cloud or hyperconverged environment do not have to include this table.
+Systems that require customer provisioning of power (for example, systems intended to be deployed in on-premises data centers or in co-located data centers) shall include a “Power Requirements Table”. Systems designed to only run in a cloud or hyperconverged environment do not have to include this table.
 
 The power requirements table shall list all hardware devices required to operate the storage system. Shared network equipment also used for client network communication and optional storage management systems do not need to be included. The power requirements table shall include:
 
