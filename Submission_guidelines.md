@@ -457,7 +457,7 @@ The following information is required to be included in the system description P
 
 **Mandatory Power requirements**
 
-Systems that require customer provisioning of power (for example, systems intended to be deployed in on-premises data centers or in co-located data centers) shall include a “Power Requirements Table”. Systems designed to only run in a cloud or hyperconverged environment do not have to include this table.
+Systems that require customer provisioning of power (for example, systems intended to be deployed in on-premises data centers or in co-located data centers) shall include a “Power Requirements Table”. Systems designed to only run in a cloud or hyper-converged environment do not have to include this table.
 
 The power requirements table shall list all hardware devices required to operate the storage system. Shared network equipment also used for client network communication and optional storage management systems do not need to be included. The power requirements table shall include:
 
@@ -468,7 +468,7 @@ The power requirements table shall list all hardware devices required to operate
 
 Two examples of a power requirements tables are shown below:
 
-**Power Requirements Table** (large system example)
+**Power Requirements Table** (Large system example)
 
 | System component     | Power supply unit | Nameplate rated power | Design power   |
 | -------------------- | ----------------- | --------------------- | -------------- |
