@@ -1,8 +1,9 @@
 import argparse
 import sys
 
+
 from mlpstorage.config import MIN_RANKS_STR, MODELS, ACCELERATORS, DEFAULT_HOSTS, CATEGORIES, LLM_MODELS, MPI_CMDS, \
-    EXEC_TYPE, DEFAULT_RESULTS_DIR, SEARCH_METRICS, INDEX_TYPES, VECTOR_DTYPES, DISTRIBUTIONS
+    EXEC_TYPE, DEFAULT_RESULTS_DIR, EXIT_CODE, INDEX_TYPES, VECTOR_DTYPES, DISTRIBUTIONS
 
 # TODO: Get rid of this now that I'm not repeating arguments for different subparsers?
 help_messages = dict(
@@ -63,8 +64,12 @@ help_messages = dict(
 
     vdb_run_search="Run the VectorDB Search benchmark with the specified parameters.",
     vdb_datagen="Generate a dataset for the VectorDB benchmark.",
+    vdb_report_count="Number of batches between print statements",
     num_query_processes=f"Number of parallel processes to use for query execution.",
     query_batch_size=f"Number of vectors to query in each batch (per process).",
+
+    # Reports help messages
+    output_dir=f"Directory where the benchmark report will be saved.",
 
     # MPI help messages
     mpi_bin=f"Execution type for MPI commands. Supported options: {MPI_CMDS}",
@@ -74,7 +79,7 @@ help_messages = dict(
 prog_descriptions = dict(
     training="Run the MLPerf Storage training benchmark",
     checkpointing="Run the MLPerf Storage checkpointing benchmark",
-    vectordb="Run the MLPerf Storage VectorDB benchmark",
+    vectordb="Run the MLPerf Storage Preview of a VectorDB benchmark (not available in closed submissions)",
 )
 
 def parse_arguments():
@@ -90,14 +95,21 @@ def parse_arguments():
                                                     help="Checkpointing benchmark options")
     vectordb_parsers = sub_programs.add_parser("vectordb", description=prog_descriptions['vectordb'],
                                                help="VectorDB benchmark options")
+    reports_parsers = sub_programs.add_parser("reports", help="Generate a report from benchmark results")
+    history_parsers = sub_programs.add_parser("history", help="Display benchmark history")
 
     sub_programs_map = dict(training=training_parsers,
                             checkpointing=checkpointing_parsers,
-                            vectordb=vectordb_parsers)
+                            vectordb=vectordb_parsers,
+                            reports=reports_parsers,
+                            history=history_parsers
+                            )
 
     add_training_arguments(training_parsers)
     add_checkpointing_arguments(checkpointing_parsers)
     add_vectordb_arguments(vectordb_parsers)
+    add_reports_arguments(reports_parsers)
+    add_history_arguments(history_parsers)
 
     for _parser in sub_programs_map.values():
         add_universal_arguments(_parser)
@@ -112,6 +124,9 @@ def parse_arguments():
 
     return parser.parse_args()
 
+
+# These are used by the history tracker to know if logging needs to be updated.
+logging_options = ['debug', 'verbose', 'stream_log_level']
 
 def add_universal_arguments(parser):
     standard_args = parser.add_argument_group("Standard Arguments")
@@ -221,12 +236,14 @@ def add_vectordb_arguments(vectordb_parsers):
     datagen.add_argument('--vector-dtype', choices=VECTOR_DTYPES, default="FLOAT_VECTOR", help=help_messages['vector_dtype'])
     datagen.add_argument('--num-vectors', type=int, default=1_000_000, help=help_messages['num_vectors'])
     datagen.add_argument('--distribution', choices=DISTRIBUTIONS, default="uniform", help=help_messages['distribution'])
-    datagen.add_argument('--batch-size', type=int, default=10, help=help_messages['vdb_datagen_batch_size'])
+    datagen.add_argument('--batch-size', type=int, default=1_000, help=help_messages['vdb_datagen_batch_size'])
     datagen.add_argument('--chunk-size', type=int, default=10_000, help=help_messages['vdb_datagen_chunk_size'])
+    datagen.add_argument("--force", action="store_true", help="Force recreate collection if it exists")
 
     # Add specific VectorDB benchmark options here
     run_search.add_argument('--num-query-processes', type=int, default=1, help=help_messages['num_query_processes'])
     run_search.add_argument('--batch-size', type=int, default=1, help=help_messages['query_batch_size'])
+    run_search.add_argument('--report-count', type=int, default=100, help=help_messages['vdb_report_count'])
 
     end_group = run_search.add_argument_group("Provide an end condition of runtime (in seconds) or total number of "
                                               "queries to execute. The default is to run for 60 seconds")
@@ -238,6 +255,35 @@ def add_vectordb_arguments(vectordb_parsers):
         add_universal_arguments(_parser)
 
 
+def add_reports_arguments(reports_parsers):
+    # Reporting
+
+    reports_subparsers = reports_parsers.add_subparsers(dest="command", required=True, help="Sub-commands")
+    reports_parsers.required = True
+
+    reportgen = reports_subparsers.add_parser('reportgen', help=help_messages['reportgen'])
+
+    reportgen.add_argument('--output-dir', type=str, help=help_messages['output_dir'])
+    reportgen.add_argument('--remove-deleted', action="store_true", help="Remove deleted tests")
+    add_universal_arguments(reportgen)
+
+
+def add_history_arguments(history_parsers):
+    # History
+    history_subparsers = history_parsers.add_subparsers(dest="command", required=True, help="Sub-commands")
+    history_parsers.required = True
+
+    history = history_subparsers.add_parser('show', help="Show command history")
+    history.add_argument('--limit', '-n', type=int, help="Limit to the N most recent commands")
+    history.add_argument('--id', '-i', type=int, help="Show a specific command by ID")
+
+    rerun = history_subparsers.add_parser('rerun', help="Re-run a command from history")
+    rerun.add_argument('rerun_id', type=int, help="ID of the command to re-run")
+
+    for _parser in [history, rerun]:
+        add_universal_arguments(_parser)
+
+
 def validate_args(args):
     error_messages = []
     # Add generic validations here. Workload specific validation is in the Benchmark classes
@@ -246,7 +292,7 @@ def validate_args(args):
         for msg in error_messages:
             print(msg)
 
-        sys.exit(1)
+        sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
 
 
 def update_args(args):
@@ -258,8 +304,9 @@ def update_args(args):
             setattr(args, 'num_processes', int(getattr(args, arg)))
             break
 
-    if not args.runtime and not args.queries:
-        args.runtime = 60  # Default runtime if not provided
+    if hasattr(args, 'runtime') and hasattr(args, 'queries'):
+        if not args.runtime and not args.queries:
+            args.runtime = 60  # Default runtime if not provided
 
 
 if __name__ == "__main__":

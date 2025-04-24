@@ -1,4 +1,5 @@
 import os
+import sys
 
 from mlpstorage.benchmarks.base import Benchmark
 from mlpstorage.config import CONFIGS_ROOT_DIR, BENCHMARK_TYPES
@@ -23,19 +24,12 @@ class VectorDBBenchmark(Benchmark):
         self.config_path = os.path.join(CONFIGS_ROOT_DIR, self.VECTORDB_CONFIG_PATH)
         self.config_name = args.config if hasattr(args, 'config') and args.config else "default"
         self.yaml_params = read_config_from_file(os.path.join(self.config_path, f"{self.config_name}.yaml"))
-        self.run_result_output = self.generate_output_location()
 
         self.verify_benchmark()
 
         self.logger.status(f'Instantiated the VectorDB Benchmark...')
 
-    def generate_output_location(self):
-        """
-        Generate the output directory structure for vector database benchmark results
-        """
-        return self._generate_output_location()
-
-    def run(self):
+    def _run(self):
         """Execute the appropriate command based on the command_method_map"""
         if self.command in self.command_method_map:
             self.logger.verboser(f"Executing command: {self.command}")
@@ -63,7 +57,10 @@ class VectorDBBenchmark(Benchmark):
 
         cmd = f"{script_name}"
         cmd += f" --config {config_file}"
-        cmd += f" --output-dir {self.run_result_output}"
+
+        if script_name == "load-vdb":
+            if self.args.force:
+                cmd += " --force"
 
         # Add host and port if provided (common to both datagen and run)
         if hasattr(self.args, 'host') and self.args.host:
@@ -81,7 +78,16 @@ class VectorDBBenchmark(Benchmark):
 
     def execute_datagen(self):
         """Execute the data generation command using load_vdb.py"""
-        cmd = self.build_command("load-vdb")
+        additional_params = {
+            "dimension": self.args.dimension,
+            "num-shards": self.args.num_shards,
+            "vector-dtype": self.args.vector_dtype,
+            "num-vectors": self.args.num_vectors,
+            "distribution": self.args.distribution,
+            "batch-size": self.args.batch_size,
+            "chunk-size": self.args.chunk_size,
+        }
+        cmd = self.build_command("load-vdb", additional_params)
 
         self.logger.verbose(f'Executing data generation.')
         self._execute_command(cmd)
@@ -91,11 +97,14 @@ class VectorDBBenchmark(Benchmark):
         # Define additional parameters specific to the run command
         additional_params = {
             "processes": self.args.num_query_processes,
+            "batch-size": self.args.batch_size,
             "runtime": self.args.runtime,
             "queries": self.args.queries,
+            "report-count": self.args.report_count,
+            "output-dir": self.run_result_output,
         }
 
         cmd = self.build_command("vdbbench", additional_params)
         self.logger.verbose(f'Execuging benchmark run.')
-        self._execute_command(cmd)
+        self._execute_command(cmd, output_file_prefix=f"{self.BENCHMARK_TYPE.value}_{self.args.command}")
 
