@@ -1,7 +1,9 @@
 import os
 
 from datetime import datetime
-from .config import MODELS, PARAM_VALIDATION, MAX_READ_THREADS_TRAINING, LLM_MODELS, MAX_NUM_FILES_TRAIN, BENCHMARK_TYPES
+from typing import List, Tuple
+
+from mlpstorage.config import MODELS, PARAM_VALIDATION, MAX_READ_THREADS_TRAINING, LLM_MODELS, BENCHMARK_TYPES, DATETIME_STR
 
 
 class BenchmarkVerifier:
@@ -21,6 +23,7 @@ class BenchmarkVerifier:
             validation = PARAM_VALIDATION.INVALID
 
         self.logger.status(f'Benchmark verification: {validation.name}')
+        return validation
 
     def _verify_training_params(self) -> PARAM_VALIDATION:
         # Add code here for validation processes. We do not need to validate an option is in a list as the argparse
@@ -87,10 +90,14 @@ class BenchmarkVerifier:
         # TODO: Implement validation for vector database parameters.
         # Use Cluster Information to verify the size of dataset against the number of clients?
         self.logger.info(f'Need to implement vector database parameter validation.')
+        if self.benchmark.args.closed:
+            self.logger.error(f'VectorDB is preview only and is not allowed in closed submission.')
+            return PARAM_VALIDATION.INVALID
+
         return PARAM_VALIDATION.CLOSED
 
 
-def calculate_training_data_size(args, cluster_information, dataset_params, reader_params, logger):
+def calculate_training_data_size(args, cluster_information, dataset_params, reader_params, logger) -> Tuple[int, int, int]:
     """
     Validate the parameters for the datasize operation and apply rules for a closed submission.
 
@@ -114,9 +121,8 @@ def calculate_training_data_size(args, cluster_information, dataset_params, read
     dataset.
     :return:
     """
-    required_file_count = 0
+    required_file_count = 1
     required_subfolders_count = 0
-    required_samples_per_file = 0
 
     # Find the amount of memory in the cluster via args or measurements
     measured_total_mem_bytes = cluster_information.info['accumulated_mem_info_bytes']['total']
@@ -144,6 +150,8 @@ def calculate_training_data_size(args, cluster_information, dataset_params, read
     min_num_files_by_samples = min_samples // dataset_params['num_samples_per_file']
 
     required_file_count = max(min_num_files_by_bytes, min_num_files_by_samples)
+    total_disk_bytes = required_file_count * file_size_bytes
+
     logger.ridiculous(f'Required file count: {required_file_count}')
     logger.ridiculous(f'Required sample count: {min_samples}')
     logger.ridiculous(f'Min number of files by samples: {min_num_files_by_samples}')
@@ -151,11 +159,11 @@ def calculate_training_data_size(args, cluster_information, dataset_params, read
     logger.ridiculous(f'Required dataset size: {required_file_count * file_size_bytes / 1024 / 1024} MB')
     logger.ridiculous(f'Number of Samples by size: {num_samples_by_bytes}')
     if min_num_files_by_bytes > min_num_files_by_samples:
-        logger.verbose(f'Minimum file count dictated by dataset size to memory size ratio.')
+        logger.result(f'Minimum file count dictated by dataset size to memory size ratio.')
     else:
         logger.result(f'Minimum file count dictated by 500 step requirement of given accelerator count and batch size.')
 
-    return required_file_count, required_subfolders_count, required_samples_per_file
+    return int(required_file_count), int(required_subfolders_count), int(total_disk_bytes)
 
 
 def generate_output_location(benchmark, datetime_str=None, **kwargs):
@@ -181,7 +189,7 @@ def generate_output_location(benchmark, datetime_str=None, **kwargs):
         str: The full path to the output location
     """
     if datetime_str is None:
-        datetime_str = datetime.now().strftime("%Y%m%d_%H%M%S")
+        datetime_str = DATETIME_STR
 
     output_location = benchmark.args.results_dir
     if hasattr(benchmark, "run_number"):
@@ -191,7 +199,7 @@ def generate_output_location(benchmark, datetime_str=None, **kwargs):
 
     # Handle different benchmark types
     if benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.training:
-        if not benchmark.args.get("model", None):
+        if not hasattr(benchmark.args, "model"):
             raise ValueError("Model name is required for training benchmark output location")
 
         output_location = os.path.join(output_location, benchmark.args.model)
