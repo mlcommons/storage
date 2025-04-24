@@ -1,0 +1,28 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlpstorage"
+version = "2.0.0b1"
+description = "MLPerf Storage Benchmark Suite"
+readme = "README.md"
+authors = [
+    {name = "MLCommons Storage Working Group"}
+]
+
+dependencies = [
+    "dlio-benchmark==2.0.0",
+    "psutil>=5.9",
+    "vdbbench @ git+https://github.com/wvaske/vdb-bench.git",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/mlcommons/storage"
+"Bug Tracker" = "https://github.com/mlcommons/storage/issues"
+
+[tool.setuptools]
+packages = {find = {}}
+
+[project.scripts]
+mlpstorage = 'mlpstorage.main:main'
