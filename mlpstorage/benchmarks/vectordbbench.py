@@ -24,19 +24,12 @@ class VectorDBBenchmark(Benchmark):
         self.config_path = os.path.join(CONFIGS_ROOT_DIR, self.VECTORDB_CONFIG_PATH)
         self.config_name = args.config if hasattr(args, 'config') and args.config else "default"
         self.yaml_params = read_config_from_file(os.path.join(self.config_path, f"{self.config_name}.yaml"))
-        self.run_result_output = self.generate_output_location()
 
         self.verify_benchmark()
 
         self.logger.status(f'Instantiated the VectorDB Benchmark...')
 
-    def generate_output_location(self):
-        """
-        Generate the output directory structure for vector database benchmark results
-        """
-        return self._generate_output_location()
-
-    def run(self):
+    def _run(self):
         """Execute the appropriate command based on the command_method_map"""
         if self.command in self.command_method_map:
             self.logger.verboser(f"Executing command: {self.command}")
@@ -113,5 +106,5 @@ class VectorDBBenchmark(Benchmark):
 
         cmd = self.build_command("vdbbench", additional_params)
         self.logger.verbose(f'Execuging benchmark run.')
-        self._execute_command(cmd)
+        self._execute_command(cmd, output_file_prefix=f"{self.BENCHMARK_TYPE.value}_{self.args.command}")
 
