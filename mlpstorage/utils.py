@@ -1,5 +1,7 @@
 import concurrent.futures
+import enum
 import io
+import json
 import logging
 import os
 import pprint
@@ -14,7 +16,29 @@ import yaml
 
 from typing import List, Union, Optional, Dict, Tuple, Set
 
-from mlpstorage.config import CONFIGS_ROOT_DIR
+from mlpstorage.config import CONFIGS_ROOT_DIR, MPIRUN, MPIEXEC, MPI_RUN_BIN
+
+
+class MLPSJsonEncoder(json.JSONEncoder):
+
+    def default(self, obj):
+        try:
+            if isinstance(obj, (float, int, str, list, tuple, dict)):
+                return super().default(obj)
+            if isinstance(obj, set):
+                return list(obj)
+            elif "Logger" in str(type(obj)):
+                return "Logger object"
+            elif 'ClusterInformation' in str(type(obj)):
+                return obj.info
+            elif isinstance(obj, enum.Enum):
+                return obj.value
+            elif hasattr(obj, '__dict__'):
+                return obj.__dict__
+            else:
+                return super().default(obj)
+        except Exception as e:
+            return str(obj)
 
 
 def read_config_from_file(relative_path):
@@ -250,10 +274,6 @@ class ClusterInformation:
         return str(self.info)
 
     def collect_info(self, local=False):
-        if self.debug:
-            print(f"DEBUG - pretending to collect information for hosts: {self.hosts}")
-            return
-
         if local:
             getter_func = self.get_local_info
         else:
