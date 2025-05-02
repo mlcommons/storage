@@ -1,15 +1,34 @@
 #!/usr/bin/python3.9
 #!/usr/bin/env python3
+import signal
 import sys
 
 from mlpstorage.benchmarks import TrainingBenchmark, VectorDBBenchmark, CheckpointingBenchmark
 from mlpstorage.cli import parse_arguments, validate_args, update_args
-from mlpstorage.config import HISTFILE, DATETIME_STR, EXIT_CODE
+from mlpstorage.config import HISTFILE, DATETIME_STR, EXIT_CODE, DEFAULT_RESULTS_DIR
 from mlpstorage.debug import debugger_hook, MLPS_DEBUG
 from mlpstorage.history import HistoryTracker
 from mlpstorage.logging import setup_logging, apply_logging_options
+from mlpstorage.reporting import ReportGenerator
 
 logger = setup_logging("MLPerfStorage")
+signal_received = False
+
+
+def signal_handler(sig, frame):
+    """Handle signals like SIGINT (Ctrl+C) and SIGTERM."""
+    global signal_received
+
+    signal_name = signal.Signals(sig).name
+    logger.warning(f"Received signal {signal_name} ({sig})")
+
+    # Set the flag to indicate we've received a signal
+    signal_received = True
+
+    # For SIGTERM, exit immediately
+    if sig in (signal.SIGTERM, signal.SIGINT):
+        logger.info("Exiting immediately due to SIGTERM")
+        sys.exit(EXIT_CODE.INTERRUPTED)
 
 
 def run_benchmark(args):
@@ -33,11 +52,14 @@ def run_benchmark(args):
 
 
 def main():
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    print(f'Watching signals')
+    global signal_received
+
     args = parse_arguments()
     if args.debug or MLPS_DEBUG:
         sys.excepthook = debugger_hook
-        if not MLPS_DEBUG:
-            mlpstorage.MLPS_DEBUG = True
 
     apply_logging_options(logger, args)
 
@@ -67,9 +89,25 @@ def main():
         else:
             # If handle_history_command returned an exit code, return it
             return new_args
-    
+
+    if args.program == "reports":
+        result_dir = args.result_dir if hasattr(args, 'result_dir') else DEFAULT_RESULTS_DIR
+        report_generator = ReportGenerator(result_dir, args, logger=logger)
+        return report_generator.generate_reports()
+
+
     # For other commands, run the benchmark
-    return run_benchmark(args)
+    for i in range(args.loops):
+        if signal_received:
+            print(f'Caught signal, exiting...')
+            return EXIT_CODE.INTERRUPTED
+
+        ret_code = run_benchmark(args)
+        if ret_code != EXIT_CODE.SUCCESS:
+            logger.error(f"Benchmark failed after {i+1} iterations")
+            return EXIT_CODE.FAILURE
+
+    return EXIT_CODE.SUCCESS
 
 if __name__ == "__main__":
     sys.exit(main())

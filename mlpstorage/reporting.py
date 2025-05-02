@@ -25,7 +25,13 @@ class ReportGenerator:
             apply_logging_options(self.logger, args)
 
         self.result_dir = result_dir
-        self.result_files = get_runs_files(self.result_dir)
+        self.result_files = []
+        self.results = []
+
+    def generate_reports(self):
+        self.logger.info(f'Generating reports for {self.result_dir}')
+        self.result_files = get_runs_files(self.result_dir, logger=self.logger)
+        self.logger.info(f'Found {len(self.result_files)} runs')
         self.results = self.accumulate_results()
         self.write_csv_file()
         self.write_json_file()
@@ -39,7 +45,17 @@ class ReportGenerator:
         :return:
         """
         results = []
+        self.logger.info(f'Accumulating results from {len(self.result_files)} runs')
         for run_info in self.result_files:
+            self.logger.debug(f'Processing run: {run_info}')
+            run_id = f"{run_info['benchmark_name']}"
+            if run_info.get("command"):
+                run_id += f"_{run_info['command']}"
+            if run_info.get("subcommand"):
+                run_id += f"_{run_info['subcommand']}"
+            run_id += f"_{run_info['datetime']}"
+
+            self.logger.verbose(f'Processing run: {run_id}')
             if not run_info.get("mlps_metadata_file"):
                 self.logger.error(f"No metadata.json file found in {run_info['run_dir']}")
                 continue
@@ -64,6 +80,7 @@ class ReportGenerator:
                 status = "Failed"
 
             combined_result_dict = dict(
+                run_id=run_id,
                 run_info=run_info,
                 mlps=metadata,
                 dlio=summary,
@@ -74,10 +91,12 @@ class ReportGenerator:
         return results
 
     def write_json_file(self):
+        self.logger.info(f'Writing results to {self.result_dir}/results.json')
         with open(f'{self.result_dir}/results.json', 'w') as f:
             json.dump(self.results, f, indent=2)
 
     def write_csv_file(self):
+        self.logger.info(f'Writing results to {self.result_dir}/results.csv')
         flattened_results = [flatten_nested_dict(r) for r in self.results]
         flattened_results = [remove_nan_values(r) for r in flattened_results]
         fieldnames = set()

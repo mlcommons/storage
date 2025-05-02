@@ -284,6 +284,9 @@ class CommandExecutor:
             
             if self.process and self.process.poll() is None:
                 self.process.terminate()
+
+            for handler in self._original_handlers.values():
+                handler(sig, frame)
         
         for sig in signals:
             self._original_handlers[sig] = signal.getsignal(sig)
