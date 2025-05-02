@@ -2,14 +2,15 @@ import argparse
 import sys
 
 
-from mlpstorage.config import MIN_RANKS_STR, MODELS, ACCELERATORS, DEFAULT_HOSTS, CATEGORIES, LLM_MODELS, MPI_CMDS, \
-    EXEC_TYPE, DEFAULT_RESULTS_DIR, EXIT_CODE, INDEX_TYPES, VECTOR_DTYPES, DISTRIBUTIONS
+from mlpstorage.config import (CHECKPOINT_RANKS_STRINGS, MODELS, ACCELERATORS, DEFAULT_HOSTS, VECTORDB_DEFAULT_RUNTIME,
+                               LLM_MODELS, LLM_MODELS_STRINGS, MPI_CMDS, EXEC_TYPE, DEFAULT_RESULTS_DIR, EXIT_CODE, VECTOR_DTYPES, DISTRIBUTIONS)
 
 # TODO: Get rid of this now that I'm not repeating arguments for different subparsers?
 help_messages = dict(
     # General help messages
     sub_commands="Select a subcommand for the benchmark.",
-    model="Model to emulate. A specific model defines the sample size, sample container format, and data "
+    #      Model to emulate. A specific model defines the sample size, sample container format, and data ra
+    model="Model to emulate. A specific model defines the sample size, sample container format, and data \n"
           "rates for each supported accelerator.",
     accelerator_type="Accelerator to simulate for the benchmark. A specific accelerator defines the data access "
                      "sizes and rates for each supported workload",
@@ -26,12 +27,13 @@ help_messages = dict(
     client_host_mem_GB="Memory available in the client where the benchmark is run. The dataset needs to be 5x the "
                        "available memory for closed submissions.",
     client_hosts="Space-separated list of IP addresses or hostnames of the participating hosts. "
-                 "Example: '--hosts 192.168.1.1 192.168.1.2 192.168.1.3' or '--hosts host1 host2 host3'",
+                 "\nExample: '--hosts 192.168.1.1 192.168.1.2 192.168.1.3' or '--hosts host1 host2 host3'",
     category="Benchmark category to be submitted.",
     results_dir="Directory where the benchmark results will be saved.",
-    params="Additional parameters to be passed to the benchmark. These will override the config file. For a closed "
-           "submission only a subset of params are supported. Multiple values allowed in the form: "
-           "--params key1=value1 key2=value2 key3=value3",
+    params="Additional parameters to be passed to the benchmark. These will override the config file. "
+           "\nFor a closed submission only a subset of params are supported. "
+           "\nMultiple values allowed in the form: "
+           "\n    --params key1=value1 key2=value2 key3=value3",
     datasize="The datasize command calculates the number of samples needed for a given workload, accelerator type,"
              " number of accelerators, and client host memory.",
     training_datagen="The datagen command generates a dataset for a given workload and number of parallel generation "
@@ -42,13 +44,21 @@ help_messages = dict(
 
     # Checkpointing help messages
     checkpoint="The checkpoint command executes checkpoints in isolation as a write-only workload",
-    recovery="The recovery command executes a recovery of the most recently written checkpoint with randomly "
-             "assigned reader to data mappings",
+    recovery="The recovery command executes a recovery of the most recently written checkpoint with "
+             "\nrandomly assigned reader to data mappings",
     llm_model="The model & size to be emulated for checkpointing. The selection will dictate the TP, PP, & DP "
-              "sizes as well as the size of the checkpoint",
+              "\nsizes as well as the size of the checkpoint. "
+              "\nAvailable LLM Models: "
+              f"\n    {LLM_MODELS_STRINGS}",
+    num_checkpoints="The number of checkpoints to be executed.",
     num_checkpoint_accelerators=f"The number of accelerators to emulate for the checkpoint task. Each LLM Model "
-                                f"can be executed as 8 accelerators or the minimum required to run the model: "
-                                f"\n{MIN_RANKS_STR}",
+                                f"\ncan be executed with the following accelerator counts: "
+                                f"\n    {CHECKPOINT_RANKS_STRINGS}",
+    deepspeed_zero_level="The DeepSpeed Zero level. \nSupported options: "
+                         "\n    0 = disabled, "
+                         "\n    1 = Optimizer Partitioning, "
+                         "\n    2 = Gradient partitioning, "
+                         "\n    3 = Model Parameter Partitioning",
 
     # VectorDB help messages
     db_ip_address=f"IP address of the VectorDB instance. If not provided, a local VectorDB instance will be used.",
@@ -122,7 +132,9 @@ def parse_arguments():
         sub_programs_map[sys.argv[1]].print_help(sys.stderr)
         sys.exit(1)
 
-    return parser.parse_args()
+    parsed_args = parser.parse_args()
+    validate_args(parsed_args)
+    return parsed_args
 
 
 # These are used by the history tracker to know if logging needs to be updated.
@@ -204,16 +216,43 @@ def add_training_arguments(training_parsers):
 def add_checkpointing_arguments(checkpointing_parsers):
     # Checkpointing
 
+    # Add a validation function for DeepSpeed Zero level
+    def zero_level_type(value):
+        ivalue = int(value)
+        if ivalue < 0 or ivalue > 3:
+            raise argparse.ArgumentTypeError(f"DeepSpeed Zero level must be between 0 and 3, got {value}")
+        return ivalue
+
     checkpointing_subparsers = checkpointing_parsers.add_subparsers(dest="command", required=True, help="Sub-commands")
     checkpointing_parsers.required = True
 
     # Add specific checkpointing benchmark options here
-    checkpoint = checkpointing_subparsers.add_parser('checkpoint', help=help_messages['checkpoint'])
-    checkpoint.add_argument('--llm-model', '-lm', choices=LLM_MODELS, help=help_messages['llm_model'])
-    checkpoint.add_argument('--hosts', '-s', type=str, help=help_messages['client_hosts'])
-    checkpoint.add_argument('--num-accelerators', '-na', type=int, help=help_messages['num_checkpoint_accelerators'])
-
+    checkpoint = checkpointing_subparsers.add_parser('checkpoint', help=help_messages['checkpoint'],
+                                                     formatter_class=argparse.RawTextHelpFormatter)
     recovery = checkpointing_subparsers.add_parser('recovery', help=help_messages['recovery'])
+
+    for _parser in [checkpoint, recovery]:
+        _parser.add_argument('--hosts', '-s', nargs="+", default=DEFAULT_HOSTS, help=help_messages['client_hosts'])
+
+        # We do not use "choices=LLM_MODELS" here because it makes the help really long. We define a string for the
+        # help that includes the choices and do validation in the validate_args section
+        _parser.add_argument('--model', '-m', required=True, help=help_messages['llm_model'])
+        _parser.add_argument('--num-checkpoints-read', '-ncr', type=int, default=1, help=help_messages['num_checkpoints'])
+        _parser.add_argument('--num-checkpoints-write', '-ncw', type=int, default=1, help=help_messages['num_checkpoints'])
+        # Not available in open or closed for MLPS 2.0
+        # _parser.add_argument('--deepspeed-zero-level', '-dzl', type=zero_level_type, default=0,
+        #                      help=help_messages['deepspeed_zero_level'])
+
+
+        _parser.add_argument('--exec-type', '-et', type=EXEC_TYPE, choices=list(EXEC_TYPE), default=EXEC_TYPE.MPI, help=help_messages['exec_type'])
+
+        add_mpi_group(_parser)
+
+        _parser.add_argument('--ssh-username', '-u', type=str, help="Username for SSH for system information collection")
+        _parser.add_argument('--num-processes', '-np', type=int, default=None, help=help_messages['num_checkpoint_accelerators'])
+        _parser.add_argument('--params', '-p', nargs="+", type=str, help=help_messages['params'])
+        _parser.add_argument("--data-dir", '-dd', type=str, help="Filesystem location for data")
+        add_universal_arguments(_parser)
 
 
 def add_vectordb_arguments(vectordb_parsers):
@@ -287,7 +326,9 @@ def add_history_arguments(history_parsers):
 def validate_args(args):
     error_messages = []
     # Add generic validations here. Workload specific validation is in the Benchmark classes
-
+    if args.program == "checkpointing":
+        if args.model not in LLM_MODELS:
+            error_messages.append("Invalid LLM model. Supported models are: {}".format(", ".join(LLM_MODELS)))
     if error_messages:
         for msg in error_messages:
             print(msg)
@@ -299,14 +340,23 @@ def update_args(args):
     """
     This method is an interface between the CLI and the benchmark class.
     """
-    for arg in ['num_processes', 'num_accelerators', 'max_accelerators']:
-        if hasattr(args, arg):
-            setattr(args, 'num_processes', int(getattr(args, arg)))
-            break
+    if not hasattr(args, 'num_processes'):
+        # Different commands for training use different nomeenclature for the number of mpi processes to use
+        # Training = num_accelerators
+        # Datasize = max_accelerators
+        # Datagen = num_processes
+        # Checkpoint = num_processes
+        # We want to consistently use num_processes in code but the different options for the CLI
+        for arg in ['num_processes', 'num_accelerators', 'max_accelerators']:
+            if hasattr(args, arg) and type(getattr(args, arg)) is int:
+                print(f'Setting attr from {arg} to {getattr(args, arg)}')
+                setattr(args, 'num_processes', int(getattr(args, arg)))
+                break
 
     if hasattr(args, 'runtime') and hasattr(args, 'queries'):
+        # For VectorDB we need runtime or queries. If none defined use a default runtime
         if not args.runtime and not args.queries:
-            args.runtime = 60  # Default runtime if not provided
+            args.runtime = VECTORDB_DEFAULT_RUNTIME  # Default runtime if not provided
 
 
 if __name__ == "__main__":
