@@ -139,6 +139,8 @@ def setup_logging(name=__name__, stream_log_level=DEFAULT_STREAM_LOG_LEVEL):
 
 
 def apply_logging_options(_logger, args):
+    if args is None:
+        return
     # Set log level to VERBOSE unless the current log level is higher. In which case set it 1 level higher
     stream_handlers = [h for h in _logger.handlers if not hasattr(h, 'baseFilename')]
     log_levels = sorted([v for k, v in sys.modules[__name__].__dict__.items() if type(v) is int])
