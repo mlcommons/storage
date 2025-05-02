@@ -53,18 +53,25 @@ OPEN = "open"
 CLOSED = "closed"
 CATEGORIES = [OPEN, CLOSED]
 
+LLAMA3_8B = "llama3-8b"
 LLAMA3_70B = 'llama3-70b'
 LLAMA3_405B = 'llama3-405b'
-LLM_1620B = 'llm-1620b'
-LLM_MODELS = [LLAMA3_70B, LLAMA3_405B, LLM_1620B]
+LLAMA3_1T = 'llama3-1t'
+LLM_MODELS = [LLAMA3_70B, LLAMA3_405B, LLAMA3_1T, LLAMA3_8B]
 
-LLM_MODEL_PARALLELISMS = {
-    LLAMA3_70B: dict(tp=8, pp=4, min_ranks=4 * 8),
-    LLAMA3_405B: dict(tp=8, pp=16, min_ranks=8 * 16),
-    LLM_1620B: dict(tp=8, pp=64, min_ranks=64 * 8),
+LLM_SUBSET_PROCS = 8
+# Defined as (MinProcs, ZeroLevel, GPU per Data Parallel Instance, Closed GPU Count)
+LLM_ALLOWED_VALUES = {
+    LLAMA3_1T: (LLM_SUBSET_PROCS, 3, 8*64, 8*64*2),
+    LLAMA3_405B: (LLM_SUBSET_PROCS, 3, 8*32, 8*32*2),
+    LLAMA3_70B: (LLM_SUBSET_PROCS, 1, 8, 8*8),
+    LLAMA3_8B: (LLM_SUBSET_PROCS, 1, 8, 8)
 }
-MIN_RANKS_STR = "; ".join(
-    [f'{key} = {value["min_ranks"]} accelerators' for key, value in LLM_MODEL_PARALLELISMS.items()])
+
+CHECKPOINT_RANKS_STRINGS = "\n    ".join(
+    [f'{key}: CLOSED in [{value[0]} || {value[3]}], OPEN allows a multiple of {value[2]}' for key, value in LLM_ALLOWED_VALUES.items()])
+
+LLM_MODELS_STRINGS = "\n    ".join(LLM_MODELS)
 
 MPIRUN = "mpirun"
 MPIEXEC = "mpiexec"
@@ -127,3 +134,6 @@ VECTOR_DTYPES = ["FLOAT_VECTOR"]
 
 # Supported distributions are currently uniform, normal, or zipfian
 DISTRIBUTIONS = ["uniform", "normal", "zipfian"]
+
+# Default runtime for vector database benchmarks if not defined
+VECTORDB_DEFAULT_RUNTIME = 60
