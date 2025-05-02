@@ -2,9 +2,10 @@
 #!/usr/bin/env python3
 import sys
 
-from mlpstorage.benchmarks import TrainingBenchmark, VectorDBBenchmark
+from mlpstorage.benchmarks import TrainingBenchmark, VectorDBBenchmark, CheckpointingBenchmark
 from mlpstorage.cli import parse_arguments, validate_args, update_args
 from mlpstorage.config import HISTFILE, DATETIME_STR, EXIT_CODE
+from mlpstorage.debug import debugger_hook, MLPS_DEBUG
 from mlpstorage.history import HistoryTracker
 from mlpstorage.logging import setup_logging, apply_logging_options
 
@@ -13,10 +14,10 @@ logger = setup_logging("MLPerfStorage")
 
 def run_benchmark(args):
     """Run a benchmark based on the provided args."""
-    validate_args(args)
     update_args(args)
     program_switch_dict = dict(
         training=TrainingBenchmark,
+        checkpointing=CheckpointingBenchmark,
         vectordb=VectorDBBenchmark,
     )
 
@@ -33,6 +34,11 @@ def run_benchmark(args):
 
 def main():
     args = parse_arguments()
+    if args.debug or MLPS_DEBUG:
+        sys.excepthook = debugger_hook
+        if not MLPS_DEBUG:
+            mlpstorage.MLPS_DEBUG = True
+
     apply_logging_options(logger, args)
 
     hist = HistoryTracker(history_file=HISTFILE, logger=logger)
