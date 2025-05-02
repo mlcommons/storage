@@ -2,7 +2,7 @@
 #!/usr/bin/env python3
 import sys
 
-from mlpstorage.benchmarks import TrainingBenchmark, VectorDBBenchmark
+from mlpstorage.benchmarks import TrainingBenchmark, VectorDBBenchmark, CheckpointingBenchmark
 from mlpstorage.cli import parse_arguments, validate_args, update_args
 from mlpstorage.config import HISTFILE, DATETIME_STR, EXIT_CODE
 from mlpstorage.debug import debugger_hook, MLPS_DEBUG
@@ -17,6 +17,7 @@ def run_benchmark(args):
     update_args(args)
     program_switch_dict = dict(
         training=TrainingBenchmark,
+        checkpointing=CheckpointingBenchmark,
         vectordb=VectorDBBenchmark,
     )
 
