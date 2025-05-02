@@ -13,7 +13,7 @@ from functools import wraps
 from pyarrow.ipc import open_stream
 
 from mlpstorage.config import PARAM_VALIDATION, DATETIME_STR, MLPS_DEBUG
-from mlpstorage.debug import debug_tryer_wrapper, DebugTryer
+from mlpstorage.debug import debug_tryer_wrapper
 from mlpstorage.logging import setup_logging, apply_logging_options
 from mlpstorage.rules import BenchmarkVerifier, generate_output_location
 from mlpstorage.utils import CommandExecutor, MLPSJsonEncoder
@@ -43,73 +43,8 @@ class Benchmark(abc.ABC):
 
         self.command_output_files = list()
         self.run_result_output = self.generate_output_location()
+        os.makedirs(self.run_result_output, exist_ok=True)
         self.logger.status(f'Benchmark results directory: {self.run_result_output}')
-
-    def __getattribute__(self, item):
-        method = object.__getattribute__(self, item)
-        if not isinstance(method, types.MethodType):
-            # Fail fast for things that are not methods
-            return super().__getattribute__(item)
-
-        if self.debug or MLPS_DEBUG:
-            return debug_tryer_wrapper(on_error=DebugTryer.DEBUGGER, debug=True, logger=self.logger, func=super().__getattribute__(item))
-
-        else:
-            return super().__getattribute__(item)
-
-    # def __getattribute__(self, name):
-    #     """
-    #     Special method to intercept attribute access.
-    #     If the attribute is the 'run' method, wrap it with timing functionality.
-    #     """
-    #     attr = super().__getattribute__(name)
-    #
-    #     # Only intercept the 'run' method
-    #     # if name == 'run' and callable(attr):
-    #     #     @wraps(attr)
-    #     #     def timed_run(*args, **kwargs):
-    #     #         # Get logger if available
-    #     #         try:
-    #     #             logger = super(Benchmark, self).__getattribute__('logger')
-    #     #             logger.info(f"Starting benchmark run at {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    #     #             start_time = time.time()
-    #     #
-    #     #             # Execute the original run method
-    #     #             result = attr(*args, **kwargs)
-    #     #
-    #     #             # Calculate and log the execution time
-    #     #             end_time = time.time()
-    #     #             execution_time = end_time - start_time
-    #     #
-    #     #             # Format the time nicely
-    #     #             if execution_time < 60:
-    #     #                 time_str = f"{execution_time:.2f} seconds"
-    #     #             elif execution_time < 3600:
-    #     #                 minutes = int(execution_time // 60)
-    #     #                 seconds = execution_time % 60
-    #     #                 time_str = f"{minutes} minutes and {seconds:.2f} seconds"
-    #     #             else:
-    #     #                 hours = int(execution_time // 3600)
-    #     #                 minutes = int((execution_time % 3600) // 60)
-    #     #                 seconds = execution_time % 60
-    #     #                 time_str = f"{hours} hours, {minutes} minutes and {seconds:.2f} seconds"
-    #     #
-    #     #             logger.info(f"Benchmark run completed in {time_str}")
-    #     #             logger.info(f"End time: {time.strftime('%Y-%m-%d %H:%M:%S')}")
-    #     #
-    #     #             # Store the execution time as an attribute for potential later use
-    #     #             super(Benchmark, self).__setattr__('last_run_duration', execution_time)
-    #     #
-    #     #             return result
-    #     #         except (AttributeError, Exception) as e:
-    #     #             # If logger is not available or any other error occurs,
-    #     #             # just run the original method without timing
-    #     #             return attr(*args, **kwargs)
-    #     #
-    #     #     return timed_run
-    #
-    #     # Return the original attribute for all other cases
-    #     return attr
 
     def _execute_command(self, command, output_file_prefix=None, print_stdout=True, print_stderr=True) -> Tuple[str, str, int]:
         """
@@ -123,7 +58,7 @@ class Benchmark(abc.ABC):
         if self.args.what_if:
             self.logger.debug(f'Executing command in --what-if mode means no execution will be performed.')
             log_message = f'What-if mode: \nCommand: {command}'
-            if self.args.debug:
+            if self.debug:
                 log_message += f'\n\nParameters: \n{pprint.pformat(vars(self.args))}'
             self.logger.info(log_message)
             return "", "", 0
