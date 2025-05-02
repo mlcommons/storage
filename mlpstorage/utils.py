@@ -3,6 +3,7 @@ import enum
 import io
 import json
 import logging
+import math
 import os
 import pprint
 import psutil
@@ -82,6 +83,50 @@ def create_nested_dict(flat_dict, parent_dict=None, separator='.'):
         current_dict[keys[-1]] = value
 
     return parent_dict
+
+
+def flatten_nested_dict(nested_dict, parent_key='', separator='.'):
+    """
+    Flatten a nested dictionary structure into a single-level dictionary with keys
+    joined by a separator.
+
+    Example:
+        Input: {'a': 1, 'b': {'c': 2, 'd': {'e': 3}}}
+        Output: {'a': 1, 'b.c': 2, 'b.d.e': 3}
+
+    Args:
+        nested_dict (dict): The nested dictionary to flatten
+        parent_key (str): The parent key prefix (used in recursion)
+        separator (str): The character to use for joining keys
+
+    Returns:
+        dict: A flattened dictionary with compound keys
+    """
+    flat_dict = {}
+
+    for key, value in nested_dict.items():
+        new_key = f"{parent_key}{separator}{key}" if parent_key else key
+
+        if isinstance(value, dict):
+            # Recursively flatten any nested dictionaries
+            flat_dict.update(flatten_nested_dict(value, new_key, separator))
+        else:
+            # Add the leaf value to our flattened dictionary
+            flat_dict[new_key] = value
+
+    return flat_dict
+
+
+def remove_nan_values(input_dict):
+    # Remove any NaN values from the input dictionary
+    ret_dict = dict()
+    for k, v in input_dict.items():
+        if type(v) in [float, int] and math.isnan(v):  # Ignore NaN values
+            continue
+        else:
+            ret_dict[k] = v
+
+    return ret_dict
 
 
 class CommandExecutor:
