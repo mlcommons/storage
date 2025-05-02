@@ -102,7 +102,8 @@ def parse_arguments():
     training_parsers = sub_programs.add_parser("training", description=prog_descriptions['training'],
                                                help="Training benchmark options")
     checkpointing_parsers = sub_programs.add_parser("checkpointing", description=prog_descriptions['checkpointing'],
-                                                    help="Checkpointing benchmark options")
+                                                    help="Checkpointing benchmark options",
+                                                    formatter_class=argparse.RawTextHelpFormatter)
     vectordb_parsers = sub_programs.add_parser("vectordb", description=prog_descriptions['vectordb'],
                                                help="VectorDB benchmark options")
     reports_parsers = sub_programs.add_parser("reports", help="Generate a report from benchmark results")
@@ -143,6 +144,7 @@ logging_options = ['debug', 'verbose', 'stream_log_level']
 def add_universal_arguments(parser):
     standard_args = parser.add_argument_group("Standard Arguments")
     standard_args.add_argument('--results-dir', '-rd', type=str, default=DEFAULT_RESULTS_DIR, help=help_messages['results_dir'])
+    standard_args.add_argument('--loops', type=int, default=1, help="Number of times to run the benchmark")
 
     # Create a mutually exclusive group for closed/open options
     submission_group = standard_args.add_mutually_exclusive_group()
@@ -215,44 +217,28 @@ def add_training_arguments(training_parsers):
 
 def add_checkpointing_arguments(checkpointing_parsers):
     # Checkpointing
+    checkpointing_parsers.add_argument('--hosts', '-s', nargs="+", default=DEFAULT_HOSTS, help=help_messages['client_hosts'])
 
-    # Add a validation function for DeepSpeed Zero level
-    def zero_level_type(value):
-        ivalue = int(value)
-        if ivalue < 0 or ivalue > 3:
-            raise argparse.ArgumentTypeError(f"DeepSpeed Zero level must be between 0 and 3, got {value}")
-        return ivalue
-
-    checkpointing_subparsers = checkpointing_parsers.add_subparsers(dest="command", required=True, help="Sub-commands")
-    checkpointing_parsers.required = True
-
-    # Add specific checkpointing benchmark options here
-    checkpoint = checkpointing_subparsers.add_parser('checkpoint', help=help_messages['checkpoint'],
-                                                     formatter_class=argparse.RawTextHelpFormatter)
-    recovery = checkpointing_subparsers.add_parser('recovery', help=help_messages['recovery'])
-
-    for _parser in [checkpoint, recovery]:
-        _parser.add_argument('--hosts', '-s', nargs="+", default=DEFAULT_HOSTS, help=help_messages['client_hosts'])
-
-        # We do not use "choices=LLM_MODELS" here because it makes the help really long. We define a string for the
-        # help that includes the choices and do validation in the validate_args section
-        _parser.add_argument('--model', '-m', required=True, help=help_messages['llm_model'])
-        _parser.add_argument('--num-checkpoints-read', '-ncr', type=int, default=1, help=help_messages['num_checkpoints'])
-        _parser.add_argument('--num-checkpoints-write', '-ncw', type=int, default=1, help=help_messages['num_checkpoints'])
-        # Not available in open or closed for MLPS 2.0
-        # _parser.add_argument('--deepspeed-zero-level', '-dzl', type=zero_level_type, default=0,
-        #                      help=help_messages['deepspeed_zero_level'])
+    # We do not use "choices=LLM_MODELS" here because it makes the help really long. We define a string for the
+    # help that includes the choices and do validation in the validate_args section
+    checkpointing_parsers.add_argument('--model', '-m', required=True, help=help_messages['llm_model'])
+    checkpointing_parsers.add_argument('--num-checkpoints-read', '-ncr', type=int, default=1, help=help_messages['num_checkpoints'])
+    checkpointing_parsers.add_argument('--num-checkpoints-write', '-ncw', type=int, default=1, help=help_messages['num_checkpoints'])
+    # Not available in open or closed for MLPS 2.0
+    # _parser.add_argument('--deepspeed-zero-level', '-dzl', type=zero_level_type, default=0,
+    #                      help=help_messages['deepspeed_zero_level'])
 
 
-        _parser.add_argument('--exec-type', '-et', type=EXEC_TYPE, choices=list(EXEC_TYPE), default=EXEC_TYPE.MPI, help=help_messages['exec_type'])
+    checkpointing_parsers.add_argument('--exec-type', '-et', type=EXEC_TYPE, choices=list(EXEC_TYPE), default=EXEC_TYPE.MPI, help=help_messages['exec_type'])
 
-        add_mpi_group(_parser)
+    add_mpi_group(checkpointing_parsers)
 
-        _parser.add_argument('--ssh-username', '-u', type=str, help="Username for SSH for system information collection")
-        _parser.add_argument('--num-processes', '-np', type=int, default=None, help=help_messages['num_checkpoint_accelerators'])
-        _parser.add_argument('--params', '-p', nargs="+", type=str, help=help_messages['params'])
-        _parser.add_argument("--data-dir", '-dd', type=str, help="Filesystem location for data")
-        add_universal_arguments(_parser)
+    checkpointing_parsers.add_argument('--ssh-username', '-u', type=str, help="Username for SSH for system information collection")
+    checkpointing_parsers.add_argument('--num-processes', '-np', type=int, default=None, help=help_messages['num_checkpoint_accelerators'])
+    checkpointing_parsers.add_argument('--params', '-p', nargs="+", type=str, help=help_messages['params'])
+    checkpointing_parsers.add_argument("--data-dir", '-dd', type=str, help="Filesystem location for data")
+    # Since we're not using subparsers, this happens in the main function
+    #add_universal_arguments(checkpointing_parsers)
 
 
 def add_vectordb_arguments(vectordb_parsers):
@@ -303,7 +289,6 @@ def add_reports_arguments(reports_parsers):
     reportgen = reports_subparsers.add_parser('reportgen', help=help_messages['reportgen'])
 
     reportgen.add_argument('--output-dir', type=str, help=help_messages['output_dir'])
-    reportgen.add_argument('--remove-deleted', action="store_true", help="Remove deleted tests")
     add_universal_arguments(reportgen)
 
 

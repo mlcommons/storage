@@ -55,6 +55,8 @@ class Benchmark(abc.ABC):
         :return: (stdout, stderr, return code)
         """
 
+        self.__dict__.update({'executed_command': command})
+
         if self.args.what_if:
             self.logger.debug(f'Executing command in --what-if mode means no execution will be performed.')
             log_message = f'What-if mode: \nCommand: {command}'
@@ -65,7 +67,8 @@ class Benchmark(abc.ABC):
         else:
             watch_signals = {signal.SIGINT, signal.SIGTERM}
             stdout, stderr, return_code = self.cmd_executor.execute(command, watch_signals=watch_signals,
-                                                                    print_stdout=print_stdout, print_stderr=print_stderr)
+                                                                    print_stdout=print_stdout,
+                                                                    print_stderr=print_stderr)
 
             if output_file_prefix:
                 stdout_filename = f"{output_file_prefix}.stdout.log"
@@ -147,7 +150,9 @@ class Benchmark(abc.ABC):
 
     def run(self):
         start_time = time.time()
-        self._run()
+        result = self._run()
         self.runtime = time.time() - start_time
+        return result
+
 
 

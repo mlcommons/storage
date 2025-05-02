@@ -5,6 +5,7 @@ from typing import List, Tuple
 
 from mlpstorage.config import (MODELS, PARAM_VALIDATION, MAX_READ_THREADS_TRAINING, LLM_MODELS, BENCHMARK_TYPES,
                                DATETIME_STR, LLM_ALLOWED_VALUES, LLM_SUBSET_PROCS)
+from mlpstorage.logging import setup_logging
 
 
 class BenchmarkVerifier:
@@ -261,7 +262,6 @@ def generate_output_location(benchmark, datetime_str=None, **kwargs):
 
     elif benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.checkpointing:
         output_location = os.path.join(output_location, "checkpointing")
-        output_location = os.path.join(output_location, benchmark.args.command)
         output_location = os.path.join(output_location, datetime_str)
 
     else:
@@ -269,3 +269,102 @@ def generate_output_location(benchmark, datetime_str=None, **kwargs):
         sys.exit(1)
 
     return output_location
+
+
+def get_runs_files(results_dir, benchmark_name=None, command=None, logger=None):
+    """
+    Walk the results_dir location and return a list of dictionaries that represent a single run
+
+    [ { 'benchmark_name': <benchmark_name>,
+      'command': <command>,
+      'datetime': <datetime>,
+      'mlps_metadata_file': <mlps_metadata_file_path>,
+      'dlio_summary_json_file': <dlio_summary_json_file_path>,
+      'files': [<file_path1>, <file_path2>,...] } ]
+
+    :param results_dir: Base directory containing benchmark results
+    :param benchmark_name: Optional filter for specific benchmark name
+    :param command: Optional filter for specific command
+    :return: List of dictionaries with run information
+    """
+    if logger is None:
+        logger = setup_logging(name='mlpstorage.rules.get_runs_files')
+
+    if not os.path.exists(results_dir):
+        logger.warning(f'Results directory {results_dir} does not exist.')
+        return []
+
+    runs = []
+
+    # Walk through all directories and files in results_dir
+    for root, dirs, files in os.walk(results_dir):
+        logger.debug(f'Processing directory: {root}')
+        # Look for metadata files
+        metadata_files = [f for f in files if f.endswith('_metadata.json')]
+
+        if not metadata_files:
+            continue
+
+        for metadata_file in metadata_files:
+            # Get the full path to the metadata file
+            metadata_path = os.path.join(root, metadata_file)
+
+            # Extract components from the directory structure
+            rel_path = os.path.relpath(root, results_dir)
+            path_components = rel_path.split(os.sep)
+
+            # Skip if we don't have enough components for a valid run
+            if len(path_components) < 2:
+                continue
+
+            # Extract benchmark name, command, and datetime from path
+            deepest_path = path_components[-1]
+            if deepest_path.startswith('20'):  # Check if it's a datetime
+                datetime_str = deepest_path
+                current_benchmark_name = path_components[0]
+                if len(path_components) > 2:
+                    current_command = path_components[1]
+                else:
+                    current_command = None
+
+                if len(path_components) > 3:  # Check if it's a subcommand'
+                    subcommand = path_components[2]
+                else:
+                    subcommand = None
+
+
+                # Apply filters if provided
+                if benchmark_name and current_benchmark_name != benchmark_name:
+                    continue
+                if command and current_command != command:
+                    continue
+
+                # Find DLIO summary.json file if it exists
+                dlio_summary_file = None
+                for f in files:
+                    if f == 'summary.json':
+                        dlio_summary_file = os.path.join(root, f)
+                        break
+
+                # Collect all files in this run directory
+                run_files = [os.path.join(root, f) for f in files]
+
+                # Create run info dictionary
+                run_info = {
+                    'benchmark_name': current_benchmark_name,
+                    'datetime': datetime_str,
+                    'mlps_metadata_file': metadata_path,
+                    'dlio_summary_json_file': dlio_summary_file,
+                    'files': run_files
+                }
+
+                if command:
+                    run_info['command'] = current_command
+
+                # Add subcommand if it exists
+                if subcommand:
+                    run_info['subcommand'] = subcommand
+
+                runs.append(run_info)
+
+    return runs

@@ -5,7 +5,7 @@ import sys
 
 from mlpstorage.benchmarks.base import Benchmark
 from mlpstorage.config import (CONFIGS_ROOT_DIR, BENCHMARK_TYPES, EXEC_TYPE, MPIRUN, MLPSTORAGE_BIN_NAME,
-                               LLM_ALLOWED_VALUES, LLM_SUBSET_PROCS)
+                               LLM_ALLOWED_VALUES, LLM_SUBSET_PROCS, EXIT_CODE)
 from mlpstorage.rules import calculate_training_data_size
 from mlpstorage.utils import (read_config_from_file, create_nested_dict, update_nested_dict, ClusterInformation,
                               generate_mpi_prefix_cmd)
@@ -63,7 +63,11 @@ class DLIOBenchmark(Benchmark, abc.ABC):
     def execute_command(self):
         cmd = self.generate_dlio_command()
         self.logger.status(f'Running benchmark command:: {cmd}')
-        self._execute_command(cmd, output_file_prefix=f"{self.BENCHMARK_TYPE.value}_{self.args.command}")
+        output_file_prefix = f"{self.BENCHMARK_TYPE.value}"
+        if hasattr(self.args, "command"):
+            output_file_prefix += f"_{self.args.command}"
+
+        self._execute_command(cmd, output_file_prefix=output_file_prefix)
 
     @abc.abstractmethod
     def add_workflow_to_cmd(self, cmd) -> str:
@@ -191,7 +195,11 @@ class TrainingBenchmark(DLIOBenchmark):
                        f'according to your system.')
 
     def _run(self):
-        self.command_method_map[self.args.command]()
+        try:
+            self.command_method_map[self.args.command]()
+        except Exception as e:
+            return EXIT_CODE.FAILURE
+        return EXIT_CODE.SUCCESS
 
 
 class CheckpointingBenchmark(DLIOBenchmark):
@@ -203,11 +211,10 @@ class CheckpointingBenchmark(DLIOBenchmark):
 
         self.config_name = f'{args.model.replace("-", "_")}'
         self.config_file = f'{self.config_name}.yaml'
-
         self.params_dict, self.yaml_params, self.combined_params = self.process_dlio_params(self.config_file)
         self.verify_benchmark()
         self.add_checkpoint_params()
-        self.logger.status(f'Instantiated the Training Benchmark...')
+        self.logger.status(f'Instantiated the Checkpointing Benchmark...')
 
     def add_checkpoint_params(self):
         min_procs, zero_level, GPUpDP, ClosedGPUs = LLM_ALLOWED_VALUES.get(self.args.model)
@@ -231,4 +238,8 @@ class CheckpointingBenchmark(DLIOBenchmark):
         cmd += " ++workload.workflow.checkpoint=True"
 
     def _run(self):
-        self.execute_command()
+        try:
+            self.execute_command()
+        except Exception as e:
+            return EXIT_CODE.FAILURE
+        return EXIT_CODE.SUCCESS

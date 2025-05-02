@@ -99,7 +99,7 @@ class EXIT_CODE(enum.IntEnum):
     FILE_NOT_FOUND = 3
     PERMISSION_DENIED = 4
     CONFIGURATION_ERROR = 5
-    BENCHMARK_FAILURE = 6
+    FAILURE = 6
     TIMEOUT = 7
     # Add more as needed
     
