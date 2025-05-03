@@ -34,8 +34,11 @@ def check_env(setting, default_value=None):
 MLPS_DEBUG = check_env('MLPS_DEBUG', False)
 HISTFILE = os.path.join(pathlib.Path.home(), "mlps_history")
 
+def get_datetime_string():
+    return datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+
 # Define constants:
-DATETIME_STR = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+DATETIME_STR = get_datetime_string()
 CONFIGS_ROOT_DIR = os.path.join(os.path.split(os.path.abspath(os.path.dirname(__file__)))[0], "configs")
 
 MLPSTORAGE_BIN_NAME = "mlpstorage"

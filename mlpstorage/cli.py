@@ -2,8 +2,10 @@ import argparse
 import sys
 
 
+from mlpstorage import VERSION
 from mlpstorage.config import (CHECKPOINT_RANKS_STRINGS, MODELS, ACCELERATORS, DEFAULT_HOSTS, VECTORDB_DEFAULT_RUNTIME,
-                               LLM_MODELS, LLM_MODELS_STRINGS, MPI_CMDS, EXEC_TYPE, DEFAULT_RESULTS_DIR, EXIT_CODE, VECTOR_DTYPES, DISTRIBUTIONS)
+                               LLM_MODELS, LLM_MODELS_STRINGS, MPI_CMDS, EXEC_TYPE, DEFAULT_RESULTS_DIR, EXIT_CODE,
+                               VECTOR_DTYPES, DISTRIBUTIONS)
 
 # TODO: Get rid of this now that I'm not repeating arguments for different subparsers?
 help_messages = dict(
@@ -96,6 +98,7 @@ def parse_arguments():
     # Many of the help messages are shared between the subparsers. This dictionary prevents rewriting the same messages
     # in multiple places.
     parser = argparse.ArgumentParser(description="Script to launch the MLPerf Storage benchmark")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     sub_programs = parser.add_subparsers(dest="program", required=True)
     sub_programs.required = True
 
@@ -155,7 +158,6 @@ def add_universal_arguments(parser):
     output_control = parser.add_argument_group("Output Control")
     output_control.add_argument("--debug", action="store_true", help="Enable debug mode")
     output_control.add_argument("--verbose", action="store_true", help="Enable verbose mode")
-    output_control.add_argument("--version", action="version", version="%(prog)s 0.1")
     output_control.add_argument("--stream-log-level", type=str, default="INFO",)
 
     output_control.add_argument("--allow-invalid-params", "-aip", action="store_true",
@@ -181,7 +183,6 @@ def add_training_arguments(training_parsers):
     datagen = training_subparsers.add_parser("datagen", help=help_messages['training_datagen'])
     run_benchmark = training_subparsers.add_parser("run", help=help_messages['run_benchmark'])
     configview = training_subparsers.add_parser("configview", help=help_messages['configview'])
-    reportgen = training_subparsers.add_parser("reportgen", help=help_messages['reportgen'])
 
     for _parser in [datasize, datagen, run_benchmark]:
         _parser.add_argument('--hosts', '-s', nargs="+", default=DEFAULT_HOSTS, help=help_messages['client_hosts'])
@@ -207,11 +208,9 @@ def add_training_arguments(training_parsers):
         _parser.add_argument('--num-client-hosts', '-nc', type=int, required=True, help=help_messages['num_client_hosts'])
 
     for _parser in [datasize, datagen, run_benchmark, configview]:
+        _parser.add_argument("--data-dir", '-dd', type=str, help="Filesystem location for data")
         _parser.add_argument('--ssh-username', '-u', type=str, help="Username for SSH for system information collection")
         _parser.add_argument('--params', '-p', nargs="+", type=str, help=help_messages['params'])
-
-    for _parser in [datasize, datagen, run_benchmark, configview, reportgen]:
-        _parser.add_argument("--data-dir", '-dd', type=str, help="Filesystem location for data")
         add_universal_arguments(_parser)
 
 
