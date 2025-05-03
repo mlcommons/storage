@@ -12,9 +12,9 @@ authors = [
 ]
 
 dependencies = [
-#    "dlio-benchmark==2.0.0",
+    "dlio-benchmark @ git+https://github.com/argonne-lcf/dlio_benchmark.git@mlperf_storage_v2.0",
     "psutil>=5.9",
-    "vdbbench @ git+https://github.com/wvaske/vdb-bench.git",
+    "pyarrow"
 ]
 
 [project.urls]
