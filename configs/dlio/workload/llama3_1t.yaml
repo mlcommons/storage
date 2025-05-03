@@ -19,8 +19,8 @@ model:
 framework: pytorch
 
 workflow:
-  generate_data: True
-  train: True
+  generate_data: False
+  train: False
   checkpoint: True
 
 checkpoint:
