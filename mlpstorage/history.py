@@ -56,7 +56,7 @@ class HistoryTracker:
         except FileNotFoundError:
             return 1
 
-    def add_entry(self, command: Union[str, list[str]]):
+    def add_entry(self, command: Union[str, list[str]], datetime_str=None):
         """
         Add a new entry to the history file.
 
@@ -67,7 +67,7 @@ class HistoryTracker:
             command = ' '.join(command)
 
         sequence_id = self.get_next_sequence_id()
-        timestamp = DATETIME_STR
+        timestamp = datetime_str if datetime_str else DATETIME_STR
         
         # Format the line as: sequence_id, timestamp, command
         history_line = f"{sequence_id},{timestamp},{command}"

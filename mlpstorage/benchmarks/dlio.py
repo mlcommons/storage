@@ -136,6 +136,7 @@ class TrainingBenchmark(DLIOBenchmark):
 
         # Training doesn't do checkpoints
         cmd += " ++workload.workflow.checkpoint=False"
+        return cmd
 
     def generate_datagen_benchmark_command(self, num_files_train, num_subfolders_train):
         """

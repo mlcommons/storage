@@ -5,7 +5,7 @@ import sys
 
 from mlpstorage.benchmarks import TrainingBenchmark, VectorDBBenchmark, CheckpointingBenchmark
 from mlpstorage.cli import parse_arguments, validate_args, update_args
-from mlpstorage.config import HISTFILE, DATETIME_STR, EXIT_CODE, DEFAULT_RESULTS_DIR
+from mlpstorage.config import HISTFILE, DATETIME_STR, EXIT_CODE, DEFAULT_RESULTS_DIR, get_datetime_string
 from mlpstorage.debug import debugger_hook, MLPS_DEBUG
 from mlpstorage.history import HistoryTracker
 from mlpstorage.logging import setup_logging, apply_logging_options
@@ -31,7 +31,7 @@ def signal_handler(sig, frame):
         sys.exit(EXIT_CODE.INTERRUPTED)
 
 
-def run_benchmark(args):
+def run_benchmark(args, run_datetime):
     """Run a benchmark based on the provided args."""
     update_args(args)
     program_switch_dict = dict(
@@ -45,7 +45,7 @@ def run_benchmark(args):
         print(f"Unsupported program: {args.program}")
         return 1
         
-    benchmark = benchmark_class(args)
+    benchmark = benchmark_class(args, run_datetime=run_datetime, logger=logger)
     ret_code = benchmark.run()
     benchmark.write_metadata()
     return ret_code
@@ -54,7 +54,6 @@ def run_benchmark(args):
 def main():
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
-    print(f'Watching signals')
     global signal_received
 
     args = parse_arguments()
@@ -63,10 +62,12 @@ def main():
 
     apply_logging_options(logger, args)
 
+    datetime_str = DATETIME_STR
+
     hist = HistoryTracker(history_file=HISTFILE, logger=logger)
     if args.program != "history":
         # Don't save history commands
-        hist.add_entry(sys.argv)
+        hist.add_entry(sys.argv, datetime_str=datetime_str)
 
     # Handle history command separately
     if args.program == 'history':
@@ -95,17 +96,20 @@ def main():
         report_generator = ReportGenerator(result_dir, args, logger=logger)
         return report_generator.generate_reports()
 
-
+    run_datetime = datetime_str
     # For other commands, run the benchmark
     for i in range(args.loops):
         if signal_received:
             print(f'Caught signal, exiting...')
             return EXIT_CODE.INTERRUPTED
 
-        ret_code = run_benchmark(args)
+        ret_code = run_benchmark(args, run_datetime)
         if ret_code != EXIT_CODE.SUCCESS:
             logger.error(f"Benchmark failed after {i+1} iterations")
             return EXIT_CODE.FAILURE
+
+        # Set datetime for next iteration
+        run_datetime = get_datetime_string()
 
     return EXIT_CODE.SUCCESS
 

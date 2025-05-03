@@ -33,6 +33,8 @@ class Benchmark(abc.ABC):
             self.logger = setup_logging(name=f"{self.BENCHMARK_TYPE}_benchmark", stream_log_level=args.stream_log_level)
             apply_logging_options(self.logger, args)
 
+        if not run_datetime:
+            self.logger.warning('No run datetime provided. Using current datetime.')
         self.run_datetime = run_datetime if run_datetime else DATETIME_STR
         self.run_number = run_number
         self.runtime = 0
