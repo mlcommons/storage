@@ -255,6 +255,7 @@ class CheckpointingBenchmark(DLIOBenchmark):
     def add_workflow_to_cmd(self, cmd) -> str:
         cmd += " ++workload.workflow.generate_data=False ++workload.workflow.train=False"
         cmd += " ++workload.workflow.checkpoint=True"
+        return cmd
 
     def _run(self):
         try:
