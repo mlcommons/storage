@@ -5,7 +5,7 @@ import sys
 
 from mlpstorage.benchmarks.base import Benchmark
 from mlpstorage.config import (CONFIGS_ROOT_DIR, BENCHMARK_TYPES, EXEC_TYPE, MPIRUN, MLPSTORAGE_BIN_NAME,
-                               LLM_ALLOWED_VALUES, LLM_SUBSET_PROCS, EXIT_CODE)
+                               LLM_ALLOWED_VALUES, LLM_SUBSET_PROCS, EXIT_CODE, MODELS)
 from mlpstorage.rules import calculate_training_data_size
 from mlpstorage.utils import (read_config_from_file, create_nested_dict, update_nested_dict, ClusterInformation,
                               generate_mpi_prefix_cmd)
@@ -81,7 +81,7 @@ class DLIOBenchmark(Benchmark, abc.ABC):
         # Run directory for Hydra to output log files
         cmd += f" ++hydra.run.dir={self.run_result_output}"
 
-        self.add_workflow_to_cmd(cmd)
+        cmd = self.add_workflow_to_cmd(cmd)
 
         if self.params_dict:
             for key, value in self.params_dict.items():
@@ -121,11 +121,29 @@ class TrainingBenchmark(DLIOBenchmark):
         self.params_dict, self.yaml_params, self.combined_params = self.process_dlio_params(self.config_file)
 
         self.verify_benchmark()
-        self.add_datadir_param()
+
+        if self.args.command != "datasize":
+            # The datasize command uses --data-dir and needs to generate a command that also calls --data-dir
+            # The add_datadir_param would convert --data-dir to --dataset.data_folder which is invalid to
+            # mlpstorage.
+            self.add_datadir_param()
         self.logger.status(f'Instantiated the Training Benchmark...')
 
     def add_datadir_param(self):
         self.params_dict['dataset.data_folder'] = self.args.data_dir
+        if not any([self.args.data_dir.endswith(m) for m in MODELS]):
+            # Add the model to the data dir path and make sure it exists
+            self.params_dict['dataset.data_folder'] = os.path.join(self.args.data_dir, self.args.model)
+            if not os.path.exists(self.params_dict['dataset.data_folder']):
+                self.logger.info(f'Creating data directory: {self.params_dict["dataset.data_folder"]}...')
+                os.makedirs(self.params_dict['dataset.data_folder'])
+
+        # Create the train, eval, test directories
+        for folder in ["train", "valid", "test"]:
+            folder_path = os.path.join(self.params_dict['dataset.data_folder'], folder)
+            if not os.path.exists(folder_path):
+                self.logger.info(f'Creating directory: {folder_path}...')
+                os.makedirs(folder_path)
 
     def add_workflow_to_cmd(self, cmd) -> str:
         # Configure the workflow depending on command
