@@ -6,6 +6,7 @@ from typing import List, Tuple
 from mlpstorage.config import (MODELS, PARAM_VALIDATION, MAX_READ_THREADS_TRAINING, LLM_MODELS, BENCHMARK_TYPES,
                                DATETIME_STR, LLM_ALLOWED_VALUES, LLM_SUBSET_PROCS)
 from mlpstorage.logging import setup_logging
+from mlpstorage.utils import is_valid_datetime_format
 
 
 class BenchmarkVerifier:
@@ -209,6 +210,34 @@ def calculate_training_data_size(args, cluster_information, dataset_params, read
     return int(required_file_count), int(required_subfolders_count), int(total_disk_bytes)
 
 
+"""
+The results directory structure is as follows:
+results_dir:
+    <benchmark_name>:
+        <command>:
+            <subcommand> (Optional)
+                <datetime>:
+                    run_<run_number> (Optional)
+                    
+This looks like:
+results_dir:
+    training:
+        unet3d:
+            datagen:
+                <datetime>:
+                    <output_files>
+            run:
+                <datetime>:
+                    run_0:
+                        <output_files>
+    checkpointing:
+        llama3-8b:
+            <datetime>:
+                <output_files>
+"""
+
+
+
 def generate_output_location(benchmark, datetime_str=None, **kwargs):
     """
     Generate a standardized output location for benchmark results.
@@ -219,7 +248,7 @@ def generate_output_location(benchmark, datetime_str=None, **kwargs):
         <command>:
             <subcommand> (Optional)
                 <datetime>:
-                    run_<run_number>
+                    run_<run_number> (Optional)
 
     Args:
         benchmark (Benchmark): benchmark (e.g., 'training', 'vectordb', 'checkpoint')
@@ -245,6 +274,7 @@ def generate_output_location(benchmark, datetime_str=None, **kwargs):
         if not hasattr(benchmark.args, "model"):
             raise ValueError("Model name is required for training benchmark output location")
 
+        output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
         output_location = os.path.join(output_location, benchmark.args.model)
         output_location = os.path.join(output_location, benchmark.args.command)
         output_location = os.path.join(output_location, datetime_str)
@@ -253,7 +283,7 @@ def generate_output_location(benchmark, datetime_str=None, **kwargs):
             output_location = os.path.join(output_location, f"run_{run_number}")
 
     elif benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.vector_database:
-        output_location = os.path.join(output_location, "vectordb")
+        output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
         output_location = os.path.join(output_location, benchmark.args.command)
         output_location = os.path.join(output_location, datetime_str)
 
@@ -261,7 +291,11 @@ def generate_output_location(benchmark, datetime_str=None, **kwargs):
             output_location = os.path.join(output_location, f"run_{run_number}")
 
     elif benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.checkpointing:
-        output_location = os.path.join(output_location, "checkpointing")
+        if not hasattr(benchmark.args, "model"):
+            raise ValueError("Model name is required for training benchmark output location")
+
+        output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
+        output_location = os.path.join(output_location, benchmark.args.model)
         output_location = os.path.join(output_location, datetime_str)
 
     else:
@@ -280,6 +314,7 @@ def get_runs_files(results_dir, benchmark_name=None, command=None, logger=None):
       'datetime': <datetime>,
       'mlps_metadata_file': <mlps_metadata_file_path>,
       'dlio_summary_json_file': <dlio_summary_json_file_path>,
+      'run_number': run_<num>,  #(if applicable)
       'files': [<file_path1>, <file_path2>,...] } ]
 
     :param results_dir: Base directory containing benchmark results
@@ -298,73 +333,40 @@ def get_runs_files(results_dir, benchmark_name=None, command=None, logger=None):
 
     # Walk through all directories and files in results_dir
     for root, dirs, files in os.walk(results_dir):
-        logger.debug(f'Processing directory: {root}')
+        logger.ridiculous(f'Processing directory: {root}')
+
         # Look for metadata files
         metadata_files = [f for f in files if f.endswith('_metadata.json')]
 
         if not metadata_files:
+            logger.debug(f'No metadata file found')
+            continue
+        else:
+            logger.debug(f'Found metadata files in directory {root}: {metadata_files}')
+
+        if len(metadata_files) > 1:
+            logger.warning(f'Multiple metadata files found in directory {root}. Skipping this directory.')
             continue
 
-        for metadata_file in metadata_files:
-            # Get the full path to the metadata file
-            metadata_path = os.path.join(root, metadata_file)
+        metadata_path = os.path.join(root, metadata_files[0])
 
-            # Extract components from the directory structure
-            rel_path = os.path.relpath(root, results_dir)
-            path_components = rel_path.split(os.sep)
+        # Find DLIO summary.json file if it exists
+        dlio_summary_file = None
+        for f in files:
+            if f == 'summary.json':
+                dlio_summary_file = os.path.join(root, f)
+                break
 
-            # Skip if we don't have enough components for a valid run
-            if len(path_components) < 2:
-                continue
+        # Collect all files in this run directory
+        run_files = [os.path.join(root, f) for f in files]
 
-            # Extract benchmark name, command, and datetime from path
-            deepest_path = path_components[-1]
-            if deepest_path.startswith('20'):  # Check if it's a datetime
-                datetime_str = deepest_path
-                current_benchmark_name = path_components[0]
-                if len(path_components) > 2:
-                    current_command = path_components[1]
-                else:
-                    current_command = None
+        # Create run info dictionary
+        run_info = {
+            'mlps_metadata_file': metadata_path,
+            'dlio_summary_json_file': dlio_summary_file,
+            'files': run_files
+        }
 
-                if len(path_components) > 3:  # Check if it's a subcommand'
-                    subcommand = path_components[2]
-                else:
-                    subcommand = None
-
-
-                # Apply filters if provided
-                if benchmark_name and current_benchmark_name != benchmark_name:
-                    continue
-                if command and current_command != command:
-                    continue
-
-                # Find DLIO summary.json file if it exists
-                dlio_summary_file = None
-                for f in files:
-                    if f == 'summary.json':
-                        dlio_summary_file = os.path.join(root, f)
-                        break
-
-                # Collect all files in this run directory
-                run_files = [os.path.join(root, f) for f in files]
-
-                # Create run info dictionary
-                run_info = {
-                    'benchmark_name': current_benchmark_name,
-                    'datetime': datetime_str,
-                    'mlps_metadata_file': metadata_path,
-                    'dlio_summary_json_file': dlio_summary_file,
-                    'files': run_files
-                }
-
-                if command:
-                    run_info['command'] = current_command
-
-                # Add subcommand if it exists
-                if subcommand:
-                    run_info['subcommand'] = subcommand
-
-                runs.append(run_info)
+        runs.append(run_info)
 
     return runs

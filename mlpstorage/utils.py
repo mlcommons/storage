@@ -42,6 +42,33 @@ class MLPSJsonEncoder(json.JSONEncoder):
             return str(obj)
 
 
+def is_valid_datetime_format(datetime_str):
+    """
+    Check if a string is a valid datetime in the format "yyyymmdd_hhMMss"
+    
+    :param datetime_str: String to check
+    :return: True if the string is a valid datetime, False otherwise
+    """
+    try:
+        # Check if the string has the correct length and format
+        if len(datetime_str) != 15 or datetime_str[8] != '_':
+            return False
+        
+        # Try to parse the datetime string
+        parsed_datetime = datetime.strptime(datetime_str, "%Y%m%d_%H%M%S")
+        return True
+    except ValueError:
+        # If parsing fails, the format is invalid
+        return False
+
+
+def get_datetime_from_timestamp(datetime_str):
+    if is_valid_datetime_format(datetime_str):
+        return datetime.strptime(datetime_str, "%Y%m%d_%H%M%S")
+    else:
+        return None
+
+
 def read_config_from_file(relative_path):
     config_path = os.path.join(CONFIGS_ROOT_DIR, relative_path)
     if not os.path.isfile(config_path):

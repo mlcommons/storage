@@ -147,7 +147,7 @@ def apply_logging_options(_logger, args):
 
     if args.stream_log_level:
         for stream_handler in stream_handlers:
-            stream_handler.setLevel(args.stream_log_level)
+            stream_handler.setLevel(args.stream_log_level.upper())
 
     if args.verbose:
         for stream_handler in stream_handlers:

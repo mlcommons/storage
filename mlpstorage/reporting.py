@@ -1,5 +1,7 @@
 import csv
 import json
+import os.path
+import pprint
 
 from typing import List, Dict, Any
 
@@ -10,7 +12,7 @@ from mlpstorage.utils import flatten_nested_dict, remove_nan_values
 
 class ReportGenerator:
 
-    def __init__(self, result_dir, args=None, logger=None):
+    def __init__(self, results_dir, args=None, logger=None):
         self.args = args
         if self.args is not None:
             self.debug = self.args.debug or MLPS_DEBUG
@@ -24,13 +26,13 @@ class ReportGenerator:
             self.logger = setup_logging(name=f"mlpstorage_reporter")
             apply_logging_options(self.logger, args)
 
-        self.result_dir = result_dir
+        self.results_dir = results_dir
         self.result_files = []
         self.results = []
 
     def generate_reports(self):
-        self.logger.info(f'Generating reports for {self.result_dir}')
-        self.result_files = get_runs_files(self.result_dir, logger=self.logger)
+        self.logger.info(f'Generating reports for {self.results_dir}')
+        self.result_files = get_runs_files(self.results_dir, logger=self.logger)
         self.logger.info(f'Found {len(self.result_files)} runs')
         self.results = self.accumulate_results()
         self.write_csv_file()
@@ -47,15 +49,8 @@ class ReportGenerator:
         results = []
         self.logger.info(f'Accumulating results from {len(self.result_files)} runs')
         for run_info in self.result_files:
-            self.logger.debug(f'Processing run: {run_info}')
-            run_id = f"{run_info['benchmark_name']}"
-            if run_info.get("command"):
-                run_id += f"_{run_info['command']}"
-            if run_info.get("subcommand"):
-                run_id += f"_{run_info['subcommand']}"
-            run_id += f"_{run_info['datetime']}"
+            self.logger.ridiculous(f'Processing run: \n{pprint.pformat(run_info)}')
 
-            self.logger.verbose(f'Processing run: {run_id}')
             if not run_info.get("mlps_metadata_file"):
                 self.logger.error(f"No metadata.json file found in {run_info['run_dir']}")
                 continue
@@ -79,6 +74,15 @@ class ReportGenerator:
                 summary = dict()
                 status = "Failed"
 
+            run_id = metadata['args']['program']
+            if command := metadata['args'].get("command"):
+                run_id += f"_{command}"
+            if subcommand := metadata['args'].get("subcommand"):
+                run_id += f"_{subcommand}"
+            if model := metadata['args'].get("model"):
+                run_id += f"_{model}"
+            run_id += f"_{metadata['run_datetime']}"
+
             combined_result_dict = dict(
                 run_id=run_id,
                 run_info=run_info,
@@ -91,19 +95,21 @@ class ReportGenerator:
         return results
 
     def write_json_file(self):
-        self.logger.info(f'Writing results to {self.result_dir}/results.json')
-        with open(f'{self.result_dir}/results.json', 'w') as f:
+        json_file = os.path.join(self.results_dir,'results.json')
+        self.logger.info(f'Writing results to {json_file}')
+        with open(json_file, 'w') as f:
             json.dump(self.results, f, indent=2)
 
     def write_csv_file(self):
-        self.logger.info(f'Writing results to {self.result_dir}/results.csv')
+        csv_file = os.path.join(self.results_dir,'results.csv')
+        self.logger.info(f'Writing results to {csv_file}')
         flattened_results = [flatten_nested_dict(r) for r in self.results]
         flattened_results = [remove_nan_values(r) for r in flattened_results]
         fieldnames = set()
         for l in flattened_results:
             fieldnames.update(l.keys())
 
-        with open(f'{self.result_dir}/results.csv', 'w+', newline='') as file_object:
+        with open(csv_file, 'w+', newline='') as file_object:
             csv_writer = csv.DictWriter(f=file_object, fieldnames=sorted(fieldnames), lineterminator='\n')
             csv_writer.writeheader()
             csv_writer.writerows(flattened_results)

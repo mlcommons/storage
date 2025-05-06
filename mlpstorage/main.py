@@ -92,8 +92,8 @@ def main():
             return new_args
 
     if args.program == "reports":
-        result_dir = args.result_dir if hasattr(args, 'result_dir') else DEFAULT_RESULTS_DIR
-        report_generator = ReportGenerator(result_dir, args, logger=logger)
+        results_dir = args.results_dir if hasattr(args, 'results_dir') else DEFAULT_RESULTS_DIR
+        report_generator = ReportGenerator(results_dir, args, logger=logger)
         return report_generator.generate_reports()
 
     run_datetime = datetime_str
