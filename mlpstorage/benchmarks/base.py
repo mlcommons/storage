@@ -119,7 +119,11 @@ class Benchmark(abc.ABC):
 
     def verify_benchmark(self) -> bool:
         self.logger.verboser(f'Verifying benchmark parameters: {self.args}')
-        self.verification = self.benchmark_verifier.verify()
+        try:
+            self.verification = self.benchmark_verifier.verify()
+        except Exception as e:
+            self.logger.error(f'Error occurred during benchmark verification: {e}. Contact the developer.')
+            sys.exit(1)
         self.logger.verboser(f'Benchmark verification result: {self.verification}')
 
         if not self.args.closed and not hasattr(self.args, "open"):

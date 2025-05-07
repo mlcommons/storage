@@ -450,25 +450,37 @@ Currently, the storage benchmark suite supports benchmarking of 3 deep learning 
 Calculate minimum dataset size required for the benchmark run based on your client configuration
 
 ```bash
-./benchmark.sh datasize --workload unet3d --accelerator-type h100 --num-accelerators 8 --num-client-hosts 2 --client-host-memory-in-gb 128
+[root@localhost ~ 188]# mlpstorage training datasize --model unet3d --accelerator-type h100 --max-accelerators 12 --num-client-hosts 2 --client-host-memory-in-gb 256
+Setting attr from max_accelerators to 12
+2025-05-07 11:23:02|STATUS: Benchmark results directory: /tmp/mlperf_storage_results/training/unet3d/datasize/20250507_112302
+2025-05-07 11:23:02|WARNING: Running the benchmark without verification for open or closed configurations. These results are not valid for submission. Use --open or --closed to specify a configuration.
+2025-05-07 11:23:02|STATUS: Instantiated the Training Benchmark...
+2025-05-07 11:23:02|RESULT: Minimum file count dictated by 500 step requirement of given accelerator count and batch size.
+2025-05-07 11:23:02|RESULT: Number of training files: 42000
+2025-05-07 11:23:02|RESULT: Number of training subfolders: 0
+2025-05-07 11:23:02|RESULT: Total disk space required for training: 5734.36 GB
+2025-05-07 11:23:02|RESULT: Run the following command to generate data:
+mlpstorage training datagen --hosts=127.0.0.1 --model=unet3d --exec-type=mpi --param dataset.num_files_train=42000 --num-processes=12 --results-dir=/tmp/mlperf_storage_results --data-dir=<INSERT_DATA_DIR>
+2025-05-07 11:23:02|WARNING: The parameter for --num-processes is the same as --max-accelerators. Adjust the value according to your system.
+[root@localhost ~ 189]#
 ```
 
 Generate data for the benchmark run
 
 ```bash
-./benchmark.sh datagen --hosts 10.117.61.121,10.117.61.165 --workload unet3d --accelerator-type h100 --num-parallel 8 --param dataset.num_files_train=1200 --param dataset.data_folder=unet3d_data
+mlpstorage training datagen --hosts=127.0.0.1 --model=unet3d --exec-type=mpi --param dataset.num_files_train=42000 --num-processes=12 --results-dir=/root/mlperf_storage_results --data-dir=/root/mlptmpdata --allow-run-as-root --oversubscribe
 ```
   
 Run the benchmark.
 
 ```bash
-./benchmark.sh run --hosts 10.117.61.121,10.117.61.165 --workload unet3d --accelerator-type h100 --num-accelerators 2 --results-dir unet3d_h100 --param dataset.num_files_train=1200 --param dataset.data_folder=unet3d_data
+mlpstorage training run --hosts 127.0.0.1 --client-host-memory-in-gb 256 --num-client-hosts 1 --model unet3d --num-accelerators 4 --data-dir /root/mlptmpdata --accelerator-type h100 --oversubscribe --allow-run-as-root --closed
 ```
 
 All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
 
 ```bash 
-./benchmark.sh reportgen --results-dir unet3d_h100
+mlpstorage reports reportgen --results-dir /root/mlperf_storage_results/
 ```
 
 ### ResNet-50
@@ -476,25 +488,25 @@ All results will be stored in the directory configured using `--results-dir`(or 
 Calculate minimum dataset size required for the benchmark run based on your client configuration
 
 ```bash
-./benchmark.sh datasize --workload resnet50 --accelerator-type h100 --num-accelerators 8 --num-client-hosts 2 --client-host-memory-in-gb 128
+ mlpstorage training datasize --hosts 127.0.0.1 --client-host-memory-in-gb 256 --num-client-hosts 1 --model resnet50 --max-accelerators 400 --data-dir /root/mlptmpdata --accelerator-type h100 --oversubscribe --allow-run-as-root
 ```
 
 Generate data for the benchmark run
 
 ```bash
-./benchmark.sh datagen --hosts 10.117.61.121,10.117.61.165 --workload resnet50 --accelerator-type h100 --num-parallel 8 --param dataset.num_files_train=1200 --param dataset.data_folder=resnet50_data
+ mlpstorage training datagen --hosts=127.0.0.1 --model=resnet50 --exec-type=mpi --param dataset.num_files_train=63948 --num-processes=400 --results-dir=/tmp/mlperf_storage_results --data-dir=/root/mlptmpdata
 ```
   
 Run the benchmark.
 
 ```bash
-./benchmark.sh run --hosts 10.117.61.121,10.117.61.165 --workload resnet50 --accelerator-type h100 --num-accelerators 2 --results-dir resnet50_h100 --param dataset.num_files_train=1200 --param dataset.data_folder=resnet50_data
+ mlpstorage training run --hosts 127.0.0.1 --client-host-memory-in-gb 256 --closed --num-client-hosts 1 --model resnet50 --num-accelerators 4 --data-dir /root/mlptmpdata --accelerator-type h100 --oversubscribe --allow-run-as-root
 ```
 
 All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
 
 ```bash 
-./benchmark.sh reportgen --results-dir resnet50_h100
+mlpstorage reports reportgen --results-dir /root/mlperf_storage_results/
 ```
 
 ### CosmoFlow
@@ -502,7 +514,7 @@ All results will be stored in the directory configured using `--results-dir`(or 
 Calculate minimum dataset size required for the benchmark run based on your client configuration
 
 ```bash
-./benchmark.sh datasize --workload cosmoflow --accelerator-type h100 --num-accelerators 8 --num-client-hosts 2 --client-host-memory-in-gb 128
+mlpstorage training datasize --hosts 127.0.0.1 --client-host-memory-in-gb 256 --closed --num-client-hosts 1 --model cosmoflow --max-accelerators 4 --data-dir /root/mlptmpdata --accelerator-type h100 
 ```
 
 Generate data for the benchmark run
@@ -514,13 +526,13 @@ Generate data for the benchmark run
 Run the benchmark.
 
 ```bash
-./benchmark.sh run --hosts 10.117.61.121,10.117.61.165 --workload cosmoflow --accelerator-type h100 --num-accelerators 2 --results-dir cosmoflow_h100 --param dataset.num_files_train=1200 --param dataset.data_folder=cosmoflow_data
+ mlpstorage training run --hosts 127.0.0.1 --client-host-memory-in-gb 256 --num-client-hosts 1 --model cosmoflow --num-accelerators 4 --data-dir /root/mlptmpdata --accelerator-type h100 --oversubscribe --allow-run-as-root --closed 
 ```
 
 All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
 
 ```bash 
-./benchmark.sh reportgen --results-dir cosmoflow_h100
+mlpstorage reports reportgen --results-dir /root/mlperf_storage_results/
 ```
 
 ## Parameters 

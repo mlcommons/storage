@@ -120,7 +120,7 @@ class TrainingBenchmark(DLIOBenchmark):
 
         self.params_dict, self.yaml_params, self.combined_params = self.process_dlio_params(self.config_file)
 
-        if self.args.command != "datagen":
+        if self.args.command not in ("datagen", "datasize"):
             self.verify_benchmark()
 
         if self.args.command != "datasize":
