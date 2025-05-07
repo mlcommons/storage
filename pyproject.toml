@@ -24,5 +24,8 @@ dependencies = [
 [tool.setuptools]
 packages = {find = {}}
 
+[tool.setuptools.package-data]
+"mlpstorage" = ["../configs/dlio/workload/*.yaml"]
+
 [project.scripts]
 mlpstorage = 'mlpstorage.main:main'
