@@ -32,6 +32,7 @@ class SubmissionChecker:
         report_generator = ReportGenerator(results_dir, args, logger)
         report_generator.generate_reports(write_files=False)
         self.raw_results = report_generator.results
+
         self.invalid_results = []
         self.valid_results = []
         self.validate_results_for_submission()
@@ -49,7 +50,38 @@ class SubmissionChecker:
         self.generate_summary_tables()
 
     def run_checks(self):
+        """
+        Run all the checks on each result object. A result looks like:
+         {
+            'dlio': {DLIO summary.json data},
+            'mlps': {
+                '_config_name': 'unet3d_datagen',
+                'args': {<args>>},
+                'base_command_path': 'dlio_benchmark',
+                'cluster_information': {<ClusterInformation.info>},
+                'combined_params': {<all dlio parameters>},
+                'command_output_files': [{<Command and stdout & stderr files>}],
+                'config_file': 'unet3d_datagen.yaml',
+                'config_path': '/usr/local/lib/python3.10/site-packages/configs/dlio',
+                'debug': None,
+                'executed_command': <dlio command>,
+                'params_dict': {<params passed via CLI>},
+                'run_datetime': '20250507_112451',
+                'run_result_output': '/root/mlperf_storage_results/training/unet3d/datagen/20250507_112451',
+                'runtime': 15.396047592163086,
+                'yaml_params': {<config file params>}
+            },
+            'run_id': 'training_datagen_unet3d_20250507_112451',
+            'run_info': {
+                'dlio_summary_json_file': None,
+                'files': [list of result files],
+                'mlps_metadata_file': '/root/mlperf_storage_results/training/unet3d/datagen/20250507_112451/training_20250507_112451_metadata.json'},
+            'status': 'Failed'
+        }
+        :return:
+        """
         for result in self.valid_results:
+            self.logger.verbose(f'Running checks for run_id: {result}')
             result_issues = []
             for check in self.checks:
                 result_issues = check(result)
@@ -79,6 +111,7 @@ class SubmissionChecker:
         """
         valid_results = []
         for result in self.raw_results:
+            self.logger.verbose(f'Validating run_id: {pprint.pformat(result)}')
             if not result.get("mlps"):
                 self.logger.error(f'Validating a run without a metadata.json file. Please contact the developer. run information: {result}')
                 self.invalid_results.append(result)
