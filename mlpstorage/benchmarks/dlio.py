@@ -120,7 +120,8 @@ class TrainingBenchmark(DLIOBenchmark):
 
         self.params_dict, self.yaml_params, self.combined_params = self.process_dlio_params(self.config_file)
 
-        self.verify_benchmark()
+        if self.args.command != "datagen":
+            self.verify_benchmark()
 
         if self.args.command != "datasize":
             # The datasize command uses --data-dir and needs to generate a command that also calls --data-dir
