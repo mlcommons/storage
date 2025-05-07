@@ -4,7 +4,7 @@ import sys
 from typing import Union
 
 from mlpstorage.config import HISTFILE, DATETIME_STR, EXIT_CODE
-from mlpstorage.logging import setup_logging
+from mlpstorage.mlps_logging import setup_logging
 
 
 class HistoryTracker:

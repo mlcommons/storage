@@ -14,7 +14,7 @@ from pyarrow.ipc import open_stream
 
 from mlpstorage.config import PARAM_VALIDATION, DATETIME_STR, MLPS_DEBUG
 from mlpstorage.debug import debug_tryer_wrapper
-from mlpstorage.logging import setup_logging, apply_logging_options
+from mlpstorage.mlps_logging import setup_logging, apply_logging_options
 from mlpstorage.rules import BenchmarkVerifier, generate_output_location
 from mlpstorage.utils import CommandExecutor, MLPSJsonEncoder
 
@@ -99,6 +99,8 @@ class Benchmark(abc.ABC):
         for k, v in self.__dict__.items():
             if not k in keys_to_skip and not k.startswith("__"):
                 metadata[k] = v
+
+        metadata['benchmark_type'] = self.BENCHMARK_TYPE.name
 
         return metadata
 

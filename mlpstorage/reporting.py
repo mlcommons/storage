@@ -1,12 +1,13 @@
 import csv
 import json
+import mlps_logging
 import os.path
 import pprint
 
 from typing import List, Dict, Any
 
-from mlpstorage.config import MLPS_DEBUG
-from mlpstorage.logging import setup_logging, apply_logging_options
+from mlpstorage.mlps_logging import setup_logging, apply_logging_options
+from mlpstorage.config import MLPS_DEBUG, BENCHMARK_TYPES
 from mlpstorage.rules import get_runs_files
 from mlpstorage.utils import flatten_nested_dict, remove_nan_values
 
@@ -30,13 +31,14 @@ class ReportGenerator:
         self.result_files = []
         self.results = []
 
-    def generate_reports(self):
+    def generate_reports(self, write_files=True):
         self.logger.info(f'Generating reports for {self.results_dir}')
         self.result_files = get_runs_files(self.results_dir, logger=self.logger)
         self.logger.info(f'Found {len(self.result_files)} runs')
         self.results = self.accumulate_results()
-        self.write_csv_file()
-        self.write_json_file()
+        if write_files:
+            self.write_csv_file()
+            self.write_json_file()
 
     def accumulate_results(self):
         """
@@ -113,3 +115,50 @@ class ReportGenerator:
             csv_writer = csv.DictWriter(f=file_object, fieldnames=sorted(fieldnames), lineterminator='\n')
             csv_writer.writeheader()
             csv_writer.writerows(flattened_results)
+
+    def validate_results_for_submission(self, print=True):
+        """
+        We need to walk through each result and verify the following:
+            1. Ensure every run has the metadata file
+            2. Ensure every run has a summary.json file
+            3. Ensure the parameters for a run abide by the rules
+            4. Ensure status if "Completed"
+
+        Then we print a set of helpful tables showing the results for the various benchmarks
+        """
+        training_tests = []
+        checkpointing_tests = []
+        invalid_reasons = []  # List of dictionaries iwth keys "run_id"
+        for result in self.results:
+            if not result.get("mlps"):
+                self.logger.error(f'Validating a run without a metadata.json file. Please contact the developer. run information: {result}')
+                continue
+
+            mlps_metadata_file = result['run_info']['mlps_metadata_file']
+            if not result.get("dlio"):
+                self.logger.verbose(f'INVALID - No dlio summary.json information found. Metadata file: {mlps_metadata_file}')
+                invalid_reasons.append(dict(mlps_metadata_file=mlps_metadata_file,
+                                            result_information=result,
+                                            reason='No dlio summary.json information found.'))
+
+            program = result['mlps']['args']['program']
+            if program in (BENCHMARK_TYPES.training, BENCHMARK_TYPES.checkpointing):
+                # Training and Checkpointing use DLIO
+                runtime_params = result['mlps']['combined_params']
+
+
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser(description='Generate reports from MLPerf Storage')
+    parser.add_argument('--results-dir', type=str, required=True, help='Path to the results directory')
+    parser.add_argument('--verbose', action='store_true', help='Enable verbose mode')
+    parser.add_argument('--debug', action='store_true', help='Enable debug mode')
+
+    args = parser.parse_args()
+    logger = setup_logging(name=f"mlpstorage_reporter")
+    apply_logging_options(logger, args)
+
+    reporter = ReportGenerator(results_dir=args.results_dir, args=args, logger=logger)
+    reporter.generate_reports(write_files=False)
+    reporter.validate_results_for_submission(print=True)

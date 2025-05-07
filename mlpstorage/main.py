@@ -8,7 +8,7 @@ from mlpstorage.cli import parse_arguments, validate_args, update_args
 from mlpstorage.config import HISTFILE, DATETIME_STR, EXIT_CODE, DEFAULT_RESULTS_DIR, get_datetime_string
 from mlpstorage.debug import debugger_hook, MLPS_DEBUG
 from mlpstorage.history import HistoryTracker
-from mlpstorage.logging import setup_logging, apply_logging_options
+from mlpstorage.mlps_logging import setup_logging, apply_logging_options
 from mlpstorage.reporting import ReportGenerator
 
 logger = setup_logging("MLPerfStorage")

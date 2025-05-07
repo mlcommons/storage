@@ -145,16 +145,16 @@ def apply_logging_options(_logger, args):
     stream_handlers = [h for h in _logger.handlers if not hasattr(h, 'baseFilename')]
     log_levels = sorted([v for k, v in sys.modules[__name__].__dict__.items() if type(v) is int])
 
-    if args.stream_log_level:
+    if hasattr(args, "stream_log_level") and args.stream_log_level:
         for stream_handler in stream_handlers:
             stream_handler.setLevel(args.stream_log_level.upper())
 
-    if args.verbose:
+    if hasattr(args, "verbose") and args.verbose:
         for stream_handler in stream_handlers:
             if stream_handler.level > VERBOSE:
                 stream_handler.setLevel(VERBOSE)
 
-    if args.debug:
+    if hasattr(args, "debug") and args.debug:
         for stream_handler in stream_handlers:
             stream_handler.setFormatter(ColoredDebugFormatter())
             if stream_handler.level > DEBUG:

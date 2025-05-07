@@ -82,6 +82,7 @@ help_messages = dict(
 
     # Reports help messages
     output_dir=f"Directory where the benchmark report will be saved.",
+    config_file="Path to YAML file with argument overrides that will be applied after CLI arguments",
 
     # MPI help messages
     mpi_bin=f"Execution type for MPI commands. Supported options: {MPI_CMDS}",
@@ -137,9 +138,76 @@ def parse_arguments():
         sys.exit(1)
 
     parsed_args = parser.parse_args()
+    
+    # Apply YAML config file overrides if specified
+    if hasattr(parsed_args, 'config_file') and parsed_args.config_file:
+        parsed_args = apply_yaml_config_overrides(parsed_args)
+    
     validate_args(parsed_args)
     return parsed_args
 
+def apply_yaml_config_overrides(args):
+    """
+    Apply overrides from a YAML config file to the parsed arguments.
+    
+    Args:
+        args (argparse.Namespace): The parsed command-line arguments
+        
+    Returns:
+        argparse.Namespace: The updated arguments with YAML overrides applied
+    """
+    import yaml
+    
+    try:
+        with open(args.config_file, 'r') as f:
+            yaml_config = yaml.safe_load(f)
+        
+        if not yaml_config:
+            print(f"Warning: Config file {args.config_file} is empty or invalid")
+            return args
+            
+        # Convert args to a dictionary for easier manipulation
+        args_dict = vars(args)
+        
+        # Apply overrides from YAML
+        for key, value in yaml_config.items():
+            # Skip if the key doesn't exist in args
+            if key not in args_dict:
+                print(f"Warning: Config file contains unknown parameter '{key}', skipping")
+                continue
+                
+            # Skip if the value is None (to avoid overriding CLI args with None)
+            if value is None:
+                continue
+                
+            # Handle special cases for list arguments
+            if isinstance(args_dict.get(key), list) and not isinstance(value, list):
+                if key == 'hosts':
+                    # Convert string to list for hosts
+                    args_dict[key] = value.split(',')
+                elif key == 'params':
+                    # Convert dict to list of "key=value" strings for params
+                    if isinstance(value, dict):
+                        args_dict[key] = [f"{k}={v}" for k, v in value.items()]
+                    else:
+                        print(f"Warning: Invalid format for 'params' in config file, skipping")
+                        continue
+            else:
+                # Regular case - just override the value
+                args_dict[key] = value
+                
+        # Convert back to Namespace
+        return argparse.Namespace(**args_dict)
+        
+    except FileNotFoundError:
+        print(f"Error: Config file {args.config_file} not found")
+        sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
+    except yaml.YAMLError as e:
+        print(f"Error parsing YAML config file: {e}")
+        sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
+    except Exception as e:
+        print(f"Error applying config file overrides: {e}")
+        sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
 
 # These are used by the history tracker to know if logging needs to be updated.
 logging_options = ['debug', 'verbose', 'stream_log_level']
@@ -148,6 +216,7 @@ def add_universal_arguments(parser):
     standard_args = parser.add_argument_group("Standard Arguments")
     standard_args.add_argument('--results-dir', '-rd', type=str, default=DEFAULT_RESULTS_DIR, help=help_messages['results_dir'])
     standard_args.add_argument('--loops', type=int, default=1, help="Number of times to run the benchmark")
+    standard_args.add_argument('--config-file', '-cf', type=str, help="Path to YAML file with argument overrides")
 
     # Create a mutually exclusive group for closed/open options
     submission_group = standard_args.add_mutually_exclusive_group()

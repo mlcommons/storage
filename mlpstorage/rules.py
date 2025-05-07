@@ -6,7 +6,7 @@ from typing import List, Tuple
 
 from mlpstorage.config import (MODELS, PARAM_VALIDATION, MAX_READ_THREADS_TRAINING, LLM_MODELS, BENCHMARK_TYPES,
                                DATETIME_STR, LLM_ALLOWED_VALUES, LLM_SUBSET_PROCS)
-from mlpstorage.logging import setup_logging
+from mlpstorage.mlps_logging import setup_logging
 from mlpstorage.utils import is_valid_datetime_format
 
 
