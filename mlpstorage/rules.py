@@ -1,6 +1,7 @@
 import os
 
 from datetime import datetime
+from pprint import pprint, pformat
 from typing import List, Tuple
 
 from mlpstorage.config import (MODELS, PARAM_VALIDATION, MAX_READ_THREADS_TRAINING, LLM_MODELS, BENCHMARK_TYPES,
@@ -36,7 +37,6 @@ class BenchmarkVerifier:
         # We will walk through all the params and see if they're valid for open, closed, or invalid.
         # Then we compare the set of validations against open/closed and exit if not a valid configuration.
         validation_results = dict()
-
         any_non_closed = False
         if self.benchmark.params_dict:
             for param, value in self.benchmark.params_dict.items():
@@ -45,14 +45,38 @@ class BenchmarkVerifier:
                 if validation_results[param][2] != PARAM_VALIDATION.CLOSED:
                     any_non_closed = True
 
-        # Add code to verify the other parameters here. Use cluster information and data size commands to verify
-        # that the number of processes is appropriate fo the given datasize
+        self.logger.verbose(f'Verification results from input parames: \n{pformat(validation_results)}')
+        # Accumulate the validations from optional params
         validation_set = set(v[2] for v in validation_results.values())
-        if validation_set == {PARAM_VALIDATION.CLOSED}:
+
+
+        # Add code to verify the other parameters here. Use cluster information and data size commands to verify
+        cluster_info = self.benchmark.cluster_information
+        total_client_mem_bytes = cluster_info.info['accumulated_mem_info_bytes']['total']
+        num_hosts = len(cluster_info.info['host_info'])
+        num_files, num_dirs, total_bytes = calculate_training_data_size(self.benchmark.args, cluster_info, self.benchmark.combined_params.get('dataset'),self.benchmark.combined_params.get('reader'), self.logger)
+
+        # Verify num_files_train from combined_params is above the required minimum
+        configured_num_files_train = self.benchmark.combined_params['dataset']['num_files_train']
+        if configured_num_files_train < num_files:
+            self.logger.error(f'Configured number of files for training ({configured_num_files_train}) is less than required number of files ({num_files}).')
+            validation_set.add(PARAM_VALIDATION.INVALID)
+        else:
+            self.logger.verbose(f'Configured number of files for training ({configured_num_files_train}) meets the required number of files ({num_files}).')
+            validation_set.add(PARAM_VALIDATION.CLOSED)
+
+        # TODO: Other verifications from the rules document should do validation_set.add(PARAM_VALIDATION)
+
+
+        self.logger.verbose(f'Analyzing verification from set of results: {validation_set}')
+        if validation_set == set():
+            self.logger.error('Validation did not complete properly. Unable to verify close or open execution.')
+            return PARAM_VALIDATION.INVALID
+        elif validation_set == {PARAM_VALIDATION.CLOSED}:
             return PARAM_VALIDATION.CLOSED
         elif PARAM_VALIDATION.INVALID in validation_set:
             error_string = "\n\t".join([f"{p} = {v[1]}" for p, v in validation_results.items()])
-            self.logger.error(f'\nNot all parameters allowed in closed submission: \n'
+            self.logger.error(f'Not all parameters allowed in closed submission: \n'
                               f'\t{error_string}')
             return PARAM_VALIDATION.INVALID
         else:
@@ -65,7 +89,7 @@ class BenchmarkVerifier:
             if param.startswith('dataset'):
                 left, right = param.split('.')
                 if right in ('data_folder', 'num_files_train'):
-                    # TODO: Add check of min num_files for given memory config
+                    self.logger.verbose(f'Allowed to change {param} for model {model} with value {value}.')
                     return PARAM_VALIDATION.CLOSED
 
             # Allowed to set number of read threads
@@ -73,10 +97,11 @@ class BenchmarkVerifier:
                 left, right = param.split('.')
                 if right == "read_threads":
                     if 0 < int(value) < MAX_READ_THREADS_TRAINING:
+                        self.logger.verbose(f'Allowed to change {param} for model {model} with value {value} being less than {MAX_READ_THREADS_TRAINING}.')
                         return PARAM_VALIDATION.CLOSED
 
-            self.logger.error(f'Invalid parameter {param} for model {model} with value {value}.')
-            return PARAM_VALIDATION.INVALID
+        self.logger.error(f'Invalid parameter {param} for model {model} with value {value}.')
+        return PARAM_VALIDATION.INVALID
 
     def _verify_checkpointing_params(self) -> PARAM_VALIDATION:
         # Rules to Implement:
@@ -228,8 +253,7 @@ results_dir:
                     <output_files>
             run:
                 <datetime>:
-                    run_0:
-                        <output_files>
+                    <output_files>
     checkpointing:
         llama3-8b:
             <datetime>:
@@ -248,7 +272,7 @@ def generate_output_location(benchmark, datetime_str=None, **kwargs):
         <command>:
             <subcommand> (Optional)
                 <datetime>:
-                    run_<run_number> (Optional)
+                    <output files>
 
     Args:
         benchmark (Benchmark): benchmark (e.g., 'training', 'vectordb', 'checkpoint')
@@ -279,16 +303,10 @@ def generate_output_location(benchmark, datetime_str=None, **kwargs):
         output_location = os.path.join(output_location, benchmark.args.command)
         output_location = os.path.join(output_location, datetime_str)
 
-        if benchmark.args.command == "run":
-            output_location = os.path.join(output_location, f"run_{run_number}")
-
     elif benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.vector_database:
         output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
         output_location = os.path.join(output_location, benchmark.args.command)
         output_location = os.path.join(output_location, datetime_str)
-
-        if benchmark.args.command == "run-search":
-            output_location = os.path.join(output_location, f"run_{run_number}")
 
     elif benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.checkpointing:
         if not hasattr(benchmark.args, "model"):

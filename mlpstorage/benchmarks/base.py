@@ -31,6 +31,7 @@ class Benchmark(abc.ABC):
         else:
             # Ensure there is always a logger available
             self.logger = setup_logging(name=f"{self.BENCHMARK_TYPE}_benchmark", stream_log_level=args.stream_log_level)
+            self.logger.warning(f'Benchmark did not get a logger passed. Using default logger.')
             apply_logging_options(self.logger, args)
 
         if not run_datetime:
@@ -117,12 +118,19 @@ class Benchmark(abc.ABC):
         return generate_output_location(self, self.run_datetime)
 
     def verify_benchmark(self) -> bool:
+        self.logger.verboser(f'Verifying benchmark parameters: {self.args}')
+        self.verification = self.benchmark_verifier.verify()
+        self.logger.verboser(f'Benchmark verification result: {self.verification}')
+
         if not self.args.closed and not hasattr(self.args, "open"):
             self.logger.warning(f'Running the benchmark without verification for open or closed configurations. These results are not valid for submission. Use --open or --closed to specify a configuration.')
             return True
         if not self.BENCHMARK_TYPE:
             raise ValueError(f'No benchmark specified. Unable to verify benchmark')
-        self.verification = self.benchmark_verifier.verify()
+
+        if not self.verification:
+            self.logger.error(f'Verification did not return a result. Contact the developer')
+            sys.exit(1)
         if self.verification == PARAM_VALIDATION.CLOSED:
             return True
         elif self.verification == PARAM_VALIDATION.INVALID:
