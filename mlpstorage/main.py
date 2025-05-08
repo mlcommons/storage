@@ -46,9 +46,19 @@ def run_benchmark(args, run_datetime):
         return 1
         
     benchmark = benchmark_class(args, run_datetime=run_datetime, logger=logger)
-    ret_code = benchmark.run()
-    benchmark.write_metadata()
-    return ret_code
+    try:
+        ret_code = benchmark.run()
+    except Exception as e:
+        logger.error(f"Error running benchmark: {str(e)}")
+        ret_code = EXIT_CODE.ERROR
+    finally:
+        logger.error(f'Attempting to write metadata for benchmark...')
+        try:
+            benchmark.write_metadata()
+            return ret_code
+        except Exception as e:
+            logger.error(f"Error writing metadata: {str(e)}")
+            return ret_code
 
 
 def main():

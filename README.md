@@ -27,16 +27,39 @@ Following prerequisites must be satisfied
 2. The code and data location(discussed in further sections) must be exactly same in every client host including the launcher host. This is because, the same benchmark command is automatically triggered in every participating client host during the distributed training process.
 
 ## Installation 
+**The following installation steps must be run on every client host that will participate in running the benchmarks.**
 
-**Note**: Steps described in this sections must be run in every client host.
+### Pip
+Please ensure you have the latest version of pip installed. This will fix the following error where the package is built as "UNKNOWN"
 
-Install dependencies using your system package manager.
-- `mpich` for MPI package
+```bash
+root@ub2204:/opt/mlcommons# pip3 install mlperf-storage/
+Processing ./mlperf-storage
+  Installing build dependencies ... done
+  Getting requirements to build wheel ... done
+  Preparing metadata (pyproject.toml) ... done
+Building wheels for collected packages: UNKNOWN
+  Building wheel for UNKNOWN (pyproject.toml) ... done
+  Created wheel for UNKNOWN: filename=UNKNOWN-0.0.0-py3-none-any.whl size=4736 sha256=24d5d9b84c74dd01ec25cda688a010de8ed0a6151155ce72527e123ae208cb66
+  Stored in directory: /root/.cache/pip/wheels/16/10/40/a09c7951d2239911165d66a38255539c850dc08013a44321fe
+Successfully built UNKNOWN
+Installing collected packages: UNKNOWN
+Successfully installed UNKNOWN-0.0.0
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+```
 
-For eg: when running on Ubuntu OS,
+Upgrade pip like so:
+```bash
+python3 -m pip install --upgrade pip
+```
+
+### mpi4py
+DLIO requires the use of mpi4py. See the instructions here: https://mpi4py.readthedocs.io/en/stable/install.html#linux
+
+For eg: when running on Ubuntu 22.04, install openmpi tools and libraries then mpi4py will build correctly as part of the pip installation process.
 
 ```
-sudo apt-get install mpich
+sudo apt-get install libopenmpi-dev openmpi-common
 ```
 
 Clone the latest release from [MLCommons Storage](https://github.com/mlcommons/storage) repository and install Python dependencies.

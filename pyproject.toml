@@ -10,7 +10,7 @@ readme = "README.md"
 authors = [
     {name = "MLCommons Storage Working Group"}
 ]
-
+requires-python = ">=3.10.0"
 dependencies = [
     "dlio-benchmark @ git+https://github.com/argonne-lcf/dlio_benchmark.git@mlperf_storage_v2.0",
     "psutil>=5.9",

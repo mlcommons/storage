@@ -279,7 +279,7 @@ def add_training_arguments(training_parsers):
     for _parser in [datasize, datagen, run_benchmark, configview]:
         _parser.add_argument("--data-dir", '-dd', type=str, help="Filesystem location for data")
         _parser.add_argument('--ssh-username', '-u', type=str, help="Username for SSH for system information collection")
-        _parser.add_argument('--params', '-p', nargs="+", type=str, help=help_messages['params'])
+        _parser.add_argument('--params', '-p', nargs="+", type=str, action="append", help=help_messages['params'])
         add_universal_arguments(_parser)
 
 
@@ -303,7 +303,7 @@ def add_checkpointing_arguments(checkpointing_parsers):
 
     checkpointing_parsers.add_argument('--ssh-username', '-u', type=str, help="Username for SSH for system information collection")
     checkpointing_parsers.add_argument('--num-processes', '-np', type=int, default=None, help=help_messages['num_checkpoint_accelerators'])
-    checkpointing_parsers.add_argument('--params', '-p', nargs="+", type=str, help=help_messages['params'])
+    checkpointing_parsers.add_argument('--params', '-p', nargs="+", type=str, action="append", help=help_messages['params'])
     checkpointing_parsers.add_argument("--data-dir", '-dd', type=str, help="Filesystem location for data")
     # Since we're not using subparsers, this happens in the main function
     #add_universal_arguments(checkpointing_parsers)
@@ -410,6 +410,11 @@ def update_args(args):
         # For VectorDB we need runtime or queries. If none defined use a default runtime
         if not args.runtime and not args.queries:
             args.runtime = VECTORDB_DEFAULT_RUNTIME  # Default runtime if not provided
+
+    # Check for list of lists in params and flatten them
+    if args.params:
+        flattened_params = [item for sublist in args.params for item in sublist]
+        setattr(args, 'params', flattened_params)
 
 
 if __name__ == "__main__":
