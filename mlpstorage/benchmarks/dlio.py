@@ -74,6 +74,7 @@ class DLIOBenchmark(Benchmark, abc.ABC):
         raise NotImplementedError("Subclasses must implement this method")
 
     def generate_dlio_command(self):
+        self.logger.verboser(f'Generating DLIO command for benchmark {self.BENCHMARK_TYPE.value}')
         cmd = ""
         cmd = f"{self.base_command_path}"
         cmd += f" workload={self.config_name}"
@@ -90,8 +91,9 @@ class DLIOBenchmark(Benchmark, abc.ABC):
         cmd += f" --config-dir={self.config_path}"
 
         if self.args.exec_type == EXEC_TYPE.MPI:
-            mpi_prefix = generate_mpi_prefix_cmd(MPIRUN, self.args.hosts, self.args.num_processes,
-                                                 self.args.oversubscribe, self.args.allow_run_as_root)
+            self.logger.debug(f'Generating MPI Command with binary "{self.args.mpi_bin}"')
+            mpi_prefix = generate_mpi_prefix_cmd(self.args.mpi_bin, self.args.hosts, self.args.num_processes,
+                                                 self.args.oversubscribe, self.args.allow_run_as_root, self.logger)
             cmd = f"{mpi_prefix} {cmd}"
 
         return cmd
@@ -218,6 +220,7 @@ class TrainingBenchmark(DLIOBenchmark):
         try:
             self.command_method_map[self.args.command]()
         except Exception as e:
+            self.logger.error(f'Error occurred while executing command: {str(e)}')
             return EXIT_CODE.FAILURE
         return EXIT_CODE.SUCCESS
 

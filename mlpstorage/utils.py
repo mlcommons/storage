@@ -17,7 +17,7 @@ import yaml
 
 from typing import List, Union, Optional, Dict, Tuple, Set
 
-from mlpstorage.config import CONFIGS_ROOT_DIR, MPIRUN, MPIEXEC, MPI_RUN_BIN
+from mlpstorage.config import CONFIGS_ROOT_DIR, MPIRUN, MPIEXEC, MPI_RUN_BIN, MPI_EXEC_BIN
 
 
 class MLPSJsonEncoder(json.JSONEncoder):
@@ -411,11 +411,11 @@ class ClusterInformation:
         return memory_info
 
 
-def generate_mpi_prefix_cmd(mpi_cmd, hosts, num_processes, oversubscribe, allow_run_as_root):
+def generate_mpi_prefix_cmd(mpi_cmd, hosts, num_processes, oversubscribe, allow_run_as_root, logger):
     if mpi_cmd == MPIRUN:
         prefix = f"{MPI_RUN_BIN} -n {num_processes} -host {','.join(hosts)}"
     elif mpi_cmd == MPIEXEC:
-        raise NotImplementedError(f"Unsupported MPI command: {mpi_cmd}")
+        prefix = f"{MPI_EXEC_BIN} -n {num_processes} -host {','.join(hosts)}"
     else:
         raise ValueError(f"Unsupported MPI command: {mpi_cmd}")
 

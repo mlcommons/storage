@@ -239,7 +239,7 @@ def add_universal_arguments(parser):
 
 def add_mpi_group(parser):
     mpi_options = parser.add_argument_group("MPI")
-    mpi_options.add_argument('--mpi-bin', choices=MPI_CMDS, default="mpiexec", help=help_messages['mpi_bin'])
+    mpi_options.add_argument('--mpi-bin', choices=MPI_CMDS, default="mpirun", help=help_messages['mpi_bin'])
     mpi_options.add_argument('--oversubscribe', action="store_true")
     mpi_options.add_argument('--allow-run-as-root', action="store_true")
 
