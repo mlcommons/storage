@@ -1,0 +1,30 @@
+model: 
+  name: llama_405b
+  type: transformer
+  num_layers: 126
+  model_datatype: fp16
+  optimizer_datatype: fp32
+  parallelism:
+    tensor: 8
+    pipeline: 32
+    zero_stage: 1
+  transformer: 
+    vocab_size: 128256
+    hidden_size: 16384
+    ffn_hidden_size: 53248
+    num_attention_heads: 128
+    num_kv_heads: 8
+
+framework: pytorch
+
+workflow:
+  generate_data: False
+  train: False
+  checkpoint: True
+
+checkpoint:
+  checkpoint_folder: checkpoints/llama_405b
+  time_between_checkpoints: 5
+  num_checkpoints_write: 10
+  num_checkpoints_read: 10
+  fsync: True

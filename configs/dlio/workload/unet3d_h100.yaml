@@ -1,4 +1,7 @@
-model: unet3d
+model: 
+  name: unet3d
+  type: cnn
+  model_size: 499153191
 
 framework: pytorch
 
@@ -12,9 +15,9 @@ dataset:
   format: npz
   num_files_train: 168
   num_samples_per_file: 1
-  record_length: 146600628
-  record_length_stdev: 68341808
-  record_length_resize: 2097152
+  record_length_bytes: 146600628
+  record_length_bytes_stdev: 68341808
+  record_length_bytes_resize: 2097152
   
 reader: 
   data_loader: pytorch
@@ -31,7 +34,6 @@ checkpoint:
   checkpoint_folder: checkpoints/unet3d
   checkpoint_after_epoch: 5
   epochs_between_checkpoints: 2
-  model_size: 499153191
 
 metric:
   au: 0.90

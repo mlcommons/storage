@@ -13,45 +13,13 @@ MLPerf Storage is a benchmark suite to characterize the performance of storage s
 	- [CLOSED](#closed)
 	- [OPEN](#open)
 - [Submission Rules](#submission-rules)
+- 
 ## Overview
-
-This section describes how to use the MLPerf™ Storage Benchmark to measure the performance of a storage system supporting a compute cluster running AI/ML training tasks.
- 
-This benchmark attempts to balance two goals:
-1.	Comparability between benchmark submissions to enable decision making by the AI/ML Community.
-2.	Flexibility to enable experimentation and to show off unique storage system features that will benefit the AI/ML Community.
- 
-To that end we have defined two classes of submissions: CLOSED and OPEN.
- 
-CLOSED represents a level playing field where all<sup>*</sup> results are comparable across submissions.  CLOSED explicitly forfeits flexibility in order to enable easy comparability. 
-
-<sup>*</sup> The benchmark supports both PyTorch and TensorFlow data formats, however these formats substantially different loads to the storage system such that cross-format comparisons are not appropriate, even with CLOSED submissions.  Therefore only comparisons of storage systems using the same data format are valid (e.g., two CLOSED PyTorch runs or two CLOSED TensorFlow runs.  As new data formats like PyTorch and TensorFlow are added to the benchmark that categorization will grow.
- 
-OPEN allows more flexibility to tune and change both the benchmark and the storage system configuration to show off new approaches or new features that will benefit the AI/ML Community.  OPEN explicitly forfeits comparability to allow showcasing innovation.
-
-**Benchmark output metric**
-
-For each workload, the benchmark output metric is samples per second, subject to a minimum *accelerator utilization* (```AU```), where higher is better. To pass a benchmark run, ```AU``` should be 90% or higher. ```AU``` is computed as follows. The total ideal compute time is derived from the batch size, total dataset size, number of simulated accelerators, and sleep time: ```total_compute_time = (records/file * total_files)/simulated_accelerators/batch_size * sleep_time```. Then ```AU``` is computed as follows: 
-
-```
-AU (percentage) = (total_compute_time/total_benchmark_running_time) * 100
-```
-
-Note that the sleep time has been determined by running the workloads including the compute step on real hardware and is dependent on the accelerator type. In this preview package we include sleep times for NVIDIA V100 GPUs, as measured in an NVIDIA DGX-1 system.
-
-In addition to ```AU```, submissions are expected to report details such as the number of MPI processes run on the DLIO host, as well as the amount of main memory on the DLIO host.
-
-**Future work**
-
-In a future version of the benchmark, the MLPerf Storage WG plans to add support for the “data preparation” phase of AI/ML workload as we believe that is a significant load on a storage system and is not well represented by existing AI/ML benchmarks, but the current version only requires a static copy of the dataset exist on the storage system before the start of the run.
- 
-In a future version of the benchmark, the MLPerf Storage WG plans to add support for benchmarking a storage system while running more than one MLPerf Storage benchmark at the same time (ie: more than one Training job type, such as 3DUnet and Recommender at the same time), but the current version requires that a submission only include one such job type per submission.
-
-In a future version of the benchmark, we aim to include sleep times for different accelerator types, including different types of GPUs and other ASICS.
+For an overview of how this benchmark suite is used by submitters to compare the performance of storage systems supporting an AI cluster, see the MLPerf™ Storage Benchmark submission rules here: [doc](https://github.com/mlcommons/storage/blob/main/Submission_guidelines.md). 
 
 ## Prerequisite
 
-The installation and the configuration steps described in this README are validated against clients running Ubuntu 22.04 server with python 3.10.12. The benchmark script has to be run only in one participating client host(any) which internally calls `mpirun` to launch the distributed training across multiple client hosts. The launcher client host also participates in the distributed training process.
+The installation and the configuration steps described in this README are validated against clients running Ubuntu 22.04 server with python 3.10.12. The benchmark script has to be run only in one participating client host(any) which internally calls `mpirun` to launch the distributed workloads across multiple client hosts. The launcher client host also participates in the distributed training process.
 
 Following prerequisites must be satisfied
 
@@ -59,123 +27,364 @@ Following prerequisites must be satisfied
 2. The code and data location(discussed in further sections) must be exactly same in every client host including the launcher host. This is because, the same benchmark command is automatically triggered in every participating client host during the distributed training process.
 
 ## Installation 
+**The following installation steps must be run on every client host that will participate in running the benchmarks.**
 
-**Note**: Steps described in this sections must be run in every client host.
+### Pip
+Please ensure you have the latest version of pip installed. This will fix the following error where the package is built as "UNKNOWN"
 
-Install dependencies using your system package manager.
-- `mpich` for MPI package
+```bash
+root@ub2204:/opt/mlcommons# pip3 install mlperf-storage/
+Processing ./mlperf-storage
+  Installing build dependencies ... done
+  Getting requirements to build wheel ... done
+  Preparing metadata (pyproject.toml) ... done
+Building wheels for collected packages: UNKNOWN
+  Building wheel for UNKNOWN (pyproject.toml) ... done
+  Created wheel for UNKNOWN: filename=UNKNOWN-0.0.0-py3-none-any.whl size=4736 sha256=24d5d9b84c74dd01ec25cda688a010de8ed0a6151155ce72527e123ae208cb66
+  Stored in directory: /root/.cache/pip/wheels/16/10/40/a09c7951d2239911165d66a38255539c850dc08013a44321fe
+Successfully built UNKNOWN
+Installing collected packages: UNKNOWN
+Successfully installed UNKNOWN-0.0.0
+WARNING: Running pip as the 'root' user can result in broken permissions and conflicting behaviour with the system package manager. It is recommended to use a virtual environment instead: https://pip.pypa.io/warnings/venv
+```
 
-For eg: when running on Ubuntu OS,
+Upgrade pip like so:
+```bash
+python3 -m pip install --upgrade pip
+```
+
+### mpi4py
+DLIO requires the use of mpi4py. See the instructions here: https://mpi4py.readthedocs.io/en/stable/install.html#linux
+
+For eg: when running on Ubuntu 22.04, install openmpi tools and libraries then mpi4py will build correctly as part of the pip installation process.
 
 ```
-sudo apt-get install mpich
+sudo apt-get install libopenmpi-dev openmpi-common
 ```
 
 Clone the latest release from [MLCommons Storage](https://github.com/mlcommons/storage) repository and install Python dependencies.
 
 ```bash
-git clone -b v1.0 --recurse-submodules https://github.com/mlcommons/storage.git
-cd storage
-pip3 install -r dlio_benchmark/requirements.txt
+git clone https://github.com/mlcommons/storage.git
+pip3 install ./storage
 ```
 
 The working directory structure is as follows
 
 ```
 |---storage
-       |---benchmark.sh
-       |---dlio_benchmark
-       |---storage-conf
-           |---workload(folder contains configs of all workloads)
-
+       |---benchmark.py
+       |---mlpstorage
+           |---(folder contains benchmark src files)
+       |---configs
+           |---dlio
+               |---workload
+                   |---(folder contains configs for all checkpoint and training workloads)
+           |---vectordbbench (These configurations are PREVIEW only and not available for submission)
+               |---(folder contains configs for all vectordb workloads)
 ```
 
-The benchmark simulation will be performed through the [dlio_benchmark](https://github.com/argonne-lcf/dlio_benchmark) code, a benchmark suite for emulating I/O patterns for deep learning workloads. [dlio_benchmark](https://github.com/argonne-lcf/dlio_benchmark) currently is listed as a submodule to this MLPerf Storage repo. The DLIO configuration of each workload is specified through a yaml file. You can see the configs of all MLPerf Storage workloads in the `storage-conf` folder. ```benchmark.sh``` is a wrapper script which launches [dlio_benchmark](https://github.com/argonne-lcf/dlio_benchmark) to perform the benchmark for MLPerf Storage workloads. 
+The benchmark simulation will be performed through the [dlio_benchmark](https://github.com/argonne-lcf/dlio_benchmark) code, a benchmark suite for emulating I/O patterns for deep learning workloads. [dlio_benchmark](https://github.com/argonne-lcf/dlio_benchmark) is listed as a prerequisite to a specific git branch. A future release will update the installer to pull DLIO from PyPi. The DLIO configuration of each workload is specified through a yaml file. You can see the configs of all MLPerf Storage workloads in the `configs` folder. ```benchmark.py``` is a wrapper script which launches [dlio_benchmark](https://github.com/argonne-lcf/dlio_benchmark) to perform the benchmark for MLPerf Storage workloads. 
+
+## Operation
+The benchmarks uses nested commands to select the workload category, workload, and workload parameters.
+
+### Workload Categories
+The first command is the workload category
+ - training
+ - checkpointing
+ - vectordb (PREVIEW)
 
 ```bash
-./benchmark.sh -h
+mlpstorage -h
+usage: mlpstorage [-h] [--version] {training,checkpointing,vectordb,reports,history} ...
 
-Usage: ./benchmark.sh [datasize/datagen/run/configview/reportgen] [options]
-Script to launch the MLPerf Storage benchmark.
+Script to launch the MLPerf Storage benchmark
+
+positional arguments:
+  {training,checkpointing,vectordb,reports,history}
+    training            Training benchmark options
+    checkpointing       Checkpointing benchmark options
+    vectordb            VectorDB benchmark options
+    reports             Generate a report from benchmark results
+    history             Display benchmark history
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --version             show program's version number and exit
 ```
 
-## Configuration
+### Training Category
+The training category supports 3 models (unet3d, resnet50, cosmoflow). The benchmark execution process requires these steps:
+1. Datasize - Calculate required number of samples for a given client configuration
+2. Datagen - Generate the required dataset
+3. Run - Execute the benchmark
+4. Reportgen - Process the result logs into readable files
+
+```bash
+mlpstorage training --help
+usage: mlpstorage training [-h] [--results-dir RESULTS_DIR] [--loops LOOPS] [--open | --closed] [--debug] [--verbose]
+                           [--stream-log-level STREAM_LOG_LEVEL] [--allow-invalid-params] [--what-if]
+                           {datasize,datagen,run,configview} ...
+
+Run the MLPerf Storage training benchmark
+
+positional arguments:
+  {datasize,datagen,run,configview}
+    datasize            The datasize command calculates the number of samples needed for a given workload, accelerator
+                        type, number of accelerators, and client host memory.
+    datagen             The datagen command generates a dataset for a given workload and number of parallel generation
+                        processes.
+    run                 Run the benchmark with the specified parameters.
+    configview          View the final config based on the specified options.
+
+optional arguments:
+  -h, --help            show this help message and exit
+
+Standard Arguments:
+  --results-dir RESULTS_DIR, -rd RESULTS_DIR
+                        Directory where the benchmark results will be saved.
+  --loops LOOPS         Number of times to run the benchmark
+  --open                Run as an open submission
+  --closed              Run as a closed submission
+
+Output Control:
+  --debug               Enable debug mode
+  --verbose             Enable verbose mode
+  --stream-log-level STREAM_LOG_LEVEL
+  --allow-invalid-params, -aip
+                        Do not fail on invalid parameters.
+
+View Only:
+  --what-if             View the configuration that would execute and the associated command.
+```
+
+Use ```mlpstorage training {command} --help``` for the full list of parameters for each command.
+
+#### Data Sizing and Generation
 
 **Note**: Steps described in this section must be run only in one client host(launcher client).
 
-The benchmark suite consists of 4 distinct phases
+The datasize command relies on the accelerator being emulated, the max number of accelerators to support, the system memory in the benchmark clients, and the number of benchmark clients.
 
-1. Calculate the minimum dataset size required for the benchmark run
+The two rules that generally dictate the datasize are:
+1. The datasize on disk must be 5x the cumulative system memory of the benchmark clients
+2. The benchmark must run for 500 iterations of the given batch size for all GPUs
+
+If the list of clients is passed in for this command the amount of memory is found programmatically. Otherwise, the user can provide the number of clients and the amount of memory per client for the calculation.
 
 ```bash
-./benchmark.sh datasize -h
-Usage: ./benchmark.sh datasize [options]
-Get minimum dataset size required for the benchmark run.
+[root@localhost ]# mlpstorage training datasize --help
+usage: mlpstorage training datasize [-h] [--hosts HOSTS [HOSTS ...]] --model {cosmoflow,resnet50,unet3d}
+                                    --client-host-memory-in-gb CLIENT_HOST_MEMORY_IN_GB [--exec-type {mpi,docker}]
+                                    [--mpi-bin {mpirun,mpiexec}] [--oversubscribe] [--allow-run-as-root]
+                                    --max-accelerators MAX_ACCELERATORS --accelerator-type {h100,a100}
+                                    --num-client-hosts NUM_CLIENT_HOSTS [--data-dir DATA_DIR]
+                                    [--ssh-username SSH_USERNAME] [--params PARAMS [PARAMS ...]]
+                                    [--results-dir RESULTS_DIR] [--loops LOOPS] [--open | --closed] [--debug]
+                                    [--verbose] [--stream-log-level STREAM_LOG_LEVEL] [--allow-invalid-params]
+                                    [--what-if]
 
+optional arguments:
+  -h, --help            show this help message and exit
+  --hosts HOSTS [HOSTS ...], -s HOSTS [HOSTS ...]
+                        Space-separated list of IP addresses or hostnames of the participating hosts. Example: '--
+                        hosts 192.168.1.1 192.168.1.2 192.168.1.3' or '--hosts host1 host2 host3'
+  --model {cosmoflow,resnet50,unet3d}, -m {cosmoflow,resnet50,unet3d}
+                        Model to emulate. A specific model defines the sample size, sample container format, and data
+                        rates for each supported accelerator.
+  --client-host-memory-in-gb CLIENT_HOST_MEMORY_IN_GB, -cm CLIENT_HOST_MEMORY_IN_GB
+                        Memory available in the client where the benchmark is run. The dataset needs to be 5x the
+                        available memory for closed submissions.
+  --exec-type {mpi,docker}, -et {mpi,docker}
+                        Execution type for benchmark commands. Supported options: [<EXEC_TYPE.MPI: 'mpi'>,
+                        <EXEC_TYPE.DOCKER: 'docker'>]
+  --max-accelerators MAX_ACCELERATORS, -ma MAX_ACCELERATORS
+                        Max number of simulated accelerators. In multi-host configurations the accelerators will be
+                        initiated in a round-robin fashion to ensure equal distribution of simulated accelerator
+                        processes
+  --accelerator-type {h100,a100}, -g {h100,a100}
+                        Accelerator to simulate for the benchmark. A specific accelerator defines the data access
+                        sizes and rates for each supported workload
+  --num-client-hosts NUM_CLIENT_HOSTS, -nc NUM_CLIENT_HOSTS
+                        Number of participating client hosts. Simulated accelerators will be initiated on these hosts
+                        in a round-robin fashion
+  --data-dir DATA_DIR, -dd DATA_DIR
+                        Filesystem location for data
+  --ssh-username SSH_USERNAME, -u SSH_USERNAME
+                        Username for SSH for system information collection
+  --params PARAMS [PARAMS ...], -p PARAMS [PARAMS ...]
+                        Additional parameters to be passed to the benchmark. These will override the config file. For
+                        a closed submission only a subset of params are supported. Multiple values allowed in the
+                        form: --params key1=value1 key2=value2 key3=value3
 
-Options:
-  -h, --help			        Print this message
-  -w, --workload		        Workload dataset to be generated. Possible options are 'unet3d', 'cosmoflow' 'resnet50'
-  -g, --accelerator-type	        Simulated accelerator type used for the benchmark. Possible options are 'a100' 'h100'
-  -n, --num-accelerators	        Simulated number of accelerators(of same accelerator type)
-  -c, --num-client-hosts	        Number of participating client hosts
-  -m, --client-host-memory-in-gb	Memory available in the client where benchmark is run
+MPI:
+  --mpi-bin {mpirun,mpiexec}
+                        Execution type for MPI commands. Supported options: ['mpirun', 'mpiexec']
+  --oversubscribe
+  --allow-run-as-root
+
+Standard Arguments:
+  --results-dir RESULTS_DIR, -rd RESULTS_DIR
+                        Directory where the benchmark results will be saved.
+  --loops LOOPS         Number of times to run the benchmark
+  --open                Run as an open submission
+  --closed              Run as a closed submission
+
+Output Control:
+  --debug               Enable debug mode
+  --verbose             Enable verbose mode
+  --stream-log-level STREAM_LOG_LEVEL
+  --allow-invalid-params, -aip
+                        Do not fail on invalid parameters.
+
+View Only:
+  --what-if             View the configuration that would execute and the associated command.
 ```
 
 Example:
 
-To calculate minimum dataset size for a `unet3d` workload running on 2 client machines with 128 GB each with overall 8 simulated a100 accelerators
+To calculate minimum dataset size for a `unet3d` model running on 2 client machines with 128 GB each with overall 8 simulated a100 accelerators
 
 ```bash
-./benchmark.sh datasize --workload unet3d --accelerator-type a100 --num-accelerators 8 --num-client-hosts 2 --client-host-memory-in-gb 128
+/benchmark.py training datasize -m unet3d --lient-host-memory-in-gb 128 --max-accelerators 16 --um-client-hosts 2 --accelerator-type a100  --results-dir ~/mlps-results
 ```
 
 2. Synthetic data is generated based on the workload requested by the user.
 
 ```bash
-./benchmark.sh datagen -h
+[root@localhost ]# mlpstorage training datagen --help
+usage: mlpstorage training datagen [-h] [--hosts HOSTS [HOSTS ...]] --model {cosmoflow,resnet50,unet3d}
+                                   [--exec-type {mpi,docker}] [--mpi-bin {mpirun,mpiexec}] [--oversubscribe]
+                                   [--allow-run-as-root] --num-processes NUM_PROCESSES [--data-dir DATA_DIR]
+                                   [--ssh-username SSH_USERNAME] [--params PARAMS [PARAMS ...]]
+                                   [--results-dir RESULTS_DIR] [--loops LOOPS] [--open | --closed] [--debug]
+                                   [--verbose] [--stream-log-level STREAM_LOG_LEVEL] [--allow-invalid-params]
+                                   [--what-if]
 
-Usage: ./benchmark.sh datagen [options]
-Generate benchmark dataset based on the specified options.
+optional arguments:
+  -h, --help            show this help message and exit
+  --hosts HOSTS [HOSTS ...], -s HOSTS [HOSTS ...]
+                        Space-separated list of IP addresses or hostnames of the participating hosts. Example: '--
+                        hosts 192.168.1.1 192.168.1.2 192.168.1.3' or '--hosts host1 host2 host3'
+  --model {cosmoflow,resnet50,unet3d}, -m {cosmoflow,resnet50,unet3d}
+                        Model to emulate. A specific model defines the sample size, sample container format, and data
+                        rates for each supported accelerator.
+  --exec-type {mpi,docker}, -et {mpi,docker}
+                        Execution type for benchmark commands. Supported options: [<EXEC_TYPE.MPI: 'mpi'>,
+                        <EXEC_TYPE.DOCKER: 'docker'>]
+  --num-processes NUM_PROCESSES, -np NUM_PROCESSES
+                        Number of parallel processes to use for dataset generation. Processes will be initiated in a
+                        round-robin fashion across the configured client hosts
+  --data-dir DATA_DIR, -dd DATA_DIR
+                        Filesystem location for data
+  --ssh-username SSH_USERNAME, -u SSH_USERNAME
+                        Username for SSH for system information collection
+  --params PARAMS [PARAMS ...], -p PARAMS [PARAMS ...]
+                        Additional parameters to be passed to the benchmark. These will override the config file. For
+                        a closed submission only a subset of params are supported. Multiple values allowed in the
+                        form: --params key1=value1 key2=value2 key3=value3
 
+MPI:
+  --mpi-bin {mpirun,mpiexec}
+                        Execution type for MPI commands. Supported options: ['mpirun', 'mpiexec']
+  --oversubscribe
+  --allow-run-as-root
 
-Options:
-  -h, --help			Print this message
-  -s, --hosts			Comma separated IP addresses of the participating hosts(without space). eg: '192.168.1.1,192.168.2.2'
-  -c, --category		Benchmark category to be submitted. Possible options are 'closed'(default)
-  -w, --workload		Workload dataset to be generated. Possible options are 'unet3d', 'cosmoflow' 'resnet50'
-  -g, --accelerator-type	Simulated accelerator type used for the benchmark. Possible options are 'a100' 'h100'
-  -n, --num-parallel		Number of parallel jobs used to generate the dataset
-  -r, --results-dir		Location to the results directory. Default is ./results/workload.model/DATE-TIME
-  -p, --param			DLIO param when set, will override the config file value
+Standard Arguments:
+  --results-dir RESULTS_DIR, -rd RESULTS_DIR
+                        Directory where the benchmark results will be saved.
+  --loops LOOPS         Number of times to run the benchmark
+  --open                Run as an open submission
+  --closed              Run as a closed submission
+
+Output Control:
+  --debug               Enable debug mode
+  --verbose             Enable verbose mode
+  --stream-log-level STREAM_LOG_LEVEL
+  --allow-invalid-params, -aip
+                        Do not fail on invalid parameters.
+
+View Only:
+  --what-if             View the configuration that would execute and the associated command.
 ```
 
 Example:
 
-For generating training data for `unet3d` workload into `unet3d_data` directory using 8 parallel jobs distributed on 2 nodes for h100 simulated accelerator,
+For generating training data of 56,000 files for `unet3d` workload into `unet3d_data` directory using 8 parallel jobs distributed on 2 nodes.
 
 ```bash
-./benchmark.sh datagen --hosts 10.117.61.121,10.117.61.165 --workload unet3d --accelerator-type h100 --num-parallel 8 --param dataset.num_files_train=1200 --param dataset.data_folder=unet3d_data
+./benchmark.sh datagen --hosts 10.117.61.121,10.117.61.165 --model unet3d --num-processes 8 --data-dir /mnt/unet3d_data --param dataset.num_files_train=56000
 ```
 
-3. Benchmark is run on the generated data.
+#### Running a Training Benchmark
 
 ```bash
-./benchmark.sh run -h
+[root@localhost ]# mlpstorage training run --help
+usage: mlpstorage training run [-h] [--hosts HOSTS [HOSTS ...]] --model {cosmoflow,resnet50,unet3d}
+                               --client-host-memory-in-gb CLIENT_HOST_MEMORY_IN_GB [--exec-type {mpi,docker}]
+                               [--mpi-bin {mpirun,mpiexec}] [--oversubscribe] [--allow-run-as-root] --num-accelerators
+                               NUM_ACCELERATORS --accelerator-type {h100,a100} --num-client-hosts NUM_CLIENT_HOSTS
+                               [--data-dir DATA_DIR] [--ssh-username SSH_USERNAME] [--params PARAMS [PARAMS ...]]
+                               [--results-dir RESULTS_DIR] [--loops LOOPS] [--open | --closed] [--debug] [--verbose]
+                               [--stream-log-level STREAM_LOG_LEVEL] [--allow-invalid-params] [--what-if]
 
-Usage: ./benchmark.sh run [options]
-Run benchmark on the generated dataset based on the specified options.
+optional arguments:
+  -h, --help            show this help message and exit
+  --hosts HOSTS [HOSTS ...], -s HOSTS [HOSTS ...]
+                        Space-separated list of IP addresses or hostnames of the participating hosts. Example: '--
+                        hosts 192.168.1.1 192.168.1.2 192.168.1.3' or '--hosts host1 host2 host3'
+  --model {cosmoflow,resnet50,unet3d}, -m {cosmoflow,resnet50,unet3d}
+                        Model to emulate. A specific model defines the sample size, sample container format, and data
+                        rates for each supported accelerator.
+  --client-host-memory-in-gb CLIENT_HOST_MEMORY_IN_GB, -cm CLIENT_HOST_MEMORY_IN_GB
+                        Memory available in the client where the benchmark is run. The dataset needs to be 5x the
+                        available memory for closed submissions.
+  --exec-type {mpi,docker}, -et {mpi,docker}
+                        Execution type for benchmark commands. Supported options: [<EXEC_TYPE.MPI: 'mpi'>,
+                        <EXEC_TYPE.DOCKER: 'docker'>]
+  --num-accelerators NUM_ACCELERATORS, -na NUM_ACCELERATORS
+                        Number of simulated accelerators. In multi-host configurations the accelerators will be
+                        initiated in a round-robin fashion to ensure equal distribution of simulated accelerator
+                        processes
+  --accelerator-type {h100,a100}, -g {h100,a100}
+                        Accelerator to simulate for the benchmark. A specific accelerator defines the data access
+                        sizes and rates for each supported workload
+  --num-client-hosts NUM_CLIENT_HOSTS, -nc NUM_CLIENT_HOSTS
+                        Number of participating client hosts. Simulated accelerators will be initiated on these hosts
+                        in a round-robin fashion
+  --data-dir DATA_DIR, -dd DATA_DIR
+                        Filesystem location for data
+  --ssh-username SSH_USERNAME, -u SSH_USERNAME
+                        Username for SSH for system information collection
+  --params PARAMS [PARAMS ...], -p PARAMS [PARAMS ...]
+                        Additional parameters to be passed to the benchmark. These will override the config file. For
+                        a closed submission only a subset of params are supported. Multiple values allowed in the
+                        form: --params key1=value1 key2=value2 key3=value3
 
+MPI:
+  --mpi-bin {mpirun,mpiexec}
+                        Execution type for MPI commands. Supported options: ['mpirun', 'mpiexec']
+  --oversubscribe
+  --allow-run-as-root
 
-Options:
-  -h, --help			Print this message
-  -s, --hosts			Comma separated IP addresses of the participating hosts(without space). eg: '192.168.1.1,192.168.2.2'
-  -c, --category		Benchmark category to be submitted. Possible options are 'closed'(default)
-  -w, --workload		Workload to be run. Possible options are 'unet3d', 'cosmoflow' 'resnet50'
-  -g, --accelerator-type	Simulated accelerator type used for the benchmark. Possible options are 'a100' 'h100'
-  -n, --num-accelerators	Simulated number of accelerators(of same accelerator type)
-  -r, --results-dir		Location to the results directory.
-  -p, --param			DLIO param when set, will override the config file value
+Standard Arguments:
+  --results-dir RESULTS_DIR, -rd RESULTS_DIR
+                        Directory where the benchmark results will be saved.
+  --loops LOOPS         Number of times to run the benchmark
+  --open                Run as an open submission
+  --closed              Run as a closed submission
+
+Output Control:
+  --debug               Enable debug mode
+  --verbose             Enable verbose mode
+  --stream-log-level STREAM_LOG_LEVEL
+  --allow-invalid-params, -aip
+                        Do not fail on invalid parameters.
+
+View Only:
+  --what-if             View the configuration that would execute and the associated command.
+
 ```
 
 Example:
@@ -183,31 +392,77 @@ Example:
 For running benchmark on `unet3d` workload with data located in `unet3d_data` directory using 2 h100 accelerators spread across 2 client hosts(with IPs 10.117.61.121,10.117.61.165) and results on `unet3d_results` directory, 
 
 ```bash
-./benchmark.sh run --hosts 10.117.61.121,10.117.61.165 --workload unet3d --accelerator-type h100 --num-accelerators 2 --results-dir resultsdir --param dataset.num_files_train=1200 --param dataset.data_folder=unet3d_data
+# TODO: Insert command to run unet3d workload 
 ```
 
-4. Benchmark submission report is generated by aggregating the individual run results.
+4. Benchmark submission report is generated by aggregating the individual run results. The reporting command provides the associated functions to generate a report for a given results directory
 
 ```bash
-./benchmark.sh reportgen -h
+# TODO: Update
+[root@localhost]# mlpstorage reports --help
+usage: mlpstorage reports [-h] [--results-dir RESULTS_DIR] [--loops LOOPS] [--open | --closed] [--debug] [--verbose]
+                          [--stream-log-level STREAM_LOG_LEVEL] [--allow-invalid-params] [--what-if]
+                          {reportgen} ...
 
-Usage: ./benchmark.sh reportgen [options]
-Generate a report from the benchmark results.
+positional arguments:
+  {reportgen}           Sub-commands
+    reportgen           Generate a report from the benchmark results.
 
+optional arguments:
+  -h, --help            show this help message and exit
 
-Options:
-  -h, --help			Print this message
-  -r, --results-dir		Location to the results directory
+Standard Arguments:
+  --results-dir RESULTS_DIR, -rd RESULTS_DIR
+                        Directory where the benchmark results will be saved.
+  --loops LOOPS         Number of times to run the benchmark
+  --open                Run as an open submission
+  --closed              Run as a closed submission
+
+Output Control:
+  --debug               Enable debug mode
+  --verbose             Enable verbose mode
+  --stream-log-level STREAM_LOG_LEVEL
+  --allow-invalid-params, -aip
+                        Do not fail on invalid parameters.
+
+View Only:
+  --what-if             View the configuration that would execute and the associated command.
 ```
+
 To generate the benchmark report,
 
 ```bash
-./benchmark.sh reportgen --results-dir  resultsdir
+[root@localhost]# mlpstorage reports reportgen --help
+usage: mlpstorage reports reportgen [-h] [--output-dir OUTPUT_DIR] [--results-dir RESULTS_DIR] [--loops LOOPS]
+                                    [--open | --closed] [--debug] [--verbose] [--stream-log-level STREAM_LOG_LEVEL]
+                                    [--allow-invalid-params] [--what-if]
+
+optional arguments:
+  -h, --help            show this help message and exit
+  --output-dir OUTPUT_DIR
+                        Directory where the benchmark report will be saved.
+
+Standard Arguments:
+  --results-dir RESULTS_DIR, -rd RESULTS_DIR
+                        Directory where the benchmark results will be saved.
+  --loops LOOPS         Number of times to run the benchmark
+  --open                Run as an open submission
+  --closed              Run as a closed submission
+
+Output Control:
+  --debug               Enable debug mode
+  --verbose             Enable verbose mode
+  --stream-log-level STREAM_LOG_LEVEL
+  --allow-invalid-params, -aip
+                        Do not fail on invalid parameters.
+
+View Only:
+  --what-if             View the configuration that would execute and the associated command.
 ```
 
 Note: The `reportgen` script must be run in the launcher client host. 
 
-## Workloads
+## Training Models
 Currently, the storage benchmark suite supports benchmarking of 3 deep learning workloads
 - Image segmentation using U-Net3D model 
 - Image classification using Resnet-50 model
@@ -218,25 +473,37 @@ Currently, the storage benchmark suite supports benchmarking of 3 deep learning 
 Calculate minimum dataset size required for the benchmark run based on your client configuration
 
 ```bash
-./benchmark.sh datasize --workload unet3d --accelerator-type h100 --num-accelerators 8 --num-client-hosts 2 --client-host-memory-in-gb 128
+[root@localhost ~ 188]# mlpstorage training datasize --model unet3d --accelerator-type h100 --max-accelerators 12 --num-client-hosts 2 --client-host-memory-in-gb 256
+Setting attr from max_accelerators to 12
+2025-05-07 11:23:02|STATUS: Benchmark results directory: /tmp/mlperf_storage_results/training/unet3d/datasize/20250507_112302
+2025-05-07 11:23:02|WARNING: Running the benchmark without verification for open or closed configurations. These results are not valid for submission. Use --open or --closed to specify a configuration.
+2025-05-07 11:23:02|STATUS: Instantiated the Training Benchmark...
+2025-05-07 11:23:02|RESULT: Minimum file count dictated by 500 step requirement of given accelerator count and batch size.
+2025-05-07 11:23:02|RESULT: Number of training files: 42000
+2025-05-07 11:23:02|RESULT: Number of training subfolders: 0
+2025-05-07 11:23:02|RESULT: Total disk space required for training: 5734.36 GB
+2025-05-07 11:23:02|RESULT: Run the following command to generate data:
+mlpstorage training datagen --hosts=127.0.0.1 --model=unet3d --exec-type=mpi --param dataset.num_files_train=42000 --num-processes=12 --results-dir=/tmp/mlperf_storage_results --data-dir=<INSERT_DATA_DIR>
+2025-05-07 11:23:02|WARNING: The parameter for --num-processes is the same as --max-accelerators. Adjust the value according to your system.
+[root@localhost ~ 189]#
 ```
 
 Generate data for the benchmark run
 
 ```bash
-./benchmark.sh datagen --hosts 10.117.61.121,10.117.61.165 --workload unet3d --accelerator-type h100 --num-parallel 8 --param dataset.num_files_train=1200 --param dataset.data_folder=unet3d_data
+mlpstorage training datagen --hosts=127.0.0.1 --model=unet3d --exec-type=mpi --param dataset.num_files_train=42000 --num-processes=12 --results-dir=/root/mlperf_storage_results --data-dir=/root/mlptmpdata --allow-run-as-root --oversubscribe
 ```
   
 Run the benchmark.
 
 ```bash
-./benchmark.sh run --hosts 10.117.61.121,10.117.61.165 --workload unet3d --accelerator-type h100 --num-accelerators 2 --results-dir unet3d_h100 --param dataset.num_files_train=1200 --param dataset.data_folder=unet3d_data
+mlpstorage training run --hosts 127.0.0.1 --client-host-memory-in-gb 256 --num-client-hosts 1 --model unet3d --num-accelerators 4 --data-dir /root/mlptmpdata --accelerator-type h100 --oversubscribe --allow-run-as-root --closed
 ```
 
 All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
 
 ```bash 
-./benchmark.sh reportgen --results-dir unet3d_h100
+mlpstorage reports reportgen --results-dir /root/mlperf_storage_results/
 ```
 
 ### ResNet-50
@@ -244,25 +511,25 @@ All results will be stored in the directory configured using `--results-dir`(or 
 Calculate minimum dataset size required for the benchmark run based on your client configuration
 
 ```bash
-./benchmark.sh datasize --workload resnet50 --accelerator-type h100 --num-accelerators 8 --num-client-hosts 2 --client-host-memory-in-gb 128
+ mlpstorage training datasize --hosts 127.0.0.1 --client-host-memory-in-gb 256 --num-client-hosts 1 --model resnet50 --max-accelerators 400 --data-dir /root/mlptmpdata --accelerator-type h100 --oversubscribe --allow-run-as-root
 ```
 
 Generate data for the benchmark run
 
 ```bash
-./benchmark.sh datagen --hosts 10.117.61.121,10.117.61.165 --workload resnet50 --accelerator-type h100 --num-parallel 8 --param dataset.num_files_train=1200 --param dataset.data_folder=resnet50_data
+ mlpstorage training datagen --hosts=127.0.0.1 --model=resnet50 --exec-type=mpi --param dataset.num_files_train=63948 --num-processes=400 --results-dir=/tmp/mlperf_storage_results --data-dir=/root/mlptmpdata
 ```
   
 Run the benchmark.
 
 ```bash
-./benchmark.sh run --hosts 10.117.61.121,10.117.61.165 --workload resnet50 --accelerator-type h100 --num-accelerators 2 --results-dir resnet50_h100 --param dataset.num_files_train=1200 --param dataset.data_folder=resnet50_data
+ mlpstorage training run --hosts 127.0.0.1 --client-host-memory-in-gb 256 --closed --num-client-hosts 1 --model resnet50 --num-accelerators 4 --data-dir /root/mlptmpdata --accelerator-type h100 --oversubscribe --allow-run-as-root
 ```
 
 All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
 
 ```bash 
-./benchmark.sh reportgen --results-dir resnet50_h100
+mlpstorage reports reportgen --results-dir /root/mlperf_storage_results/
 ```
 
 ### CosmoFlow
@@ -270,7 +537,7 @@ All results will be stored in the directory configured using `--results-dir`(or 
 Calculate minimum dataset size required for the benchmark run based on your client configuration
 
 ```bash
-./benchmark.sh datasize --workload cosmoflow --accelerator-type h100 --num-accelerators 8 --num-client-hosts 2 --client-host-memory-in-gb 128
+mlpstorage training datasize --hosts 127.0.0.1 --client-host-memory-in-gb 256 --closed --num-client-hosts 1 --model cosmoflow --max-accelerators 4 --data-dir /root/mlptmpdata --accelerator-type h100 
 ```
 
 Generate data for the benchmark run
@@ -282,13 +549,13 @@ Generate data for the benchmark run
 Run the benchmark.
 
 ```bash
-./benchmark.sh run --hosts 10.117.61.121,10.117.61.165 --workload cosmoflow --accelerator-type h100 --num-accelerators 2 --results-dir cosmoflow_h100 --param dataset.num_files_train=1200 --param dataset.data_folder=cosmoflow_data
+ mlpstorage training run --hosts 127.0.0.1 --client-host-memory-in-gb 256 --num-client-hosts 1 --model cosmoflow --num-accelerators 4 --data-dir /root/mlptmpdata --accelerator-type h100 --oversubscribe --allow-run-as-root --closed 
 ```
 
 All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
 
 ```bash 
-./benchmark.sh reportgen --results-dir cosmoflow_h100
+mlpstorage reports reportgen --results-dir /root/mlperf_storage_results/
 ```
 
 ## Parameters 

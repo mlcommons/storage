@@ -1,0 +1,15 @@
+model: 
+  name: unet3d
+  type: cnn
+  model_size: 499153191
+
+framework: pytorch
+
+dataset: 
+  data_folder: data/unet3d/
+  format: npz
+  num_files_train: 168
+  num_samples_per_file: 1
+  record_length_bytes: 146600628
+  record_length_bytes_stdev: 68341808
+  record_length_bytes_resize: 2097152
