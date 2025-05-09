@@ -65,8 +65,8 @@ sudo apt-get install libopenmpi-dev openmpi-common
 Clone the latest release from [MLCommons Storage](https://github.com/mlcommons/storage) repository and install Python dependencies.
 
 ```bash
-git clone -b v2.0 https://github.com/mlcommons/storage.git
-pip3 install storage
+git clone https://github.com/mlcommons/storage.git
+pip3 install ./storage
 ```
 
 The working directory structure is as follows
