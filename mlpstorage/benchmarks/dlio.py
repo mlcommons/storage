@@ -5,7 +5,7 @@ import sys
 
 from mlpstorage.benchmarks.base import Benchmark
 from mlpstorage.config import (CONFIGS_ROOT_DIR, BENCHMARK_TYPES, EXEC_TYPE, MPIRUN, MLPSTORAGE_BIN_NAME,
-                               LLM_ALLOWED_VALUES, LLM_SUBSET_PROCS, EXIT_CODE, MODELS)
+                               LLM_ALLOWED_VALUES, LLM_SUBSET_PROCS, EXIT_CODE, MODELS, HYDRA_OUTPUT_SUBDIR)
 from mlpstorage.rules import calculate_training_data_size
 from mlpstorage.utils import (read_config_from_file, create_nested_dict, update_nested_dict, ClusterInformation,
                               generate_mpi_prefix_cmd)
@@ -81,6 +81,7 @@ class DLIOBenchmark(Benchmark, abc.ABC):
 
         # Run directory for Hydra to output log files
         cmd += f" ++hydra.run.dir={self.run_result_output}"
+        cmd += f" ++hydra.output_subdir={HYDRA_OUTPUT_SUBDIR}"
 
         cmd = self.add_workflow_to_cmd(cmd)
 
@@ -196,10 +197,6 @@ class TrainingBenchmark(DLIOBenchmark):
         else:
             cmd += f" --data-dir=<INSERT_DATA_DIR>"
 
-        if self.debug:
-            cmd += " --allow-run-as-root"
-            cmd += " --oversubscribe"
-
         return cmd
 
 
@@ -210,6 +207,10 @@ class TrainingBenchmark(DLIOBenchmark):
         self.logger.result(f'Number of training files: {num_files_train}')
         self.logger.result(f'Number of training subfolders: {num_subfolders_train}')
         self.logger.result(f'Total disk space required for training: {total_disk_bytes / 1024**3:.2f} GB')
+
+        if num_files_train > 10000:
+            self.logger.warning(
+                f'The number of files required may be excessive for some filesystems. You can use the num_subfolders_train parameter to shard the dataset. To keep near 10,000 files per folder use "{int(num_files_train / 10000)}x" subfolders by adding "--param dataset.num_subfolders_train={int(num_files_train / 10000)}"')
 
         cmd = self.generate_datagen_benchmark_command(num_files_train, num_subfolders_train)
         self.logger.result(f'Run the following command to generate data: \n{cmd}')

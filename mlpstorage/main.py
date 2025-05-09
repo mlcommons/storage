@@ -52,7 +52,7 @@ def run_benchmark(args, run_datetime):
         logger.error(f"Error running benchmark: {str(e)}")
         ret_code = EXIT_CODE.ERROR
     finally:
-        logger.error(f'Attempting to write metadata for benchmark...')
+        logger.status(f'Writing metadata for benchmark to: {benchmark.metadata_file_path}')
         try:
             benchmark.write_metadata()
             return ret_code

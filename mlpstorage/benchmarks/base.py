@@ -47,6 +47,10 @@ class Benchmark(abc.ABC):
         self.command_output_files = list()
         self.run_result_output = self.generate_output_location()
         os.makedirs(self.run_result_output, exist_ok=True)
+
+        self.metadata_filename = f"{self.BENCHMARK_TYPE.value}_{self.run_datetime}_metadata.json"
+        self.metadata_file_path = os.path.join(self.run_result_output, self.metadata_filename)
+
         self.logger.status(f'Benchmark results directory: {self.run_result_output}')
 
     def _execute_command(self, command, output_file_prefix=None, print_stdout=True, print_stderr=True) -> Tuple[str, str, int]:
@@ -104,11 +108,8 @@ class Benchmark(abc.ABC):
 
         return metadata
 
-    def write_metadata(self, metadata_filename=None):
-        if not metadata_filename:
-            metadata_filename = f"{self.BENCHMARK_TYPE.value}_{self.run_datetime}_metadata.json"
-
-        with open(os.path.join(self.run_result_output, metadata_filename), 'w+') as fd:
+    def write_metadata(self):
+        with open(self.metadata_file_path, 'w+') as fd:
             json.dump(self.metadata, fd, indent=2, cls=MLPSJsonEncoder)
 
         if self.args.verbose or self.args.debug or self.debug:

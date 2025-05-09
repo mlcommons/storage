@@ -43,6 +43,8 @@ CONFIGS_ROOT_DIR = os.path.join(os.path.split(os.path.abspath(os.path.dirname(__
 
 MLPSTORAGE_BIN_NAME = "mlpstorage"
 
+HYDRA_OUTPUT_SUBDIR = "dlio_config"
+
 COSMOFLOW = "cosmoflow"
 RESNET = "resnet50"
 UNET = "unet3d"
