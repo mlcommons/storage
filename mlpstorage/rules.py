@@ -57,7 +57,7 @@ class BenchmarkVerifier:
         num_files, num_dirs, total_bytes = calculate_training_data_size(self.benchmark.args, cluster_info, self.benchmark.combined_params.get('dataset'),self.benchmark.combined_params.get('reader'), self.logger)
 
         # Verify num_files_train from combined_params is above the required minimum
-        configured_num_files_train = self.benchmark.combined_params['dataset']['num_files_train']
+        configured_num_files_train = int(self.benchmark.combined_params['dataset']['num_files_train'])
         if configured_num_files_train < num_files:
             self.logger.error(f'Configured number of files for training ({configured_num_files_train}) is less than required number of files ({num_files}).')
             validation_set.add(PARAM_VALIDATION.INVALID)
@@ -227,6 +227,7 @@ def calculate_training_data_size(args, cluster_information, dataset_params, read
     logger.ridiculous(f'Min number of files by size: {min_num_files_by_bytes}')
     logger.ridiculous(f'Required dataset size: {required_file_count * file_size_bytes / 1024 / 1024} MB')
     logger.ridiculous(f'Number of Samples by size: {num_samples_by_bytes}')
+
     if min_num_files_by_bytes > min_num_files_by_samples:
         logger.result(f'Minimum file count dictated by dataset size to memory size ratio.')
     else:
