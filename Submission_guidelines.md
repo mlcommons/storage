@@ -103,6 +103,7 @@ The following definitions are used throughout this document:
 - A **sample** is the unit of data on which training is run, e.g., an image, or a sentence.
 - A **step** is defined to be the first batch of data loaded into the (emulated) accelerator.
 - **Accelerator Utilization (AU)** is defined as the percentage of time taken by the simulated accelerators, relative to the total benchmark running time. Higher is better.
+- **Design power** is defined to be the minimum measurement of electrical power that must be capable of being supplied to a single or collection of power supply units (PSUs) in order to avoid violating regulatory and safety requirements. For individual PSUs, the design power equals the nameplate rated power. For groups of redundant PSUs, the design power is equal to the sum of the nameplate rated power of the minimum number of PSUs required to be simultaneously operational.
 - A **division** is a set of rules for implementing benchmarks from a suite to produce a class of comparable results. MLPerf Storage allows CLOSED and OPEN divisions, detailed in Section 6.
 - **DLIO ([code link](https://github.com/argonne-lcf/dlio_benchmark), [paper link](https://ieeexplore.ieee.org/document/9499416))** is a benchmarking tool for deep learning applications. DLIO is the core of the MLPerf Storage benchmark and with specified configurations will emulate the I/O pattern for the workloads listed in Table 1.  MLPerf Storage provides wrapper scripts to launch DLIO. There is no need to know the internals of DLIO to do a CLOSED submission, as the wrapper scripts provided by MLPerf Storage will suffice. However, for OPEN submissions changes to the DLIO code might be required (e.g., to add custom data loaders). 
 - **Dataset content** refers to the data and the total capacity of the data, not the format of how the data is stored. Specific information on dataset content can be found [here](https://github.com/mlcommons/storage/tree/main/storage-conf/workload). 
@@ -118,6 +119,13 @@ The following definitions are used throughout this document:
 - A **benchmark implementation** is an implementation of a benchmark in a particular framework by a user under the rules of a specific division.
 - A **run** is a complete execution of a benchmark implementation on a system.
 - A **benchmark result** is the mean of 5 run results, executed consecutively. The dataset is generated only once for the 5 runs, prior to those runs. The 5 runs must be done on the same machine(s).
+- **Nameplate rated power** is defined as the maximum power capacity that can be provided by a power supply unit (PSU), as declared to a certification authority. The nameplate rated power can typically be obtained from the PSU datasheet.
+- A **Power Supply Unit (PSU)** is a component which converts an AC or DC voltage input to one or more DC voltage outputs for the purpose of powering a system or subsystem. Power supply units may be redundant and hot swappable.
+- **SPEC PTDaemon® Interface (PTDaemon®)** is a software component created by the Standard Performance Evaluation Corporation (SPEC) designed to simplify the measurement of power consumption by abstracting the interface between benchmarking software and supported power analyzers.
+- A **Supported power analyzer** is a test device supported by the PTDaemon® software that measures the instantaneous voltage and multiplies it by the instantaneous current, then accumulates these values over a specific time period to provide a cumulative measurement of consumed electrical power. For a listing of supported power analyzers, see https://www.spec.org/power/docs/SPECpower-Device_List.html
+- A **System Under Test (SUT)** is the storage system being benchmarked.
+
+
 - The storage system under test must be described via one of the following **storage system access types**.  The overall solution might support more than one of the below types, but any given benchmark submission must be described by the access type that was actually used during that submission.  Specifically, this is reflected in the `system-name.json` file, in the `storage_system→solution_type`, the `storage_system→software_defined` and `storage_system→hyperconverged` fields, and the `networks→protocols` fields.  An optional vendor-specified qualifier may be specified. This will be displayed in the results table after the storage system access type, for example, “NAS - RDMA”.
   - **Direct-attached media** – any solution using local media on the ``host node``(s); eg: NVMe-attached storage with a local filesystem layered over it.  This will be abbreviated “**Local**” in the results table.
   - **Remotely-attached block device** – any solution using remote block storage; eg: a SAN using FibreChannel, iSCSI, NVMeoF, NVMeoF over RDMA, etc, with a local filesystem implementation layered over it.  This will be abbreviated “**Remote Block**” in the results table.
@@ -431,17 +439,67 @@ The ``<system-name>.json`` file must be pass a validation check with the JSON sc
 
 The goal of the pdf is to complement the JSON file, providing additional detail on the system to enable full reproduction by a third party. We encourage submitters to add details that are more easily captured by diagrams and text description, rather than a JSON.
 
-This file is supposed to include everything that a third party would need in order to recreate the results in the submission, including product model numbers or hardware config details, unit counts of drives and/or components, system and network topologies, software used with version numbers, and any non-default configuration options used by any of the above.
-
-The following *recommended* structure of systems.pdf provides a starting point and is optional. Submitters are free to adjust this structure as they see fit.
+This file is should include everything that a third party would need in order to recreate the results in the submission, including product model numbers or hardware config details, unit counts of drives and/or components, system and network topologies, software used with version numbers, and any non-default configuration options used by any of the above.
 
 A great example of a system description pdf can be found [here](https://github.com/mlcommons/storage_results_v0.5/tree/main/closed/DDN/systems).
+
+
+**Cover page**
+
+The following information is required to be included in the system description PDF:
+
+- System name of the submission
+- Submitter name
+- Submission date
+- Version of the benchmark
+- Solution type of the submission
+- Submission division (OPEN or CLOSED)
+
+**Mandatory Power requirements**
+
+Systems that require customer provisioning of power (for example, systems intended to be deployed in on-premises data centers or in co-located data centers) shall include a “Power Requirements Table”. Systems designed to only run in a cloud or hyper-converged environment do not have to include this table.
+
+The power requirements table shall list all hardware devices required to operate the storage system. Shared network equipment also used for client network communication and optional storage management systems do not need to be included. The power requirements table shall include:
+
+1. Every component in the system that requires electrical power.
+2. For each component, every PSU for each system component.
+3. For each PSU, the PSU nameplate rated power.
+4. For each PSU (or redundant groups of PSUs0, the design power.
+
+Two examples of a power requirements tables are shown below:
+
+**Power Requirements Table** (Large system example)
+
+| System component     | Power supply unit | Nameplate rated power | Design power   |
+| -------------------- | ----------------- | --------------------- | -------------- |
+| Storage controller 1 | Power supply 1    | 1200 watts            | 3600 watts     |
+|                      | Power supply 2    | 1200 watts            |                |
+|                      | Power supply 3    | 1200 watts            |                |
+|                      | Power supply 4    | 1200 watts            |                |
+| Storage shelf 1      | Power supply 1    | 1000 watts            | 1000 watts     |
+|                      | Power supply 2    | 1000 watts            |                |
+| Network switch 1     | Power supply 1    | 1200 watts            | 1200 watts     |
+|                      | Power supply 2    | 1200 watts            |                |
+| **Totals**           |                   | **9200 watts**        | **5800 watts** |
+
+**Power Requirements Table** (Direct-attached media system example)
+
+| System component     | Power supply unit | Nameplate rated power | Design power   |
+| -------------------- | ----------------- | --------------------- | -------------- |
+| NVMe SSD 1           | 12VDC supply      | 10 watts              | 10 watts       |
+|                      | 3.3VDC supply     | 2 watts               | 2 watts        |
+| **Totals**           |                   | **12 watts**          | **12 watts**   |
+
+System component and power supply unit names in the above tables are examples. Consistent names should be used in bill-of-material documentation, system diagrams and descriptive text.
+
+**Optional information**
+
+The following *recommended* structure of systems.pdf provides a starting point for additional optional information. Submitters are free to adjust this structure as they see fit.
 
 If the submission is for a commercial system, a pdf of the product spec document can add significant value.  If it is a system that does not have a spec document (e.g., a research system, HPC etc), or the product spec pdf doesn’t include all the required detail, the document can contain (all these are optional):
 
 - Recommended: High-level system diagram e.g., showing the ``host node``(s), storage system main components, and network topology used when connecting everything (e.g., spine-and-leaf, butterfly, etc.), and any non-default configuration options that were set during the benchmark run.
 - Optional: Additional text description of the system, if the information is not captured in the JSON, e.g., the storage system’s components (make and model, optional features, capabilities, etc) and all configuration settings that are relevant to ML/AI benchmarks.  If the make/model doesn’t specify all the components of the hardware platform it is running on, eg: it’s an Software-Defined-Storage product, then those should be included here (just like the client component list).
-- Optional: power requirements – If the system requires the physical deployment of hardware, consider including the “not to exceed” power requirements for the system to run the MLCommons storage benchmark workload. Additional information can include the total nameplate power rating and the peak power consumption during the benchmark.
 - Optional: physical requirements – If the system requires the physical deployment of hardware, consider including the number of rack units, required supporting equipment, and any physical constraints on how the equipment must be installed into an industry-standard rack, such as required spacing, weight constraints, etc. We recommended the following three categories for the text description:
   1. Software, 
   2. Hardware, and

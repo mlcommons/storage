@@ -1,0 +1,31 @@
+# we mimic the checkpoint data for megatron-deepspeed
+model: 
+  name: llama_405b
+  type: transformer
+  num_layers: 128
+  model_datatype: fp16
+  optimizer_datatype: fp32
+  parallelism:
+    tensor: 8
+    pipeline: 64
+    zero_stage: 1
+  transformer: 
+    vocab_size: 128256
+    hidden_size: 25872
+    ffn_hidden_size: 98304
+    num_attention_heads: 192
+    num_kv_heads: 32
+
+framework: pytorch
+
+workflow:
+  generate_data: False
+  train: False
+  checkpoint: True
+
+checkpoint:
+  checkpoint_folder: checkpoints/llama_1t
+  time_between_checkpoints: 5
+  num_checkpoints_write: 10
+  num_checkpoints_read: 10
+  fsync: True

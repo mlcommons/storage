@@ -1,0 +1,4 @@
+# Example configuration for global options to all commands
+hosts: 127.0.0.1
+data_dir: /mnt/nvme
+results_dir: /root/mlpstorage_results/
