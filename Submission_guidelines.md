@@ -94,6 +94,105 @@ Table 1: Benchmark description
 - Configuration files for the workloads and dataset content can be found [here](https://github.com/mlcommons/storage/tree/main/storage-conf/workload).
 
 ### 2.2 Checkpointing
+#### 2.2.1 models
+One can submit benchmark results for the following four different models. The model architectures and parallelism settings are specified below.
+
+**Table 2 LLM models**
+|           Model            | 8B    | 70B   | 405B   | 1T     |
+|-----------------------|-------|-------|--------|--------|
+| Hidden dimension      | 4096  | 8192  | 16384  | 25872  |
+| FFN size              | 14336 | 28672 | 53248  | 98304  |
+| num_attention_heads   | 32    | 128   | 128    | 192    |
+| num_kv_heads          | 8     | 8     | 8      | 32     |
+| Num layers            | 32    | 80    | 126    | 128    |
+| Parallelism  (TPxPPxDP)    | 1×1×8 | 8×1x8 | 8×32×2 | 8×64×2 |
+| ZeRO            | 3         | 3       | 1          | 1          |
+| Checkpoint size | 105 GB    | 912 GB  | 5.29 TB    | 18 TB      |
+
+
+#### 2.2.2 Benchmark Execution
+**Checkpoint Modes (global storage vs local storage)** 
+
+There are two operational modes set by the parameter ```++workload.checkpoint.mode```:
+
+* ``default``: Used for global storage systems. In this mode, the benchmark runs at scale to write/read the entire checkpoint dataset. The total number of GPUs must match the number listed in Table 2 (TP×PP×DP).
+
+* ``subset``: Intended for node local storage systems.In this mode, checkpointing is simulated on a single host by writing/reading only a fraction (``num_gpus/TP/PP/DP``) of the checkpoint data, where ``num_gpus`` is the number of gpus on the host. 
+
+**Checkpoint write and (read) recovery**
+
+For each submission, one must first perform the checkpoint write, then clear the cache, and finally perform the checkpoint read. The required command-line flags are:
+
+* WRITE: ``++workload.checkpoint.num_checkpoints_read=-1 ``
+* READ: ``++workload.checkpoint.num_checkpoints_write=-1``
+
+**fsync**
+We enforce ``fsync`` to be applied during checkpoint writes to ensure data is flushed to persistent storage. ``fsync`` is enabled by default in all workload configuration files.
+
+**Example Execution Commands**
+The following are examples of running the benchmark directly through DLIO. 
+
+* ``default`` mode (``WORLD_SIZE = TP*PP*DP``): 
+  ```bash
+  # Perform checkpoint writes
+  mpiexec -np 512 --ppn 8 python3 dlio_benchmark/main.py workload=llama_405b \
+    ++workload.checkpoint.checkpoint_folder=$FOLDER_TO_SAVE_CHECKPOINT \
+    ++workload.checkpoint.num_checkpoints_read=-1
+  # Clear the cache 
+  ... 
+  # perform checkpoint reads
+  mpiexec -np 512 --ppn 8 python3 dlio_benchmark/main.py workload=llama_405b \
+    ++workload.checkpoint.checkpoint_folder=$FOLDER_TO_SAVE_CHECKPOINT \
+    ++workload.checkpoint.num_checkpoints_write=-1
+  ```
+* ``subset`` mode (on a single host)
+  ```bash
+  # Perform checkpoint writes (data parallelism must match Table 2)
+  mpiexec -np 512 --ppn 8 python3 dlio_benchmark/main.py workload=llama_405b \
+    ++workload.checkpoint.checkpoint_folder=$FOLDER_TO_SAVE_CHECKPOINT \
+    ++workload.checkpoint.mode=subset \
+    ++workload.model.parallelism.data=2
+  # Clear the cache 
+  ... 
+  # Perform checkpoint read (data parallelism must match Table 2)
+  mpiexec -np 512 --ppn 8 python3 dlio_benchmark/main.py workload=llama_405b \
+    ++workload.checkpoint.checkpoint_folder=$FOLDER_TO_SAVE_CHECKPOINT \
+    ++workload.checkpoint.num_checkpoints_write=-1 \
+    ++workload.checkpoint.mode=subset \
+    ++workload.model.parallelism.data=2
+  ```
+
+#### 2.2.3 Metrics and Results Reporting
+We report the checkpoint time per write / read and I/O throughput from each rank. For each run: 
+
+	* The metric for duration is the maximum time across all GPUs.
+	* The metric for throughput is the minimum across all GPUs.
+
+Each benchmark setup must be executed five times, and logs from all five runs must be submitted. The final metrics are the average across the five runs.
+
+Example results folder structure is as follows: 
+```
+./llama_8b_zero3
+Run0
+Run1
+Run2
+Run3
+Run4
+```
+
+#### 2.2.5 OPEN vs CLOSE submissions
+For CLOSED submissions, the total number of GPUs must be fixed according to Table 2.
+
+For OPEN submissions, the total number of GPUs may be increased in multiples of (TP×PP) to showcase the scalability of the storage solution.
+
+**Table 3: Configuration parameters and their mutability in CLOSED and OPEN divisions**
+| Parameter                          | Meaning                                      | Default value                        | Changeable in CLOSE | Changeable in OPEN |
+|-----------------------------------|----------------------------------------------|--------------------------------------|----------------------|---------------------|
+| --ppn                             | Number of GPUs per node                      | N/A                                  | YES (minimal 4)      | YES (minimal 4)     |
+| -np $NUM_GPUS                     | Total number of GPUs                         | Node local: 8<br>Global: the value in Table 1 | NO                   | YES                 |
+| checkpoint.checkpoint_folder      | The folder to save the checkpoint data       | checkpoint/{workload}                | YES                  | YES                 |
+| checkpoint.num_checkpoint_write   | Number of write checkpoints                  | 10 or -1                             | NO                   | NO                  |
+| checkpoint.num_checkpoint_read    | Number of write checkpoints                  | 10 or -1                             | NO                   | NO                  |
 
 ### 2.3 Vector Database
 
