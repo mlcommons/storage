@@ -29,7 +29,11 @@ help_messages = dict(
     client_host_mem_GB="Memory available in the client where the benchmark is run. The dataset needs to be 5x the "
                        "available memory for closed submissions.",
     client_hosts="Space-separated list of IP addresses or hostnames of the participating hosts. "
-                 "\nExample: '--hosts 192.168.1.1 192.168.1.2 192.168.1.3' or '--hosts host1 host2 host3'",
+                 "\nExample: '--hosts 192.168.1.1 192.168.1.2 192.168.1.3' or '--hosts host1 host2 host3'. Slots can "
+                 "be specified by appending ':<num_slots>' to a hostname like so: '--hosts host1:2 host2:2'. This "
+                 "example will run 2 accelerators on each host. If slots are not specified the number of processes "
+                 "will be equally distributed across the hosts with any remainder being distributed evenly on the "
+                 "remaining hosts in the order they are listed.",
     category="Benchmark category to be submitted.",
     results_dir="Directory where the benchmark results will be saved.",
     params="Additional parameters to be passed to the benchmark. These will override the config file. "
@@ -278,7 +282,6 @@ def add_training_arguments(training_parsers):
 
     for _parser in [datasize, datagen, run_benchmark, configview]:
         _parser.add_argument("--data-dir", '-dd', type=str, help="Filesystem location for data")
-        _parser.add_argument('--ssh-username', '-u', type=str, help="Username for SSH for system information collection")
         _parser.add_argument('--params', '-p', nargs="+", type=str, action="append", help=help_messages['params'])
         add_universal_arguments(_parser)
 
@@ -301,7 +304,6 @@ def add_checkpointing_arguments(checkpointing_parsers):
 
     add_mpi_group(checkpointing_parsers)
 
-    checkpointing_parsers.add_argument('--ssh-username', '-u', type=str, help="Username for SSH for system information collection")
     checkpointing_parsers.add_argument('--num-processes', '-np', type=int, default=None, help=help_messages['num_checkpoint_accelerators'])
     checkpointing_parsers.add_argument('--params', '-p', nargs="+", type=str, action="append", help=help_messages['params'])
     checkpointing_parsers.add_argument("--data-dir", '-dd', type=str, help="Filesystem location for data")
