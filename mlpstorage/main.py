@@ -33,7 +33,6 @@ def signal_handler(sig, frame):
 
 def run_benchmark(args, run_datetime):
     """Run a benchmark based on the provided args."""
-    update_args(args)
     program_switch_dict = dict(
         training=TrainingBenchmark,
         checkpointing=CheckpointingBenchmark,
@@ -107,6 +106,10 @@ def main():
         return report_generator.generate_reports()
 
     run_datetime = datetime_str
+
+    # Handle vdb end conditions, num_process standardization, and args.params flattening
+    update_args(args)
+
     # For other commands, run the benchmark
     for i in range(args.loops):
         if signal_received:
