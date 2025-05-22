@@ -283,6 +283,7 @@ def add_training_arguments(training_parsers):
     for _parser in [datasize, datagen, run_benchmark, configview]:
         _parser.add_argument("--data-dir", '-dd', type=str, help="Filesystem location for data")
         _parser.add_argument('--params', '-p', nargs="+", type=str, action="append", help=help_messages['params'])
+        _parser.add_argument('--dlio-bin-path', '-dp', type=str, help="Path to DLIO binary. Default is the same as mlpstorage binary path")
         add_universal_arguments(_parser)
 
 
@@ -307,6 +308,9 @@ def add_checkpointing_arguments(checkpointing_parsers):
     checkpointing_parsers.add_argument('--num-processes', '-np', type=int, default=None, help=help_messages['num_checkpoint_accelerators'])
     checkpointing_parsers.add_argument('--params', '-p', nargs="+", type=str, action="append", help=help_messages['params'])
     checkpointing_parsers.add_argument("--data-dir", '-dd', type=str, help="Filesystem location for data")
+    checkpointing_parsers.add_argument('--dlio-bin-path', '-dp', type=str,
+                                       help="Path to DLIO binary. Default is the same as mlpstorage binary path")
+
     # Since we're not using subparsers, this happens in the main function
     #add_universal_arguments(checkpointing_parsers)
 
