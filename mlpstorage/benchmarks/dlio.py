@@ -32,8 +32,8 @@ class DLIOBenchmark(Benchmark, abc.ABC):
         self.per_host_mem_kB = None
         self.total_mem_kB = None
 
-        self.cluster_information = self.accumulate_host_info(args)
-        # self.cluster_information = dict()
+        if args.command != "datagen":
+            self.cluster_information = self.accumulate_host_info(args)
 
     def accumulate_host_info(self, args):
         host_info_list = []
@@ -132,7 +132,6 @@ class TrainingBenchmark(DLIOBenchmark):
             run=self.execute_command,
             configview=self.execute_command,
             reportgen=self.execute_command)
-
         config_suffix = "datagen" if args.command == "datagen" else args.accelerator_type
         under_model = args.model.replace("-", "_")
         self.config_file = f"{under_model}_{config_suffix}.yaml"
@@ -191,8 +190,6 @@ class TrainingBenchmark(DLIOBenchmark):
             cmd += f" --hosts={','.join(self.args.hosts)}"
         cmd += f" --model={self.args.model}"
         cmd += f" --exec-type={self.args.exec_type}"
-        if self.args.ssh_username:
-            cmd += f" --ssh-username={self.args.ssh_username}"
 
         if self.params_dict:
             for key, value in self.params_dict.items():
