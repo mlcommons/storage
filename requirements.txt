@@ -1,4 +1,4 @@
-dlio-benchmark>=2.0.0
+#dlio-benchmark>=2.0.0
 vectordb-bench==0.0.22
 psutil>=5.9
 pyarrow

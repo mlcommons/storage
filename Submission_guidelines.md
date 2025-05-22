@@ -113,7 +113,7 @@ One can submit benchmark results for the following four different models. The mo
 #### 2.2.2 Benchmark Execution
 **Checkpoint Modes (global storage vs local storage)** 
 
-There are two operational modes set by the parameter ```++workload.checkpoint.mode```:
+There are two operational modes set by the parameter ```workload.checkpoint.mode```:
 
 * ``default``: Used for global storage systems. In this mode, the benchmark runs at scale to write/read the entire checkpoint dataset. The total number of GPUs must match the number listed in Table 2 (TP×PP×DP).
 
@@ -123,8 +123,8 @@ There are two operational modes set by the parameter ```++workload.checkpoint.mo
 
 For each submission, one must first perform the checkpoint write, then clear the cache, and finally perform the checkpoint read. The required command-line flags are:
 
-* WRITE: ``++workload.checkpoint.num_checkpoints_read=-1 ``
-* READ: ``++workload.checkpoint.num_checkpoints_write=-1``
+* WRITE: ``--num-checkpoints-read=-1 ``
+* READ: ``--num-checkpoints-write=-1``
 
 **fsync**
 We enforce ``fsync`` to be applied during checkpoint writes to ensure data is flushed to persistent storage. ``fsync`` is enabled by default in all workload configuration files.
@@ -134,32 +134,58 @@ The following are examples of running the benchmark directly through DLIO.
 
 * ``default`` mode (``WORLD_SIZE = TP*PP*DP``): 
   ```bash
-  # Perform checkpoint writes
-  mpiexec -np 512 --ppn 8 python3 dlio_benchmark/main.py workload=llama_405b \
-    ++workload.checkpoint.checkpoint_folder=$FOLDER_TO_SAVE_CHECKPOINT \
-    ++workload.checkpoint.num_checkpoints_read=-1
-  # Clear the cache 
+  # Perform checkpoint writes  (make sure the number of hosts is WORLD_SIZE/num_processes_per_host)
+  mlpstorage checkpointing --model llama3-405b \
+    --hosts ip1 ip2 .... \
+    --num-processes 256 \
+    --num-checkpoints-read -1 \
+    --data-dir ./checkpoint_data1 \
+    --results-dir ./checkpoint_results \
+    --ssh-username=root --mpi-bin mpiexec \
+    --exec-type mpi \
+    --closed
+
+  # Clear the cache (This might require admin access to the system)
   ... 
+
   # perform checkpoint reads
-  mpiexec -np 512 --ppn 8 python3 dlio_benchmark/main.py workload=llama_405b \
-    ++workload.checkpoint.checkpoint_folder=$FOLDER_TO_SAVE_CHECKPOINT \
-    ++workload.checkpoint.num_checkpoints_write=-1
+  mlpstorage checkpointing --model llama3-405b \
+    --hosts ip1 ip2 .... \
+    --num-processes 256 \
+    --num-checkpoints-write -1 \
+    --data-dir ./checkpoint_data1 \
+    --results-dir ./checkpoint_results \
+    --ssh-username=root \
+    --mpi-bin mpiexec \
+    --exec-type mpi \
+    --closed
   ```
-* ``subset`` mode (on a single host)
+* ``subset`` mode (on a single host with 8 GPUsß)
   ```bash
   # Perform checkpoint writes (data parallelism must match Table 2)
-  mpiexec -np 512 --ppn 8 python3 dlio_benchmark/main.py workload=llama_405b \
-    ++workload.checkpoint.checkpoint_folder=$FOLDER_TO_SAVE_CHECKPOINT \
-    ++workload.checkpoint.mode=subset \
-    ++workload.model.parallelism.data=2
+  mlpstorage checkpointing --model llama3-405b \
+    --hosts ip1 \
+    --num-processes 8 \
+    --num-checkpoints-read -1 \
+    --data-dir ./checkpoint_data1 \
+    --results-dir ./checkpoint_results \
+    --ssh-username=root --mpi-bin mpiexec \
+    --exec-type mpi \
+    --closed \
+    --params workload.model.parallelism.data=2 workload.checkpoint.mode=subset
   # Clear the cache 
   ... 
   # Perform checkpoint read (data parallelism must match Table 2)
-  mpiexec -np 512 --ppn 8 python3 dlio_benchmark/main.py workload=llama_405b \
-    ++workload.checkpoint.checkpoint_folder=$FOLDER_TO_SAVE_CHECKPOINT \
-    ++workload.checkpoint.num_checkpoints_write=-1 \
-    ++workload.checkpoint.mode=subset \
-    ++workload.model.parallelism.data=2
+  mlpstorage checkpointing --model llama3-405b \
+    --hosts ip1 \
+    --num-processes 8 \
+    --num-checkpoints-write -1 \
+    --data-dir ./checkpoint_data1 \
+    --results-dir ./checkpoint_results \
+    --ssh-username=root --mpi-bin mpiexec \
+    --exec-type mpi \
+    --closed \
+    --params workload.model.parallelism.data=2 workload.checkpoint.mode=subset
   ```
 
 #### 2.2.3 Metrics and Results Reporting
@@ -170,15 +196,6 @@ We report the checkpoint time per write / read and I/O throughput from each rank
 
 Each benchmark setup must be executed five times, and logs from all five runs must be submitted. The final metrics are the average across the five runs.
 
-Example results folder structure is as follows: 
-```
-./llama_8b_zero3
-Run0
-Run1
-Run2
-Run3
-Run4
-```
 
 #### 2.2.5 OPEN vs CLOSE submissions
 For CLOSED submissions, the total number of GPUs must be fixed according to Table 2.
@@ -186,14 +203,16 @@ For CLOSED submissions, the total number of GPUs must be fixed according to Tabl
 For OPEN submissions, the total number of GPUs may be increased in multiples of (TP×PP) to showcase the scalability of the storage solution.
 
 **Table 3: Configuration parameters and their mutability in CLOSED and OPEN divisions**
+
 | Parameter                          | Meaning                                      | Default value                        | Changeable in CLOSE | Changeable in OPEN |
 |-----------------------------------|----------------------------------------------|--------------------------------------|----------------------|---------------------|
 | --ppn                             | Number of GPUs per node                      | N/A                                  | YES (minimal 4)      | YES (minimal 4)     |
-| -np $NUM_GPUS                     | Total number of GPUs                         | Node local: 8<br>Global: the value in Table 1 | NO                   | YES                 |
-| checkpoint.checkpoint_folder      | The folder to save the checkpoint data       | checkpoint/{workload}                | YES                  | YES                 |
-| checkpoint.num_checkpoint_write   | Number of write checkpoints                  | 10 or -1                             | NO                   | NO                  |
-| checkpoint.num_checkpoint_read    | Number of write checkpoints                  | 10 or -1                             | NO                   | NO                  |
+| --num-processes                    | Total number of GPUs                         | Node local: 8<br>Global: the value in Table 1 | NO                   | YES                 |
+| --data-dir      | The folder to save the checkpoint data       | checkpoint/{workload}                | YES                  | YES                 |
+| --num-checkpoints-write | Number of write checkpoints                  | 10 or -1**                             | NO              | NO                  |
+| --num-checkpoints-read     | Number of write checkpoints                  | 10 or -1**                              | NO                   | NO                  |
 
+** has to be set  ``--num-checkpoints-read=-1`` explicitly for performing only checkpoint write, and ``--num-checkpoints-write=-1`` for performing only checkpoint read.
 ### 2.3 Vector Database
 
 ## 3 Definitions 
@@ -464,6 +483,14 @@ root_folder (or any name you prefer)
 |		│	|	├── cosmoflow-a100	
 │		│	│	|	└── ..
 |		│	|	└── cosmoflow-h100	
+│		│	│	|	└── ..
+|		│	|	└── llama-8b	
+│		│	│	|	└── ..
+|		│	|	└── llama-70b	
+│		│	│	|	└── ..
+|		│	|	└── llama-405b	
+│		│	│	|	└── ..
+|		│	|	└── llama-1t	
 │		│	│		└── ..
 │		│	└──system-name-2
 │		│	 	├── unet3d-a100
@@ -476,7 +503,15 @@ root_folder (or any name you prefer)
 │		│	 	│	└── ..
 |		│	 	├── cosmoflow-a100	
 │		│	 	|	└── ..
-|		│	 	└── cosmoflow-h100	
+|		│	 	├── cosmoflow-h100	
+│		│	 	|	└── ..
+│		│	 	├── llama-8b	
+│		│	 	|	└── ..
+|		│	 	├──llama-70b	
+│		│	 	|	└── ..
+|		│		├── llama-405b	
+│		│	 	|	└── ..
+│		│	 	└── llama-1t	
 │		│	 		└── ..
 │		└── systems
 │			system-name-1.json
@@ -501,7 +536,15 @@ root_folder (or any name you prefer)
  		│	|	├── cosmoflow-a100	
  		│	│	|	└── ..
  		│	|	└── cosmoflow-h100	
- 		│	│		└── ..
+│		│	│	|	└── ..
+|		│	|	└── llama-8b	
+│		│	│	|	└── ..
+|		│	|	└── llama-70b	
+│		│	│	|	└── ..
+|		│	|	└── llama-405b	
+│		│	│	|	└── ..
+|		│	|	└── llama-1t	
+│		│	│		└── .. 
  		│	└──system-name-2
  		│	 	├── unet3d-a100
  		│	 	│	└── ..
@@ -514,7 +557,15 @@ root_folder (or any name you prefer)
  		│	 	├── cosmoflow-a100	
  		│	 	|	└── ..
  		│	 	└── cosmoflow-h100	
- 		│	 		└── ..
+│		│	 	|	└── ..
+│		│	 	├── llama-8b	
+│		│	 	|	└── ..
+|		│	 	├──llama-70b	
+│		│	 	|	└── ..
+|		│		├── llama-405b	
+│		│	 	|	└── ..
+│		│	 	└── llama-1t	
+│		│	 		└── ..
 		└── systems
 			system-name-1.json
 			system-name-1.pdf
