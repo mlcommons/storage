@@ -326,92 +326,36 @@ class CommandExecutor:
         self._original_handlers = {}
 
 
-class ClusterInformation:
-    def __init__(self, hosts, username, debug=False):
-        self.debug = debug
-        self.hosts = hosts
-        self.username = username
-        self.info = dict(
-            host_info={},
-            accumulated_mem_info_bytes={},
-            total_client_cpus=0,
-        )
-
-        if len(hosts) == 1 and hosts[0] in ['localhost', '127.0.0.1']:
-            self.collect_info(local=True)
-        else:
-            self.collect_info(local=False)
-
-    def __str__(self):
-        return pprint.pformat(self.info)
-
-    def __repr__(self):
-        return str(self.info)
-
-    def collect_info(self, local=False):
-        if local:
-            getter_func = self.get_local_info
-        else:
-            getter_func = self.get_remote_info
-
-        with concurrent.futures.ThreadPoolExecutor() as executor:
-            future_to_host = {executor.submit(getter_func, host): host for host in self.hosts}
-            for future in concurrent.futures.as_completed(future_to_host):
-                host = future_to_host[future]
-                cpu_core_count, memory_info = future.result()
-                self.info["host_info"][host] = {
-                    'cpu_core_count': cpu_core_count,
-                    'memory_info': memory_info
-                }
-
-        for host_info in self.info["host_info"].values():
-            self.info["total_client_cpus"] += host_info['cpu_core_count']
-            for mem_key in host_info['memory_info']:
-                if mem_key not in self.info["accumulated_mem_info_bytes"]:
-                    self.info["accumulated_mem_info_bytes"][mem_key] = 0
-                self.info["accumulated_mem_info_bytes"][mem_key] += host_info['memory_info'][mem_key]
-
-    @staticmethod
-    def get_local_info(host=None):
-        cpu_core_count = psutil.cpu_count(logical=False)
-        memory_info = dict(psutil.virtual_memory()._asdict())
-        return cpu_core_count, memory_info
-
-    def get_remote_info(self, host):
-        # TODO: Add proper handling if passwordless-ssh is not conffigured.
-        cpu_core_count = self.get_remote_cpu_core_count(host)
-        memory_info = self.get_remote_memory_info(host)
-        return cpu_core_count, memory_info
-
-    def get_remote_cpu_core_count(self, host):
-        cpu_core_count = 0
-        cpu_info_path = f"ssh {self.username}@{host} cat /proc/cpuinfo"
-        try:
-            output = os.popen(cpu_info_path).read()
-            cpu_core_count = output.count('processor')
-        except Exception as e:
-            print(f"Error getting CPU core count for host {host}: {e}")
-        return cpu_core_count
-
-    def get_remote_memory_info(self, host):
-        memory_info = {}
-        meminfo_path = f"ssh {self.username}@{host} cat /proc/meminfo"
-        try:
-            output = os.popen(meminfo_path).read()
-            lines = output.split('\n')
-            for line in lines:
-                if line.startswith('MemTotal:'):
-                    memory_info['total'] = int(line.split()[1]) * 1024
-                elif line.startswith('MemFree:'):
-                    memory_info['free'] = int(line.split()[1]) * 1024
-                elif line.startswith('MemAvailable:'):
-                    memory_info['available'] = int(line.split()[1]) * 1024
-        except Exception as e:
-            print(f"Error getting memory information for host {host}: {e}")
-        return memory_info
-
-
 def generate_mpi_prefix_cmd(mpi_cmd, hosts, num_processes, oversubscribe, allow_run_as_root, logger):
+    # Check if we got slot definitions with the hosts:
+    slots_configured = False
+    for host in hosts:
+        if ":" in host:
+            slots_configured = True
+            break
+
+    if slots_configured:
+        # Ensure the configured number of slots is >= num_processes
+        num_slots = sum(int(slot) for host, slot in (host.split(":") for host in hosts))
+        logger.debug(f"Configured slots: {num_slots}")
+        if num_slots < num_processes:
+            raise ValueError(f"Configured slots ({num_slots}) are not sufficient to run {num_processes} processes")
+    elif not slots_configured:
+        slotted_hosts = []
+        # manually define how many slots per host to evenly distribute the processes across hosts. If num_processes
+        # is not divisible by the number of hosts, distribute the remaining processes to the rest of the hosts.
+        base_slots_per_host = num_processes // len(hosts)
+        remaining_slots = num_processes % len(hosts)
+
+        for i, host in enumerate(hosts):
+            # Add one extra slot to hosts until we've distributed all remaining slots
+            slots_for_this_host = base_slots_per_host + (1 if i < remaining_slots else 0)
+            slotted_hosts.append(f"{host}:{slots_for_this_host}")
+
+        # Replace the original hosts list with the slotted version
+        hosts = slotted_hosts
+        logger.debug(f"Configured slots for hosts: {hosts}")
+
     if mpi_cmd == MPIRUN:
         prefix = f"{MPI_RUN_BIN} -n {num_processes} -host {','.join(hosts)}"
     elif mpi_cmd == MPIEXEC:
