@@ -135,7 +135,7 @@ class BenchmarkVerifier:
         elif self.benchmark.args.closed:
             self.logger.error(f'Number of processes ({num_procs}) should be exactly {LLM_SUBSET_PROCS} or {ClosedGPUs} in closed submission.')
             validations.add(PARAM_VALIDATION.INVALID)
-        elif not benchmark.args.closed:
+        elif not self.benchmark.args.closed:
             # num procs should be a multiple of GPUpDP
             dp_instances = num_procs / GPUpDP
             if not dp_instances.is_integer():
