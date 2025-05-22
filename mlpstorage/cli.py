@@ -396,7 +396,7 @@ def update_args(args):
     This method is an interface between the CLI and the benchmark class.
     """
     if not hasattr(args, 'num_processes'):
-        # Different commands for training use different nomeenclature for the number of mpi processes to use
+        # Different commands for training use different nomenclature for the number of mpi processes to use
         # Training = num_accelerators
         # Datasize = max_accelerators
         # Datagen = num_processes
@@ -417,6 +417,13 @@ def update_args(args):
     if args.params:
         flattened_params = [item for sublist in args.params for item in sublist]
         setattr(args, 'params', flattened_params)
+
+    if hasattr(args, 'hosts'):
+        print(f'Hosts is: {args.hosts}')
+        # hosts can be comma separated string or a list of strings. If it's a string, it is still a list of length 1
+        if len(args.hosts) == 1 and isinstance(args.hosts[0], str):
+            setattr(args, 'hosts', args.hosts[0].split(','))
+        print(f'Hosts is: {args.hosts}')
 
 
 if __name__ == "__main__":
