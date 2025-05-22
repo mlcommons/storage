@@ -5,7 +5,7 @@ import sys
 
 from mlpstorage.benchmarks import TrainingBenchmark, VectorDBBenchmark, CheckpointingBenchmark
 from mlpstorage.cli import parse_arguments, validate_args, update_args
-from mlpstorage.config import HISTFILE, DATETIME_STR, EXIT_CODE, DEFAULT_RESULTS_DIR, get_datetime_string
+from mlpstorage.config import HISTFILE, DATETIME_STR, EXIT_CODE, DEFAULT_RESULTS_DIR, get_datetime_string, HYDRA_OUTPUT_SUBDIR
 from mlpstorage.debug import debugger_hook, MLPS_DEBUG
 from mlpstorage.history import HistoryTracker
 from mlpstorage.mlps_logging import setup_logging, apply_logging_options
@@ -33,7 +33,6 @@ def signal_handler(sig, frame):
 
 def run_benchmark(args, run_datetime):
     """Run a benchmark based on the provided args."""
-    update_args(args)
     program_switch_dict = dict(
         training=TrainingBenchmark,
         checkpointing=CheckpointingBenchmark,
@@ -107,6 +106,10 @@ def main():
         return report_generator.generate_reports()
 
     run_datetime = datetime_str
+
+    # Handle vdb end conditions, num_process standardization, and args.params flattening
+    update_args(args)
+
     # For other commands, run the benchmark
     for i in range(args.loops):
         if signal_received:

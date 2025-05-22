@@ -7,7 +7,7 @@ from typing import List, Dict, Any
 
 from mlpstorage.mlps_logging import setup_logging, apply_logging_options
 from mlpstorage.config import MLPS_DEBUG, BENCHMARK_TYPES
-from mlpstorage.rules import get_runs_files
+from mlpstorage.rules import get_runs_files, BenchmarkRunVerifier, BenchmarkRun
 from mlpstorage.utils import flatten_nested_dict, remove_nan_values
 
 class ReportGenerator:
@@ -27,14 +27,21 @@ class ReportGenerator:
             apply_logging_options(self.logger, args)
 
         self.results_dir = results_dir
-        self.result_files = []
+        self.benchmark_runs = get_runs_files(self.results_dir, logger=self.logger)
+        self.logger.info(f'Found {len(self.benchmark_runs)} runs')
         self.results = []
+
+        self.verify_results()
+
+    def verify_results(self):
+        for benchmark_run in self.benchmark_runs:
+            verifier = BenchmarkRunVerifier(benchmark_run, logger=self.logger)
+            verifier.verify()
 
     def generate_reports(self, write_files=True):
         self.logger.info(f'Generating reports for {self.results_dir}')
-        self.result_files = get_runs_files(self.results_dir, logger=self.logger)
-        self.logger.info(f'Found {len(self.result_files)} runs')
         self.results = self.accumulate_results()
+
         if write_files:
             self.write_csv_file()
             self.write_json_file()
@@ -48,50 +55,10 @@ class ReportGenerator:
         :return:
         """
         results = []
-        self.logger.info(f'Accumulating results from {len(self.result_files)} runs')
-        for run_info in self.result_files:
-            self.logger.ridiculous(f'Processing run: \n{pprint.pformat(run_info)}')
-
-            if not run_info.get("mlps_metadata_file"):
-                self.logger.error(f"No metadata.json file found in {run_info['run_dir']}")
-                continue
-
-            with open(run_info["mlps_metadata_file"], "r") as f:
-                try:
-                    metadata = json.load(f)
-                except Exception as e:
-                    self.logger.error(f"Error loading metadata.json from {run_info['mlps_metadata_file']}: {e}")
-                    continue
-
-            if run_info.get("dlio_summary_json_file"):
-                with open(run_info["dlio_summary_json_file"], "r") as f:
-                    try:
-                        summary = json.load(f)
-                    except Exception as e:
-                        self.logger.error(f"Error loading summary.json from {run_info['dlio_summary_json_file']}: {e}")
-                        continue
-                status = "Completed"
-            else:
-                summary = dict()
-                status = "Failed"
-
-            run_id = metadata['args']['program']
-            if command := metadata['args'].get("command"):
-                run_id += f"_{command}"
-            if subcommand := metadata['args'].get("subcommand"):
-                run_id += f"_{subcommand}"
-            if model := metadata['args'].get("model"):
-                run_id += f"_{model}"
-            run_id += f"_{metadata['run_datetime']}"
-
-            combined_result_dict = dict(
-                run_id=run_id,
-                run_info=run_info,
-                mlps=metadata,
-                dlio=summary,
-                status=status
-            )
-            results.append(combined_result_dict)
+        self.logger.info(f'Accumulating results from {len(self.benchmark_runs)} runs')
+        for benchmark_run in self.benchmark_runs:
+            self.logger.ridiculous(f'Processing run: \n{pprint.pformat(benchmark_run)}')
+            results.append(benchmark_run.as_dict())
 
         return results
 
