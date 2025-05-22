@@ -1,5 +1,6 @@
 import abc
 import os
+import os.path
 import pprint
 import sys
 
@@ -18,7 +19,12 @@ class DLIOBenchmark(Benchmark, abc.ABC):
     def __init__(self, args, **kwargs):
         super().__init__(args, **kwargs)
         self._config_name = None
-        self.base_command_path = f"dlio_benchmark"
+        self.base_command = "dlio_benchmark"
+        if args.dlio_bin_path:
+            self.base_path = args.dlio_bin_path
+        else:
+            self.base_path = os.path.dirname(sys.argv[0])
+        self.base_command_path = os.path.join(self.base_path, self.base_command)
 
         # This is the path that DLIO needs. The files are in this self.config_path/workload
         self.config_path = os.path.join(CONFIGS_ROOT_DIR, self.DLIO_CONFIG_PATH)
