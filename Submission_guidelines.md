@@ -95,7 +95,9 @@ Table 1: Benchmark description
 
 ### 2.2 Checkpointing
 #### 2.2.1 models
-One can submit benchmark results for the following four different models. The model architectures and parallelism settings are specified below.
+Benchmark results may be submitted for the following four model configurations. The associated model architectures and parallelism settings are listed below. The number of MPI processes must be set to 8, 64, 512, and 1024 for the respective models for CLOSE submission. 
+
+For CLOSE submissions, participants are not permitted to change the total number of GPUs. However, they may adjust the number of GPUs per host, as long as each host uses more than 4 GPUs. This allows the use of nodes with higher GPU density and fewer total nodes. Note: the aggregate GPU memory across all nodes must be sufficient to accommodate the model’s checkpoint size.
 
 **Table 2 LLM models**
 |           Model            | 8B    | 70B   | 405B   | 1T     |
@@ -105,7 +107,7 @@ One can submit benchmark results for the following four different models. The mo
 | num_attention_heads   | 32    | 128   | 128    | 192    |
 | num_kv_heads          | 8     | 8     | 8      | 32     |
 | Num layers            | 32    | 80    | 126    | 128    |
-| Parallelism  (TPxPPxDP)    | 1×1×8 | 8×1x8 | 8×32×2 | 8×64×2 |
+| Parallelism (TPxPPxDP)    | 1×1×8 | 8×1x8 | 8×32×2 | 8×64×2 |
 | ZeRO            | 3         | 3       | 1          | 1          |
 | Checkpoint size | 105 GB    | 912 GB  | 5.29 TB    | 18 TB      |
 
@@ -123,8 +125,10 @@ There are two operational modes set by the parameter ```workload.checkpoint.mode
 
 For each submission, one must first perform the checkpoint write, then clear the cache, and finally perform the checkpoint read. The required command-line flags are:
 
-* WRITE: ``--num-checkpoints-read=-1 ``
+* WRITE: ``--num-checkpoints-read=-1``
 * READ: ``--num-checkpoints-write=-1``
+
+
 
 **fsync**
 We enforce ``fsync`` to be applied during checkpoint writes to ensure data is flushed to persistent storage. ``fsync`` is enabled by default in all workload configuration files.
@@ -132,12 +136,12 @@ We enforce ``fsync`` to be applied during checkpoint writes to ensure data is fl
 **Example Execution Commands**
 The following are examples of running the benchmark directly through DLIO. 
 
-* ``default`` mode (``WORLD_SIZE = TP*PP*DP``): 
+* ``default`` mode (``WORLD_SIZE = TP*PP*DP`` as listed in Table 2): 
   ```bash
   # Perform checkpoint writes  (make sure the number of hosts is WORLD_SIZE/num_processes_per_host)
   mlpstorage checkpointing --model llama3-405b \
     --hosts ip1 ip2 .... \
-    --num-processes 256 \
+    --num-processes 512 \
     --num-checkpoints-read -1 \
     --data-dir ./checkpoint_data1 \
     --results-dir ./checkpoint_results \
@@ -151,7 +155,7 @@ The following are examples of running the benchmark directly through DLIO.
   # perform checkpoint reads
   mlpstorage checkpointing --model llama3-405b \
     --hosts ip1 ip2 .... \
-    --num-processes 256 \
+    --num-processes 512 \
     --num-checkpoints-write -1 \
     --data-dir ./checkpoint_data1 \
     --results-dir ./checkpoint_results \
@@ -160,7 +164,7 @@ The following are examples of running the benchmark directly through DLIO.
     --exec-type mpi \
     --closed
   ```
-* ``subset`` mode (on a single host with 8 GPUsß)
+* ``subset`` mode (on a single host with 8 GPUs)
   ```bash
   # Perform checkpoint writes (data parallelism must match Table 2)
   mlpstorage checkpointing --model llama3-405b \
