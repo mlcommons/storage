@@ -37,7 +37,7 @@ For eg: when running on Ubuntu 24.04, install openmpi tools and libraries.
 sudo apt install python3-pip python3-venv libopenmpi-dev openmpi-common
 ```
 
-Create a virtual environment for package installations.
+Create a virtual environment for package installations and activate it.
 
 ```bash
 python3 -m venv ~/.venvs/myenv
