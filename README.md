@@ -109,7 +109,6 @@ The training category supports 3 models (unet3d, resnet50, cosmoflow). The bench
 1. Datasize - Calculate required number of samples for a given client configuration
 2. Datagen - Generate the required dataset
 3. Run - Execute the benchmark
-4. Configview - View the final config
 
 ```bash
 [root@localhost ]# mlpstorage training --help
