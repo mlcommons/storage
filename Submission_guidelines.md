@@ -134,7 +134,8 @@ For each submission, one must first perform the checkpoint write, then clear the
 We enforce ``fsync`` to be applied during checkpoint writes to ensure data is flushed to persistent storage. ``fsync`` is enabled by default in all workload configuration files.
 
 **Example Execution Commands**
-The following are examples of running the benchmark directly through DLIO. 
+The following examples demonstrate how to run the benchmark directly using DLIO.
+Note: The output directories for the write and read phases must be different to avoid overwriting results. 
 
 * ``default`` mode (``WORLD_SIZE = TP*PP*DP`` as listed in Table 2): 
   ```bash
@@ -144,7 +145,7 @@ The following are examples of running the benchmark directly through DLIO.
     --num-processes 512 \
     --num-checkpoints-read -1 \
     --data-dir ./checkpoint_data1 \
-    --results-dir ./checkpoint_results \
+    --results-dir ./checkpoint_results_write \
     --ssh-username=root --mpi-bin mpiexec \
     --exec-type mpi \
     --closed
@@ -158,7 +159,7 @@ The following are examples of running the benchmark directly through DLIO.
     --num-processes 512 \
     --num-checkpoints-write -1 \
     --data-dir ./checkpoint_data1 \
-    --results-dir ./checkpoint_results \
+    --results-dir ./checkpoint_results_read \
     --ssh-username=root \
     --mpi-bin mpiexec \
     --exec-type mpi \
@@ -172,7 +173,7 @@ The following are examples of running the benchmark directly through DLIO.
     --num-processes 8 \
     --num-checkpoints-read -1 \
     --data-dir ./checkpoint_data1 \
-    --results-dir ./checkpoint_results \
+    --results-dir ./checkpoint_results_write \
     --ssh-username=root --mpi-bin mpiexec \
     --exec-type mpi \
     --closed \
@@ -185,7 +186,7 @@ The following are examples of running the benchmark directly through DLIO.
     --num-processes 8 \
     --num-checkpoints-write -1 \
     --data-dir ./checkpoint_data1 \
-    --results-dir ./checkpoint_results \
+    --results-dir ./checkpoint_results_read \
     --ssh-username=root --mpi-bin mpiexec \
     --exec-type mpi \
     --closed \
