@@ -48,6 +48,9 @@ help_messages = dict(
     configview="View the final config based on the specified options.",
     reportgen="Generate a report from the benchmark results.",
 
+    # Checkpoint foler is used for training and checkpointing
+    checkpoint_folder="Location for checkpoint files for training or checkpointing workloads",
+
     # Checkpointing help messages
     checkpoint_run="The checkpoint command executes checkpoint saves and restores for a given model.",
     llm_model="The model & size to be emulated for checkpointing. The selection will dictate the TP, PP, & DP "
@@ -224,7 +227,7 @@ def add_universal_arguments(parser):
     standard_args = parser.add_argument_group("Standard Arguments")
     standard_args.add_argument('--results-dir', '-rd', type=str, default=DEFAULT_RESULTS_DIR, help=help_messages['results_dir'])
     standard_args.add_argument('--loops', type=int, default=1, help="Number of times to run the benchmark")
-    standard_args.add_argument('--config-file', '-cf', type=str, help="Path to YAML file with argument overrides")
+    standard_args.add_argument('--config-file', '-c', type=str, help="Path to YAML file with argument overrides")
 
     # Create a mutually exclusive group for closed/open options
     submission_group = standard_args.add_mutually_exclusive_group()
@@ -270,6 +273,7 @@ def add_training_arguments(training_parsers):
         #  prevents it from being use today but change when we add the capability
         if _parser != datagen:
             _parser.add_argument('--client-host-memory-in-gb', '-cm', type=int, required=True, help=help_messages['client_host_mem_GB'])
+            _parser.add_argument('--checkpoint-folder', '-cf', type=str, help=help_messages['checkpoint_folder'])
 
         _parser.add_argument('--exec-type', '-et', type=EXEC_TYPE, choices=list(EXEC_TYPE), default=EXEC_TYPE.MPI, help=help_messages['exec_type'])
 
@@ -309,9 +313,11 @@ def add_checkpointing_arguments(checkpointing_parsers):
         _parser.add_argument('--num-checkpoints-read', '-ncr', type=int, default=10, help=help_messages['num_checkpoints'])
         _parser.add_argument('--num-checkpoints-write', '-ncw', type=int, default=10, help=help_messages['num_checkpoints'])
         _parser.add_argument('--num-processes', '-np', type=int, required=True, help=help_messages['num_checkpoint_accelerators'])
-        _parser.add_argument('--subset', action="store_true", help=help_messages["checkpoint_subset"])
+
+        # We handle the subset param automatically if number of processes is less than number required for Closed
+        # _parser.add_argument('--subset', action="store_true", help=help_messages["checkpoint_subset"])
         _parser.add_argument('--params', '-p', nargs="+", type=str, action="append", help=help_messages['params'])
-        _parser.add_argument("--data-dir", '-dd', type=str, help="Filesystem location for data")
+        _parser.add_argument("--checkpoint-folder", '-cf', type=str, help=help_messages['checkpoint_folder'])
         _parser.add_argument('--dlio-bin-path', '-dp', type=str, help="Path to DLIO binary. Default is the same as mlpstorage binary path")
 
 
