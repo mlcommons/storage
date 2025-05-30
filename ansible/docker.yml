@@ -1,0 +1,88 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2022 Dell Inc, or its subsidiaries.
+---
+- name: Install Docker and other packages
+  hosts: all
+  become: true
+  tasks:
+    - name: Ensure required packages are installed
+      ansible.builtin.package:
+        state: present
+        name:
+          - python3-pip
+          - sshpass
+          - git
+
+    - name: DEBIAN | Custom block of commands
+      when: ansible_os_family == 'Debian'
+      block:
+        - name: DEBIAN | Download Docker GPG key
+          ansible.builtin.get_url:
+            url: https://download.docker.com/linux/ubuntu/gpg
+            dest: /etc/apt/keyrings/docker.asc
+            mode: "0644"
+            force: true
+        - name: DEBIAN | Get architecture
+          ansible.builtin.command: dpkg --print-architecture
+          register: deb_architecture
+          changed_when: false
+        - name: DEBIAN | Add Docker repository
+          ansible.builtin.apt_repository:
+            state: present
+            repo: >
+              deb [arch={{ deb_architecture.stdout }} signed-by=/etc/apt/keyrings/docker.asc]
+              https://download.docker.com/linux/ubuntu
+              {{ ansible_distribution_release }} stable
+        - name: DEBIAN | Remove conflicting Docker packages
+          ansible.builtin.package:
+            state: absent
+            name:
+              - docker.io
+              - docker-doc
+              - docker-compose
+              - docker-compose-v2
+              - podman-docker
+              - containerd
+              - runc
+
+    - name: RHEL | Custom block of commands
+      when: ansible_os_family == "RedHat"
+      block:
+        - name: RHEL | Add Docker repository
+          # https://download.docker.com/linux/rhel/docker-ce.repo
+          ansible.builtin.yum_repository:
+            name: docker-ce-stable
+            description: Docker CE Stable - $basearch
+            baseurl: https://download.docker.com/linux/rhel/$releasever/$basearch/stable
+            gpgkey: https://download.docker.com/linux/rhel/gpg
+            gpgcheck: yes
+            enabled: yes
+        - name: RHEL | Remove conflicting Docker packages
+          ansible.builtin.package:
+            state: absent
+            name:
+              - docker
+              - docker-client
+              - docker-client-latest
+              - docker-common
+              - docker-latest
+              - docker-latest-logrotate
+              - docker-logrotate
+              - docker-engine
+              - podman
+              - runc
+
+    - name: Install Docker and related packages
+      ansible.builtin.package:
+        state: present
+        name:
+          - docker-ce
+          - docker-ce-cli
+          - containerd.io
+          - docker-buildx-plugin
+          - docker-compose-plugin
+
+    - name: Ensure Docker service is started
+      ansible.builtin.systemd:
+        state: started
+        name: docker
