@@ -667,7 +667,7 @@ def calculate_training_data_size(args, cluster_information, dataset_params, read
         num_processes = args.num_processes
     elif args.clienthost_host_memory_in_gb and not args.num_client_hosts:
         # If we have memory but not clients, we use the number of provided hosts and given memory amount
-        per_host_memory_in_bytes = args.clienthost_host_memory_in_gb * 1024 * 1024 * 102
+        per_host_memory_in_bytes = args.clienthost_host_memory_in_gb * 1024 * 1024 * 1024
         num_hosts = len(args.hosts)
         total_mem_bytes = per_host_memory_in_bytes * num_hosts
         num_processes = args.num_processes
