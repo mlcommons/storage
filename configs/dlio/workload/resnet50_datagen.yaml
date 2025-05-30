@@ -4,6 +4,11 @@ model:
 
 framework: tensorflow
 
+workflow:
+  generate_data: True
+  train: False
+  checkpoint: False
+
 dataset:
  num_files_train: 1024
  num_samples_per_file: 1251

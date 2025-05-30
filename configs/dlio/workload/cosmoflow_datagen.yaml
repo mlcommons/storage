@@ -3,6 +3,11 @@ model:
 
 framework: tensorflow
 
+workflow:
+  generate_data: True
+  train: False
+  checkpoint: False
+
 dataset:
  data_folder: data/cosmoflow
  num_files_train: 524288
