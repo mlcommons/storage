@@ -67,10 +67,19 @@ LLM_MODELS = [LLAMA3_70B, LLAMA3_405B, LLAMA3_1T, LLAMA3_8B]
 LLM_SUBSET_PROCS = 8
 # Defined as (MinProcs, ZeroLevel, GPU per Data Parallel Instance, Closed GPU Count)
 LLM_ALLOWED_VALUES = {
-    LLAMA3_1T: (LLM_SUBSET_PROCS, 3, 8*64, 8*64*2),
-    LLAMA3_405B: (LLM_SUBSET_PROCS, 3, 8*32, 8*32*2),
-    LLAMA3_70B: (LLM_SUBSET_PROCS, 1, 8, 8*8),
-    LLAMA3_8B: (LLM_SUBSET_PROCS, 1, 8, 8)
+    LLAMA3_1T: (LLM_SUBSET_PROCS, 3, 8*64, 8*64*2),     # 8*64*2 = 1,024 processes
+    LLAMA3_405B: (LLM_SUBSET_PROCS, 3, 8*32, 8*32*2),   # 8*32*2 = 512 processes
+    LLAMA3_70B: (LLM_SUBSET_PROCS, 1, 8, 8*8),          # 8*8*1 = 64 processes
+    LLAMA3_8B: (LLM_SUBSET_PROCS, 1, 8, 8)              # 8*1*1 = 8 processes
+}
+
+# Defined as (Model GB, Optimizer GB)
+# These need to be updated with actual values
+LLM_SIZE_BY_RANK = {
+    LLAMA3_1T: (2571, 15426),
+    LLAMA3_405B: (755, 4533),
+    LLAMA3_70B: (130, 781),
+    LLAMA3_8B: (15, 90)
 }
 
 CHECKPOINT_RANKS_STRINGS = "\n    ".join(

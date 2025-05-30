@@ -5,6 +5,11 @@ model:
 
 framework: pytorch
 
+workflow:
+  generate_data: True
+  train: False
+  checkpoint: False
+
 dataset: 
   data_folder: data/unet3d/
   format: npz
