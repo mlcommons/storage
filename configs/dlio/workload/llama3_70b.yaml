@@ -8,6 +8,7 @@ model:
     tensor: 8
     pipeline: 1
     zero_stage: 3
+    data: 1
   transformer: 
     vocab_size: 128256
     hidden_size: 8192

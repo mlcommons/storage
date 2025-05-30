@@ -5,7 +5,7 @@ import sys
 from mlpstorage import VERSION
 from mlpstorage.config import (CHECKPOINT_RANKS_STRINGS, MODELS, ACCELERATORS, DEFAULT_HOSTS, VECTORDB_DEFAULT_RUNTIME,
                                LLM_MODELS, LLM_MODELS_STRINGS, MPI_CMDS, EXEC_TYPE, DEFAULT_RESULTS_DIR, EXIT_CODE,
-                               VECTOR_DTYPES, DISTRIBUTIONS)
+                               VECTOR_DTYPES, DISTRIBUTIONS, UNET)
 
 # TODO: Get rid of this now that I'm not repeating arguments for different subparsers?
 help_messages = dict(
@@ -286,7 +286,7 @@ def add_training_arguments(training_parsers):
 
     for _parser in [datasize, run_benchmark]:
         _parser.add_argument('--accelerator-type', '-g', choices=ACCELERATORS, required=True, help=help_messages['accelerator_type'])
-        _parser.add_argument('--num-client-hosts', '-nc', type=int, required=True, help=help_messages['num_client_hosts'])
+        _parser.add_argument('--num-client-hosts', '-nc', type=int, help=help_messages['num_client_hosts'])
 
     for _parser in [datasize, datagen, run_benchmark, configview]:
         _parser.add_argument("--data-dir", '-dd', type=str, help="Filesystem location for data")
@@ -405,6 +405,15 @@ def validate_args(args):
     if args.program == "checkpointing":
         if args.model not in LLM_MODELS:
             error_messages.append("Invalid LLM model. Supported models are: {}".format(", ".join(LLM_MODELS)))
+
+
+    # checkpoint-folder is required for unet in training and all checkpointing
+    if not args.checkpoint_folder:
+        if args.model == UNET:
+            error_messages.append("The argument '--checkpoint-folder' is required for training the Unet model")
+        if args.model in LLM_MODELS:
+            error_messages.append("The argument '--checkpoint-folder' is required for running checkpointing")
+
     if error_messages:
         for msg in error_messages:
             print(msg)
@@ -445,6 +454,9 @@ def update_args(args):
         if len(args.hosts) == 1 and isinstance(args.hosts[0], str):
             setattr(args, 'hosts', args.hosts[0].split(','))
         print(f'Hosts is: {args.hosts}')
+
+    if not hasattr(args, "num_client_hosts") and hasattr(args, "hosts"):
+        setattr(args, "num_client_hosts", len(args.hosts))
 
 
 if __name__ == "__main__":
