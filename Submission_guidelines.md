@@ -146,7 +146,7 @@ Note: The output directories for the write and read phases must be different to 
     --num-checkpoints-read -1 \
     --data-dir ./checkpoint_data1 \
     --results-dir ./checkpoint_results_write \
-    --ssh-username=root --mpi-bin mpiexec \
+    --mpi-bin mpiexec \
     --exec-type mpi \
     --closed
 
@@ -160,7 +160,6 @@ Note: The output directories for the write and read phases must be different to 
     --num-checkpoints-write -1 \
     --data-dir ./checkpoint_data1 \
     --results-dir ./checkpoint_results_read \
-    --ssh-username=root \
     --mpi-bin mpiexec \
     --exec-type mpi \
     --closed
@@ -174,7 +173,7 @@ Note: The output directories for the write and read phases must be different to 
     --num-checkpoints-read -1 \
     --data-dir ./checkpoint_data1 \
     --results-dir ./checkpoint_results_write \
-    --ssh-username=root --mpi-bin mpiexec \
+    --mpi-bin mpiexec \
     --exec-type mpi \
     --closed \
     --params workload.model.parallelism.data=2 workload.checkpoint.mode=subset
@@ -187,7 +186,7 @@ Note: The output directories for the write and read phases must be different to 
     --num-checkpoints-write -1 \
     --data-dir ./checkpoint_data1 \
     --results-dir ./checkpoint_results_read \
-    --ssh-username=root --mpi-bin mpiexec \
+    --mpi-bin mpiexec \
     --exec-type mpi \
     --closed \
     --params workload.model.parallelism.data=2 workload.checkpoint.mode=subset
