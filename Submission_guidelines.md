@@ -144,7 +144,7 @@ Note: The output directories for the write and read phases must be different to 
     --hosts ip1 ip2 .... \
     --num-processes 512 \
     --num-checkpoints-read -1 \
-    --data-dir ./checkpoint_data1 \
+    --checkpoint-folder ./checkpoint_data1 \
     --results-dir ./checkpoint_results_write \
     --mpi-bin mpiexec \
     --exec-type mpi \
@@ -158,7 +158,7 @@ Note: The output directories for the write and read phases must be different to 
     --hosts ip1 ip2 .... \
     --num-processes 512 \
     --num-checkpoints-write -1 \
-    --data-dir ./checkpoint_data1 \
+    --checkpoint-folder ./checkpoint_data1 \
     --results-dir ./checkpoint_results_read \
     --mpi-bin mpiexec \
     --exec-type mpi \
@@ -171,7 +171,7 @@ Note: The output directories for the write and read phases must be different to 
     --hosts ip1 \
     --num-processes 8 \
     --num-checkpoints-read -1 \
-    --data-dir ./checkpoint_data1 \
+    --checkpoint-folder ./checkpoint_data1 \
     --results-dir ./checkpoint_results_write \
     --mpi-bin mpiexec \
     --exec-type mpi \
@@ -184,7 +184,7 @@ Note: The output directories for the write and read phases must be different to 
     --hosts ip1 \
     --num-processes 8 \
     --num-checkpoints-write -1 \
-    --data-dir ./checkpoint_data1 \
+    --checkpoint-folder ./checkpoint_data1 \
     --results-dir ./checkpoint_results_read \
     --mpi-bin mpiexec \
     --exec-type mpi \
@@ -212,7 +212,7 @@ For OPEN submissions, the total number of GPUs may be increased in multiples of 
 |-----------------------------------|----------------------------------------------|--------------------------------------|----------------------|---------------------|
 | --ppn                             | Number of GPUs per node                      | N/A                                  | YES (minimal 4)      | YES (minimal 4)     |
 | --num-processes                    | Total number of GPUs                         | Node local: 8<br>Global: the value in Table 1 | NO                   | YES                 |
-| --data-dir      | The folder to save the checkpoint data       | checkpoint/{workload}                | YES                  | YES                 |
+| --checkpoint-folder      | The folder to save the checkpoint data       | checkpoint/{workload}                | YES                  | YES                 |
 | --num-checkpoints-write | Number of write checkpoints                  | 10 or -1**                             | NO              | NO                  |
 | --num-checkpoints-read     | Number of write checkpoints                  | 10 or -1**                              | NO                   | NO                  |
 
