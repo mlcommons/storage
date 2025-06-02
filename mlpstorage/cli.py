@@ -408,7 +408,7 @@ def validate_args(args):
 
 
     # checkpoint-folder is required for unet in training and all checkpointing
-    if not args.checkpoint_folder:
+    if hasattr(args, 'checkpoint_folder') and not args.checkpoint_folder:
         if args.model == UNET:
             error_messages.append("The argument '--checkpoint-folder' is required for training the Unet model")
         if args.model in LLM_MODELS:
