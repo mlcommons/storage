@@ -405,11 +405,12 @@ def validate_args(args):
     if args.program == "checkpointing":
         if args.model not in LLM_MODELS:
             error_messages.append("Invalid LLM model. Supported models are: {}".format(", ".join(LLM_MODELS)))
-
+        if args.num_checkpoints_read < 0 or args.num_checkpoints_write < 0:
+            error_messages.append("Number of checkpoints read and write must be non-negative")
 
     # checkpoint-folder is required for unet in training and all checkpointing
     if hasattr(args, 'checkpoint_folder') and not args.checkpoint_folder:
-        if args.model == UNET:
+        if args.model == UNET and args.command == "run":
             error_messages.append("The argument '--checkpoint-folder' is required for training the Unet model")
         if args.model in LLM_MODELS:
             error_messages.append("The argument '--checkpoint-folder' is required for running checkpointing")
