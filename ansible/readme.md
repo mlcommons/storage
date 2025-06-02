@@ -1,6 +1,6 @@
 # MLPerf™ Storage Benchmark Suite Setup (Ansible Playbook)
 
-This repository contains an Ansible playbook to help automate the setup of the MLPerf™ Storage Benchmark Suite using Bare-Metal.
+This repository contains an Ansible playbook to help automate the setup of the MLPerf™ Storage Benchmark Suite using Bare-Metal for different OS (Ubuntu, Red Hat, SLES).
 
 ## 📋 Prerequisites
 
