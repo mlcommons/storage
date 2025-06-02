@@ -6,7 +6,8 @@ import sys
 
 from mlpstorage.benchmarks.base import Benchmark
 from mlpstorage.config import (CONFIGS_ROOT_DIR, BENCHMARK_TYPES, EXEC_TYPE, MPIRUN, MLPSTORAGE_BIN_NAME,
-                               LLM_ALLOWED_VALUES, LLM_SUBSET_PROCS, EXIT_CODE, MODELS, HYDRA_OUTPUT_SUBDIR)
+                               LLM_ALLOWED_VALUES, LLM_SUBSET_PROCS, EXIT_CODE, MODELS, HYDRA_OUTPUT_SUBDIR,
+                               LLM_SIZE_BY_RANK)
 from mlpstorage.rules import calculate_training_data_size, HostInfo, HostMemoryInfo, HostCPUInfo, ClusterInformation
 from mlpstorage.utils import (read_config_from_file, create_nested_dict, update_nested_dict, generate_mpi_prefix_cmd)
 
@@ -166,14 +167,15 @@ class TrainingBenchmark(DLIOBenchmark):
                 os.makedirs(folder_path)
 
     def add_workflow_to_cmd(self, cmd) -> str:
-        # Configure the workflow depending on command
-        if self.args.command == "datagen":
-            cmd += " ++workload.workflow.generate_data=True ++workload.workflow.train=False"
-        elif self.args.command == "run_benchmark":
-            cmd += " ++workload.workflow.generate_data=False ++workload.workflow.train=True"
-
-        # Training doesn't do checkpoints
-        cmd += " ++workload.workflow.checkpoint=False"
+        # # Configure the workflow depending on command
+        # if self.args.command == "datagen":
+        #     cmd += " ++workload.workflow.generate_data=True ++workload.workflow.train=False"
+        # elif self.args.command == "run_benchmark":
+        #     cmd += " ++workload.workflow.generate_data=False ++workload.workflow.train=True"
+        #
+        # # Training doesn't do checkpoints
+        # cmd += " ++workload.workflow.checkpoint=False"
+        # We're now using the workflow defined in the yaml file only
         return cmd
 
     def generate_datagen_benchmark_command(self, num_files_train, num_subfolders_train):
@@ -258,27 +260,71 @@ class CheckpointingBenchmark(DLIOBenchmark):
         min_procs, zero_level, GPUpDP, ClosedGPUs = LLM_ALLOWED_VALUES.get(self.args.model)
         data_parallelism = int(ClosedGPUs / GPUpDP)
 
+
+        # We only need the param "model.parallelism.data" if we are not using default checkpoint_mode
         if self.args.num_processes == ClosedGPUs:
             pass
-        elif self.args.num_processes < ClosedGPUs:
+        elif self.args.num_processes < ClosedGPUs and zero_level <= 1:
             self.params_dict['checkpoint.mode'] = "subset"
             self.params_dict['model.parallelism.data'] = data_parallelism
+        elif self.args.num_processes < ClosedGPUs and zero_level > 1:
+            self.params_dict['checkpoint.mode'] = "subset"
         elif self.args.num_processes > ClosedGPUs:
             self.params_dict['model.parallelism.data'] = self.args.num_processes // GPUpDP
 
         self.params_dict['checkpoint.num_checkpoints_read'] = self.args.num_checkpoints_read
         self.params_dict['checkpoint.num_checkpoints_write'] = self.args.num_checkpoints_write
-        self.params_dict['checkpoint.checkpoint_folder'] = f"{self.args.data_dir}/{self.args.model}"
+        self.params_dict['checkpoint.checkpoint_folder'] = os.path.join(self.args.checkpoint_folder, self.args.model)
 
 
     def add_workflow_to_cmd(self, cmd) -> str:
-        cmd += " ++workload.workflow.generate_data=False ++workload.workflow.train=False"
-        cmd += " ++workload.workflow.checkpoint=True"
+        # cmd += " ++workload.workflow.generate_data=False ++workload.workflow.train=False"
+        # cmd += " ++workload.workflow.checkpoint=True"
+        # We're now using the workflow defined in the yaml file only
         return cmd
 
     def _run(self):
         try:
-            self.execute_command()
+            if self.args.command == "run":
+                self.execute_command()
+            elif self.args.command == "datasize":
+                self.datasize()
+            else:
+                self.logger.error(f'Invalid command: {self.args.command}')
+                return EXIT_CODE.INVALID_ARGUMENTS
         except Exception as e:
             return EXIT_CODE.FAILURE
         return EXIT_CODE.SUCCESS
+
+    def datasize(self):
+        self.logger.verbose(f'Running datasize for {self.args.model}...')
+        # Calculate the total writes per rank which equates to memory required per rank
+        # If zero_level is 1, then rank 0 writes the entire model,
+        # If zero_level is 3, then the model is sharded across all ranks
+        min_procs, zero_level, GPUpDP, ClosedGPUs = LLM_ALLOWED_VALUES.get(self.args.model)
+        model_gb, optimizer_gb = LLM_SIZE_BY_RANK.get(self.args.model)
+        rank_gb = []
+
+        self.logger.verbose(f'Model & optimizer size: {model_gb:.2f} GB, {optimizer_gb:.2f} GB')
+        for rank in range(self.args.num_processes):
+            rank_gb.append(0)
+            if zero_level == 1:
+                if rank == 0:
+                    rank_gb[rank] = model_gb + (optimizer_gb / self.args.num_processes)
+                    self.logger.debug(f'Rank {rank} writes entire model: {rank_gb[rank]:.2f} GB')
+                else:
+                    rank_gb[rank] = optimizer_gb / self.args.num_processes
+                    self.logger.debug(f'Rank {rank} writes optimizer: {rank_gb[rank]:.2f} GB')
+            elif zero_level == 3:
+                rank_gb[rank] = (model_gb + optimizer_gb) / self.args.num_processes
+                self.logger.debug(f'Rank {rank} writes portion of model and optimizer: {rank_gb[rank]:.2f} GB')
+            else:
+                self.logger.error(f'Invalid zero_level: {zero_level}')
+                raise ValueError("Invalid zero_level")
+
+        rank_string = "\n\t".join(f"Rank {rank}: {rank_gb[rank]:.2f} GB" for rank in range(self.args.num_processes))
+
+        self.logger.result(f'Total GB required per rank:\n\t{rank_string}')
+        self.logger.result(f'Total GB required for all ranks: {sum(rank_gb):.2f} GB')
+
+

@@ -1,6 +1,6 @@
 # we mimic the checkpoint data for megatron-deepspeed
 model: 
-  name: llama_405b
+  name: llama_1t
   type: transformer
   num_layers: 128
   model_datatype: fp16

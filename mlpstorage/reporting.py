@@ -6,7 +6,7 @@ import pprint
 from typing import List, Dict, Any
 
 from mlpstorage.mlps_logging import setup_logging, apply_logging_options
-from mlpstorage.config import MLPS_DEBUG, BENCHMARK_TYPES
+from mlpstorage.config import MLPS_DEBUG, BENCHMARK_TYPES, EXIT_CODE
 from mlpstorage.rules import get_runs_files, BenchmarkRunVerifier, BenchmarkRun
 from mlpstorage.utils import flatten_nested_dict, remove_nan_values
 
@@ -39,12 +39,19 @@ class ReportGenerator:
             verifier.verify()
 
     def generate_reports(self, write_files=True):
+        # Verify the results directory exists:
+        if not os.path.exists(self.results_dir):
+            self.logger.error(f'Results directory {self.results_dir} does not exist')
+            return EXIT_CODE.FILE_NOT_FOUND
+
         self.logger.info(f'Generating reports for {self.results_dir}')
         self.results = self.accumulate_results()
 
         if write_files:
             self.write_csv_file()
             self.write_json_file()
+            
+        return EXIT_CODE.SUCCESS
 
     def accumulate_results(self):
         """

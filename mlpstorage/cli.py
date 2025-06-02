@@ -5,7 +5,7 @@ import sys
 from mlpstorage import VERSION
 from mlpstorage.config import (CHECKPOINT_RANKS_STRINGS, MODELS, ACCELERATORS, DEFAULT_HOSTS, VECTORDB_DEFAULT_RUNTIME,
                                LLM_MODELS, LLM_MODELS_STRINGS, MPI_CMDS, EXEC_TYPE, DEFAULT_RESULTS_DIR, EXIT_CODE,
-                               VECTOR_DTYPES, DISTRIBUTIONS)
+                               VECTOR_DTYPES, DISTRIBUTIONS, UNET)
 
 # TODO: Get rid of this now that I'm not repeating arguments for different subparsers?
 help_messages = dict(
@@ -48,10 +48,11 @@ help_messages = dict(
     configview="View the final config based on the specified options.",
     reportgen="Generate a report from the benchmark results.",
 
+    # Checkpoint foler is used for training and checkpointing
+    checkpoint_folder="Location for checkpoint files for training or checkpointing workloads",
+
     # Checkpointing help messages
-    checkpoint="The checkpoint command executes checkpoints in isolation as a write-only workload",
-    recovery="The recovery command executes a recovery of the most recently written checkpoint with "
-             "\nrandomly assigned reader to data mappings",
+    checkpoint_run="The checkpoint command executes checkpoint saves and restores for a given model.",
     llm_model="The model & size to be emulated for checkpointing. The selection will dictate the TP, PP, & DP "
               "\nsizes as well as the size of the checkpoint. "
               "\nAvailable LLM Models: "
@@ -65,6 +66,12 @@ help_messages = dict(
                          "\n    1 = Optimizer Partitioning, "
                          "\n    2 = Gradient partitioning, "
                          "\n    3 = Model Parameter Partitioning",
+    checkpoint_datasize="The datasize command calculates the total amount of writes for a given command and an estimate "
+                        "of the required memory.",
+    checkpoint_subset="Run the checkpoint in 'Subset' mode. This mode only runs on a subset of hosts. eg, for large "
+                      "models that required hundreds of processes to do an entire checkpoint, subset mode enables "
+                      "using fewer processes and only doing part of the checkpoint. This is used in the Submissions to "
+                      "represent a single 8-GPU node writing to local storage.",
 
     # VectorDB help messages
     db_ip_address=f"IP address of the VectorDB instance. If not provided, a local VectorDB instance will be used.",
@@ -220,7 +227,7 @@ def add_universal_arguments(parser):
     standard_args = parser.add_argument_group("Standard Arguments")
     standard_args.add_argument('--results-dir', '-rd', type=str, default=DEFAULT_RESULTS_DIR, help=help_messages['results_dir'])
     standard_args.add_argument('--loops', type=int, default=1, help="Number of times to run the benchmark")
-    standard_args.add_argument('--config-file', '-cf', type=str, help="Path to YAML file with argument overrides")
+    standard_args.add_argument('--config-file', '-c', type=str, help="Path to YAML file with argument overrides")
 
     # Create a mutually exclusive group for closed/open options
     submission_group = standard_args.add_mutually_exclusive_group()
@@ -266,6 +273,7 @@ def add_training_arguments(training_parsers):
         #  prevents it from being use today but change when we add the capability
         if _parser != datagen:
             _parser.add_argument('--client-host-memory-in-gb', '-cm', type=int, required=True, help=help_messages['client_host_mem_GB'])
+            _parser.add_argument('--checkpoint-folder', '-cf', type=str, help=help_messages['checkpoint_folder'])
 
         _parser.add_argument('--exec-type', '-et', type=EXEC_TYPE, choices=list(EXEC_TYPE), default=EXEC_TYPE.MPI, help=help_messages['exec_type'])
 
@@ -278,7 +286,7 @@ def add_training_arguments(training_parsers):
 
     for _parser in [datasize, run_benchmark]:
         _parser.add_argument('--accelerator-type', '-g', choices=ACCELERATORS, required=True, help=help_messages['accelerator_type'])
-        _parser.add_argument('--num-client-hosts', '-nc', type=int, required=True, help=help_messages['num_client_hosts'])
+        _parser.add_argument('--num-client-hosts', '-nc', type=int, help=help_messages['num_client_hosts'])
 
     for _parser in [datasize, datagen, run_benchmark, configview]:
         _parser.add_argument("--data-dir", '-dd', type=str, help="Filesystem location for data")
@@ -288,31 +296,40 @@ def add_training_arguments(training_parsers):
 
 
 def add_checkpointing_arguments(checkpointing_parsers):
-    # Checkpointing
-    checkpointing_parsers.add_argument('--hosts', '-s', nargs="+", default=DEFAULT_HOSTS, help=help_messages['client_hosts'])
+    checkpointing_subparsers = checkpointing_parsers.add_subparsers(dest="command", required=True)
+    checkpointing_parsers.required = True
 
-    # We do not use "choices=LLM_MODELS" here because it makes the help really long. We define a string for the
-    # help that includes the choices and do validation in the validate_args section
-    checkpointing_parsers.add_argument('--model', '-m', required=True, help=help_messages['llm_model'])
-    checkpointing_parsers.add_argument('--num-checkpoints-read', '-ncr', type=int, default=1, help=help_messages['num_checkpoints'])
-    checkpointing_parsers.add_argument('--num-checkpoints-write', '-ncw', type=int, default=1, help=help_messages['num_checkpoints'])
-    # Not available in open or closed for MLPS 2.0
-    # _parser.add_argument('--deepspeed-zero-level', '-dzl', type=zero_level_type, default=0,
-    #                      help=help_messages['deepspeed_zero_level'])
+    datasize = checkpointing_subparsers.add_parser("datasize", help=help_messages['checkpoint_datasize'])
+    run_benchmark = checkpointing_subparsers.add_parser("run", help=help_messages['checkpoint_run'])
+
+    for _parser in [datasize, run_benchmark]:
+        _parser.add_argument('--hosts', '-s', nargs="+", default=DEFAULT_HOSTS, help=help_messages['client_hosts'])
+        _parser.add_argument('--client-host-memory-in-gb', '-cm', type=int, required=True,
+                             help=help_messages['client_host_mem_GB'])
+
+        # We do not use "choices=LLM_MODELS" here because it makes the help really long. We define a string for the
+        # help that includes the choices and do validation in the validate_args section
+        _parser.add_argument('--model', '-m', required=True, help=help_messages['llm_model'])
+        _parser.add_argument('--num-checkpoints-read', '-ncr', type=int, default=10, help=help_messages['num_checkpoints'])
+        _parser.add_argument('--num-checkpoints-write', '-ncw', type=int, default=10, help=help_messages['num_checkpoints'])
+        _parser.add_argument('--num-processes', '-np', type=int, required=True, help=help_messages['num_checkpoint_accelerators'])
+
+        # We handle the subset param automatically if number of processes is less than number required for Closed
+        # _parser.add_argument('--subset', action="store_true", help=help_messages["checkpoint_subset"])
+        _parser.add_argument('--params', '-p', nargs="+", type=str, action="append", help=help_messages['params'])
+        _parser.add_argument("--checkpoint-folder", '-cf', type=str, help=help_messages['checkpoint_folder'])
+        _parser.add_argument('--dlio-bin-path', '-dp', type=str, help="Path to DLIO binary. Default is the same as mlpstorage binary path")
 
 
-    checkpointing_parsers.add_argument('--exec-type', '-et', type=EXEC_TYPE, choices=list(EXEC_TYPE), default=EXEC_TYPE.MPI, help=help_messages['exec_type'])
+        # Not available in open or closed for MLPS 2.0
+        # _parser.add_argument('--deepspeed-zero-level', '-dzl', type=zero_level_type, default=0,
+        #                      help=help_messages['deepspeed_zero_level'])
 
-    add_mpi_group(checkpointing_parsers)
+        if _parser == run_benchmark:
+            _parser.add_argument('--exec-type', '-et', type=EXEC_TYPE, choices=list(EXEC_TYPE), default=EXEC_TYPE.MPI, help=help_messages['exec_type'])
+            add_mpi_group(_parser)
 
-    checkpointing_parsers.add_argument('--num-processes', '-np', type=int, default=None, help=help_messages['num_checkpoint_accelerators'])
-    checkpointing_parsers.add_argument('--params', '-p', nargs="+", type=str, action="append", help=help_messages['params'])
-    checkpointing_parsers.add_argument("--data-dir", '-dd', type=str, help="Filesystem location for data")
-    checkpointing_parsers.add_argument('--dlio-bin-path', '-dp', type=str,
-                                       help="Path to DLIO binary. Default is the same as mlpstorage binary path")
-
-    # Since we're not using subparsers, this happens in the main function
-    #add_universal_arguments(checkpointing_parsers)
+        add_universal_arguments(_parser)
 
 
 def add_vectordb_arguments(vectordb_parsers):
@@ -388,6 +405,16 @@ def validate_args(args):
     if args.program == "checkpointing":
         if args.model not in LLM_MODELS:
             error_messages.append("Invalid LLM model. Supported models are: {}".format(", ".join(LLM_MODELS)))
+        if args.num_checkpoints_read < 0 or args.num_checkpoints_write < 0:
+            error_messages.append("Number of checkpoints read and write must be non-negative")
+
+    # checkpoint-folder is required for unet in training and all checkpointing
+    if hasattr(args, 'checkpoint_folder') and not args.checkpoint_folder:
+        if args.model == UNET and args.command == "run":
+            error_messages.append("The argument '--checkpoint-folder' is required for training the Unet model")
+        if args.model in LLM_MODELS:
+            error_messages.append("The argument '--checkpoint-folder' is required for running checkpointing")
+
     if error_messages:
         for msg in error_messages:
             print(msg)
@@ -428,6 +455,9 @@ def update_args(args):
         if len(args.hosts) == 1 and isinstance(args.hosts[0], str):
             setattr(args, 'hosts', args.hosts[0].split(','))
         print(f'Hosts is: {args.hosts}')
+
+    if not hasattr(args, "num_client_hosts") and hasattr(args, "hosts"):
+        setattr(args, "num_client_hosts", len(args.hosts))
 
 
 if __name__ == "__main__":
