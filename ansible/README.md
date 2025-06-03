@@ -44,8 +44,6 @@ mkdir -p /mnt/nfs/train /mnt/nfs/valid
 
 Use `/mnt/nfs` as a shared mount location across nodes.
 
-#### Example (NFS Client Mount):
-
 ```bash
 sudo apt install nfs-common  # Or use zypper/yum based on OS
 sudo mkdir -p /mnt/nfs
