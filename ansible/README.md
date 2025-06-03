@@ -73,7 +73,7 @@ cd storage/ansible/
 ansible-playbook -i inventory setup.yml
 ```
 
-### 3. Activate virtual environment and prepare data
+### 3. Activate virtual environment
 
 ```bash
 source storage/venv/bin/activate
