@@ -27,6 +27,7 @@ Install UV
 uv venv 
 source venv/bin/activate
 uv pip install ansible ansible-pylibssh
+ansible-galaxy collection install -r collections/requirements.yml
 ```
 
 ## 🗂️ Preparing Mount Directories
