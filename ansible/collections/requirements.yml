@@ -2,5 +2,4 @@
 # Copyright (c) 2022 Dell Inc, or its subsidiaries.
 ---
 collections:
-  - community.docker
   - community.general
