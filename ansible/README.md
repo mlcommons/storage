@@ -21,8 +21,6 @@ ssh-copy-id root@172.22.X.X  # Run for each target node
 
 ### Install Python dependencies:
 
-Install UV
-
 ```bash
 uv venv 
 source venv/bin/activate
