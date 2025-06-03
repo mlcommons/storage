@@ -1,3 +1,6 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2022 Dell Inc, or its subsidiaries.
+---
 - name: Install MLPerf Storage v2.0
   hosts: clients
   become: true
@@ -7,74 +10,66 @@
         name:
           - curl
           - git
+          - mpich
         state: present
 
-    - name: Download UV installer
-      ansible.builtin.get_url:
-        url: https://astral.sh/uv/install.sh
-        dest: /tmp/install.sh
-        mode: '0755'
-
-    - name: Install UV
-      ansible.builtin.command: "sh /tmp/install.sh"
-
-    - name: Remove existing storage directory
+    - name:  COMMON | Remove existing storage directory
       ansible.builtin.file:
         path: /root/storage
         state: absent
 
-    - name: Clone MLPerf Storage Repository
+    - name:  COMMON |  Clone MLPerf Storage Repository
       ansible.builtin.git:
         repo: https://github.com/mlcommons/storage.git
         dest: /root/storage
         version: main
-
-    - name: Create and activate Python virtual environment
+    
+    - name:  COMMON | Create and activate Python virtual environment
       ansible.builtin.command: /root/.local/bin/uv venv --python 3.12 /root/storage/.venv
 
-    - name: Install OS-specific system dependencies (Debian)
+    - name: DEBIAN | Install OS-specific system dependencies
       when: ansible_os_family == 'Debian'
       block:
-        - name: Install Python and MPI packages
+        - name: DEBIAN | Install Python and MPI packages
           ansible.builtin.package:
             name:
               - python3-dev
-              - mpich
             state: present
 
-    - name: Install OS-specific system dependencies (RedHat)
+    - name: RHEL | Install OS-specific system dependencies
       when: ansible_os_family == 'RedHat'
       block:
         - name: Install Python and MPI packages
           ansible.builtin.package:
             name:
               - python3-devel
-              - mpich
               - mpich-devel
             state: present
 
-        - name: Export MPI paths
+        - name: RHEL | Export MPI paths
           shell: |
             echo 'export LD_LIBRARY_PATH=/usr/lib64/mpich/lib:$LD_LIBRARY_PATH' >> /root/.bashrc
             echo 'export PATH=/usr/lib64/mpich/bin:$PATH' >> /root/.bashrc
           args:
             executable: /bin/bash
 
-    - name: Install OS-specific system dependencies (Suse)
+    # Required: newer GCC needed to compile mpi4py correctly
+    # MLPerf Storage depends on mpi4py which in turn requires a valid MPI compiler and development environment.
+    # On SLES, the default GCC may not be available in PATH or may be outdated. Installing GCC 12 and explicitly setting it as the default resolves these issues.
+    - name: SLES | Install OS-specific system dependencies
       when: ansible_os_family == 'Suse'
       block:
-        - name: Install base system packages
+        - name: SLES | Install base system packages
           ansible.builtin.package:
             name:
               - python3-devel
-              - mpich
               - mpich-devel
               - gcc12
               - gcc12-c++
               - cpp12
             state: present
 
-        - name: Export MPI paths
+        - name: SLES | Export MPI paths
           shell: |
             echo 'export PATH=/usr/lib64/mpi/gcc/mpich/bin:$PATH' >> /root/.bashrc
             echo 'export LD_LIBRARY_PATH=/usr/lib64/mpi/gcc/mpich/lib64:$LD_LIBRARY_PATH' >> /root/.bashrc
@@ -82,7 +77,7 @@
           args:
             executable: /bin/bash
 
-        - name: Set GCC 12 as default
+        - name: SLES | Set GCC 12 as default
           community.general.alternatives:
             name: "{{ item.name }}"
             link: "{{ item.link }}"
@@ -94,7 +89,7 @@
             - { name: cpp, link: /usr/bin/cpp, path: "/usr/bin/cpp-12" }
             - { name: c++, link: /usr/bin/c++, path: "/usr/bin/g++-12" }
 
-    - name: Install DLIO python requirements
+    - name: COMMON | Install DLIO python requirements
       ansible.builtin.command: /root/.local/bin/uv pip install .
       args:
         chdir: /root/storage
