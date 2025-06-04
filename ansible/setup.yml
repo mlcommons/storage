@@ -13,19 +13,22 @@
           - mpich
         state: present
 
-    - name:  COMMON | Remove existing storage directory
-      ansible.builtin.file:
-        path: /root/storage
-        state: absent
+    - name: COMMON | Download UV installer
+      ansible.builtin.get_url:
+        url: https://astral.sh/uv/install.sh
+        dest: /tmp/install.sh
+        mode: '0755'
 
-    - name:  COMMON |  Clone MLPerf Storage Repository
-      ansible.builtin.git:
-        repo: https://github.com/mlcommons/storage.git
-        dest: /root/storage
-        version: main
+    - name: COMMON | Install UV
+      ansible.builtin.command: "sh /tmp/install.sh"
+
+    - name: Recursively remove directory
+      ansible.builtin.file:
+        path: /root/venv/
+        state: absent
     
     - name:  COMMON | Create and activate Python virtual environment
-      ansible.builtin.command: /root/.local/bin/uv venv --python 3.12 /root/storage/.venv
+      ansible.builtin.command: /root/.local/bin/uv venv --python 3.12 /root/.venv
 
     - name: DEBIAN | Install OS-specific system dependencies
       when: ansible_os_family == 'Debian'
@@ -89,9 +92,9 @@
             - { name: cpp, link: /usr/bin/cpp, path: "/usr/bin/cpp-12" }
             - { name: c++, link: /usr/bin/c++, path: "/usr/bin/g++-12" }
 
-    - name: COMMON | Install DLIO python requirements
-      ansible.builtin.command: /root/.local/bin/uv pip install .
+    - name:  COMMON | Install MLPerf Storage from GitHub using UV inside venv
+      ansible.builtin.shell: |
+        /root/.local/bin/uv pip install --native-tls --index https://pypi.nvidia.com/ "git+https://github.com/mlcommons/storage.git@main"
       args:
-        chdir: /root/storage
-      environment:
-        CMAKE_POLICY_VERSION_MINIMUM: "3.5"
+        executable: /bin/bash
+        creates: /root/venv

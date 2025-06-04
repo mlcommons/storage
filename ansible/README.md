@@ -74,7 +74,7 @@ ansible-playbook -i inventory setup.yml
 ### 3. Activate virtual environment
 
 ```bash
-source storage/venv/bin/activate
+source venv/bin/activate
 ```
 
 ### 4. Data Generation
