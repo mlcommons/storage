@@ -105,7 +105,18 @@ class ReportGenerator:
                     if result.metrics:
                         print(f'\t    Metrics:')
                         for metric, value in result.metrics.items():
-                            print(f'\t\t- {metric}: {value}')
+                            if type(value) in (int, float):
+                                if "percentage" in metric.lower():
+                                    print(f'\t\t- {metric}: {value:,.1f}%')
+                                else:
+                                    print(f'\t\t- {metric}: {value:,.1f}')
+                            elif type(value) in (list, tuple):
+                                if "percentage" in metric.lower():
+                                    print(f'\t\t- {metric}: {", ".join(f"{v:,.1f}%" for v in value)}')
+                                else:
+                                    print(f'\t\t- {metric}: {", ".join(f"{v:,.1f}" for v in value)}')
+                            else:
+                                print(f'\t\t- {metric}: {value}')
 
                     print("\n")
 
