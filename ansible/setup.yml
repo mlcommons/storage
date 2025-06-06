@@ -1,0 +1,100 @@
+# SPDX-License-Identifier: Apache-2.0
+# Copyright (c) 2022 Dell Inc, or its subsidiaries.
+---
+- name: Install MLPerf Storage v2.0
+  hosts: clients
+  become: true
+  tasks:
+    - name: COMMON | Ensure curl, git and python build dependencies are installed
+      ansible.builtin.package:
+        name:
+          - curl
+          - git
+          - mpich
+        state: present
+
+    - name: COMMON | Download UV installer
+      ansible.builtin.get_url:
+        url: https://astral.sh/uv/install.sh
+        dest: /tmp/install.sh
+        mode: '0755'
+
+    - name: COMMON | Install UV
+      ansible.builtin.command: "sh /tmp/install.sh"
+
+    - name: Recursively remove directory
+      ansible.builtin.file:
+        path: /root/venv/
+        state: absent
+    
+    - name:  COMMON | Create and activate Python virtual environment
+      ansible.builtin.command: /root/.local/bin/uv venv --python 3.12 /root/.venv
+
+    - name: DEBIAN | Install OS-specific system dependencies
+      when: ansible_os_family == 'Debian'
+      block:
+        - name: DEBIAN | Install Python and MPI packages
+          ansible.builtin.package:
+            name:
+              - python3-dev
+            state: present
+
+    - name: RHEL | Install OS-specific system dependencies
+      when: ansible_os_family == 'RedHat'
+      block:
+        - name: Install Python and MPI packages
+          ansible.builtin.package:
+            name:
+              - python3-devel
+              - mpich-devel
+            state: present
+
+        - name: RHEL | Export MPI paths
+          shell: |
+            echo 'export LD_LIBRARY_PATH=/usr/lib64/mpich/lib:$LD_LIBRARY_PATH' >> /root/.bashrc
+            echo 'export PATH=/usr/lib64/mpich/bin:$PATH' >> /root/.bashrc
+          args:
+            executable: /bin/bash
+
+    # Required: newer GCC needed to compile mpi4py correctly
+    # MLPerf Storage depends on mpi4py which in turn requires a valid MPI compiler and development environment.
+    # On SLES, the default GCC may not be available in PATH or may be outdated. Installing GCC 12 and explicitly setting it as the default resolves these issues.
+    - name: SLES | Install OS-specific system dependencies
+      when: ansible_os_family == 'Suse'
+      block:
+        - name: SLES | Install base system packages
+          ansible.builtin.package:
+            name:
+              - python3-devel
+              - mpich-devel
+              - gcc12
+              - gcc12-c++
+              - cpp12
+            state: present
+
+        - name: SLES | Export MPI paths
+          shell: |
+            echo 'export PATH=/usr/lib64/mpi/gcc/mpich/bin:$PATH' >> /root/.bashrc
+            echo 'export LD_LIBRARY_PATH=/usr/lib64/mpi/gcc/mpich/lib64:$LD_LIBRARY_PATH' >> /root/.bashrc
+            echo 'export CC=/usr/lib64/mpi/gcc/mpich/bin/mpicc' >> /root/.bashrc
+          args:
+            executable: /bin/bash
+
+        - name: SLES | Set GCC 12 as default
+          community.general.alternatives:
+            name: "{{ item.name }}"
+            link: "{{ item.link }}"
+            path: "{{ item.path }}"
+            priority: 80
+          loop:
+            - { name: gcc, link: /usr/bin/gcc, path: "/usr/bin/gcc-12" }
+            - { name: g++, link: /usr/bin/g++, path: "/usr/bin/g++-12" }
+            - { name: cpp, link: /usr/bin/cpp, path: "/usr/bin/cpp-12" }
+            - { name: c++, link: /usr/bin/c++, path: "/usr/bin/g++-12" }
+
+    - name:  COMMON | Install MLPerf Storage from GitHub using UV inside venv
+      ansible.builtin.shell: |
+        /root/.local/bin/uv pip install --native-tls --index https://pypi.nvidia.com/ "git+https://github.com/mlcommons/storage.git@main"
+      args:
+        executable: /bin/bash
+        creates: /root/venv
