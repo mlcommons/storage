@@ -175,8 +175,7 @@ Note: The output directories for the write and read phases must be different to 
     --results-dir ./checkpoint_results_write \
     --mpi-bin mpiexec \
     --exec-type mpi \
-    --closed \
-    --params workload.model.parallelism.data=2 workload.checkpoint.mode=subset
+    --closed 
   # Clear the cache 
   ... 
   # Perform checkpoint read (data parallelism must match Table 2)
@@ -188,8 +187,7 @@ Note: The output directories for the write and read phases must be different to 
     --results-dir ./checkpoint_results_read \
     --mpi-bin mpiexec \
     --exec-type mpi \
-    --closed \
-    --params workload.model.parallelism.data=2 workload.checkpoint.mode=subset
+    --closed
   ```
 
 #### 2.2.3 Metrics and Results Reporting
