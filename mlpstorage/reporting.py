@@ -3,12 +3,24 @@ import json
 import os.path
 import pprint
 
+from dataclasses import dataclass
 from typing import List, Dict, Any
 
 from mlpstorage.mlps_logging import setup_logging, apply_logging_options
-from mlpstorage.config import MLPS_DEBUG, BENCHMARK_TYPES, EXIT_CODE
-from mlpstorage.rules import get_runs_files, BenchmarkRunVerifier, BenchmarkRun
+from mlpstorage.config import MLPS_DEBUG, BENCHMARK_TYPES, EXIT_CODE, PARAM_VALIDATION, LLM_MODELS, MODELS
+from mlpstorage.rules import get_runs_files, BenchmarkRunVerifier, BenchmarkRun, Issue
 from mlpstorage.utils import flatten_nested_dict, remove_nan_values
+
+@dataclass
+class Result:
+    benchmark_type: BENCHMARK_TYPES
+    benchmark_command: str
+    benchmark_model: [LLM_MODELS, MODELS]
+    benchmark_run: BenchmarkRun
+    issues: List[Issue]
+    category: PARAM_VALIDATION
+    metrics: Dict[str, Any]
+
 
 class ReportGenerator:
 
@@ -27,29 +39,21 @@ class ReportGenerator:
             apply_logging_options(self.logger, args)
 
         self.results_dir = results_dir
-        self.benchmark_runs = get_runs_files(self.results_dir, logger=self.logger)
-        self.logger.info(f'Found {len(self.benchmark_runs)} runs')
-        self.results = []
-
-        self.verify_results()
-
-    def verify_results(self):
-        for benchmark_run in self.benchmark_runs:
-            verifier = BenchmarkRunVerifier(benchmark_run, logger=self.logger)
-            verifier.verify()
-
-    def generate_reports(self, write_files=True):
-        # Verify the results directory exists:
         if not os.path.exists(self.results_dir):
             self.logger.error(f'Results directory {self.results_dir} does not exist')
-            return EXIT_CODE.FILE_NOT_FOUND
+            sys.exit(EXIT_CODE.FILE_NOT_FOUND)
 
+        self.results = []
+        self.accumulate_results()
+        self.print_results()
+
+    def generate_reports(self):
+        # Verify the results directory exists:
         self.logger.info(f'Generating reports for {self.results_dir}')
-        self.results = self.accumulate_results()
+        results_dicts = [report.benchmark_run.as_dict() for report in self.results]
 
-        if write_files:
-            self.write_csv_file()
-            self.write_json_file()
+        self.write_csv_file(results_dicts)
+        self.write_json_file(results_dicts)
             
         return EXIT_CODE.SUCCESS
 
@@ -62,23 +66,70 @@ class ReportGenerator:
         :return:
         """
         results = []
-        self.logger.info(f'Accumulating results from {len(self.benchmark_runs)} runs')
-        for benchmark_run in self.benchmark_runs:
+        benchmark_runs = get_runs_files(self.results_dir, logger=self.logger)
+
+        self.logger.info(f'Accumulating results from {len(benchmark_runs)} runs')
+        for benchmark_run in benchmark_runs:
             self.logger.ridiculous(f'Processing run: \n{pprint.pformat(benchmark_run)}')
-            results.append(benchmark_run.as_dict())
+            verifier = BenchmarkRunVerifier(benchmark_run, logger=self.logger)
+            category = verifier.verify()
+            issues = verifier.issues
+            result_dict = dict(
+                benchmark_run=benchmark_run,
+                benchmark_type=benchmark_run.benchmark_type,
+                benchmark_command=benchmark_run.command,
+                benchmark_model=benchmark_run.model,
+                issues=issues,
+                category=category,
+                metrics=benchmark_run.metrics
+            )
+            self.results.append(Result(**result_dict))
 
-        return results
+    def print_results(self):
+        print("\n========================= Results Report =========================")
+        for category in [PARAM_VALIDATION.CLOSED, PARAM_VALIDATION.OPEN, PARAM_VALIDATION.INVALID]:
+            print(f"\n------------------------- {category.value.upper()} Report -------------------------")
+            for result in self.results:
+                if result.category == category:
+                    print(f'\tRunID: {result.benchmark_run.run_id}')
+                    print(f'\t    Benchmark Type: {result.benchmark_type.value}')
+                    print(f'\t    Command: {result.benchmark_command}')
+                    print(f'\t    Model: {result.benchmark_model}')
+                    if result.issues:
+                        print(f'\t    Issues:')
+                        for issue in result.issues:
+                            print(f'\t\t- {issue}')
+                    else:
+                        print(f'\t\t- No issues found')
 
-    def write_json_file(self):
+                    if result.metrics:
+                        print(f'\t    Metrics:')
+                        for metric, value in result.metrics.items():
+                            if type(value) in (int, float):
+                                if "percentage" in metric.lower():
+                                    print(f'\t\t- {metric}: {value:,.1f}%')
+                                else:
+                                    print(f'\t\t- {metric}: {value:,.1f}')
+                            elif type(value) in (list, tuple):
+                                if "percentage" in metric.lower():
+                                    print(f'\t\t- {metric}: {", ".join(f"{v:,.1f}%" for v in value)}')
+                                else:
+                                    print(f'\t\t- {metric}: {", ".join(f"{v:,.1f}" for v in value)}')
+                            else:
+                                print(f'\t\t- {metric}: {value}')
+
+                    print("\n")
+
+    def write_json_file(self, results):
         json_file = os.path.join(self.results_dir,'results.json')
         self.logger.info(f'Writing results to {json_file}')
         with open(json_file, 'w') as f:
-            json.dump(self.results, f, indent=2)
+            json.dump(results, f, indent=2)
 
-    def write_csv_file(self):
+    def write_csv_file(self, results):
         csv_file = os.path.join(self.results_dir,'results.csv')
         self.logger.info(f'Writing results to {csv_file}')
-        flattened_results = [flatten_nested_dict(r) for r in self.results]
+        flattened_results = [flatten_nested_dict(r) for r in results]
         flattened_results = [remove_nan_values(r) for r in flattened_results]
         fieldnames = set()
         for l in flattened_results:

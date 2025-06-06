@@ -8,7 +8,6 @@
   - [2. Benchmark Overview](#2-benchmark-overview)
     - [2.1 Training](#21-training)
     - [2.2 Checkpointing](#22-checkpointing)
-    - [2.3 Vector Database](#23-vector-database)
   - [3 Definitions](#3-definitions)
   - [4. Performance Metrics](#4-performance-metrics)
   - [5. Benchmark Code](#5-benchmark-code)
@@ -43,12 +42,10 @@
 
 ## 1. Introduction
 
-MLPerf™ Storage is a benchmark suite to characterize the performance of storage systems that support machine learning workloads. The suite consists of 4 workload categories:
+MLPerf™ Storage is a benchmark suite to characterize the performance of storage systems that support machine learning workloads. The suite consists of 2 workload categories:
 
 1. Training
 2. Checkpointing
-3. Model Loading
-4. Vector Database
 
 This benchmark attempts to balance two goals. First, we aim for **comparability** between benchmark submissions to enable decision making by the AI/ML Community. Second, we aim for **flexibility** to enable experimentation and to show off unique storage system features that will benefit the AI/ML Community. To that end we have defined two classes of submissions: CLOSED and OPEN. 
 
@@ -94,8 +91,6 @@ Table 1: Benchmark description
 - Configuration files for the workloads and dataset content can be found [here](https://github.com/mlcommons/storage/tree/main/storage-conf/workload).
 
 ### 2.2 Checkpointing
-
-### 2.3 Vector Database
 
 ## 3 Definitions 
 The following definitions are used throughout this document:

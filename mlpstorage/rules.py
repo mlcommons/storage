@@ -31,7 +31,7 @@ class Issue:
     severity: str = "error"
     
     def __str__(self):
-        result = f"[{self.severity.upper()}] {self.message}"
+        result = f"[{self.validation.value.upper()}] {self.message}"
         if self.parameter:
             result += f" (Parameter: {self.parameter}"
             if self.expected is not None and self.actual is not None:
@@ -390,6 +390,7 @@ class BenchmarkRun:
         )
         # Get benchmark type based on workflow
         if workflow[0] or workflow[1]:
+            # Unet3d can have workflow[2] == True but it'll get caught here first
             self.benchmark_type = BENCHMARK_TYPES.training
         elif workflow[2]:
             self.benchmark_type = BENCHMARK_TYPES.checkpointing
@@ -398,10 +399,14 @@ class BenchmarkRun:
         self.num_processes = benchmark_result.summary["num_accelerators"]
 
         # Set command for training
-        if workflow[0] and not any([workflow[1], workflow[2]]):
-            self.command = "datagen"
-        if workflow[1] and not any([workflow[0], workflow[2]]):
-            self.command = "run_benchmark"
+        if self.benchmark_type == BENCHMARK_TYPES.training:
+            if workflow[1]:
+                # If "workflow.train" is present, even if there is checkpoint or datagen, it's a run_benchmark.
+                # When running DLIO with datagen and run in a single run, the metrics are still available separately
+                self.command = "run_benchmark"
+            if workflow[0]:
+                # If we don't get caught by run and workflow[0] (datagen) is True, then we have a datagen command
+                self.command = "datagen"
 
         self.run_datetime = benchmark_result.summary.get("start")
         self.parameters = benchmark_result.hydra_configs.get("config.yaml", {}).get("workload", {})
@@ -521,6 +526,9 @@ class TrainingRulesChecker(RulesChecker):
         open_allowed_params = ['framework', 'dataset.format', 'dataset.num_samples_per_file', 'reader.data_loader']
         issues = []
         for param, value in self.benchmark_run.override_parameters.items():
+            if param.startswith("workflow"):
+                # We handle workflow parameters separately
+                continue
             self.logger.debug(f"Processing override parameter: {param} = {value}")
             if param in closed_allowed_params:
                 issues.append(Issue(
@@ -545,6 +553,32 @@ class TrainingRulesChecker(RulesChecker):
                     actual=value
                 ))
         return issues
+
+    def check_workflow_parameters(self) -> Optional[Issue]:
+        issues = []
+        # Check if the workflow parameters are valid
+        workflow_params = self.benchmark_run.parameters.get('workflow', {})
+        for param, value in workflow_params.items():
+            if self.benchmark_run.model == UNET and self.benchmark_run.command == "run_benchmark":
+                # Unet3d training requires the checkpoint workflow = True
+                if param == "checkpoint":
+                    if value == True:
+                        return Issue(
+                            validation=PARAM_VALIDATION.CLOSED ,
+                            message="Unet3D training requires executing a checkpoing",
+                            parameter="workflow.checkpoint",
+                            expected="True",
+                            actual=value
+                        )
+                    elif value == False:
+                        return Issue(
+                            validation=PARAM_VALIDATION.INVALID,
+                            message="Unet3D training requires executing a checkpoint. The parameter 'workflow.checkpoint' is set to False",
+                            parameter="workflow.checkpoint",
+                            expected="True",
+                            actual=value
+                        )
+        return None
 
     def check_odirect_supported_model(self) -> Optional[Issue]:
         # The 'reader.odirect' option is only supported if the model is "Unet3d"
