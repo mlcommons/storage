@@ -258,19 +258,12 @@ class CheckpointingBenchmark(DLIOBenchmark):
 
     def add_checkpoint_params(self):
         min_procs, zero_level, GPUpDP, ClosedGPUs = LLM_ALLOWED_VALUES.get(self.args.model)
-        data_parallelism = int(ClosedGPUs / GPUpDP)
-
+        configured_data_parallelism = int(ClosedGPUs / GPUpDP)
 
         # We only need the param "model.parallelism.data" if we are not using default checkpoint_mode
-        if self.args.num_processes == ClosedGPUs:
-            pass
-        elif self.args.num_processes < ClosedGPUs and zero_level <= 1:
+        if self.args.num_processes < ClosedGPUs:
             self.params_dict['checkpoint.mode'] = "subset"
-            self.params_dict['model.parallelism.data'] = data_parallelism
-        elif self.args.num_processes < ClosedGPUs and zero_level > 1:
-            self.params_dict['checkpoint.mode'] = "subset"
-        elif self.args.num_processes > ClosedGPUs:
-            self.params_dict['model.parallelism.data'] = self.args.num_processes // GPUpDP
+            self.params_dict['model.parallelism.data'] = configured_data_parallelism
 
         self.params_dict['checkpoint.num_checkpoints_read'] = self.args.num_checkpoints_read
         self.params_dict['checkpoint.num_checkpoints_write'] = self.args.num_checkpoints_write
