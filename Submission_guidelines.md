@@ -91,6 +91,123 @@ Table 1: Benchmark description
 - Configuration files for the workloads and dataset content can be found [here](https://github.com/mlcommons/storage/tree/main/storage-conf/workload).
 
 ### 2.2 Checkpointing
+#### 2.2.1 models
+Benchmark results may be submitted for the following four model configurations. The associated model architectures and parallelism settings are listed below. The number of MPI processes must be set to 8, 64, 512, and 1024 for the respective models for CLOSE submission. 
+
+For CLOSE submissions, participants are not permitted to change the total number of GPUs. However, they may adjust the number of GPUs per host, as long as each host uses more than 4 GPUs. This allows the use of nodes with higher GPU density and fewer total nodes. Note: the aggregate GPU memory across all nodes must be sufficient to accommodate the model’s checkpoint size.
+
+**Table 2 LLM models**
+|           Model            | 8B    | 70B   | 405B   | 1T     |
+|-----------------------|-------|-------|--------|--------|
+| Hidden dimension      | 4096  | 8192  | 16384  | 25872  |
+| FFN size              | 14336 | 28672 | 53248  | 98304  |
+| num_attention_heads   | 32    | 128   | 128    | 192    |
+| num_kv_heads          | 8     | 8     | 8      | 32     |
+| Num layers            | 32    | 80    | 126    | 128    |
+| Parallelism (TPxPPxDP)    | 1×1×8 | 8×1x8 | 8×32×2 | 8×64×2 |
+| ZeRO            | 3         | 3       | 1          | 1          |
+| Checkpoint size | 105 GB    | 912 GB  | 5.29 TB    | 18 TB      |
+
+
+#### 2.2.2 Benchmark Execution
+**Checkpoint Modes (global storage vs local storage)** 
+
+There are two operational modes:
+
+* ``default``: Used for global storage systems. In this mode, the benchmark runs at scale to write/read the entire checkpoint dataset. The total number of GPUs must match the number listed in Table 2 (TP×PP×DP).
+
+* ``subset``: Intended for node local storage systems.In this mode, checkpointing is simulated on a single host by writing/reading only a fraction (``num_gpus/TP/PP/DP``) of the checkpoint data, where ``num_gpus`` is the number of gpus on the host. 
+
+**Checkpoint write and (read) recovery**
+
+For each submission, one must first perform the checkpoint write, then clear the cache, and finally perform the checkpoint read. The required command-line flags are:
+
+* WRITE: ``--num-checkpoints-read=0``
+* READ: ``--num-checkpoints-write=0``
+
+
+
+**fsync**
+We enforce ``fsync`` to be applied during checkpoint writes to ensure data is flushed to persistent storage. ``fsync`` is enabled by default in all workload configuration files.
+
+**Example Execution Commands**
+Note: The output directories for the write and read phases must be different to avoid overwriting results. 
+
+* ``default`` mode (``WORLD_SIZE = TP*PP*DP`` as listed in Table 2): 
+  ```bash
+  # Perform checkpoint writes  (make sure the number of hosts is WORLD_SIZE/num_processes_per_host)
+  mlpstorage checkpointing run --model llama3-405b \
+    --hosts ip1 ip2 .... \
+    --num-processes 512 \
+    --num-checkpoints-read 0 \
+    --num-checkpoints-write 1 \
+    --checkpoint-folder ./checkpoint_data1 \
+    --results-dir ./checkpoint_results_write \
+    --client-host-memory-in-gb 64
+
+  # Clear the cache (This might require admin access to the system)
+  ... 
+
+  # perform checkpoint reads
+  mlpstorage checkpointing run --model llama3-405b \
+    --hosts ip1 ip2 .... \
+    --num-processes 512 \
+    --num-checkpoints-read 1 \
+    --num-checkpoints-write 0 \
+    --checkpoint-folder ./checkpoint_data1 \
+    --results-dir ./checkpoint_results_read \
+    --client-host-memory-in-gb 64
+  ```
+* ``subset`` mode (on a single host with 8 GPUs)
+  ```bash
+  # Perform checkpoint writes (data parallelism must match Table 2)
+  mlpstorage checkpointing run --model llama3-405b \
+    --hosts ip1 \
+    --num-processes 8 \
+    --num-checkpoints-read 0 \
+    --num-checkpoints-write 1 \
+    --checkpoint-folder ./checkpoint_data1 \
+    --results-dir ./checkpoint_results_write \
+    --client-host-memory-in-gb 64
+  # Clear the cache 
+  ... 
+  # Perform checkpoint read (data parallelism must match Table 2)
+  mlpstorage checkpointing run --model llama3-405b \
+    --hosts ip1 \
+    --num-processes 8 \
+    --num-checkpoints-read 1 \
+    --num-checkpoints-write 0 \
+    --checkpoint-folder ./checkpoint_data1 \
+    --results-dir ./checkpoint_results_read \
+    --client-host-memory-in-gb 64
+  ```
+
+#### 2.2.3 Metrics and Results Reporting
+We report the checkpoint time per write / read and I/O throughput from each rank. For each run: 
+
+	* The metric for duration is the maximum time across all GPUs.
+	* The metric for throughput is the minimum across all GPUs.
+
+Each benchmark setup must be executed five times, and logs from all five runs must be submitted. The final metrics are the average across the five runs.
+
+
+#### 2.2.5 OPEN vs CLOSE submissions
+For CLOSED submissions, the total number of GPUs must be fixed according to Table 2.
+
+For OPEN submissions, the total number of GPUs may be increased in multiples of (TP×PP) to showcase the scalability of the storage solution.
+
+**Table 3: Configuration parameters and their mutability in CLOSED and OPEN divisions**
+
+| Parameter                          | Meaning                                      | Default value                        | Changeable in CLOSE | Changeable in OPEN |
+|-----------------------------------|----------------------------------------------|--------------------------------------|----------------------|---------------------|
+| --ppn                             | Number of GPUs per node                      | N/A                                  | YES (minimal 4)      | YES (minimal 4)     |
+| --num-processes                    | Total number of GPUs                         | Node local: 8<br>Global: the value in Table 1 | NO                   | YES                 |
+| --checkpoint-folder      | The folder to save the checkpoint data       | checkpoint/{workload}                | YES                  | YES                 |
+| --num-checkpoints-write | Number of write checkpoints                  | 10 or -1**                             | NO              | NO                  |
+| --num-checkpoints-read     | Number of write checkpoints                  | 10 or -1**                              | NO                   | NO                  |
+
+** has to be set  ``--num-checkpoints-read=-1`` explicitly for performing only checkpoint write, and ``--num-checkpoints-write=-1`` for performing only checkpoint read.
+### 2.3 Vector Database
 
 ## 3 Definitions 
 The following definitions are used throughout this document:
@@ -360,6 +477,14 @@ root_folder (or any name you prefer)
 |		│	|	├── cosmoflow-a100	
 │		│	│	|	└── ..
 |		│	|	└── cosmoflow-h100	
+│		│	│	|	└── ..
+|		│	|	└── llama-8b	
+│		│	│	|	└── ..
+|		│	|	└── llama-70b	
+│		│	│	|	└── ..
+|		│	|	└── llama-405b	
+│		│	│	|	└── ..
+|		│	|	└── llama-1t	
 │		│	│		└── ..
 │		│	└──system-name-2
 │		│	 	├── unet3d-a100
@@ -372,7 +497,15 @@ root_folder (or any name you prefer)
 │		│	 	│	└── ..
 |		│	 	├── cosmoflow-a100	
 │		│	 	|	└── ..
-|		│	 	└── cosmoflow-h100	
+|		│	 	├── cosmoflow-h100	
+│		│	 	|	└── ..
+│		│	 	├── llama-8b	
+│		│	 	|	└── ..
+|		│	 	├──llama-70b	
+│		│	 	|	└── ..
+|		│		├── llama-405b	
+│		│	 	|	└── ..
+│		│	 	└── llama-1t	
 │		│	 		└── ..
 │		└── systems
 │			system-name-1.json
@@ -397,7 +530,15 @@ root_folder (or any name you prefer)
  		│	|	├── cosmoflow-a100	
  		│	│	|	└── ..
  		│	|	└── cosmoflow-h100	
- 		│	│		└── ..
+│		│	│	|	└── ..
+|		│	|	└── llama-8b	
+│		│	│	|	└── ..
+|		│	|	└── llama-70b	
+│		│	│	|	└── ..
+|		│	|	└── llama-405b	
+│		│	│	|	└── ..
+|		│	|	└── llama-1t	
+│		│	│		└── .. 
  		│	└──system-name-2
  		│	 	├── unet3d-a100
  		│	 	│	└── ..
@@ -410,7 +551,15 @@ root_folder (or any name you prefer)
  		│	 	├── cosmoflow-a100	
  		│	 	|	└── ..
  		│	 	└── cosmoflow-h100	
- 		│	 		└── ..
+│		│	 	|	└── ..
+│		│	 	├── llama-8b	
+│		│	 	|	└── ..
+|		│	 	├──llama-70b	
+│		│	 	|	└── ..
+|		│		├── llama-405b	
+│		│	 	|	└── ..
+│		│	 	└── llama-1t	
+│		│	 		└── ..
 		└── systems
 			system-name-1.json
 			system-name-1.pdf
