@@ -22,13 +22,13 @@
     - name: COMMON | Install UV
       ansible.builtin.command: "sh /tmp/install.sh"
 
-    - name: Recursively remove directory
+    - name: COMMON | Recursively remove directory
       ansible.builtin.file:
         path: /root/venv/
         state: absent
     
     - name:  COMMON | Create and activate Python virtual environment
-      ansible.builtin.command: /root/.local/bin/uv venv --python 3.12 /root/.venv
+      ansible.builtin.command: /root/.local/bin/uv venv --python 3.12 /root/venv
 
     - name: DEBIAN | Install OS-specific system dependencies
       when: ansible_os_family == 'Debian'
@@ -42,7 +42,7 @@
     - name: RHEL | Install OS-specific system dependencies
       when: ansible_os_family == 'RedHat'
       block:
-        - name: Install Python and MPI packages
+        - name: RHEL | Install Python and MPI packages
           ansible.builtin.package:
             name:
               - python3-devel
@@ -97,4 +97,4 @@
         /root/.local/bin/uv pip install --native-tls --index https://pypi.nvidia.com/ "git+https://github.com/mlcommons/storage.git@main"
       args:
         executable: /bin/bash
-        creates: /root/venv
+        chdir: /root/venv
