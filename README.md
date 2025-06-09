@@ -55,7 +55,7 @@ python3 -m pip install --upgrade pip
 Clone the latest release from [MLCommons Storage](https://github.com/mlcommons/storage) repository and install Python dependencies.
 
 ```bash
-git clone https://github.com/mlcommons/storage.git
+git clone -b v2.0-rc0 https://github.com/mlcommons/storage.git
 cd storage
 pip3 install -e .
 ```
@@ -474,7 +474,7 @@ mlpstorage training datagen --hosts 127.0.0.1 --num-processes 8 --model unet3d -
 Run the benchmark.
 
 ```bash
-mlpstorage training run --hosts 127.0.0.1 --num-client-hosts 1 --client-host-memory-in-gb 64 --num-accelerators 4 --accelerator-type h100 --model unet3d  --data-dir unet3d_data --results-dir unet3d_results --param dataset.num_files_train=42000
+mlpstorage training run --hosts 127.0.0.1 --num-client-hosts 1 --client-host-memory-in-gb 64 --num-accelerators 4 --accelerator-type h100 --model unet3d  --data-dir unet3d_data --results-dir unet3d_results --param dataset.num_files_train=42000 --checkpoint-folder unet3d_checkpoints
 ```
 
 All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
@@ -532,7 +532,7 @@ mlpstorage training run  --hosts 127.0.0.1 --num-client-hosts 1  --client-host-m
 All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
 
 ```bash 
-mlpstorage reports reportgen --results-dir cosmoflow_data
+mlpstorage reports reportgen --results-dir cosmoflow_results
 ```
 
 ## Parameters 
