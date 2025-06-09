@@ -210,6 +210,7 @@ class HistoryTracker:
         Returns:
             int: Exit code (0 for success, non-zero for failure)
         """
+
         if hasattr(args, 'id') and args.id is not None:
             # Print specific history entry
             return self.print_history(sequence_id=args.id)
@@ -225,7 +226,4 @@ class HistoryTracker:
             return new_args
         else:
             # Print all history entries
-            if not self.print_history():
-                return EXIT_CODE.GENERAL_ERROR
-                
-        return EXIT_CODE.SUCCESS
+            return self.print_history()

@@ -1,0 +1,55 @@
+System:
+  name: Micron 9550 Gen5 NVMe
+  description: <text>
+  # Type can be any of:
+  #  - local-storage
+  #  - hyper-converged
+  #  - parallel-filesystem
+  #  - software-defined-storage
+  type: local_storage
+  max_sequential_read: # Optional - GiB/s
+  max_sequential_write: # Optional - GiB/s
+  max_random_read: # Optional - GiB/s
+  max_random_write: # Optional - GiB/s
+
+Nodes:
+  dlio_client:  # This can be DLIO Client, storage node, storage controller, AwesomeMarketingName_Type1, etc
+    quantity: &dlio_client_quantity 8  # How many of this node
+    hardware:
+      model: SMC
+      rack_units: 2
+      power_supplies: 2
+      psu_configuration: active/passive
+      psu_rating: &dlio_client_psu_rating 1200
+      memory_capacity: 256GB
+      memory_configuration: 8x32GB
+      cpu_qty: 2
+      cpu_model: AMD 9555
+      cpu_cores: 96
+    networking:
+      management:
+        model: intel i210
+        speed: 1Gbps
+        qty: 1
+    operating_system:
+      name: Ubuntu
+      version: 22.04 LTS
+      release_date: 2022-04-12
+      kernel_version: 5.15.0-56-generic
+      cpu_architecture: x86_64
+    tuning:
+      mpi_configuration:
+        environment_variables: <list>
+        version: Open MPI 4.1.4
+      sysctl_parameters:
+        <list all non-default parameters>
+
+PowerRequirements:
+  dlio_client:
+    quantity: *dlio_client_quantity
+    psu1_nameplate_power: *dlio_client_psu_rating
+    psu2_nameplate_power: *dlio_client_psu_rating
+    psu3_nameplate_power: *dlio_client_psu_rating
+    design_power: 2400
+    num_active_psus: 2
+    num_passive_psus: 1

@@ -8,7 +8,6 @@
   - [2. Benchmark Overview](#2-benchmark-overview)
     - [2.1 Training](#21-training)
     - [2.2 Checkpointing](#22-checkpointing)
-    - [2.3 Vector Database](#23-vector-database)
   - [3 Definitions](#3-definitions)
   - [4. Performance Metrics](#4-performance-metrics)
   - [5. Benchmark Code](#5-benchmark-code)
@@ -43,12 +42,10 @@
 
 ## 1. Introduction
 
-MLPerf™ Storage is a benchmark suite to characterize the performance of storage systems that support machine learning workloads. The suite consists of 4 workload categories:
+MLPerf™ Storage is a benchmark suite to characterize the performance of storage systems that support machine learning workloads. The suite consists of 2 workload categories:
 
 1. Training
 2. Checkpointing
-3. Model Loading
-4. Vector Database
 
 This benchmark attempts to balance two goals. First, we aim for **comparability** between benchmark submissions to enable decision making by the AI/ML Community. Second, we aim for **flexibility** to enable experimentation and to show off unique storage system features that will benefit the AI/ML Community. To that end we have defined two classes of submissions: CLOSED and OPEN. 
 
@@ -115,7 +112,7 @@ For CLOSE submissions, participants are not permitted to change the total number
 #### 2.2.2 Benchmark Execution
 **Checkpoint Modes (global storage vs local storage)** 
 
-There are two operational modes set by the parameter ```workload.checkpoint.mode```:
+There are two operational modes:
 
 * ``default``: Used for global storage systems. In this mode, the benchmark runs at scale to write/read the entire checkpoint dataset. The total number of GPUs must match the number listed in Table 2 (TP×PP×DP).
 
@@ -125,8 +122,8 @@ There are two operational modes set by the parameter ```workload.checkpoint.mode
 
 For each submission, one must first perform the checkpoint write, then clear the cache, and finally perform the checkpoint read. The required command-line flags are:
 
-* WRITE: ``--num-checkpoints-read=-1``
-* READ: ``--num-checkpoints-write=-1``
+* WRITE: ``--num-checkpoints-read=0``
+* READ: ``--num-checkpoints-write=0``
 
 
 
@@ -134,60 +131,55 @@ For each submission, one must first perform the checkpoint write, then clear the
 We enforce ``fsync`` to be applied during checkpoint writes to ensure data is flushed to persistent storage. ``fsync`` is enabled by default in all workload configuration files.
 
 **Example Execution Commands**
-The following examples demonstrate how to run the benchmark directly using DLIO.
 Note: The output directories for the write and read phases must be different to avoid overwriting results. 
 
 * ``default`` mode (``WORLD_SIZE = TP*PP*DP`` as listed in Table 2): 
   ```bash
   # Perform checkpoint writes  (make sure the number of hosts is WORLD_SIZE/num_processes_per_host)
-  mlpstorage checkpointing --model llama3-405b \
+  mlpstorage checkpointing run --model llama3-405b \
     --hosts ip1 ip2 .... \
     --num-processes 512 \
-    --num-checkpoints-read -1 \
+    --num-checkpoints-read 0 \
+    --num-checkpoints-write 1 \
     --checkpoint-folder ./checkpoint_data1 \
     --results-dir ./checkpoint_results_write \
-    --mpi-bin mpiexec \
-    --exec-type mpi \
-    --closed
+    --client-host-memory-in-gb 64
 
   # Clear the cache (This might require admin access to the system)
   ... 
 
   # perform checkpoint reads
-  mlpstorage checkpointing --model llama3-405b \
+  mlpstorage checkpointing run --model llama3-405b \
     --hosts ip1 ip2 .... \
     --num-processes 512 \
-    --num-checkpoints-write -1 \
+    --num-checkpoints-read 1 \
+    --num-checkpoints-write 0 \
     --checkpoint-folder ./checkpoint_data1 \
     --results-dir ./checkpoint_results_read \
-    --mpi-bin mpiexec \
-    --exec-type mpi \
-    --closed
+    --client-host-memory-in-gb 64
   ```
 * ``subset`` mode (on a single host with 8 GPUs)
   ```bash
   # Perform checkpoint writes (data parallelism must match Table 2)
-  mlpstorage checkpointing --model llama3-405b \
+  mlpstorage checkpointing run --model llama3-405b \
     --hosts ip1 \
     --num-processes 8 \
-    --num-checkpoints-read -1 \
+    --num-checkpoints-read 0 \
+    --num-checkpoints-write 1 \
     --checkpoint-folder ./checkpoint_data1 \
     --results-dir ./checkpoint_results_write \
-    --mpi-bin mpiexec \
-    --exec-type mpi \
-    --closed 
+    --client-host-memory-in-gb 64
   # Clear the cache 
   ... 
   # Perform checkpoint read (data parallelism must match Table 2)
-  mlpstorage checkpointing --model llama3-405b \
+  mlpstorage checkpointing run --model llama3-405b \
     --hosts ip1 \
     --num-processes 8 \
-    --num-checkpoints-write -1 \
+    --num-checkpoints-read 1 \
+    --num-checkpoints-write 0 \
     --checkpoint-folder ./checkpoint_data1 \
     --results-dir ./checkpoint_results_read \
-    --mpi-bin mpiexec \
-    --exec-type mpi \
-    --closed
+    --client-host-memory-in-gb 64
   ```
 
 #### 2.2.3 Metrics and Results Reporting

@@ -1,5 +1,5 @@
 model:
-  name: llama_8b_zero3
+  name: llama_8b
   type: transformer
   num_layers: 32
   model_datatype: fp16
@@ -23,7 +23,7 @@ workflow:
   checkpoint: True
 
 checkpoint:
-  checkpoint_folder: checkpoints/llama_8b_zero3
+  checkpoint_folder: checkpoints/llama_8b
   time_between_checkpoints: 5
   num_checkpoints_write: 10
   num_checkpoints_read: 10
