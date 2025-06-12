@@ -97,17 +97,18 @@ Benchmark results may be submitted for the following four model configurations. 
 For CLOSE submissions, participants are not permitted to change the total number of GPUs. However, they may adjust the number of GPUs per host, as long as each host uses more than 4 GPUs. This allows the use of nodes with higher GPU density and fewer total nodes. Note: the aggregate GPU memory across all nodes must be sufficient to accommodate the model’s checkpoint size.
 
 **Table 2 LLM models**
+
 |           Model            | 8B    | 70B   | 405B   | 1T     |
-|-----------------------|-------|-------|--------|--------|
-| Hidden dimension      | 4096  | 8192  | 16384  | 25872  |
-| FFN size              | 14336 | 28672 | 53248  | 98304  |
-| num_attention_heads   | 32    | 128   | 128    | 192    |
-| num_kv_heads          | 8     | 8     | 8      | 32     |
-| Num layers            | 32    | 80    | 126    | 128    |
-| Parallelism (TPxPPxDP)    | 1×1×8 | 8×1x8 | 8×32×2 | 8×64×2 |
-| Total Processes       | 8     | 64    | 512    | 1024   |
-| ZeRO            | 3         | 3       | 1          | 1          |
-| Checkpoint size | 105 GB    | 912 GB  | 5.29 TB    | 18 TB      |
+|----------------------------|-------|-------|--------|--------|
+| Hidden dimension           | 4096  | 8192  | 16384  | 25872  |
+| FFN size                   | 14336 | 28672 | 53248  | 98304  |
+| num_attention_heads        | 32    | 128   | 128    | 192    |
+| num_kv_heads               | 8     | 8     | 8      | 32     |
+| Num layers                 | 32    | 80    | 126    | 128    |
+| Parallelism (TPxPPxDP)     | 1×1×8 | 8×1x8 | 8×32×2 | 8×64×2 |
+| Total Processes            | 8     | 64    | 512    | 1024   |
+| ZeRO                       | 3     | 3     | 1      | 1      |
+| Checkpoint size            | 105 GB| 912 GB| 5.29 TB| 18 TB  |
 
 
 #### 2.2.2 Benchmark Execution
@@ -137,13 +138,18 @@ Caches need to be cleared by the user outside of the mlpstorage tool.
 
 ##### 2.2.2.1 Clearing Caches
 
-The checkpoints that are written are quite large. If the checkpoint size per client node is less than 3x the client node's memory capacity, then the filesystem cache needs to be cleared between the write and read phases.
+The checkpoints that are written are quite large. **If the checkpoint size per client node is less than 3x the client node's memory capacity, then the filesystem cache needs to be cleared between the write and read phases.**
 
-Eamples:
+Examples:
 
-| Model (Total Size) | Num Clients & Memory | Size for ranks | Size for 1st and Last Client | Need to Clear Caches? |
-|--------------------|----------------------|----------------|------------------------------|-----------------------|
-| Llama3 405b (912GB) | 8x (64 Ranks / Node)<br>1024GB per Client |  256x 11.8GB<br>256x 8.85GB | First: 755GB<br>Last: 566.4GB | No (556GB x 3 = 1,699GB which is greater than the client memory ()) |
+| Model (Total Size)  | Num Clients & Memory                      | Size for ranks             | Size for 1st and Last Client                             | Need to Clear Caches?                                            |
+|---------------------|-------------------------------------------|----------------------------|----------------------------------------------------------|------------------------------------------------------------------|
+| Llama3 405b (5.2TB) | 8x (64 Ranks / Node)<br>1024GB per Client | 256x 11.8GB<br>256x 8.85GB | First: 755GB (64x 11.8GB)<br>Last: 566.4GB (64x 8.85GB)  | No (556GB x 3 = 1,699GB which is greater than the client memory) |
+| Llama3 70b (912GB)  | 8x (8x Ranks / Node)<br>1024GB per Client | 64x 11.23GB                | First: 89.8GB (8x 14.23GB)<br>Last: Same as First (DP=1) | Yes (89.8 x 3 = 269.5GB which is less than the client memory)    |
+
+In the first case, after 2x checkpoints data that has been written is being flushed from the filesystem cache. This means that after 10x checkpoints a standard Linux system will not have any data in the filesystem cache that would be read for a checkpoint recovery starting back at the first written checkpoint.
+
+In the second case, after 10x checkpoints, 898GB of data will have been written per client with each client having 1024GB of memory. Without clearing caches this data would be read from the filesystem cache
 
 **fsync**
 We enforce ``fsync`` to be applied during checkpoint writes to ensure data is flushed to persistent storage. ``fsync`` is enabled by default in all workload configuration files.
