@@ -299,8 +299,6 @@ class CheckpointingBenchmark(DLIOBenchmark):
         rank_gb = []
 
         self.logger.verbose(f'Model & optimizer size: {model_gb:.2f} GB, {optimizer_gb:.2f} GB')
-        import pdb
-        pdb.set_trace()
         for rank in range(self.args.num_processes):
             rank_gb.append(0)
             if zero_level == 1:
