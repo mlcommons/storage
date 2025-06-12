@@ -141,9 +141,9 @@ The checkpoints that are written are quite large. If the checkpoint size per cli
 
 Eamples:
 
-| Model (Total Size) | Num Clients & Memory| Size for ranks | Size for 1st and Last Client | Need to Clear Caches? |
-|-----------------------------------------------------------------------------------------|
-| Llama3 405b (912GB) | 8x (64 Ranks / Node)<br>1024GB per Client |  256x 11.8GB<br>256x 8.85GB | First: 755GB<br>Last: 566.4GB | No (556GB x 3 = 1,699GB which is greater than the client memory ())
+| Model (Total Size) | Num Clients & Memory | Size for ranks | Size for 1st and Last Client | Need to Clear Caches? |
+|--------------------|----------------------|----------------|------------------------------|-----------------------|
+| Llama3 405b (912GB) | 8x (64 Ranks / Node)<br>1024GB per Client |  256x 11.8GB<br>256x 8.85GB | First: 755GB<br>Last: 566.4GB | No (556GB x 3 = 1,699GB which is greater than the client memory ()) |
 
 **fsync**
 We enforce ``fsync`` to be applied during checkpoint writes to ensure data is flushed to persistent storage. ``fsync`` is enabled by default in all workload configuration files.
