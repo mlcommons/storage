@@ -64,7 +64,7 @@ commands=(
     "mlpstorage training datasize --model resnet50 --client-host-memory-in-gb 256 --max-accelerators 80 --num-client-hosts 2 --accelerator-type a100|0"
     "mlpstorage training datasize --model resnet50 --client-host-memory-in-gb 256 --max-accelerators 80 --num-client-hosts 2 --accelerator-type h100|0"
     "mlpstorage training datasize --model cosmoflow --client-host-memory-in-gb 256 --max-accelerators 80 --num-client-hosts 2 --accelerator-type h100|0"
-    "mlpstorage training datasize --model unet3d --client-host-memory-in-gb 256 --max-accelerators 80 --num-client-hosts 2 --accelerator-type h100 --closed|0"
+    "mlpstorage training datasize --model unet3d --client-host-memory-in-gb 256 --max-accelerators 80 --num-client-hosts 2 --accelerator-type h100|0"
 
     "mlpstorage training datagen --hosts 127.0.0.1,127.0.0.1 --model resnet50 --num-processes 96 --param dataset.num_files_train=192 --data-dir /mnt/nvme/test_data --results-dir /root/mlpstorage_test_results --allow-run-as-root|0"
     "mlpstorage training datagen --hosts 127.0.0.1,127.0.0.1 --model cosmoflow --num-processes 96 --param dataset.num_files_train=192 --data-dir /mnt/nvme/test_data --results-dir /root/mlpstorage_test_results --allow-run-as-root|0"
@@ -88,7 +88,7 @@ commands=(
     "mlpstorage checkpointing run --hosts 127.0.0.1 --model llama3-1t --client-host-memory-in-gb 512 --num-processes 8 --checkpoint-folder /mnt/nvme/test_data --results-dir /root/mlpstorage_test_results --num-checkpoints-read 1 --num-checkpoints-write 1 --allow-run-as-root|0"
 
     "mlpstorage reports reportgen --results-dir ./test_results|3"
-#    "mlpstorage reports reportgen --results-dir /root/mlpstorage_test_results|0"
+    "mlpstorage reports reportgen --results-dir /root/mlpstorage_test_results|0"
 )
 
 # Loop through all commands and run them
