@@ -245,7 +245,7 @@ For OPEN submissions, the total number of GPUs may be increased in multiples of 
 | --num-checkpoints-write | Number of write checkpoints                  | 10 or 0**                                     | NO              | NO                  |
 | --num-checkpoints-read     | Number of write checkpoints                  | 10 or 0**                                     | NO                   | NO                  |
 
-** has to be set  ``--num-checkpoints-read=0`` explicitly for performing only checkpoint write, and ``--num-checkpoints-write=0`` for performing only checkpoint read.
+** By default, --num-checkpoints-read and --num-checkpoints-write are set to be 10. To perform write only, one has to turn off read by explicitly setting ``--num-checkpoints-read=0``; to perform read only, one has to turn off write by explicitly set  ``--num-checkpoints-write=0``
 
 For an OPEN or CLOSED submission, the process must follow:
 1. Write 10 checkpoints
