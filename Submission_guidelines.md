@@ -564,15 +564,11 @@ root_folder (or any name you prefer)
 
 The purpose of the system description is to provide sufficient detail on the storage system under test, and the ``host nodes`` running the test, plus the network connecting them, to enable full reproduction of the benchmark results by a third party. 
 
-Each submission must contain a ``<system-name>.json`` file and a ``<system-name>.pdf`` file.  If you submit more than one benchmark result, each submission must have a unique ``<system-name>.json`` file and a ``<system-name>.pdf`` file that documents the system under test and the environment that generated that result, including any configuration options in effect.
+Each submission must contain a ``<system-name>.yaml`` file and a ``<system-name>.pdf`` file.  If you submit more than one benchmark result, each submission must have a unique ``<system-name>.yaml`` file and a ``<system-name>.pdf`` file that documents the system under test and the environment that generated that result, including any configuration options in effect.
 
-Note that, during the review period, submitters may be asked to include additional details in the JSON and pdf to enable reproducibility by a third party.
+Note that, during the review period, submitters may be asked to include additional details in the yaml and pdf to enable reproducibility by a third party.
 
-#### 11.4.1 System Description JSON
-
-The ``<system-name>.json`` file must be pass a validation check with the JSON schema in use for V1.0.  The [schema and two examples of it being used](https://drive.google.com/drive/folders/1ZXNUXN4L8amD0Ba38GoIOt761b73F8bs) are provided.  For example, ``check-jsonschema`` is a convenient tool that is present in many linux distributions, but other tools may be used.
-
-#### 11.4.2 System Description PDF
+#### 11.4.1 System Description PDF
 
 The goal of the pdf is to complement the JSON file, providing additional detail on the system to enable full reproduction by a third party. We encourage submitters to add details that are more easily captured by diagrams and text description, rather than a JSON.
 
