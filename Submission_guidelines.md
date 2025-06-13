@@ -58,8 +58,8 @@ The MLPerf name and logo are trademarks of the MLCommons® Association ("MLCommo
 | Jun 18, 2025 | Freeze rules & benchmark code. |
 | Jun 24, 2025 | Open benchmark for submissions. |
 | Jul 7, 2025 | **Submissions due.** |
-| Jul 7, 2025 - Aug 6, 2025 | Review period. |
-| Aug 6, 2025 | **Benchmark competition results are published.** |
+| Jul 7, 2025 - Aug 4, 2025 | Review period. |
+| Aug 4, 2025 | **Benchmark competition results are published.** |
 
 
 ## 2. Benchmark Overview
