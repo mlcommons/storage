@@ -281,10 +281,14 @@ More details on installation and running the benchmark can be found in the [Gith
 ## 6. General Rules
  
 The following apply to all results submitted for this benchmark.
+
 ### 6.1. Strive to be fair
-  Benchmarking should be conducted to measure the framework and storage system performance as fairly as possible. Ethics and reputation matter.
+
+Benchmarking should be conducted to measure the framework and storage system performance as fairly as possible. Ethics and reputation matter.
+
 ### 6.2. System and framework must be available
-- **Available Systems**. If you are measuring the performance of a publicly available and widely-used system or framework, you must use publicly available and widely-used versions of the system or framework. This class of systems will be called Available Systems, and availability here means the system is a publicly available commercial storage system. If you are measuring the performance of a system that is not available at the time of the benchmark results submission, the system must become commercially available **within 6 months** from results publication. Otherwise, the results for that submission will be retracted from the MLCommons results dashboard.
+
+- **Available Systems**. To be called an ``available system`` all components of the system must be publicly available. If any components of the system are not available at the time of the benchmark results submission, those components must be included in an ``available system`` submission that is submitted in the next round of MLPerf Storage benchmark submissions.  Otherwise, the results for that submission may be retracted from the MLCommons results dashboard.
 - **RDI Systems**. If you are measuring the performance of an experimental framework or system, you must make the system and framework you use available upon demand for replication by MLCommons. This class of systems will be called RDI (research, development, internal). 
 
 ### 6.3 Non-determinism
