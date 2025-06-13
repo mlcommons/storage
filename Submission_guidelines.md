@@ -424,7 +424,7 @@ A successful run result consists of a directory tree structure containing the se
 
 The whole package must be uploaded to MLCommons via the UI provided to submitters.
 
-It will be possible to upload your results many times, not just once, but each upload completely replaces the prior upload.
+It will be possible to upload your results many times, not just once, but each upload completely replaces the prior upload before the submission deadline.
 
 At least your final upload, if not all of them, should include all of the individual result submissions that you want to be included.  Eg: if you want to submit results for A100 and H100, that would be two submissions but only one upload operation.
 
