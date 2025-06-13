@@ -352,7 +352,6 @@ This setup simulates distributed training of a single training task, spread acro
 
 Submitters must respect the following for multi-host node submissions:
 - All the data must be accessible to all the ``host nodes``. 
-- The checkpoint location must reside in the same storage system that stores the dataset.
 - The number of simulated accelerators in each ``host node`` must be identical.
 
 While it is recommended that all ``host nodes`` be as close as possible to identical, that is not required by these Rules.  The fact that distributed training uses a pool-wide common barrier to synchronize the transition from one step to the next of all ``host nodes`` results in the overall performance of the cluster being determined by the slowest ``host node``.
