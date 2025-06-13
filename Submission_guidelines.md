@@ -430,22 +430,15 @@ OPEN division benchmarks must be referred to using the benchmark name plus the t
 
 ## 11. Submission
 
-A **successful run result** consists of a mean samples/second measurement ``(train_throughput_mean_samples_per_second)`` for a complete benchmark run that achieves mean accelerator utilization ``(train_au_mean_percentage)`` equal to or higher than the minimum defined for that workload.
+A successful run result consists of a directory tree structure containing the set of files produced by the benchmark as the result, plus the manually created SystemDescription files (both PDF and yaml) that describe the storage solution under test and the environment the test was run in.
 
-Submissions are made via a ``git push`` into a private MLCommons repository at github.com.  The link to the repo and the required authentication (eg: userid, password) to access that repo will only be given to people who have registered their intent to submit results in this round (see below for the link to the form).
+The whole package must be uploaded to MLCommons via the UI provided to submitters.
 
-Many ``git push`` operations can be made using that link, but only the last one before the window closes will be considered.  Each ``git push`` operation should include all of the individual result submissions that you want to be included.  Eg: if you want to submit results for A100 and H100, that would be two submissions but only one ``git push`` operation.
+It will be possible to upload your results many times, not just once, but each upload completely replaces the prior upload before the submission deadline.
 
-Several agreements between the submitter and MLCommons must be completed and signed **before the submission due date** before benchmark results can be submitted.  Note: since these are legal agreements, it can take significant time to get them signed, so please plan ahead.
+At least your final upload, if not all of them, should include all of the individual result submissions that you want to be included.  Eg: if you want to submit results for A100 and H100, that would be two submissions but only one upload operation.
 
-The [Intention to submit form](https://docs.google.com/forms/d/e/1FAIpQLSdzGRNECkXeRmK4zVH85zRrHh6dvC62V-ZkPuGCfOlMF7j95w/viewform?usp=sharing) is required of everyone who intends to submit results.  We collect the email addresses of submitters so we can contact them if needed, to know how many ``git push`` authentication credentials to create, and to know who to give those credentials to.
-
-Submitters who are not members of MLCommons need to have signed:
-- [Non-member Test Agreement](https://drive.google.com/file/d/1rHV0Q_1Rp9pugqG73c6T5Y4Ry1y2bViz/view?usp=sharing)
-- [Corporate CLA (Contributor License Agreement)](https://drive.google.com/file/d/1Px6uosXzO8Y5IGvb3bOXD6C0hZEL4_nn/view?usp=drive_link)
-- Trademark License Agreement (must be individually requested)
-
-If an organization has already signed these agreements, they do not need to sign them again unless there have been changes to those agreements by MLCommons.  Please look at each document for clarification.
+The following is not a requirement of these rules, but a possibly valuable risk management strategy.  Consider uploading whatever results you have every day or two.  Each new upload replaces the last one.  If some disaster happened and you were not able to continue tuning your submission, you would at least have the prior submission package available as a backup.
 
 ### 11.1 What to submit - CLOSED submissions
 
@@ -581,15 +574,11 @@ root_folder (or any name you prefer)
 
 The purpose of the system description is to provide sufficient detail on the storage system under test, and the ``host nodes`` running the test, plus the network connecting them, to enable full reproduction of the benchmark results by a third party. 
 
-Each submission must contain a ``<system-name>.json`` file and a ``<system-name>.pdf`` file.  If you submit more than one benchmark result, each submission must have a unique ``<system-name>.json`` file and a ``<system-name>.pdf`` file that documents the system under test and the environment that generated that result, including any configuration options in effect.
+Each submission must contain a ``<system-name>.yaml`` file and a ``<system-name>.pdf`` file.  If you submit more than one benchmark result, each submission must have a unique ``<system-name>.yaml`` file and a ``<system-name>.pdf`` file that documents the system under test and the environment that generated that result, including any configuration options in effect.
 
-Note that, during the review period, submitters may be asked to include additional details in the JSON and pdf to enable reproducibility by a third party.
+Note that, during the review period, submitters may be asked to include additional details in the yaml and pdf to enable reproducibility by a third party.
 
-#### 11.4.1 System Description JSON
-
-The ``<system-name>.json`` file must be pass a validation check with the JSON schema in use for V1.0.  The [schema and two examples of it being used](https://drive.google.com/drive/folders/1ZXNUXN4L8amD0Ba38GoIOt761b73F8bs) are provided.  For example, ``check-jsonschema`` is a convenient tool that is present in many linux distributions, but other tools may be used.
-
-#### 11.4.2 System Description PDF
+#### 11.4.1 System Description PDF
 
 The goal of the pdf is to complement the JSON file, providing additional detail on the system to enable full reproduction by a third party. We encourage submitters to add details that are more easily captured by diagrams and text description, rather than a JSON.
 
