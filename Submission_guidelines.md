@@ -247,9 +247,12 @@ The following definitions are used throughout this document:
   - **Other** – any solution whose access is not sufficiently described by the above categories.  This will be abbreviated “**Other**” in the results table.
 
 ## 4. Performance Metrics
-TODO: Move to benchmark definitions with metrics for each?
 
-The benchmark performance metric is **samples per second, subject to a minimum accelerator utilization (AU) defined for that workload**. Higher samples per second is better. 
+The metrics reported by the benchmark are different for different types of workloads.  They are broken out below.
+
+### 4.1. Training Workloads
+
+The benchmark performance metric for Training workloads (3D-Unet, ResNet-50, and Cosmflow) is **samples per second, subject to a minimum accelerator utilization (AU) defined for that workload**. Higher samples per second is better. 
 
 To pass a benchmark run, the AU should be equal to or greater than the minimum value, and is computed as follows:
 ```
@@ -266,6 +269,10 @@ total_compute_time = (records_per_file * total_files) / simulated_accelerators /
 ```
 
 *NOTE: The sleep time has been determined by running the actual MLPerf training workloads including the compute step on real hardware and is dependent on the accelerator type. In this version of the benchmark we include sleep times for **NVIDIA A100 and H100 GPUs**. We plan on expanding the measurements to different accelerator types in future releases.*
+
+### 4.2. Checkpoint Workloads
+
+The benchmark performance metrics for Checkpoint workloads (write/take, and read/recover) are **bandwidth while writing, and bandwidth while reading**, plus an additional data point which is the amount of time required, if any, between the completion of writing a checkpoint and the first point at which that checkpoint can be read from a different ``host node``.
 
 ## 5. Benchmark Code
 
