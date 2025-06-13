@@ -294,6 +294,8 @@ The data generator in DLIO uses a fixed random seed that must not be changed, to
 - Another random number generator initialized with an allowed seed
 Random number generators may be initialized repeatedly in multiple processes or threads. For a single run, the same seed may be shared across multiple processes or threads.
 
+The storage system must not be informed of the random seed or the source of randomness.  This is intended to disallow submissions where the storage systen can predict the access pattern of the data samples.
+
 ### 6.4. Result rounding
 Public results should be rounded normally, to two decimal places.
 
