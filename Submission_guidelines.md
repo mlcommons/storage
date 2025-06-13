@@ -420,22 +420,15 @@ OPEN division benchmarks must be referred to using the benchmark name plus the t
 
 ## 11. Submission
 
-A **successful run result** consists of a mean samples/second measurement ``(train_throughput_mean_samples_per_second)`` for a complete benchmark run that achieves mean accelerator utilization ``(train_au_mean_percentage)`` equal to or higher than the minimum defined for that workload.
+A successful run result consists of a directory tree structure containing the set of files produced by the benchmark as the result, plus the manually created SystemDescription files (both PDF and yaml) that describe the storage solution under test and the environment the test was run in.
 
-Submissions are made via a ``git push`` into a private MLCommons repository at github.com.  The link to the repo and the required authentication (eg: userid, password) to access that repo will only be given to people who have registered their intent to submit results in this round (see below for the link to the form).
+The whole package must be uploaded to MLCommons via the UI provided to submitters.
 
-Many ``git push`` operations can be made using that link, but only the last one before the window closes will be considered.  Each ``git push`` operation should include all of the individual result submissions that you want to be included.  Eg: if you want to submit results for A100 and H100, that would be two submissions but only one ``git push`` operation.
+It will be possible to upload your results many times, not just once, but each upload completely replaces the prior upload.
 
-Several agreements between the submitter and MLCommons must be completed and signed **before the submission due date** before benchmark results can be submitted.  Note: since these are legal agreements, it can take significant time to get them signed, so please plan ahead.
+At least your final upload, if not all of them, should include all of the individual result submissions that you want to be included.  Eg: if you want to submit results for A100 and H100, that would be two submissions but only one upload operation.
 
-The [Intention to submit form](https://docs.google.com/forms/d/e/1FAIpQLSdzGRNECkXeRmK4zVH85zRrHh6dvC62V-ZkPuGCfOlMF7j95w/viewform?usp=sharing) is required of everyone who intends to submit results.  We collect the email addresses of submitters so we can contact them if needed, to know how many ``git push`` authentication credentials to create, and to know who to give those credentials to.
-
-Submitters who are not members of MLCommons need to have signed:
-- [Non-member Test Agreement](https://drive.google.com/file/d/1rHV0Q_1Rp9pugqG73c6T5Y4Ry1y2bViz/view?usp=sharing)
-- [Corporate CLA (Contributor License Agreement)](https://drive.google.com/file/d/1Px6uosXzO8Y5IGvb3bOXD6C0hZEL4_nn/view?usp=drive_link)
-- Trademark License Agreement (must be individually requested)
-
-If an organization has already signed these agreements, they do not need to sign them again unless there have been changes to those agreements by MLCommons.  Please look at each document for clarification.
+The following is not a requirement of these rules, but a possibly valuable risk management strategy.  Consider uploading whatever results you have every day or two.  Each new upload replaces the last one.  If some disaster happened and you were not able to continue tuning your submission, you would at least have the prior submission package available as a backup.
 
 ### 11.1 What to submit - CLOSED submissions
 
