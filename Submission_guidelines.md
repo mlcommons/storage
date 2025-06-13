@@ -317,6 +317,9 @@ Caching of training data on ``host nodes`` running MLPerf Storage is controlled 
 Results that cannot be replicated are not valid results. Replicated results should be within 5% within 5 tries.
 
 ## 7. Dataset Generation
+
+This section only describes the dataset generation methodology and requirements for Training workloads, the equivalent topic is covered in section 2.2, Checkpointing.
+
 MLPerf Storage uses DLIO to generate synthetic data. Instructions on how to generate the datasets for each benchmark are available [here](https://github.com/mlcommons/storage). The datasets are generated following the sample size distribution and structure of the dataset seeds (see Table 1) for each of the benchmarks. 
 
 **Minimum dataset size**. The MLPerf Storage benchmark script **must be used** to run the benchmarks since it calculates the minimum dataset size for each benchmark.  It does so using the provided number of simulated accelerators and the size of all of the ``host node``’s memory in GB. The minimum dataset size computation is as follows:
