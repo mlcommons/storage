@@ -674,7 +674,7 @@ Code should be updated via a pull request prior to the “fixing objections” d
 
 ### 12.5 Withdrawing results / changing division
 
-Anytime up until the final human readable deadline (typically within 2-3 business days before the press call, so June 5th, 2024, in this case), an entry may be withdrawn by amending the pull request.  Alternatively, an entry may be voluntarily moved from the closed division to the open division.  Each benchmark results submission is treated separately for reporting in the results table and in terms of withdrawing it.  For example, submitting a 3D-Unet run with 20 clients and 80 A100 accelerators is separate from submitting a 3D-Unet run with 19 clients and 76 accelerators.
+Anytime up until the final human readable deadline (typically within 2-3 business days before the press call, so July 28th, 2025, in this case), an entry may be withdrawn by amending the pull request.  Alternatively, an entry may be voluntarily moved from the closed division to the open division.  Each benchmark results submission is treated separately for reporting in the results table and in terms of withdrawing it.  For example, submitting a 3D-Unet run with 20 clients and 80 A100 accelerators is separate from submitting a 3D-Unet run with 19 clients and 76 accelerators.
 
 ## 13. Roadmap for future MLPerf Storage releases
 
