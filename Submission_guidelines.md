@@ -97,16 +97,18 @@ Benchmark results may be submitted for the following four model configurations. 
 For CLOSE submissions, participants are not permitted to change the total number of GPUs. However, they may adjust the number of GPUs per host, as long as each host uses more than 4 GPUs. This allows the use of nodes with higher GPU density and fewer total nodes. Note: the aggregate GPU memory across all nodes must be sufficient to accommodate the model’s checkpoint size.
 
 **Table 2 LLM models**
+
 |           Model            | 8B    | 70B   | 405B   | 1T     |
-|-----------------------|-------|-------|--------|--------|
-| Hidden dimension      | 4096  | 8192  | 16384  | 25872  |
-| FFN size              | 14336 | 28672 | 53248  | 98304  |
-| num_attention_heads   | 32    | 128   | 128    | 192    |
-| num_kv_heads          | 8     | 8     | 8      | 32     |
-| Num layers            | 32    | 80    | 126    | 128    |
-| Parallelism (TPxPPxDP)    | 1×1×8 | 8×1x8 | 8×32×2 | 8×64×2 |
-| ZeRO            | 3         | 3       | 1          | 1          |
-| Checkpoint size | 105 GB    | 912 GB  | 5.29 TB    | 18 TB      |
+|----------------------------|-------|-------|--------|--------|
+| Hidden dimension           | 4096  | 8192  | 16384  | 25872  |
+| FFN size                   | 14336 | 28672 | 53248  | 98304  |
+| num_attention_heads        | 32    | 128   | 128    | 192    |
+| num_kv_heads               | 8     | 8     | 8      | 32     |
+| Num layers                 | 32    | 80    | 126    | 128    |
+| Parallelism (TPxPPxDP)     | 1×1×8 | 8×1x8 | 8×32×2 | 8×64×2 |
+| Total Processes            | 8     | 64    | 512    | 1024   |
+| ZeRO                       | 3     | 3     | 1      | 1      |
+| Checkpoint size            | 105 GB| 912 GB| 5.29 TB| 18 TB  |
 
 
 #### 2.2.2 Benchmark Execution
@@ -114,24 +116,45 @@ For CLOSE submissions, participants are not permitted to change the total number
 
 There are two operational modes:
 
-* ``default``: Used for global storage systems. In this mode, the benchmark runs at scale to write/read the entire checkpoint dataset. The total number of GPUs must match the number listed in Table 2 (TP×PP×DP).
+* ``default``: Used for shared storage systems. In this mode, the benchmark runs on multiple hosts to write/read the entire checkpoint dataset. The total number of processes (emulated GPUs) must match the number listed in Table 2 (TP×PP×DP = Total Processes).
 
-* ``subset``: Intended for node local storage systems.In this mode, checkpointing is simulated on a single host by writing/reading only a fraction (``num_gpus/TP/PP/DP``) of the checkpoint data, where ``num_gpus`` is the number of gpus on the host. 
+* ``subset``: Intended for node local storage systems. In this mode, checkpointing is simulated on a single host by writing/reading only a fraction (``num_gpus/TP/PP/DP``) of the checkpoint data, where ``num_gpus`` is the number of gpus on the host. The only allowed value for number of processes in a subset submission is 8 (the 8B model does not support subset mode as it is already set to 8 processes).
 
 **Checkpoint write and (read) recovery**
 
-For each submission, one must first perform the checkpoint write, then clear the cache, and finally perform the checkpoint read. The required command-line flags are:
+For each submission, one must first perform the checkpoint write, then clear the cache if required, and finally perform the checkpoint read. The required command-line flags are:
+
+For a submission, the sequence is the following:
+1. Write 10x checkpoints
+2. Clear filesystem caches if necessary
+3. Read 10x checkpoints
+
+The default options will run the read and write checkpoints in a single mlpstorage call. If caches need to be cleared use the following parameters for the WRITE and READ tests. 
 
 * WRITE: ``--num-checkpoints-read=0``
 * READ: ``--num-checkpoints-write=0``
 
+Caches need to be cleared by the user outside of the mlpstorage tool.
 
+##### 2.2.2.1 Clearing Caches
+
+The checkpoints that are written are quite large. **If the checkpoint size per client node is less than 3x the client node's memory capacity, then the filesystem cache needs to be cleared between the write and read phases.**
+
+Examples:
+
+| Model (Total Size)  | Num Clients & Memory                      | Size for ranks             | Size for 1st and Last Client                             | Need to Clear Caches?                                            |
+|---------------------|-------------------------------------------|----------------------------|----------------------------------------------------------|------------------------------------------------------------------|
+| Llama3 405b (5.2TB) | 8x (64 Ranks / Node)<br>1024GB per Client | 256x 11.8GB<br>256x 8.85GB | First: 755GB (64x 11.8GB)<br>Last: 566.4GB (64x 8.85GB)  | No (556GB x 3 = 1,699GB which is greater than the client memory) |
+| Llama3 70b (912GB)  | 8x (8x Ranks / Node)<br>1024GB per Client | 64x 11.23GB                | First: 89.8GB (8x 14.23GB)<br>Last: Same as First (DP=1) | Yes (89.8 x 3 = 269.5GB which is less than the client memory)    |
+
+In the first case, after 2x checkpoints data that has been written is being flushed from the filesystem cache. This means that after 10x checkpoints a standard Linux system will not have any data in the filesystem cache that would be read for a checkpoint recovery starting back at the first written checkpoint.
+
+In the second case, after 10x checkpoints, 898GB of data will have been written per client with each client having 1024GB of memory. Without clearing caches this data would be read from the filesystem cache
 
 **fsync**
 We enforce ``fsync`` to be applied during checkpoint writes to ensure data is flushed to persistent storage. ``fsync`` is enabled by default in all workload configuration files.
 
 **Example Execution Commands**
-Note: The output directories for the write and read phases must be different to avoid overwriting results. 
 
 * ``default`` mode (``WORLD_SIZE = TP*PP*DP`` as listed in Table 2): 
   ```bash
@@ -140,9 +163,8 @@ Note: The output directories for the write and read phases must be different to 
     --hosts ip1 ip2 .... \
     --num-processes 512 \
     --num-checkpoints-read 0 \
-    --num-checkpoints-write 1 \
     --checkpoint-folder ./checkpoint_data1 \
-    --results-dir ./checkpoint_results_write \
+    --results-dir ./mlpstorage_results \
     --client-host-memory-in-gb 64
 
   # Clear the cache (This might require admin access to the system)
@@ -152,22 +174,20 @@ Note: The output directories for the write and read phases must be different to 
   mlpstorage checkpointing run --model llama3-405b \
     --hosts ip1 ip2 .... \
     --num-processes 512 \
-    --num-checkpoints-read 1 \
     --num-checkpoints-write 0 \
     --checkpoint-folder ./checkpoint_data1 \
-    --results-dir ./checkpoint_results_read \
+    --results-dir ./mlpstorage_results \
     --client-host-memory-in-gb 64
   ```
-* ``subset`` mode (on a single host with 8 GPUs)
+* ``subset`` mode (on a single host with **8 GPUs**)
   ```bash
   # Perform checkpoint writes (data parallelism must match Table 2)
   mlpstorage checkpointing run --model llama3-405b \
     --hosts ip1 \
     --num-processes 8 \
     --num-checkpoints-read 0 \
-    --num-checkpoints-write 1 \
     --checkpoint-folder ./checkpoint_data1 \
-    --results-dir ./checkpoint_results_write \
+    --results-dir ./mlpstorage_results \
     --client-host-memory-in-gb 64
   # Clear the cache 
   ... 
@@ -175,10 +195,9 @@ Note: The output directories for the write and read phases must be different to 
   mlpstorage checkpointing run --model llama3-405b \
     --hosts ip1 \
     --num-processes 8 \
-    --num-checkpoints-read 1 \
     --num-checkpoints-write 0 \
     --checkpoint-folder ./checkpoint_data1 \
-    --results-dir ./checkpoint_results_read \
+    --results-dir ./mlpstorage_results \
     --client-host-memory-in-gb 64
   ```
 
@@ -188,8 +207,28 @@ We report the checkpoint time per write / read and I/O throughput from each rank
 	* The metric for duration is the maximum time across all GPUs.
 	* The metric for throughput is the minimum across all GPUs.
 
-Each benchmark setup must be executed five times, and logs from all five runs must be submitted. The final metrics are the average across the five runs.
+A checkpoint workload submission must include 10 checkpoint writes and 10 checkpoint reads; the logs from the writes and reads must be submitted. 
 
+#### 2.2.4 Requirements for Simultaneously Readable and Writable
+
+Checkpoint recovery is intended to mimic an environment where a failure has occurred and the data needs to be read by different hosts than wrote the data. 
+
+For storage systems where all hosts can read and write all data simultaneously, the process described above satisfies the requirements.
+
+For storage systems where 1 host has write access to a volume but all hosts have read access, the above process also satisfies the requirements so long as reads can be fulfilled immediately following a write.
+
+For storage systems where 1 host has write access to a volume and a "remapping" process is required for other hosts to read the same data, the time to remap must be measured and included in the submission. 
+
+**Any processes between the write and read phases of checkpointing that are required before data can be read by a different host than wrote the data must be measured and included in the submission. The time for these processes will be added to the recovery time and throughput calculation for submitted scores** 
+
+The system_configuration.yaml document must list whether the solution support simultaneous reads and/or writes as such:
+```yaml
+System:
+  shared_capabilities:
+    multi_host_support: True            # False is used for local storage
+    simultaneous_write_support: False   # Are simultaneous writes by multiple hosts supported in the submitted configuration
+    simultaneous_read__support: True    # Are simultaneous reads by multiple hosts supported in the submitted configuration
+```
 
 #### 2.2.5 OPEN vs CLOSE submissions
 For CLOSED submissions, the total number of GPUs must be fixed according to Table 2.
@@ -198,15 +237,23 @@ For OPEN submissions, the total number of GPUs may be increased in multiples of 
 
 **Table 3: Configuration parameters and their mutability in CLOSED and OPEN divisions**
 
-| Parameter                          | Meaning                                      | Default value                        | Changeable in CLOSE | Changeable in OPEN |
-|-----------------------------------|----------------------------------------------|--------------------------------------|----------------------|---------------------|
-| --ppn                             | Number of GPUs per node                      | N/A                                  | YES (minimal 4)      | YES (minimal 4)     |
+| Parameter                          | Meaning                                      | Default value                                 | Changeable in CLOSE | Changeable in OPEN |
+|-----------------------------------|----------------------------------------------|-----------------------------------------------|----------------------|---------------------|
+| --ppn                             | Number of GPUs per node                      | N/A                                           | YES (minimal 4)      | YES (minimal 4)     |
 | --num-processes                    | Total number of GPUs                         | Node local: 8<br>Global: the value in Table 1 | NO                   | YES                 |
-| --checkpoint-folder      | The folder to save the checkpoint data       | checkpoint/{workload}                | YES                  | YES                 |
-| --num-checkpoints-write | Number of write checkpoints                  | 10 or -1**                             | NO              | NO                  |
-| --num-checkpoints-read     | Number of write checkpoints                  | 10 or -1**                              | NO                   | NO                  |
+| --checkpoint-folder      | The folder to save the checkpoint data       | checkpoint/{workload}                         | YES                  | YES                 |
+| --num-checkpoints-write | Number of write checkpoints                  | 10 or 0**                                     | NO              | NO                  |
+| --num-checkpoints-read     | Number of write checkpoints                  | 10 or 0**                                     | NO                   | NO                  |
 
-** has to be set  ``--num-checkpoints-read=-1`` explicitly for performing only checkpoint write, and ``--num-checkpoints-write=-1`` for performing only checkpoint read.
+** By default, --num-checkpoints-read and --num-checkpoints-write are set to be 10. To perform write only, one has to turn off read by explicitly setting ``--num-checkpoints-read=0``; to perform read only, one has to turn off write by explicitly set  ``--num-checkpoints-write=0``
+
+For an OPEN or CLOSED submission, the process must follow:
+1. Write 10 checkpoints
+2. Clearing Caches or Remapping Volumes if required
+3. Read 10 checkpoint
+
+DLIO and mlpstorage both support options to run 10 checkpoints with a single call or run 10 checkpoints as separate invokations of the tools. So long as the process is followed, checkpoints can be executed as a 10 checkpoint batch or individually. 
+
 ### 2.3 Vector Database
 
 ## 3 Definitions 

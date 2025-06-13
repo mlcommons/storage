@@ -302,12 +302,11 @@ class CheckpointingBenchmark(DLIOBenchmark):
         for rank in range(self.args.num_processes):
             rank_gb.append(0)
             if zero_level == 1:
-                if rank == 0:
-                    rank_gb[rank] = model_gb + (optimizer_gb / self.args.num_processes)
-                    self.logger.debug(f'Rank {rank} writes entire model: {rank_gb[rank]:.2f} GB')
-                else:
-                    rank_gb[rank] = optimizer_gb / self.args.num_processes
-                    self.logger.debug(f'Rank {rank} writes optimizer: {rank_gb[rank]:.2f} GB')
+                self.logger.debug("Optimizer is written by all ranks, but only the ranks on the first DP instance write the model")
+                rank_gb[rank] = optimizer_gb / self.args.num_processes
+                if rank < GPUpDP:
+                    rank_gb[rank] += model_gb / GPUpDP
+                    self.logger.debug(f'First DP: rank-{rank} write model: {rank_gb[rank]:.2f} GB')
             elif zero_level == 3:
                 rank_gb[rank] = (model_gb + optimizer_gb) / self.args.num_processes
                 self.logger.debug(f'Rank {rank} writes portion of model and optimizer: {rank_gb[rank]:.2f} GB')

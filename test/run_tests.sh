@@ -58,7 +58,7 @@ commands=(
     "mlpstorage --version|0"
     "mlpstorage history show|0"
 
-    # Example of a command expected to fail with exit code 2 (INVALID_ARGUMENTS)
+#     Example of a command expected to fail with exit code 2 (INVALID_ARGUMENTS)
     "mlpstorage training datasize --invalid-flag|2"
 
     "mlpstorage training datasize --model resnet50 --client-host-memory-in-gb 256 --max-accelerators 80 --num-client-hosts 2 --accelerator-type a100|0"
