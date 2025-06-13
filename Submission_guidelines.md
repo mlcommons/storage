@@ -340,6 +340,8 @@ Please note that the log file(s) output during the generation step needs to be i
 
 ## 8. Single-host Submissions
 
+This section only applies to Training workloads, the equivalent topic is covered in section 2.2.2, "subset mode".
+
 Submitters can add load to the storage system in two orthogonal ways: (1) increase the number of simulated accelerators inside one ``host node`` (i.e., one machine), and/or (2) increase the number of ``host nodes`` connected to the storage system.
 
 For single-host submissions, increase the number of simulated accelerators by changing the ``--num-accelerators`` parameter to the ``benchmark.sh script``. Note that the benchmarking tool requires approximately 0.5GB of host memory per simulated accelerator.
