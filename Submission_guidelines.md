@@ -207,7 +207,7 @@ We report the checkpoint time per write / read and I/O throughput from each rank
 	* The metric for duration is the maximum time across all GPUs.
 	* The metric for throughput is the minimum across all GPUs.
 
-A checkpoint workload submission must include 10 checkpoints written and 10 checkpoints read as well as the logs for any optional processes as outlined in section 2.2.5 (clearing caches, storage remapping, etc)
+A checkpoint workload submission must include 10 checkpoint writes and 10 checkpoint reads; the logs from the writes and reads must be submitted. 
 
 #### 2.2.4 Requirements for Simultaneously Readable and Writable
 
