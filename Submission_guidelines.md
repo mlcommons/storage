@@ -298,7 +298,16 @@ Random number generators may be initialized repeatedly in multiple processes or 
 Public results should be rounded normally, to two decimal places.
 
 ### 6.5. Stable storage must be used
+
+For all workloads stable storage must be used, but there are some differences in the specifics.
+
+#### 6.5.1. Training Workloads
+
 The MLPerf Storage benchmark will create the dataset on the storage system, in the desired ``dataset format``, before the start of the benchmark run.  The data must reside on stable storage before the actual benchmark testing can run.
+
+#### 6.5.2. Checkpoint Workloads
+
+When a checkpoint is taken/written, it is not reqiured to be written to a persistent storage system, but it is required to report the time duration between the checkpoint being completed and the earliest time that that checkpoint could be read by a different ``host node``, which is a different way of saying "stable storage".  That duration between write completeion and availability for reading will be added to the time to read/recover from the benchmark.
 
 ### 6.6. Caching
 Caching of training data on ``host nodes`` running MLPerf Storage is controlled via a warm up run, dataset size to memory ratios, and changing random seeds between runs.
