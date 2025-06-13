@@ -272,7 +272,7 @@ total_compute_time = (records_per_file * total_files) / simulated_accelerators /
 
 ### 4.2. Checkpoint Workloads
 
-The benchmark performance metrics for Checkpoint workloads (write/take, and read/recover) are **bandwidth while writing, and bandwidth while reading**, plus an additional data point which is the amount of time required, if any, between the completion of writing a checkpoint and the first point at which that checkpoint can be read from a different ``host node``.
+The benchmark performance metrics for Checkpoint workloads (write/take, and read/recover) are **bandwidth while writing, and bandwidth while reading**, plus an additional data point which is the amount of time required, if any, between the completion of writing a checkpoint and the first point at which that checkpoint can be read from a different ``host node``.  That duration between write completeion and availability for reading will be added to the time to read/recover from the benchmark.
 
 ## 5. Benchmark Code
 
