@@ -676,14 +676,3 @@ Code should be updated via a pull request prior to the “fixing objections” d
 
 Anytime up until the final human readable deadline (typically within 2-3 business days before the press call, so July 28th, 2025, in this case), an entry may be withdrawn by amending the pull request.  Alternatively, an entry may be voluntarily moved from the closed division to the open division.  Each benchmark results submission is treated separately for reporting in the results table and in terms of withdrawing it.  For example, submitting a 3D-Unet run with 20 clients and 80 A100 accelerators is separate from submitting a 3D-Unet run with 19 clients and 76 accelerators.
 
-## 13. Roadmap for future MLPerf Storage releases
-
-The Working Group is very interested in your feedback. Please contact storage-chairs@mlcommons.org with any suggestions.
-
-Our working group aims to add the following features in a future version of the benchmark:
-- We plan to add support for the “data pre-processing” phase of AI/ML workload as we are aware that this is a significant load on a storage system and is not well represented by existing AI/ML benchmarks. 
-- Add support for other types of storage systems (e.g., Object Stores) in the CLOSED division.
-- Expand the number of workloads in the benchmark suite e.g.,add a large language model (GPT3), and a diffusion model (Stable Diffusion).
-- Add support for PyTorch and Tensorflow in the CLOSED division for all workloads.
-- Continue adding support for more types of accelerators.
-- We plan to add support for benchmarking a storage system while running more than one MLPerf Storage benchmark at the same time (ie: more than one Training job type, such as 3DUnet and Recommender at the same time), but the current version requires that a submission only include one such job type per submission. 
