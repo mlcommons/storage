@@ -188,7 +188,7 @@ We report the checkpoint time per write / read and I/O throughput from each rank
 
 Each benchmark setup must be executed five times, and logs from all five runs must be submitted. The final metrics are the average across the five runs.
 
-When a checkpoint is taken/written, it must be written to stable storage, but that checkpoint does not need to be visible to other other hosts yet.  If it is not readable by other hosts but after some additional processing or reconfiguration it can be read by other hosts, the time duration between the checkpoint being completed and the earliest time that that checkpoint could be read by a different ``host node`` must be reported in the SystemDescription.yaml file.  That duration between write completion and availability for reading will be added to the time to read/recover from the benchmark.
+When a checkpoint is taken/written, it must be written to stable storage, but that checkpoint does not need to be readable by other other hosts yet.  If it is not readable by other hosts immediately after the checkpoint write is complete, if it requires some additional processing or reconfiguration before the checkpoint is readable by other hosts, the time duration between the checkpoint being completed and the earliest time that that checkpoint could be read by a different ``host node`` must be reported in the SystemDescription.yaml file.  That duration between write completion and availability for reading will be added to the time to read/recover from the benchmark.
 
 #### 2.2.5 OPEN vs CLOSE submissions
 For CLOSED submissions, the total number of GPUs must be fixed according to Table 2.
