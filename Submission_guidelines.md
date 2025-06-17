@@ -635,6 +635,10 @@ Two examples of a power requirements tables are shown below:
 
 System component and power supply unit names in the above tables are examples. Consistent names should be used in bill-of-material documentation, system diagrams and descriptive text.
 
+**Mandatory Rack Units Requirements**
+
+If the system requires the physical deployment of dedicated hardware, ie: is not a cloud-based deployment or a hyperconverged deployment, you will need to include the total number of rack units that will be consumed by the storage system under test, plus any supporting gear that is required for the configuration being tested.  That supporting gear could include, for example, network switches for a "backend" or private network that is required for the storage system to operate.  The rack units measure does not need to include any of the gear that connects the storage system to the ``host nodes``.
+
 **Optional information**
 
 The following *recommended* structure of systems.pdf provides a starting point for additional optional information. Submitters are free to adjust this structure as they see fit.
@@ -643,7 +647,7 @@ If the submission is for a commercial system, a pdf of the product spec document
 
 - Recommended: High-level system diagram e.g., showing the ``host node``(s), storage system main components, and network topology used when connecting everything (e.g., spine-and-leaf, butterfly, etc.), and any non-default configuration options that were set during the benchmark run.
 - Optional: Additional text description of the system, if the information is not captured in the JSON, e.g., the storage system’s components (make and model, optional features, capabilities, etc) and all configuration settings that are relevant to ML/AI benchmarks.  If the make/model doesn’t specify all the components of the hardware platform it is running on, eg: it’s an Software-Defined-Storage product, then those should be included here (just like the client component list).
-- Optional: physical requirements – If the system requires the physical deployment of hardware, consider including the number of rack units, required supporting equipment, and any physical constraints on how the equipment must be installed into an industry-standard rack, such as required spacing, weight constraints, etc. We recommended the following three categories for the text description:
+- Optional: We recommended the following three categories for the text description:
   1. Software, 
   2. Hardware, and
   3. Settings.
