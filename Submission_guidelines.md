@@ -55,11 +55,11 @@ The MLPerf name and logo are trademarks of the MLCommons® Association ("MLCommo
 
 | Date | Description |
 | ---- | ----------- |
-| Jun 26, 2024 | Freeze rules & benchmark code. |
-| Aug 7, 2024 | Open benchmark for submissions. |
-| Aug 21, 2024 | **Submissions due.** |
-| Aug 21, 2024 - Sep 11, 2024 | Review period. |
-| Sep 11, 2024 | **Benchmark competition results are published.** |
+| Jun 18, 2025 | Freeze rules & benchmark code. |
+| Jun 24, 2025 | Open benchmark for submissions. |
+| Jul 7, 2025 | **Submissions due.** |
+| Jul 7, 2025 - Aug 4, 2025 | Review period. |
+| Aug 4, 2025 | **Benchmark competition results are published.** |
 
 
 ## 2. Benchmark Overview
@@ -222,7 +222,7 @@ The following definitions are used throughout this document:
 - **Dataset format** refers to the format in which the training data is stored (e.g., npz, hdf5, csv, png, tfrecord, etc.), not the content or total capacity of the dataset.
 
   *NOTE: we plan to add support for Object storage in a future version of the benchmark, so OPEN submissions that include benchmark application changes and a description of how the original MLPerf Training benchmark dataset was mapped into Objects will be appreciated.*
-- A **storage system** consists of a defined set of hardware and software resources that provide storage services to one or more ``host nodes``. Storage systems can be hardware based, software-defined, virtualized or cloud based, and must be capable of providing the minimum storage services required to run the benchmark.
+- A **storage system** consists of a defined set of hardware and software resources that provide storage services to one or more ``host nodes``. Storage systems can be hardware based, software-defined, virtualized, hyperconverged, or cloud based, and must be capable of providing the minimum storage services required to run the benchmark.  If the storage system requires a dedicated network, then the hardware required for that network must be included in the ``storage system``.  If the storage system is hyperconverged, then it will probably share hardware (eg: CPU and/or networking) with the ``host nodes``.
 - A **storage scaling unit** is defined as the minimum unit by which the performance and scale of a storage system can be increased. Examples of storage scaling units are “nodes”, “controllers”, “virtual machines” or “shelves”. Benchmark runs with different numbers of storage scaling units allow a reviewer to evaluate how well a given storage solution is able to scale as more scaling units are added.
 - A **host node** is defined as the minimum unit by which the load upon the storage system under test can be increased.  Every ``host node`` must run the same number of simulated accelerators.  A ``host node`` can be instantiated by running the MLPerf Storage benchmark code within a Container or within a VM guest image or natively within an entire physical system.  The number of Containers or VM guest images per physical system and the CPU resources per ``host node`` is up to the submitter. Note that the maximum DRAM available to any ``host node`` must be used when calculating the dataset size to be generated for the test. 
 - An **ML framework** is a specific version of a software library or set of related libraries for training ML models using a system. Examples include specific versions of Caffe2, MXNet, PaddlePaddle, PyTorch, or TensorFlow.
@@ -238,7 +238,7 @@ The following definitions are used throughout this document:
 - A **System Under Test (SUT)** is the storage system being benchmarked.
 
 
-- The storage system under test must be described via one of the following **storage system access types**.  The overall solution might support more than one of the below types, but any given benchmark submission must be described by the access type that was actually used during that submission.  Specifically, this is reflected in the `system-name.json` file, in the `storage_system→solution_type`, the `storage_system→software_defined` and `storage_system→hyperconverged` fields, and the `networks→protocols` fields.  An optional vendor-specified qualifier may be specified. This will be displayed in the results table after the storage system access type, for example, “NAS - RDMA”.
+- The storage system under test must be described via one of the following **storage system access types**.  The overall solution might support more than one of the below types, but any given benchmark submission must be described by the access type that was actually used during that submission.  An optional vendor-specified qualifier may be specified. This will be displayed in the results table after the storage system access type, for example, “NAS - RDMA”.
   - **Direct-attached media** – any solution using local media on the ``host node``(s); eg: NVMe-attached storage with a local filesystem layered over it.  This will be abbreviated “**Local**” in the results table.
   - **Remotely-attached block device** – any solution using remote block storage; eg: a SAN using FibreChannel, iSCSI, NVMeoF, NVMeoF over RDMA, etc, with a local filesystem implementation layered over it.  This will be abbreviated “**Remote Block**” in the results table.
   - **Shared filesystem using a standards-defined access protocol** – any solution using a version of standard NFS or CIFS/SMB to access storage.  This will be abbreviated “**NAS**” in the results table.
@@ -288,10 +288,14 @@ More details on installation and running the benchmark can be found in the [Gith
 ## 6. General Rules
  
 The following apply to all results submitted for this benchmark.
+
 ### 6.1. Strive to be fair
-  Benchmarking should be conducted to measure the framework and storage system performance as fairly as possible. Ethics and reputation matter.
+
+Benchmarking should be conducted to measure the framework and storage system performance as fairly as possible. Ethics and reputation matter.
+
 ### 6.2. System and framework must be available
-- **Available Systems**. If you are measuring the performance of a publicly available and widely-used system or framework, you must use publicly available and widely-used versions of the system or framework. This class of systems will be called Available Systems, and availability here means the system is a publicly available commercial storage system. If you are measuring the performance of a system that is not available at the time of the benchmark results submission, the system must become commercially available **within 6 months** from results publication. Otherwise, the results for that submission will be retracted from the MLCommons results dashboard.
+
+- **Available Systems**. To be called an ``available system`` all components of the system must be publicly available. If any components of the system are not available at the time of the benchmark results submission, those components must be included in an ``available system`` submission that is submitted in the next round of MLPerf Storage benchmark submissions.  Otherwise, the results for that submission may be retracted from the MLCommons results dashboard.
 - **RDI Systems**. If you are measuring the performance of an experimental framework or system, you must make the system and framework you use available upon demand for replication by MLCommons. This class of systems will be called RDI (research, development, internal). 
 
 ### 6.3 Non-determinism
@@ -300,6 +304,8 @@ The data generator in DLIO uses a fixed random seed that must not be changed, to
 - System source of randomness, e.g. /dev/random or /dev/urandom
 - Another random number generator initialized with an allowed seed
 Random number generators may be initialized repeatedly in multiple processes or threads. For a single run, the same seed may be shared across multiple processes or threads.
+
+The storage system must not be informed of the random seed or the source of randomness.  This is intended to disallow submissions where the storage systen can predict the access pattern of the data samples.
 
 ### 6.4. Result rounding
 Public results should be rounded normally, to two decimal places.
@@ -317,6 +323,8 @@ Caching of training data on ``host nodes`` running MLPerf Storage is controlled 
 Results that cannot be replicated are not valid results. Replicated results should be within 5% within 5 tries.
 
 ## 7. Dataset Generation
+
+This section only describes the dataset generation methodology and requirements for Training workloads, the equivalent topic is covered in section 2.2, Checkpointing.
 
 MLPerf Storage uses DLIO to generate synthetic data. Instructions on how to generate the datasets for each benchmark are available [here](https://github.com/mlcommons/storage). The datasets are generated following the sample size distribution and structure of the dataset seeds (see Table 1) for each of the benchmarks. 
 
@@ -348,6 +356,8 @@ Please note that the log file(s) output during the generation step needs to be i
 
 ## 8. Single-host Submissions
 
+This section only applies to Training workloads, the equivalent topic is covered in section 2.2.2, "subset mode".
+
 Submitters can add load to the storage system in two orthogonal ways: (1) increase the number of simulated accelerators inside one ``host node`` (i.e., one machine), and/or (2) increase the number of ``host nodes`` connected to the storage system.
 
 For single-host submissions, increase the number of simulated accelerators by changing the ``--num-accelerators`` parameter to the ``benchmark.sh script``. Note that the benchmarking tool requires approximately 0.5GB of host memory per simulated accelerator.
@@ -360,7 +370,6 @@ This setup simulates distributed training of a single training task, spread acro
 
 Submitters must respect the following for multi-host node submissions:
 - All the data must be accessible to all the ``host nodes``. 
-- The checkpoint location must reside in the same storage system that stores the dataset.
 - The number of simulated accelerators in each ``host node`` must be identical.
 
 While it is recommended that all ``host nodes`` be as close as possible to identical, that is not required by these Rules.  The fact that distributed training uses a pool-wide common barrier to synchronize the transition from one step to the next of all ``host nodes`` results in the overall performance of the cluster being determined by the slowest ``host node``.
@@ -428,22 +437,15 @@ OPEN division benchmarks must be referred to using the benchmark name plus the t
 
 ## 11. Submission
 
-A **successful run result** consists of a mean samples/second measurement ``(train_throughput_mean_samples_per_second)`` for a complete benchmark run that achieves mean accelerator utilization ``(train_au_mean_percentage)`` equal to or higher than the minimum defined for that workload.
+A successful run result consists of a directory tree structure containing the set of files produced by the benchmark as the result, plus the manually created SystemDescription files (both PDF and yaml) that describe the storage solution under test and the environment the test was run in.
 
-Submissions are made via a ``git push`` into a private MLCommons repository at github.com.  The link to the repo and the required authentication (eg: userid, password) to access that repo will only be given to people who have registered their intent to submit results in this round (see below for the link to the form).
+The whole package must be uploaded to MLCommons via the UI provided to submitters.
 
-Many ``git push`` operations can be made using that link, but only the last one before the window closes will be considered.  Each ``git push`` operation should include all of the individual result submissions that you want to be included.  Eg: if you want to submit results for A100 and H100, that would be two submissions but only one ``git push`` operation.
+It will be possible to upload your results many times, not just once, but each upload completely replaces the prior upload before the submission deadline.
 
-Several agreements between the submitter and MLCommons must be completed and signed **before the submission due date** before benchmark results can be submitted.  Note: since these are legal agreements, it can take significant time to get them signed, so please plan ahead.
+At least your final upload, if not all of them, should include all of the individual result submissions that you want to be included.  Eg: if you want to submit results for A100 and H100, that would be two submissions but only one upload operation.
 
-The [Intention to submit form](https://docs.google.com/forms/d/e/1FAIpQLSdzGRNECkXeRmK4zVH85zRrHh6dvC62V-ZkPuGCfOlMF7j95w/viewform?usp=sharing) is required of everyone who intends to submit results.  We collect the email addresses of submitters so we can contact them if needed, to know how many ``git push`` authentication credentials to create, and to know who to give those credentials to.
-
-Submitters who are not members of MLCommons need to have signed:
-- [Non-member Test Agreement](https://drive.google.com/file/d/1rHV0Q_1Rp9pugqG73c6T5Y4Ry1y2bViz/view?usp=sharing)
-- [Corporate CLA (Contributor License Agreement)](https://drive.google.com/file/d/1Px6uosXzO8Y5IGvb3bOXD6C0hZEL4_nn/view?usp=drive_link)
-- Trademark License Agreement (must be individually requested)
-
-If an organization has already signed these agreements, they do not need to sign them again unless there have been changes to those agreements by MLCommons.  Please look at each document for clarification.
+The following is not a requirement of these rules, but a possibly valuable risk management strategy.  Consider uploading whatever results you have every day or two.  Each new upload replaces the last one.  If some disaster happened and you were not able to continue tuning your submission, you would at least have the prior submission package available as a backup.
 
 ### 11.1 What to submit - CLOSED submissions
 
@@ -579,15 +581,11 @@ root_folder (or any name you prefer)
 
 The purpose of the system description is to provide sufficient detail on the storage system under test, and the ``host nodes`` running the test, plus the network connecting them, to enable full reproduction of the benchmark results by a third party. 
 
-Each submission must contain a ``<system-name>.json`` file and a ``<system-name>.pdf`` file.  If you submit more than one benchmark result, each submission must have a unique ``<system-name>.json`` file and a ``<system-name>.pdf`` file that documents the system under test and the environment that generated that result, including any configuration options in effect.
+Each submission must contain a ``<system-name>.yaml`` file and a ``<system-name>.pdf`` file.  If you submit more than one benchmark result, each submission must have a unique ``<system-name>.yaml`` file and a ``<system-name>.pdf`` file that documents the system under test and the environment that generated that result, including any configuration options in effect.
 
-Note that, during the review period, submitters may be asked to include additional details in the JSON and pdf to enable reproducibility by a third party.
+Note that, during the review period, submitters may be asked to include additional details in the yaml and pdf to enable reproducibility by a third party.
 
-#### 11.4.1 System Description JSON
-
-The ``<system-name>.json`` file must be pass a validation check with the JSON schema in use for V1.0.  The [schema and two examples of it being used](https://drive.google.com/drive/folders/1ZXNUXN4L8amD0Ba38GoIOt761b73F8bs) are provided.  For example, ``check-jsonschema`` is a convenient tool that is present in many linux distributions, but other tools may be used.
-
-#### 11.4.2 System Description PDF
+#### 11.4.1 System Description PDF
 
 The goal of the pdf is to complement the JSON file, providing additional detail on the system to enable full reproduction by a third party. We encourage submitters to add details that are more easily captured by diagrams and text description, rather than a JSON.
 
@@ -682,16 +680,5 @@ Code should be updated via a pull request prior to the “fixing objections” d
 
 ### 12.5 Withdrawing results / changing division
 
-Anytime up until the final human readable deadline (typically within 2-3 business days before the press call, so June 5th, 2024, in this case), an entry may be withdrawn by amending the pull request.  Alternatively, an entry may be voluntarily moved from the closed division to the open division.  Each benchmark results submission is treated separately for reporting in the results table and in terms of withdrawing it.  For example, submitting a 3D-Unet run with 20 clients and 80 A100 accelerators is separate from submitting a 3D-Unet run with 19 clients and 76 accelerators.
+Anytime up until the final human readable deadline (typically within 2-3 business days before the press call, so July 28th, 2025, in this case), an entry may be withdrawn by amending the pull request.  Alternatively, an entry may be voluntarily moved from the closed division to the open division.  Each benchmark results submission is treated separately for reporting in the results table and in terms of withdrawing it.  For example, submitting a 3D-Unet run with 20 clients and 80 A100 accelerators is separate from submitting a 3D-Unet run with 19 clients and 76 accelerators.
 
-## 13. Roadmap for future MLPerf Storage releases
-
-The Working Group is very interested in your feedback. Please contact storage-chairs@mlcommons.org with any suggestions.
-
-Our working group aims to add the following features in a future version of the benchmark:
-- We plan to add support for the “data pre-processing” phase of AI/ML workload as we are aware that this is a significant load on a storage system and is not well represented by existing AI/ML benchmarks. 
-- Add support for other types of storage systems (e.g., Object Stores) in the CLOSED division.
-- Expand the number of workloads in the benchmark suite e.g.,add a large language model (GPT3), and a diffusion model (Stable Diffusion).
-- Add support for PyTorch and Tensorflow in the CLOSED division for all workloads.
-- Continue adding support for more types of accelerators.
-- We plan to add support for benchmarking a storage system while running more than one MLPerf Storage benchmark at the same time (ie: more than one Training job type, such as 3DUnet and Recommender at the same time), but the current version requires that a submission only include one such job type per submission. 

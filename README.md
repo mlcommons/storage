@@ -551,6 +551,7 @@ Below table displays the list of configurable parameters for the benchmark in th
 | reader.computation_threads    | Number of threads to preprocess the data(for TensorFlow)      |1|
 | reader.prefetch_size    | Number of batches to prefetch      |2|
 | reader.transfer_size       | Number of bytes in the read buffer(only for Tensorflow)  		        | |
+| reader.odirect                  | Whether to use direct I/O for reader (currectly applicable to UNet3D)   | False | 
 | **Checkpoint params**		|								|   |
 | checkpoint.checkpoint_folder	| The folder to save the checkpoints  				| --|
 | **Storage params**		|								|   |
