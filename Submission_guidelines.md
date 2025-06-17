@@ -306,7 +306,7 @@ The MLPerf Storage benchmark will create the dataset on the storage system, in t
 
 #### 6.5.2. Checkpoint Workloads
 
-See section "2.2.2 Benchmark Execution" for more details.
+See section "2.2.3 Metrics and Results Reporting" for more details.
 
 ### 6.6. Caching
 Caching of training data on ``host nodes`` running MLPerf Storage is controlled via a warm up run, dataset size to memory ratios, and changing random seeds between runs.
