@@ -637,7 +637,7 @@ System component and power supply unit names in the above tables are examples. C
 
 **Mandatory Rack Units Requirements**
 
-If the system requires the physical deployment of dedicated hardware, ie: is not a cloud-based deployment or a hyperconverged deployment, you will need to include the total number of rack units that will be consumed by the storage system under test, plus any supporting gear that is required for the configuration being tested.  That supporting gear could include, for example, network switches for a "backend" or private network that is required for the storage system to operate.  The rack units measure does not need to include any of the gear that connects the storage system to the ``host nodes``.
+If the system requires the physical deployment of dedicated hardware, ie: is not a cloud-based deployment or a hyperconverged deployment, you will need to include the total number of rack units that will be consumed by the storage system under test in the SystemDescription file(s), plus any supporting gear that is required for the configuration being tested.  That supporting gear could include, for example, network switches for a "backend" or private network that is required for the storage system to operate.  The rack units measure does not need to include any of the gear that connects the storage system to the ``host nodes``.
 
 **Optional information**
 
