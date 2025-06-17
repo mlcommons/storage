@@ -125,8 +125,6 @@ For each submission, one must first perform the checkpoint write, then clear the
 * WRITE: ``--num-checkpoints-read=0``
 * READ: ``--num-checkpoints-write=0``
 
-
-
 **fsync**
 We enforce ``fsync`` to be applied during checkpoint writes to ensure data is flushed to persistent storage. ``fsync`` is enabled by default in all workload configuration files.
 
@@ -190,6 +188,7 @@ We report the checkpoint time per write / read and I/O throughput from each rank
 
 Each benchmark setup must be executed five times, and logs from all five runs must be submitted. The final metrics are the average across the five runs.
 
+When a checkpoint is taken/written, it must be written to stable storage, but that checkpoint does not need to be visible to other other hosts yet.  If it is not readable by other hosts but after some additional processing or reconfiguration it can be read by other hosts, the time duration between the checkpoint being completed and the earliest time that that checkpoint could be read by a different ``host node`` must be reported in the SystemDescription.yaml file.  That duration between write completion and availability for reading will be added to the time to read/recover from the benchmark.
 
 #### 2.2.5 OPEN vs CLOSE submissions
 For CLOSED submissions, the total number of GPUs must be fixed according to Table 2.
@@ -307,7 +306,7 @@ The MLPerf Storage benchmark will create the dataset on the storage system, in t
 
 #### 6.5.2. Checkpoint Workloads
 
-When a checkpoint is taken/written, it is not reqiured to be written to a persistent storage system, but it is required to report the time duration between the checkpoint being completed and the earliest time that that checkpoint could be read by a different ``host node``, which is a different way of saying "stable storage".  That duration between write completeion and availability for reading will be added to the time to read/recover from the benchmark.
+See section "2.2.2 Benchmark Execution" for more details.
 
 ### 6.6. Caching
 Caching of training data on ``host nodes`` running MLPerf Storage is controlled via a warm up run, dataset size to memory ratios, and changing random seeds between runs.
