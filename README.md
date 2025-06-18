@@ -1,5 +1,5 @@
-# MLPerf™ Storage Benchmark Suite
-MLPerf Storage is a benchmark suite to characterize the performance of storage systems that support machine learning workloads.
+# MLPerf Storage Benchmark Suite
+MLPerf® Storage is a benchmark suite to characterize the performance of storage systems that support machine learning workloads.
 
 - [Overview](#overview)
 - [Prerequisite](#prerequisite)
@@ -15,7 +15,7 @@ MLPerf Storage is a benchmark suite to characterize the performance of storage s
 - [Submission Rules](#submission-rules)
 - 
 ## Overview
-For an overview of how this benchmark suite is used by submitters to compare the performance of storage systems supporting an AI cluster, see the MLPerf™ Storage Benchmark submission rules here: [doc](https://github.com/mlcommons/storage/blob/main/Submission_guidelines.md). 
+For an overview of how this benchmark suite is used by submitters to compare the performance of storage systems supporting an AI cluster, see the MLPerf® Storage Benchmark submission rules here: [doc](https://github.com/mlcommons/storage/blob/main/Submission_guidelines.md). 
 
 ## Prerequisite
 
@@ -551,6 +551,7 @@ Below table displays the list of configurable parameters for the benchmark in th
 | reader.computation_threads    | Number of threads to preprocess the data(for TensorFlow)      |1|
 | reader.prefetch_size    | Number of batches to prefetch      |2|
 | reader.transfer_size       | Number of bytes in the read buffer(only for Tensorflow)  		        | |
+| reader.odirect                  | Whether to use direct I/O for reader (currectly applicable to UNet3D)   | False | 
 | **Checkpoint params**		|								|   |
 | checkpoint.checkpoint_folder	| The folder to save the checkpoints  				| --|
 | **Storage params**		|								|   |
