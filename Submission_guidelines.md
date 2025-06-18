@@ -96,7 +96,7 @@ Table 1: Benchmark description
 #### 2.2.1 models
 Benchmark results may be submitted for the following four model configurations. The associated model architectures and parallelism settings are listed below. The number of MPI processes must be set to 8, 64, 512, and 1024 for the respective models for CLOSE submission. 
 
-For CLOSE submissions, participants are not permitted to change the total number of GPUs. However, they may adjust the number of GPUs per host, as long as each host uses more than 4 GPUs. This allows the use of nodes with higher GPU density and fewer total nodes. Note: the aggregate GPU memory across all nodes must be sufficient to accommodate the model’s checkpoint size.
+For CLOSE submissions, participants are not permitted to change the total number of simulated accelerators. However, they may adjust the number of simulated accelerators per host, as long as each host uses more than 4 simulated accelerators. This allows the use of nodes with higher simulated accelerator density and fewer total nodes. Note: the aggregate simulated accelerator memory across all nodes must be sufficient to accommodate the model’s checkpoint size.
 
 **Table 2 LLM models**
 
@@ -119,9 +119,9 @@ For CLOSE submissions, participants are not permitted to change the total number
 
 There are two operational modes:
 
-* ``default``: Used for shared storage systems. In this mode, the benchmark runs on multiple hosts to write/read the entire checkpoint dataset. The total number of processes (emulated GPUs) must match the number listed in Table 2 (TP×PP×DP = Total Processes).
+* ``default``: Used for shared storage systems. In this mode, the benchmark runs on multiple hosts to write/read the entire checkpoint dataset. The total number of processes (emulated accelerators) must match the number listed in Table 2 (TP×PP×DP = Total Processes).
 
-* ``subset``: Intended for node local storage systems. In this mode, checkpointing is simulated on a single host by writing/reading only a fraction (``num_gpus/TP/PP/DP``) of the checkpoint data, where ``num_gpus`` is the number of gpus on the host. The only allowed value for number of processes in a subset submission is 8 (the 8B model does not support subset mode as it is already set to 8 processes).
+* ``subset``: Intended for node local storage systems. In this mode, checkpointing is simulated on a single host by writing/reading only a fraction (``num_gpus/TP/PP/DP``) of the checkpoint data, where ``num_gpus`` is the number of simulated accelerators on the host. The only allowed value for number of processes in a subset submission is 8 (the 8B model does not support subset mode as it is already set to 8 processes).
 
 **Checkpoint write and (read) recovery**
 
@@ -206,7 +206,7 @@ We enforce ``fsync`` to be applied during checkpoint writes to ensure data is fl
     --results-dir ./mlpstorage_results \
     --client-host-memory-in-gb 64
   ```
-* ``subset`` mode (on a single host with **8 GPUs**)
+* ``subset`` mode (on a single host with **8 simulated accelerators**)
   ```bash
   # Perform checkpoint writes (data parallelism must match Table 2)
   mlpstorage checkpointing run --model llama3-405b \
@@ -349,6 +349,8 @@ total_compute_time = (records_per_file * total_files) / simulated_accelerators /
 ### 4.2. Checkpoint Workloads
 
 The benchmark performance metrics for Checkpoint workloads (write/take, and read/recover) are **bandwidth while writing, and bandwidth while reading**, plus an additional data point which is the amount of time required, if any, between the completion of writing a checkpoint and the first point at which that checkpoint can be read from a different ``host node``.  That duration between write completeion and availability for reading will be added to the time to read/recover from the benchmark.
+
+**Submitters do not need to use hardware accelerators (e.g., GPUs, TPUs, and other ASICs) when running MLPerf Storage - Checkpointing.**
 
 ## 5. Benchmark Code
 
