@@ -70,7 +70,7 @@ Each benchmark setup must be executed a number of times (5 for training and 10 f
 
 ### 2.1 Training
 
-MLPerf Storage emulates accelerators for the training workloads with the tool DLIO developed by Argonne National Labs. DLIO uses the standard AI frameworks (PyTorch, Tensorflow, Numpy, etc) to load data from storage to memory at the same intensity as a given accelerator.
+MLPerf Storage emulates (or "simulates", the terms are used interchangably in this document) accelerators for the training workloads with the tool DLIO developed by Argonne National Labs. DLIO uses the standard AI frameworks (PyTorch, Tensorflow, Numpy, etc) to load data from storage to memory at the same intensity as a given accelerator.
 
 **This emulation means that submitters do not need to use hardware accelerators (e.g., GPUs, TPUs, and other ASICs) when running MLPerf Storage - Training.**
 
@@ -94,9 +94,9 @@ Table 1: Benchmark description
 
 ### 2.2 Checkpointing
 #### 2.2.1 models
-Benchmark results may be submitted for the following four model configurations. The associated model architectures and parallelism settings are listed below. The number of MPI processes must be set to 8, 64, 512, and 1024 for the respective models for CLOSE submission. 
+Benchmark results may be submitted for the following four model configurations. The associated model architectures and parallelism settings are listed below. The number of MPI processes must be set to 8, 64, 512, and 1024 for the respective models for CLOSED submission. 
 
-For CLOSE submissions, participants are not permitted to change the total number of simulated accelerators. However, they may adjust the number of simulated accelerators per host, as long as each host uses more than 4 simulated accelerators. This allows the use of nodes with higher simulated accelerator density and fewer total nodes. Note: the aggregate simulated accelerator memory across all nodes must be sufficient to accommodate the model’s checkpoint size.
+For CLOSED submissions, participants are not permitted to change the total number of simulated accelerators. However, they may adjust the number of simulated accelerators per host, as long as each host uses more than 4 simulated accelerators. This allows the use of nodes with higher simulated accelerator density and fewer total nodes. Note: the aggregate simulated accelerator memory across all nodes must be sufficient to accommodate the model’s checkpoint size.
 
 **Table 2 LLM models**
 
@@ -259,20 +259,20 @@ System:
     simultaneous_read__support: True    # Are simultaneous reads by multiple hosts supported in the submitted configuration
 ```
 
-#### 2.2.5 OPEN vs CLOSE submissions
+#### 2.2.5 OPEN vs CLOSED submissions
 For CLOSED submissions, the total number of processes must be fixed according to Table 2.
 
 For OPEN submissions, the total number of processes may be increased in multiples of (TP×PP) to showcase the scalability of the storage solution.
 
 **Table 3: Configuration parameters and their mutability in CLOSED and OPEN divisions**
 
-| Parameter                          | Meaning                                      | Default value                                 | Changeable in CLOSE | Changeable in OPEN |
-|------------------------------------|----------------------------------------------|-----------------------------------------------|---------------------|--------------------|
-| --ppn                              | Number of processes per node                 | N/A                                           | YES (minimal 4)     | YES (minimal 4)    |
-| --num-processes                    | Total number of processes                    | Node local: 8<br>Global: the value in Table 1 | NO                  | YES                |
-| --checkpoint-folder                | The folder to save the checkpoint data       | checkpoint/{workload}                         | YES                 | YES                |
-| --num-checkpoints-write            | Number of write checkpoints                  | 10 or 0**                                     | NO                  | NO                 |
-| --num-checkpoints-read             | Number of write checkpoints                  | 10 or 0**                                     | NO                  | NO                 |
+| Parameter                          | Meaning                                      | Default value                                 | Changeable in CLOSED | Changeable in OPEN |
+|------------------------------------|----------------------------------------------|-----------------------------------------------|----------------------|--------------------|
+| --ppn                              | Number of processes per node                 | N/A                                           | YES (minimal 4)      | YES (minimal 4)    |
+| --num-processes                    | Total number of processes                    | Node local: 8<br>Global: the value in Table 1 | NO                   | YES                |
+| --checkpoint-folder                | The folder to save the checkpoint data       | checkpoint/{workload}                         | YES                  | YES                |
+| --num-checkpoints-write            | Number of write checkpoints                  | 10 or 0**                                     | NO                   | NO                 |
+| --num-checkpoints-read             | Number of write checkpoints                  | 10 or 0**                                     | NO                   | NO                 |
 
 ** By default, --num-checkpoints-read and --num-checkpoints-write are set to be 10. To perform write only, one has to turn off read by explicitly setting ``--num-checkpoints-read=0``; to perform read only, one has to turn off write by explicitly set  ``--num-checkpoints-write=0``
 
