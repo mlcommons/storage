@@ -49,6 +49,8 @@ MLPerf™ Storage is a benchmark suite to characterize the performance of storag
 
 This benchmark attempts to balance two goals. First, we aim for **comparability** between benchmark submissions to enable decision making by the AI/ML Community. Second, we aim for **flexibility** to enable experimentation and to show off unique storage system features that will benefit the AI/ML Community. To that end we have defined two classes of submissions: CLOSED and OPEN. 
 
+Published results for the 3D-Unet, ResNet-50, and Cosmoflow Training workloads are comparable across v1.0 and v2.0 of the MLPerf Storage benchmark.  A [full listing of comparability is available](https://github.com/mlcommons/policies/blob/master/MLPerf_Compatibility_Table.adoc).
+
 The MLPerf name and logo are trademarks of the MLCommons® Association ("MLCommons"). In order to refer to a result using the MLPerf name, the result must conform to the letter and spirit of the rules specified in this document. MLCommons reserves the right to solely determine if a use of its name or logos is acceptable.
 
 ### 1.1 Timeline
