@@ -160,6 +160,9 @@ class TrainingBenchmark(DLIOBenchmark):
                 self.logger.info(f'Creating data directory: {self.params_dict["dataset.data_folder"]}...')
                 os.makedirs(self.params_dict['dataset.data_folder'])
 
+        # Update combined_params to reflect the calculated data folder path
+        self.combined_params['dataset']['data_folder'] = self.params_dict['dataset.data_folder']
+
         # Create the train, eval, test directories
         for folder in ["train", "valid", "test"]:
             folder_path = os.path.join(self.params_dict['dataset.data_folder'], folder)
@@ -225,6 +228,20 @@ class TrainingBenchmark(DLIOBenchmark):
         self.logger.result(f'Number of training subfolders: {num_subfolders_train}')
         self.logger.result(f'Total disk space required for training: {total_disk_bytes / 1024**3:.2f} GB')
 
+        # Store calculated values back into the parameters for metadata file
+        self.combined_params['dataset']['num_files_train'] = num_files_train
+        self.combined_params['dataset']['num_subfolders_train'] = num_subfolders_train
+        
+        # Store additional calculated metrics in a datasize_results section
+        if 'datasize_results' not in self.combined_params:
+            self.combined_params['datasize_results'] = {}
+        self.combined_params['datasize_results'].update({
+            'calculated_num_files_train': num_files_train,
+            'calculated_num_subfolders_train': num_subfolders_train,
+            'calculated_total_disk_bytes': total_disk_bytes,
+            'calculated_total_disk_gb': total_disk_bytes / 1024**3
+        })
+
         if num_files_train > 10000:
             self.logger.warning(
                 f'The number of files required may be excessive for some filesystems. You can use the num_subfolders_train parameter to shard the dataset. To keep near 10,000 files per folder use "{int(num_files_train / 10000)}x" subfolders by adding "--param dataset.num_subfolders_train={int(num_files_train / 10000)}"')
@@ -265,10 +282,26 @@ class CheckpointingBenchmark(DLIOBenchmark):
         if self.args.num_processes < ClosedGPUs:
             self.params_dict['checkpoint.mode'] = "subset"
             self.params_dict['model.parallelism.data'] = configured_data_parallelism
+            # Update combined_params as well
+            if 'checkpoint' not in self.combined_params:
+                self.combined_params['checkpoint'] = {}
+            self.combined_params['checkpoint']['mode'] = "subset"
+            if 'model' not in self.combined_params:
+                self.combined_params['model'] = {}
+            if 'parallelism' not in self.combined_params['model']:
+                self.combined_params['model']['parallelism'] = {}
+            self.combined_params['model']['parallelism']['data'] = configured_data_parallelism
 
         self.params_dict['checkpoint.num_checkpoints_read'] = self.args.num_checkpoints_read
         self.params_dict['checkpoint.num_checkpoints_write'] = self.args.num_checkpoints_write
         self.params_dict['checkpoint.checkpoint_folder'] = os.path.join(self.args.checkpoint_folder, self.args.model)
+        
+        # Update combined_params with checkpoint values
+        if 'checkpoint' not in self.combined_params:
+            self.combined_params['checkpoint'] = {}
+        self.combined_params['checkpoint']['num_checkpoints_read'] = self.args.num_checkpoints_read
+        self.combined_params['checkpoint']['num_checkpoints_write'] = self.args.num_checkpoints_write
+        self.combined_params['checkpoint']['checkpoint_folder'] = os.path.join(self.args.checkpoint_folder, self.args.model)
 
 
     def add_workflow_to_cmd(self, cmd) -> str:
