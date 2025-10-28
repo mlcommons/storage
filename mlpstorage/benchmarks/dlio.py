@@ -224,6 +224,19 @@ class TrainingBenchmark(DLIOBenchmark):
         num_files_train, num_subfolders_train, total_disk_bytes = calculate_training_data_size(
             self.args, self.cluster_information, self.combined_params['dataset'], self.combined_params['reader'], self.logger
         )
+        
+        # Determine num_subfolders_train: use explicit user input if provided, otherwise calculate based on num_files_train
+        user_provided_subfolders = self.combined_params['dataset'].get('num_subfolders_train', None)
+        if user_provided_subfolders is not None and user_provided_subfolders > 0:
+            # User explicitly provided a value, use it
+            num_subfolders_train = user_provided_subfolders
+        elif num_files_train > 10000:
+            # Auto-calculate: shard into ~10k files per folder
+            num_subfolders_train = int(num_files_train / 10000)
+        else:
+            # Few enough files that no sharding is needed
+            num_subfolders_train = 0
+        
         self.logger.result(f'Number of training files: {num_files_train}')
         self.logger.result(f'Number of training subfolders: {num_subfolders_train}')
         self.logger.result(f'Total disk space required for training: {total_disk_bytes / 1024**3:.2f} GB')
