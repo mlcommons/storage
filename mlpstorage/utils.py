@@ -364,17 +364,39 @@ def generate_mpi_prefix_cmd(mpi_cmd, hosts, num_processes, oversubscribe, allow_
         raise ValueError(f"Unsupported MPI command: {mpi_cmd}")
 
     # CPU scheduling optimizations for multi-host I/O workloads
-    unique_hosts = set()
-    for host in hosts:
-        host_part = host.split(':')[0] if ':' in host else host
-        unique_hosts.add(host_part)
+    # Check if user has provided --bind-to or --map-by in params
+    user_bind_to_override = False
+    user_map_by_override = False
     
-    if len(unique_hosts) > 1:
-        # Multi-host: prioritize even distribution across nodes
-        prefix += " --bind-to none --map-by node"
+    if params:
+        for param in params:
+            if '--bind-to' in param:
+                user_bind_to_override = True
+                logger.debug(f"User provided --bind-to override: {param}")
+            if '--map-by' in param:
+                user_map_by_override = True
+                logger.debug(f"User provided --map-by override: {param}")
+    
+    # Only add default bind-to and map-by if user hasn't provided them
+    if not user_bind_to_override and not user_map_by_override:
+        # Use default behavior based on number of hosts
+        unique_hosts = set()
+        for host in hosts:
+            host_part = host.split(':')[0] if ':' in host else host
+            unique_hosts.add(host_part)
+        
+        if len(unique_hosts) > 1:
+            # Multi-host: prioritize even distribution across nodes
+            prefix += " --bind-to none --map-by node"
+            logger.debug("Using default multi-host settings: --bind-to none --map-by node")
+        else:
+            # Single-host: optimize for NUMA domains
+            prefix += " --bind-to none --map-by socket"
+            logger.debug("Using default single-host settings: --bind-to none --map-by socket")
     else:
-        # Single-host: optimize for NUMA domains
-        prefix += " --bind-to none --map-by socket"
+        # User provided overrides, so we'll skip defaults
+        if user_bind_to_override or user_map_by_override:
+            logger.debug("Skipping default --bind-to/--map-by due to user overrides in --mpi-params")
 
     if oversubscribe:
         prefix += " --oversubscribe"

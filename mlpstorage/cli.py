@@ -253,7 +253,9 @@ def add_mpi_group(parser):
     mpi_options.add_argument('--mpi-bin', choices=MPI_CMDS, default="mpirun", help=help_messages['mpi_bin'])
     mpi_options.add_argument('--oversubscribe', action="store_true")
     mpi_options.add_argument('--allow-run-as-root', action="store_true")
-    mpi_options.add_argument('--mpi-params', nargs="+", type=str, action="append", help="Other MPI parameters that will be passed to MPI")
+    mpi_options.add_argument('--mpi-params', nargs="+", type=str, action="append", 
+                           help="Additional MPI parameters. Use this to override defaults like --map-by or --bind-to. "
+                                "Example: --mpi-params '--map-by core' '--bind-to socket'")
 
 
 def add_training_arguments(training_parsers):
