@@ -4,18 +4,22 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlpstorage"
-version = "2.0.0b1"
+version = "2.1.0"
 description = "MLPerf Storage Benchmark Suite"
 readme = "README.md"
 authors = [
-    {name = "MLCommons Storage Working Group"}
+    {name = "MLCommons Storage Working Group", email = "storage-chairs@mlcommons.org"},
 ]
-requires-python = ">=3.10.0"
+requires-python = ">=3.12,<3.13"
 dependencies = [
-    "dlio-benchmark @ git+https://github.com/argonne-lcf/dlio_benchmark.git@mlperf_storage_v2.0",
-    "psutil>=5.9",
-    "pyarrow"
+  "dlio-benchmark @ git+https://github.com/argonne-lcf/dlio_benchmark.git@f794b65",
+  "psutil>=5.9",
+  "pyarrow",
+  # until https://github.com/argonne-lcf/dlio_benchmark/pull/309 is merged
+  "tensorflow==2.16.2",
+  "tensorflow-io==0.37.1",
 ]
+license = {text = "Apache-2.0"}
 
 [project.urls]
 "Homepage" = "https://github.com/mlcommons/storage"
@@ -29,3 +33,6 @@ packages = {find = {}}
 
 [project.scripts]
 mlpstorage = 'mlpstorage.main:main'
+
+[tool.pdm]
+distribution = true
