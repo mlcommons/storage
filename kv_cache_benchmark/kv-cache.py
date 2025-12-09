@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """
 KV Cache Benchmark - Multi-Tier Performance Comparison
-Hazem Awadallah, Kingston Digital, 2025
-Assisted by Github Copilot
-
-Integrated Multi-User KV Cache Benchmark - Enhanced Version
-MLPerf Storage Working Group - Benchmark Implementation
-
+Kingston Digital, 2025
+Licensed under the Apache License, Version 2.0 (the "License")
+MLPerf Storage Working Group 
 This script provides a comprehensive, configurable benchmark for testing storage system
 performance for Large Language Model (LLM) Key-Value (KV) cache offloading. It simulates
 a realistic multi-tenant inference environment with a sophisticated multi-tier cache.
@@ -1057,6 +1054,16 @@ class KVCacheGenerator:
     def __init__(self, model_config: ModelConfig, global_seed: Optional[int] = None):
         self.model_config = model_config
         self.global_seed = 0 if global_seed is None else int(global_seed)
+        
+        # OPTIMIZATION: Pre-allocate a large buffer of random noise (e.g., 256MB)
+        # We will slice this buffer to satisfy requests instead of generating new noise every time.
+        # This removes the CPU bottleneck seen in the flamegraph (random_uniform + float conversion).
+        self.buffer_size_elements = 128 * 1024 * 1024  # 128 million elements (~256MB for float16)
+        self.dtype = np.float16 if 'float16' in self.model_config.dtype else np.float32
+        
+        print(f"[KVCacheGenerator] Pre-generating {self.buffer_size_elements * 2 / 1024**2:.0f} MB noise buffer...")
+        rng = np.random.default_rng(self.global_seed)
+        self.precomputed_buffer = rng.uniform(-1.0, 1.0, size=self.buffer_size_elements).astype(self.dtype)
 
     def _seed_from_key(self, key: str) -> int:
         # Use stable cryptographic hash to get deterministic 64-bit seed
@@ -1067,30 +1074,39 @@ class KVCacheGenerator:
     def generate(self, sequence_length: int, key: Optional[str] = None) -> np.ndarray:
         """
         Generates a NumPy array with the correct shape and dtype for a KV cache.
-        The data itself is random noise, but is generated deterministically if a key is provided.
+        Uses a pre-computed buffer to avoid CPU bottlenecks during benchmarking.
         """
         # The shape of a KV cache tensor is typically:
         # (num_layers, 2 (for K/V), sequence_length, num_kv_heads, head_dimension)
         kv_shape = (
             self.model_config.num_layers,
             2,  # K and V
-            sequence_length,
+            int(sequence_length), # Ensure sequence_length is int
             self.model_config.kv_heads,
             self.model_config.kv_dim_per_head
         )
-
-        dtype = np.float16 if 'float16' in self.model_config.dtype else np.float32
         
-        if key is None:
-            # Fallback to global RNG if no key is provided (less deterministic in multithreading)
-            rng = np.random.default_rng(self.global_seed)
+        total_elements = int(np.prod(kv_shape)) # Ensure total_elements is int
+        
+        # If the request fits in our precomputed buffer, just slice and reshape (Zero Copy if possible)
+        if total_elements <= self.buffer_size_elements:
+            # We use a rolling start index based on the key hash to simulate "different" data
+            # without the cost of generation.
+            if key:
+                seed = self._seed_from_key(key)
+                start_idx = int(seed % (self.buffer_size_elements - total_elements)) # Ensure start_idx is int
+            else:
+                start_idx = 0
+                
+            flat_view = self.precomputed_buffer[start_idx : start_idx + total_elements]
+            return flat_view.reshape(kv_shape)
+            
         else:
-            # Generate a seed deterministically from the key and global seed
-            seed = self._seed_from_key(key)
-            rng = np.random.default_rng(seed & 0xFFFFFFFF)
-
-        data = rng.uniform(-1.0, 1.0, size=kv_shape).astype(dtype)
-        return data
+            # Fallback for extremely large requests (rare): Tile the buffer
+            # This is slower but safe.
+            repeats = int((total_elements + self.buffer_size_elements - 1) // self.buffer_size_elements)
+            large_data = np.tile(self.precomputed_buffer, repeats)[:total_elements]
+            return large_data.reshape(kv_shape)
 
 
 # ============================================================================ 
@@ -1114,7 +1130,8 @@ class MultiTierCache:
                  cache_dir: str = None,
                  eviction_policy: str = 'lru',
                  performance_profile: str = 'latency',
-                 seed: Optional[int] = None):
+                 seed: Optional[int] = None,
+                 max_concurrent_allocs: int = 0):
 
         self.model_config = model_config
         self.gpu_memory_limit = gpu_memory_gb * 1024**3
@@ -1122,6 +1139,7 @@ class MultiTierCache:
         self.eviction_policy = eviction_policy
         self.performance_profile = performance_profile
         self.seed = seed
+        self.max_concurrent_allocs = max_concurrent_allocs
 
         # Initialize storage backends for each tier.
         self.backends = {}
@@ -1146,6 +1164,13 @@ class MultiTierCache:
         self.metadata_lock = threading.Lock()  # For coarse-grained operations on the cache_entries dict itself.
         self.memory_lock = threading.Lock()     # For updating the gpu_memory_used and cpu_memory_used counters.
         self.stats_lock = threading.Lock()      # For updating the performance statistics dictionary.
+        
+        # Semaphore to limit concurrent allocations (bounds RAM usage).
+        # If max_concurrent_allocs is 0 or None, no limit is applied.
+        if self.max_concurrent_allocs and self.max_concurrent_allocs > 0:
+            self.allocation_semaphore = threading.Semaphore(self.max_concurrent_allocs)
+        else:
+            self.allocation_semaphore = None
 
         # Dictionary for collecting a wide range of performance metrics.
         self.stats = {
@@ -1184,6 +1209,295 @@ class MultiTierCache:
                 self.entry_locks[key] = threading.Lock()
             return self.entry_locks[key]
 
+    # ========================================================================
+    # WATERFALL LRU EVICTION METHODS
+    # These methods implement a hierarchical cache eviction strategy where
+    # new (hot) data always targets the fastest tier, and LRU entries cascade
+    # down the hierarchy: GPU -> CPU -> NVMe
+    # ========================================================================
+
+    def _get_tier_order(self) -> List[str]:
+        """
+        Returns the tier hierarchy from fastest to slowest.
+        If GPU is not available, CPU becomes the top tier.
+        """
+        tiers = []
+        if 'gpu' in self.backends:
+            tiers.append('gpu')
+        tiers.extend(['cpu', 'nvme'])
+        return tiers
+
+    def _get_tier_limit(self, tier: str) -> float:
+        """Get the memory limit for a tier in bytes."""
+        if tier == 'gpu':
+            return self.gpu_memory_limit
+        elif tier == 'cpu':
+            return self.cpu_memory_limit
+        else:
+            return float('inf')  # NVMe is considered unlimited
+
+    def _get_tier_usage(self, tier: str) -> float:
+        """Get the current memory usage for a tier in bytes."""
+        if tier == 'gpu':
+            return self.gpu_memory_used
+        elif tier == 'cpu':
+            return self.cpu_memory_used
+        else:
+            return 0  # NVMe usage not tracked
+
+    def _update_tier_usage(self, tier: str, delta: int):
+        """Update the memory usage tracking for a tier."""
+        if tier == 'gpu':
+            self.gpu_memory_used = max(0, self.gpu_memory_used + delta)
+        elif tier == 'cpu':
+            self.cpu_memory_used = max(0, self.cpu_memory_used + delta)
+        # NVMe doesn't track usage
+
+    def _get_lru_entries_in_tier(self, tier: str) -> List[Tuple[str, dict]]:
+        """
+        Get all cache entries in a specific tier, sorted by LRU order.
+        Returns list of (key, entry_dict) tuples, oldest access first.
+        """
+        with self.metadata_lock:
+            entries = [
+                (k, dict(v))  # Copy to avoid mutation issues
+                for k, v in self.cache_entries.items()
+                if v['location'] == tier
+            ]
+        # Sort by last_access (primary), then by access_count (secondary)
+        # Lower values = older/colder = evict first
+        entries.sort(key=lambda x: (x[1]['last_access'], x[1].get('access_count', 0)))
+        return entries
+
+    def _demote_entry(self, key: str, from_tier: str, to_tier: str) -> Tuple[bool, float]:
+        """
+        Move a cache entry from one tier to a lower (slower) tier.
+        
+        This is the core operation for waterfall eviction. It reads the data
+        from the source tier, writes it to the destination tier, and updates
+        all metadata atomically.
+        
+        Args:
+            key: The cache key to demote
+            from_tier: Source tier ('gpu' or 'cpu')
+            to_tier: Destination tier ('cpu' or 'nvme')
+            
+        Returns:
+            Tuple of (success: bool, total_latency: float)
+        """
+        entry_lock = self._get_entry_lock(key)
+        
+        with entry_lock:
+            # Verify entry still exists and is in the expected tier
+            with self.metadata_lock:
+                if key not in self.cache_entries:
+                    return False, 0.0
+                entry = self.cache_entries[key]
+                current_location = entry['location']
+                if current_location != from_tier:
+                    # Entry was already moved by another thread - that's okay
+                    return True, 0.0
+                size = entry['size']
+
+            try:
+                # Step 1: Read from source tier
+                data, read_timing = self.backends[from_tier].read(key)
+                
+                # Step 2: Write to destination tier
+                write_timing = self.backends[to_tier].write(key, data)
+                
+                # Step 3: Delete from source tier (only after successful write)
+                self.backends[from_tier].delete(key)
+                
+                # Step 4: Update metadata atomically
+                with self.metadata_lock:
+                    if key in self.cache_entries:
+                        self.cache_entries[key]['location'] = to_tier
+                
+                # Step 5: Update memory tracking
+                # NOTE: We only decrement the source tier here. The destination tier's
+                # space was already reserved atomically by _ensure_space_in_tier() before
+                # this demotion was triggered. Adding to to_tier here would double-count.
+                with self.memory_lock:
+                    self._update_tier_usage(from_tier, -size)
+                
+                # Step 6: Update statistics
+                with self.stats_lock:
+                    self.stats['evictions'] += 1
+                    if to_tier == 'cpu':
+                        self.stats['offloads_cpu'] += 1
+                    elif to_tier == 'nvme':
+                        self.stats['offloads_nvme'] += 1
+                        # Track tokens processed for NVMe throughput calculation
+                        # Assuming size is bytes, and we know dtype size from model config
+                        # But simpler: we can estimate tokens from size if needed, or just track bytes
+                        # The user asked for 'nvme_tokens_processed'.
+                        # We can approximate tokens = size / (2 * layers * heads * dim * dtype_size)
+                        # Or just use the 'num_tokens' if we had it.
+                        # Since we don't have num_tokens easily here without looking up the key again or storing it,
+                        # let's look at the entry dict which should have it if we stored it.
+                        # The current cache_entries dict stores: 'location', 'size', 'last_access', 'access_count'.
+                        # It does NOT store num_tokens.
+                        # However, size is directly proportional.
+                        # Let's just track bytes for now and convert later if needed, OR
+                        # better yet, let's add num_tokens to the cache entry metadata in allocate_cache.
+                        # For now, to fix the immediate request without changing data structures too much:
+                        # We will estimate tokens based on size.
+                        # size = num_tokens * layers * 2 * heads * dim * 2 (for float16)
+                        # so num_tokens = size / (layers * 4 * heads * dim)
+                        bytes_per_token = (
+                            self.model_config.num_layers * 
+                            2 * # K and V
+                            self.model_config.kv_heads * 
+                            self.model_config.kv_dim_per_head * 
+                            2 # float16 bytes
+                        )
+                        tokens = int(size / bytes_per_token)
+                        self.stats['nvme_tokens_processed'] += tokens
+                
+                total_latency = read_timing.total + write_timing.total
+                return True, total_latency
+                
+            except Exception as e:
+                print(f"[KVCache] Failed to demote {key} from {from_tier} to {to_tier}: {e}")
+                return False, 0.0
+
+    def _ensure_space_in_tier(self, tier: str, required_bytes: int, recursion_depth: int = 0) -> bool:
+        """
+        Ensure there's enough space in a tier by evicting LRU entries.
+        
+        This implements the waterfall eviction strategy:
+        1. If the tier has space, return immediately
+        2. Otherwise, find the LRU entry in this tier
+        3. Recursively ensure space in the next tier down
+        4. Demote the LRU entry to the next tier
+        5. Repeat until enough space is available
+        
+        Args:
+            tier: The tier to make space in ('gpu' or 'cpu')
+            required_bytes: Number of bytes needed
+            recursion_depth: Safety counter to prevent infinite recursion
+            
+        Returns:
+            True if space was successfully made available, False otherwise
+        """
+        # NVMe is the sink - always has space
+        if tier == 'nvme':
+            return True
+        
+        # Safety limit to prevent runaway eviction cascades
+        max_recursion = 10
+        if recursion_depth > max_recursion:
+            print(f"[KVCache] Warning: Hit recursion limit in _ensure_space_in_tier")
+            return False
+        
+        tier_order = self._get_tier_order()
+        try:
+            tier_idx = tier_order.index(tier)
+        except ValueError:
+            return False
+        
+        next_tier = tier_order[tier_idx + 1] if tier_idx + 1 < len(tier_order) else None
+        if next_tier is None:
+            return False
+        
+        limit = self._get_tier_limit(tier)
+        target_usage = limit * 0.8  # Keep 20% buffer consistent with original code
+        
+        # If the entry is larger than the tier can physically hold, skip to next tier
+        if required_bytes > limit * 0.95:  # Allow up to 95% for a single large entry
+            return False
+        
+        # Calculate a reasonable eviction limit based on tier capacity.
+        # For large models (e.g., 70B), entries can be hundreds of MB each,
+        # so we may need to evict many entries to make room for one large request.
+        # Use the number of entries in the tier as a guide, with a minimum of 1000.
+        entries_in_tier = len(self._get_lru_entries_in_tier(tier))
+        # FIX: Cap the max evictions to prevent infinite loops if we can't clear enough space
+        # The previous logic could loop forever if entries_in_tier kept growing or didn't reduce fast enough.
+        # We set a hard cap of 5000 or slightly more than current entries.
+        max_evictions_per_call = min(5000, max(1000, entries_in_tier + 100))
+        eviction_count = 0
+        
+        while eviction_count < max_evictions_per_call:
+            # Check if we have enough space now
+            with self.memory_lock:
+                current_usage = self._get_tier_usage(tier)
+                # Normal case: fit within the 80% target
+                if current_usage + required_bytes <= target_usage:
+                    # FIX: Atomic Reservation
+                    # We must reserve the space NOW, inside the lock, to prevent other threads
+                    # from seeing this space as free and over-subscribing the tier.
+                    self._update_tier_usage(tier, required_bytes)
+                    return True
+                
+                # Large entry case: if we've cleared the tier, allow up to 95% of limit
+                if current_usage < limit * 0.05 and required_bytes <= limit * 0.95:
+                    # FIX: Atomic Reservation here too
+                    self._update_tier_usage(tier, required_bytes)
+                    return True
+            
+            # Find the LRU entry in this tier
+            lru_entries = self._get_lru_entries_in_tier(tier)
+            
+            if not lru_entries:
+                # No entries to evict. This can happen due to:
+                # 1. Race condition: in-flight writes not yet registered in cache_entries
+                # 2. Accounting mismatch from failed writes
+                # Recalculate actual usage from entries to fix any drift.
+                with self.metadata_lock:
+                    actual_usage = sum(
+                        entry['size'] for entry in self.cache_entries.values()
+                        if entry['location'] == tier
+                    )
+                with self.memory_lock:
+                    if tier == 'gpu':
+                        self.gpu_memory_used = actual_usage
+                    elif tier == 'cpu':
+                        self.cpu_memory_used = actual_usage
+                
+                # Check if we now have space after recalculation
+                # Note: We need to re-acquire lock to check and reserve safely, 
+                # but since we just updated it, let's do a quick check.
+                with self.memory_lock:
+                    current_usage = self._get_tier_usage(tier)
+                    if current_usage + required_bytes <= target_usage:
+                        self._update_tier_usage(tier, required_bytes)
+                        return True
+                
+                # Tier is empty but entry still doesn't fit — too large for this tier
+                return False
+            
+            # Early exit optimization: if tier is nearly empty (< 20% used) but
+            # we still can't fit, the entry is probably too large for this tier
+            total_size_in_tier = sum(e['size'] for _, e in lru_entries)
+            if total_size_in_tier < limit * 0.2 and required_bytes > target_usage * 0.5:
+                # Tier almost empty but entry > 50% of usable space — skip to next tier
+                return False
+            
+            lru_key, lru_entry = lru_entries[0]
+            lru_size = lru_entry['size']
+            
+            # Recursively ensure the next tier has space for this entry
+            if not self._ensure_space_in_tier(next_tier, lru_size, recursion_depth + 1):
+                print(f"[KVCache] Warning: Could not make space in {next_tier} for demotion")
+                # If we can't move the LRU item, we can't make space. 
+                # We should probably abort to avoid spinning.
+                return False
+            
+            # Demote the LRU entry to the next tier
+            success, _ = self._demote_entry(lru_key, tier, next_tier)
+            if not success:
+                # Entry might have been moved by another thread, try next LRU
+                pass
+            
+            eviction_count += 1
+        
+        # Hit eviction limit — this can happen under heavy concurrent load
+        # when many threads are competing for limited tier space. This is
+        # expected behavior; the entry will fall through to the next tier.
+        return False
+
     def allocate_cache(self, key: str, num_tokens: int, phase: InferencePhase = InferencePhase.PREFILL) -> Tuple[bool, str, float]:
         """
         Allocates and writes a new KV cache entry to the most appropriate tier.
@@ -1202,7 +1516,22 @@ class MultiTierCache:
             if key in self.cache_entries:
                 return True, self.cache_entries[key]['location'], 0.0
 
-        # Generate the KV cache data. This is computationally expensive and done outside locks.
+        # Use semaphore to limit concurrent allocations if configured.
+        # This bounds RAM usage by limiting how many threads can hold large
+        # data arrays simultaneously.
+        if self.allocation_semaphore:
+            self.allocation_semaphore.acquire()
+        
+        try:
+            return self._allocate_cache_inner(key, num_tokens, phase)
+        finally:
+            if self.allocation_semaphore:
+                self.allocation_semaphore.release()
+
+    def _allocate_cache_inner(self, key: str, num_tokens: int, phase: InferencePhase) -> Tuple[bool, str, float]:
+        """Inner implementation of allocate_cache, called within semaphore."""
+        
+        # Generate the KV cache data. This is the RAM-heavy operation.
         try:
             data = self.generator.generate(sequence_length=num_tokens, key=key)
         except MemoryError:
@@ -1222,20 +1551,46 @@ class MultiTierCache:
             self.stats['write_operations'] += 1
             self.stats['total_write_bytes'] += size_bytes
 
-        # --- Tiering Logic ---
-        # Decide which tier to write to based on available memory.
-        with self.memory_lock:
-            # Tier 1: GPU. Check if there's space in the GPU budget (with a 20% buffer).
-            if 'gpu' in self.backends and self.gpu_memory_used + size_bytes < self.gpu_memory_limit * 0.8:
-                self.gpu_memory_used += size_bytes
-                allocated_tier = 'gpu'
-            # Tier 2: CPU. Check if there's space in the CPU budget.
-            elif self.cpu_memory_used + size_bytes < self.cpu_memory_limit * 0.8:
-                self.cpu_memory_used += size_bytes
-                allocated_tier = 'cpu'
-            # Tier 3: NVMe. If no space in RAM, offload to disk.
-            else:
+        # --- Waterfall LRU Tiering Logic ---
+        # New data is always "hot", so we try to place it in the fastest tier.
+        # If the fast tier is full, we evict LRU entries down the hierarchy
+        # (GPU -> CPU -> NVMe) to make room at the top.
+        #
+        # This ensures the invariant: hottest data lives in the fastest tier.
+        #
+        #    +-----------+
+        #    |    GPU    |  <- New writes target here first
+        #    +-----------+
+        #         |  LRU eviction (demote to CPU)
+        #         v
+        #    +-----------+
+        #    |    CPU    |
+        #    +-----------+
+        #         |  LRU eviction (demote to NVMe)
+        #         v
+        #    +-----------+
+        #    |   NVMe    |  <- Cold data sinks here
+        #    +-----------+
+        #
+        tier_order = self._get_tier_order()
+        allocated_tier = None
+        
+        # Try each tier from fastest to slowest
+        for tier in tier_order:
+            if tier == 'nvme':
+                # NVMe is the fallback - always has space
                 allocated_tier = 'nvme'
+                break
+            
+            # Try to ensure space in this tier (may trigger cascade evictions)
+            if self._ensure_space_in_tier(tier, size_bytes):
+                # Space is already reserved by _ensure_space_in_tier atomically
+                allocated_tier = tier
+                break
+        
+        # Final fallback to NVMe if all else fails
+        if allocated_tier is None:
+            allocated_tier = 'nvme'
 
         # Perform the actual write operation to the chosen backend.
         try:
@@ -1275,10 +1630,7 @@ class MultiTierCache:
         except Exception as e:
             # If the write fails, roll back the memory reservation.
             with self.memory_lock:
-                if allocated_tier == 'gpu':
-                    self.gpu_memory_used -= size_bytes
-                elif allocated_tier == 'cpu':
-                    self.cpu_memory_used -= size_bytes
+                self._update_tier_usage(allocated_tier, -size_bytes)
             del data
             return False, 'none', 0.0
 
@@ -2033,7 +2385,8 @@ class IntegratedBenchmark:
                  performance_profile: str = 'latency',
                  use_burst_trace: bool = False,
                  burst_trace_path: Optional[str] = None,
-                 seed: Optional[int] = None):
+                 seed: Optional[int] = None,
+                 max_concurrent_allocs: int = 0):
 
         self.model_config = model_config
         self.num_users = num_users
@@ -2050,6 +2403,7 @@ class IntegratedBenchmark:
         self.use_burst_trace = use_burst_trace
         self.burst_trace_path = burst_trace_path
         self.seed = seed
+        self.max_concurrent_allocs = max_concurrent_allocs
         self.burst_requests: List[Tuple[int, int]] = []
         if self.use_burst_trace:
             self._load_burst_trace()
@@ -2061,7 +2415,8 @@ class IntegratedBenchmark:
             cpu_memory_gb=cpu_memory_gb,
             cache_dir=cache_dir,
             performance_profile=performance_profile,
-            seed=seed
+            seed=seed,
+            max_concurrent_allocs=max_concurrent_allocs
         )
         self.conversation_manager = ConversationManager()
         self.prefix_cache_manager = PrefixCacheManager(self.cache) if enable_prefix_caching else None
@@ -2473,6 +2828,8 @@ class IntegratedBenchmark:
             print(f"    - Mode: {self.autoscaler.mode}")
         print(f"  - QoS Support: Enabled (Interactive/Responsive/Batch)")
         print(f"  - Trace-Driven (BurstGPT): {'Enabled' if self.use_burst_trace else 'Disabled'}")
+        if self.max_concurrent_allocs > 0:
+            print(f"  - Max Concurrent Allocations: {self.max_concurrent_allocs} (bounds RAM usage)")
         print("=" * 80)
 
         users = []
@@ -2812,6 +3169,9 @@ def main():
     parser.add_argument('--output', type=str, default=f"benchmark_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", help='Output file for results')
     parser.add_argument('--seed', type=int, default=None,
                         help='Seed for random number generators to ensure reproducibility.')
+    parser.add_argument('--max-concurrent-allocs', type=int, default=0,
+                        help='Limit concurrent allocations to bound RAM usage. 0 = unlimited. '
+                             'Recommended: 8-16 for large models to prevent memory explosion.')
 
     args = parser.parse_args()
 
@@ -2846,7 +3206,8 @@ def main():
         performance_profile=args.performance_profile,
         use_burst_trace=args.use_burst_trace,
         burst_trace_path=args.burst_trace_path,
-        seed=args.seed
+        seed=args.seed,
+        max_concurrent_allocs=args.max_concurrent_allocs
     )
 
     results = benchmark.run()

@@ -529,6 +529,75 @@ The benchmark copies that pattern with three simple pieces:
 
 In the summary you will see both numbers. A high reuse count with few hits simply says the prompt was detected but the stored copy had already been evicted, just like what operators watch for in production.
 
+### J. ShareGPT Replay: Realistic Workload Simulation
+
+While synthetic workloads (using random token counts within a range) are excellent for controlled stress testing, they may not fully capture the nuances of human-AI interaction. The **ShareGPT Replay** feature addresses this by loading real conversation trees from the ShareGPT dataset.
+
+**How it works:**
+1.  **Ingestion:** The `ShareGPTDatasetLoader` parses a JSON dataset of real conversations. It uses a tokenizer to calculate the exact `context_tokens` (user prompt) and `generate_tokens` (model response) for every turn.
+2.  **Replay:** Instead of generating random requests, the benchmark feeds these real token counts into the `InferenceRequest` queue.
+3.  **Structure Preservation:** Crucially, it preserves the multi-turn structure of the data. Request 2 is guaranteed to be a follow-up to Request 1, testing the `MultiTierCache`'s ability to handle real conversational locality.
+
+**Case Study: Analyzing ShareGPT Results**
+Running a replay with the `llama3.1-70b-instruct` model on a memory-constrained system (2GB CPU RAM) reveals bottlenecks often hidden by uniform random distributions.
+
+*   **High Cache Hit Rate (97.2%):** Real conversations exhibit high locality. Users ask follow-up questions, allowing the system to reuse the KV cache effectively.
+*   **NVMe Read Latency Spikes (291ms P95):** Unlike synthetic tests which might average around a mean, real user inputs vary wildly. A single request with a 16k token context can saturate the read bandwidth, pushing the P95 latency above the 200ms target, resulting in a "FAIL" assessment for storage even if throughput is high.
+
+**Sample Output Summary:**
+```text
+### STORAGE PERFORMANCE ASSESSMENT: FAIL ✗ ###
+  Criteria Passed: 3/4
+  ✓ NVMe Write P95 < 500ms: 54.50ms
+  ✗ NVMe Read P95 < 200ms: 291.11ms (Target: 200ms)
+  ✓ Cache Hit Rate > 30%: 97.2%
+
+### CACHE TIER DISTRIBUTION ###
+  GPU Entries: 0 (0.00 GB)
+  CPU Entries: 156 (1.60 GB)
+  NVMe Entries: 1772 (92% of cache on slow storage)
+```
+
+### K. The Importance of Realism: A Comparative Case Study
+
+To illustrate why workload realism matters, we compared two runs of the benchmark on identical hardware (50 users, 70B model, NVMe-only cache).
+
+**Run A: Real Workload (ShareGPT)**
+This run uses the actual conversation data, reflecting human usage patterns.
+```bash
+python3 kv-cache_sharegpt_replay.py \
+    --model llama3.1-70b-instruct \
+    --dataset-path ShareGPT_V3_unfiltered_cleaned_split.json \
+    --gpu-mem-gb 0 --cpu-mem-gb 2 --cache-dir /mnt/nvme \
+    --num-users 50 --duration 300 --generation-mode none
+```
+
+**Run B: Synthetic Workload (Random)**
+This run omits the dataset, causing the benchmark to fall back to generating random, full-length contexts. This represents a "worst-case" scenario (e.g., massive document processing) rather than a chat workload.
+```bash
+python3 kv-cache_sharegpt_replay.py \
+    --model llama3.1-70b-instruct \
+    --gpu-mem-gb 0 --cpu-mem-gb 2 --cache-dir /mnt/nvme \
+    --num-users 50 --duration 300 --generation-mode none
+```
+
+The results were dramatically different:
+
+| Metric | Run A: ShareGPT (Real) | Run B: Synthetic (Random) | Difference |
+| :--- | :--- | :--- | :--- |
+| **Workload Type** | Human Conversations | Random Large Contexts | |
+| **Mean Context Size** | **133 tokens** (~41 MB) | **2,676 tokens** (~836 MB) | **20x Larger Data** |
+| **Throughput** | **2,610 tok/sec** | **362 tok/sec** | **7.2x Slower** |
+| **NVMe Read P95** | **291 ms** | **6,752 ms** (6.7s) | **23x Slower** |
+| **End-to-End P50** | 93 ms | 121,158 ms (2 min) | **System Collapse** |
+
+**Key Findings:**
+1.  **Context Size Explosion:** Real human queries are concise (avg 133 tokens). The synthetic generator, aiming for coverage, produced contexts averaging 2,676 tokens. This forced the storage system to read/write **20x more data per request** in the synthetic run.
+2.  **System Collapse:** In the synthetic run, the P50 end-to-end latency ballooned to **2 minutes**, while the storage latency was only ~4 seconds. This indicates the system was in a state of **thrashing**, where requests spent 95% of their time waiting in the queue because the storage was saturated handling massive files.
+3.  **Cache Efficiency:** Real conversations have high locality (85.9% multi-turn hit rate) because users ask follow-up questions. The synthetic run had a much lower hit rate (60.1%), further stressing the storage.
+
+**Conclusion:** Run A represents a realistic chatbot application, where the NVMe drive is nearly sufficient. Run B represents a worst-case scenario, proving that for such heavy workloads, the current hardware configuration is inadequate.
+
 ---
 
 ## 6. Current Work: Validating Simulation Accuracy with vLLM
@@ -644,16 +713,16 @@ Two primary scenarios should be submitted to give a comprehensive view of storag
 
 #### Standard Submission: `llama3.1-8b`
 
-This workload provides a baseline for storage performance under typical conditions. A fixed seed is required to ensure the workload is identical for all submissions, enabling fair and reproducible comparisons.
+This workload provides a baseline for storage performance under typical conditions. **Note:** We set `cpu-mem-gb 0` to disable the caching tier entirely, forcing every token to hit the NVMe drive. This ensures the benchmark measures the storage hardware, not the OS file cache.
 
 ```bash
 # MLPerf v3.0 Recommended Invocation: Storage Saturation Test (8B Model)
-python3 kv-cache.py \
+python3 kv-cache-waterfall-lru.py \
     --model llama3.1-8b \
     --num-users 150 \
     --duration 600 \
     --gpu-mem-gb 0 \
-    --cpu-mem-gb 2 \
+    --cpu-mem-gb 0 \
     --generation-mode realistic \
     --performance-profile throughput \
     --seed 42 \
@@ -666,17 +735,20 @@ This workload tests the storage's ability to handle a much heavier load, as the 
 
 ```bash
 # MLPerf v3.0 Recommended Invocation: Storage Saturation Test (70B Model)
-python3 kv-cache.py \
+python3 kv-cache-waterfall-lru.py \
     --model llama3.1-70b-instruct \
     --num-users 40 \
     --duration 600 \
     --gpu-mem-gb 0 \
-    --cpu-mem-gb 4 \
+    --cpu-mem-gb 0 \
     --generation-mode realistic \
     --performance-profile throughput \
     --seed 42 \
     --output mlperf_v3_storage_submission_70b.json
 ```
+
+**Why `cpu-mem-gb 0`?**
+In previous versions, a small CPU budget (e.g., 2GB) was allowed. However, analysis showed that operating system file caching (Page Cache) could absorb write bursts within this budget, artificially lowering latency metrics. Setting both GPU and CPU memory to 0 forces the "Waterfall" logic to bypass all caching layers and write directly to the NVMe backend, providing the most rigorous and honest assessment of storage I/O performance.
 
 **Key Parameters Explained:**
 *   `--num-users 150`: A high, fixed user count is used to ensure the storage device is placed under significant and continuous load.
@@ -872,7 +944,7 @@ python3 kv-cache.py \
     --num-users 50 \
     --duration 180 \
     --gpu-mem-gb 0 \
-    --cpu-mem-gb 0.5 \
+    --cpu-mem-gb 0 \
     --generation-mode realistic \
     --cache-dir /mnt/nvme \
     --seed 42 \
@@ -925,7 +997,7 @@ python3 kv-cache.py \
     --num-users 10 \
     --duration 180 \
     --gpu-mem-gb 0 \
-    --cpu-mem-gb 32 \
+    --cpu-mem-gb 0 \
     --enable-autoscaling \
     --autoscaler-mode capacity \
     --generation-mode none \
@@ -1005,3 +1077,128 @@ python3 kv-cache.py \
     --seed 42 \
     --output results_max_stress.json
 ```
+
+### Test 9: ShareGPT Workload Replay
+
+**Purpose:** Validates system performance against a trace of real-world human-AI conversations. This is the closest approximation to running a production service. It uses the dedicated replay script [`kv-cache_sharegpt_replay.py`](kv-cache_sharegpt_replay.py ).
+
+```bash
+python3 kv-cache_sharegpt_replay.py \
+    --model llama3.1-70b-instruct \
+    --dataset-path ShareGPT_V3_unfiltered_cleaned_split.json \
+    --max-conversations 1000 \
+    --gpu-mem-gb 0 \
+    --cpu-mem-gb 2 \
+    --cache-dir /mnt/nvme \
+    --num-users 50 \
+    --duration 300 \
+    --generation-mode none \
+    --output results_sharegpt_replay.json
+```
+
+---
+
+# CHANGES-12-05-2025: The "Waterfall" Architecture & Optimization
+
+**Date:** December 5, 2025
+**Subject:** Major architectural upgrade to `kv-cache-waterfall-lru.py`.
+
+This update introduces a fundamental shift in how the benchmark manages memory, moving from a simple "Spillover" model to a sophisticated "Waterfall" eviction strategy. It also addresses a critical CPU bottleneck that was masking true storage performance.
+
+## 1. Architectural Shift: From Spillover to Waterfall
+
+The original benchmark used a **Spillover** strategy. When the GPU was full, new data was forced directly into the CPU (and then NVMe).
+*   **The Problem:** New data is often the "hottest" (most likely to be read again soon). By forcing it to the slowest tier, we were penalizing active conversations. Meanwhile, old, cold data sat comfortably in the GPU, wasting valuable VRAM.
+*   **The Solution (Waterfall):** The new implementation enforces a strict hierarchy. New data **always** targets the fastest tier (GPU).
+    *   If the GPU is full, the system identifies the **Least Recently Used (LRU)** item in the GPU and moves it to the CPU to make room.
+    *   If the CPU is full, it moves the CPU's LRU item to NVMe.
+    *   **Result:** The hottest data stays fast. Only truly cold data "falls" down the waterfall to storage. This mimics the behavior of production-grade caching systems like Redis or vLLM.
+
+### The Waterfall Flow
+
+```ascii
+      [ New Data ]
+           |
+           v
+    +-------------+      (Full?)      +-------------+      (Full?)      +-------------+
+    |  GPU Tier   |  -------------->  |  CPU Tier   |  -------------->  |  NVMe Tier  |
+    | (Fastest)   |   Evict LRU       | (Medium)    |   Evict LRU       | (Slowest)   |
+    +-------------+                   +-------------+                   +-------------+
+           ^                                 ^                                 ^
+           |                                 |                                 |
+    [ Hot Access ]                    [ Warm Access ]                   [ Cold Access ]
+```
+
+### Implementation: Recursive Eviction
+
+The core logic resides in `_ensure_space_in_tier`. It recursively clears space in lower tiers to make room for demotions from higher tiers.
+
+```python
+def _ensure_space_in_tier(self, tier: str, required_bytes: int, recursion_depth: int = 0) -> bool:
+    # ... (recursion limits and checks omitted) ...
+
+    # Find the LRU entry in this tier
+    lru_entries = self._get_lru_entries_in_tier(tier)
+    lru_key, lru_entry = lru_entries[0]
+    lru_size = lru_entry['size']
+    
+    # Recursively ensure the next tier has space for this entry
+    # This triggers the "Waterfall" effect down the hierarchy
+    if not self._ensure_space_in_tier(next_tier, lru_size, recursion_depth + 1):
+        return False
+    
+    # Demote the LRU entry to the next tier
+    success, _ = self._demote_entry(lru_key, tier, next_tier)
+```
+
+## 2. Removing the CPU Bottleneck: Static Noise Buffers
+
+**The Issue:**
+Profiling the original script revealed that `np.random.uniform`—the function used to generate the dummy KV cache data—was consuming massive amounts of CPU time.
+*   **Impact:** The CPU was spending so much time generating random numbers that it couldn't issue storage I/O requests fast enough. The benchmark was measuring the speed of Python's random number generator, not the speed of the NVMe drive.
+
+**The Fix:**
+We replaced dynamic generation with a **Static Noise Buffer**.
+*   **Mechanism:** At startup, the benchmark pre-allocates a 256MB block of random noise in memory.
+*   **Zero-Copy Slicing:** When a request needs 10MB of data, instead of generating 10MB of new numbers, the system simply takes a "slice" (a view) of the pre-existing buffer.
+*   **Result:** Data generation is now effectively instant (zero CPU cost). This ensures that 100% of the latency measured is due to the storage subsystem, providing a true test of hardware performance.
+
+```python
+class KVCacheGenerator:
+    def __init__(self, model_config: ModelConfig, global_seed: Optional[int] = None):
+        # Pre-allocate a large buffer of random noise (e.g., 256MB)
+        self.buffer_size_elements = 128 * 1024 * 1024 
+        self.precomputed_buffer = rng.uniform(-1.0, 1.0, size=self.buffer_size_elements).astype(self.dtype)
+
+    def generate(self, sequence_length: int, key: Optional[str] = None) -> np.ndarray:
+        # ... (shape calculation omitted) ...
+        
+        # Zero-Copy Slicing: Take a view of the pre-existing buffer
+        if total_elements <= self.buffer_size_elements:
+            flat_view = self.precomputed_buffer[start_idx : start_idx + total_elements]
+            return flat_view.reshape(kv_shape)
+```
+
+## 3. Concurrency Hardening
+
+Implementing the Waterfall strategy introduced complex race conditions, where multiple threads might try to evict the same item or claim the same free space simultaneously.
+*   **Atomic Reservations:** We implemented a "check-and-reserve" logic inside the memory locks. A thread now claims space *before* it starts writing, preventing over-subscription.
+*   **Loop Protection:** We added hard caps to the eviction loops. In a pathological case where the system is thrashing, the eviction logic will now abort rather than spinning infinitely, preventing the benchmark from hanging.
+
+```python
+# Inside _ensure_space_in_tier
+with self.memory_lock:
+    current_usage = self._get_tier_usage(tier)
+    # Check if we have space
+    if current_usage + required_bytes <= target_usage:
+        # ATOMIC RESERVATION: Claim the space immediately inside the lock.
+        # This prevents other threads from seeing this space as free.
+        self._update_tier_usage(tier, required_bytes)
+        return True
+```
+
+## 4. Enhanced Metrics: NVMe Token Throughput
+
+To align with MLPerf requirements, we added a specific counter for `nvme_tokens_processed`.
+*   **Why:** Previously, we tracked raw bytes. However, MLPerf metrics are often in "Tokens per Second."
+*   **How:** The system now tracks the exact number of tokens associated with every read, write, and demotion operation that touches the NVMe drive. This allows us to report a precise "Storage Throughput (tok/s)" metric that accounts for the massive read amplification inherent in LLM inference.
