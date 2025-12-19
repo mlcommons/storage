@@ -1094,7 +1094,8 @@ class KVCacheGenerator:
             # without the cost of generation.
             if key:
                 seed = self._seed_from_key(key)
-                start_idx = int(seed % (self.buffer_size_elements - total_elements)) # Ensure start_idx is int
+                divisor = self.buffer_size_elements - total_elements
+                start_idx = int(seed % divisor) if divisor > 0 else 0
             else:
                 start_idx = 0
                 
@@ -2689,7 +2690,8 @@ class IntegratedBenchmark:
                 with self.results_lock: self.results['prefill_latencies'].append(write_latency)
 
             # 4. Simulate a RAG operation by reading random chunk caches.
-            if self.rag_manager and random.random() < 0.1: # 10% of requests are RAG queries
+            # NOTE: Check that documents exist to avoid race condition with RAG ingestion thread
+            if self.rag_manager and self.rag_manager.documents and random.random() < 0.1: # 10% of requests are RAG queries
                 doc_id = random.choice(list(self.rag_manager.documents.keys()))
                 chunks = self.rag_manager.retrieve_chunks(doc_id)
                 for chunk in chunks: # Read the KV cache for each retrieved chunk.
