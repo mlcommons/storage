@@ -1,7 +1,7 @@
 #!/bin/bash
 # KV Cache Storage Benchmark - Multi-Tier Performance Comparison
-# Hazem Awadallah, Kingston Digital, 2025
-# Assisted by Github Copilot
+# Kingston Digital, 2025
+# Apache 2.0 license
 # This script runs a comprehensive comparison of cache tier configurations for LLM inference workloads.
 # It automatically detects your hardware (GPU, RAM, storage) and runs 9 different test scenarios to show
 # you exactly where your data ends up and how fast it moves between tiers.
@@ -371,7 +371,7 @@ if should_run 'capacity-autoscale'; then
         --num-users "$capacity_start_users" \
         --duration "$autoscale_duration" \
         --gpu-mem-gb 0 \
-        --cpu-mem-gb 0 \
+        --cpu-mem-gb 4 \
         --enable-autoscaling \
         --autoscaler-mode capacity \
         --generation-mode none \
@@ -413,7 +413,7 @@ if should_run 'mlperf_submission'; then
         --num-users 150 \
         --duration 600 \
         --gpu-mem-gb 0 \
-        --cpu-mem-gb 0 \
+        --cpu-mem-gb 4 \
         --generation-mode realistic \
         --performance-profile throughput \
         --cache-dir "$cache_dir" \
@@ -428,7 +428,7 @@ if should_run 'mlperf_submission'; then
         --num-users 40 \
         --duration 600 \
         --gpu-mem-gb 0 \
-        --cpu-mem-gb 0 \
+        --cpu-mem-gb 4 \
         --generation-mode realistic \
         --performance-profile throughput \
         --cache-dir "$cache_dir" \
@@ -451,7 +451,7 @@ if should_run 'gpu-only'; then
             --num-users $users_baseline \
             --duration "$tier_duration" \
             --gpu-mem-gb $gpu_mem_gb \
-            --cpu-mem-gb 0 \
+            --cpu-mem-gb 4 \
             --generation-mode realistic \
             "${rag_args[@]}" \
             --seed 42 \
@@ -517,7 +517,7 @@ if should_run 'storage-only'; then
         --num-users $users_baseline \
         --duration "$tier_duration" \
         --gpu-mem-gb 0 \
-        --cpu-mem-gb 0 \
+        --cpu-mem-gb 4 \
         --generation-mode realistic \
         --cache-dir $cache_dir \
         "${rag_args[@]}" \
@@ -680,7 +680,7 @@ if should_run 'storage-saturation'; then
         --num-users $users_high \
         --duration "$saturation_duration" \
         --gpu-mem-gb 0 \
-        --cpu-mem-gb 0 \
+        --cpu-mem-gb 4 \
         --generation-mode realistic \
         --cache-dir $cache_dir \
         "${rag_args[@]}" \
