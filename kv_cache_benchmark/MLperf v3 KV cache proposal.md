@@ -1202,3 +1202,238 @@ with self.memory_lock:
 To align with MLPerf requirements, we added a specific counter for `nvme_tokens_processed`.
 *   **Why:** Previously, we tracked raw bytes. However, MLPerf metrics are often in "Tokens per Second."
 *   **How:** The system now tracks the exact number of tokens associated with every read, write, and demotion operation that touches the NVMe drive. This allows us to report a precise "Storage Throughput (tok/s)" metric that accounts for the massive read amplification inherent in LLM inference.
+---
+
+# CHANGES-01-09-2026: ShareGPT Integration, Unit Testing, and Excel Export
+
+**Date:** January 9, 2026
+**Subject:** Feature enhancements to support realistic workload replay, automated testing, and streamlined results analysis.
+
+This update consolidates the ShareGPT replay functionality into the main benchmark script, adds a comprehensive unit test suite, and introduces optional Excel export capabilities. These changes improve usability for both development validation and production benchmarking without introducing any regressions to the core simulation logic.
+
+## 1. ShareGPT Dataset Integration
+
+The original repository maintained two separate scripts: `kv-cache.py` for synthetic workloads and `kv-cache_sharegpt_replay.py` for real conversation replay. This created maintenance overhead and confused users about which script to use. We merged the ShareGPT functionality directly into `kv-cache.py`.
+
+**What Changed:**
+*   **New Class: `ShareGPTDatasetLoader`** (~150 lines) parses ShareGPT JSON files and uses tiktoken to calculate exact token counts for each conversation turn.
+*   **New Arguments:** The main script now accepts `--dataset-path`, `--max-conversations`, `--request-rate`, and `--max-requests` for controlling replay behavior.
+*   **Backward Compatibility:** When no dataset path is provided, the benchmark falls back to its original synthetic workload generation. Existing invocations work unchanged.
+
+**Why This Matters:**
+Real human conversations exhibit dramatically different patterns than synthetic workloads. In our validation testing, ShareGPT conversations averaged 133 tokens per context versus 2,676 tokens for synthetic generation—a 20x difference. This affects cache hit rates (85-97% vs 50-70%), throughput measurements, and the validity of capacity planning exercises.
+
+**Sample Invocation:**
+```bash
+python3 kv-cache.py \
+    --model llama3.1-8b \
+    --dataset-path ShareGPT_V3_unfiltered_cleaned_split.json \
+    --max-conversations 500 \
+    --num-users 50 \
+    --duration 300 \
+    --gpu-mem-gb 0 \
+    --cpu-mem-gb 4 \
+    --generation-mode realistic \
+    --cache-dir /mnt/nvme \
+    --seed 42 \
+    --output results_sharegpt.json
+```
+
+## 2. Storage Throughput Metric
+
+A critical addition for fair MLPerf Storage comparisons: we now report `storage_throughput_tokens_per_sec` alongside the existing wall-clock throughput.
+
+**The Problem:**
+Wall-clock throughput (`avg_throughput_tokens_per_sec`) includes concurrency artifacts, queue wait times, and other system-level effects. When comparing storage tiers, this metric can be misleading because a slower tier might appear faster simply due to different queueing behavior.
+
+**The Solution:**
+Storage throughput is calculated as:
+```
+storage_throughput = total_tokens / total_storage_io_time
+```
+
+This isolates the actual I/O performance from system-level effects, enabling apples-to-apples comparisons between configurations.
+
+**In the Output:**
+```
+### OVERALL PERFORMANCE ###
+  Avg Throughput: 1,630.77 tok/s      (wall-clock based)
+  Storage Throughput: 2,105.32 tok/s  (storage I/O based, NEW)
+```
+
+## 3. Unit Test Suite
+
+We added a comprehensive pytest-based test suite (`test_kv_cache.py`) that validates core functionality without running full benchmarks. This enables rapid development iteration and CI/CD integration.
+
+**Coverage:**
+The test suite includes 12 test classes covering:
+*   `TestModelConfig`: Validates KV cache size calculations for all 5 model configurations
+*   `TestInferenceRequest`: Tests cache key generation and latency tracking
+*   `TestQoSProfiles`: Verifies priority levels and SLA targets
+*   `TestKVCacheGenerator`: Confirms deterministic generation and precomputed buffer optimization
+*   `TestCPUMemoryBackend`: Tests write/read/delete/clear operations
+*   `TestNVMeBackend`: Validates file I/O and metadata tracking
+*   `TestGPUMemoryBackend`: CUDA tensor operations (auto-skipped without GPU)
+*   `TestConversationManager`: Multi-turn tracking and LRU eviction
+*   `TestUserSimulator`: Mixed user generation
+*   `TestMultiTierCache`: CPU-only mode allocation and access
+*   `TestMultiTierCacheWithGPU`: Full three-tier hierarchy (auto-skipped without GPU)
+*   `TestXLSXExport`: CSV/Excel export validation
+
+**Running Tests:**
+```bash
+# Full test suite with verbose output
+pytest test_kv_cache.py -v
+
+# Run specific test class
+pytest test_kv_cache.py -k "TestModelConfig" -v
+
+# Skip GPU tests explicitly
+pytest test_kv_cache.py -v -m "not skipif"
+```
+
+**Expected Runtime:** 3-5 seconds without GPU, 5-10 seconds with GPU.
+
+## 4. Excel Export Capability
+
+For users who analyze results in spreadsheets, we added optional Excel/CSV export via the `--xlsx-output` argument.
+
+**Dependencies:**
+*   `pandas` (required for export)
+*   `openpyxl` (optional; enables `.xlsx` format; without it, falls back to `.csv`)
+
+**Graceful Fallback:**
+*   If pandas is not installed, the export is skipped with a warning
+*   If openpyxl is not installed, the benchmark writes CSV instead of XLSX
+*   The benchmark never fails due to missing optional dependencies
+
+**Output Columns:**
+The export includes all key parameters and metrics in a single row:
+| Model | Num Users | Duration | GPU Mem | CPU Mem | Total Requests | Total Tokens | Avg Throughput | Storage Throughput | Cache Hit Rate | E2E P95 | Storage IO P95 |
+
+**Sample Invocation:**
+```bash
+python3 kv-cache.py \
+    --model llama3.1-8b \
+    --num-users 50 \
+    --duration 120 \
+    --gpu-mem-gb 0 \
+    --cpu-mem-gb 4 \
+    --seed 42 \
+    --output results.json \
+    --xlsx-output results.xlsx
+```
+
+## 5. Regression Analysis: No Core Logic Changes
+
+A detailed diff analysis between the original `kv-cache.py` and the enhanced version confirms that the core simulation logic remains identical:
+
+| Component | Status |
+|-----------|--------|
+| `MultiTierCache` class | Unchanged |
+| `allocate_cache()` eviction logic | Unchanged |
+| `access_cache()` read logic | Unchanged |
+| `KVCacheGenerator` precomputed buffer | Unchanged |
+| `GPUMemoryBackend`, `CPUMemoryBackend`, `NVMeBackend` | Unchanged |
+| `UserSimulator` | Unchanged |
+| QoS handling | Unchanged |
+| Autoscaling | Unchanged |
+| RAG workload | Unchanged |
+| Prefix caching | Unchanged |
+
+**What Was Added (Not Modified):**
+1. `ShareGPTDatasetLoader` class (new code, doesn't affect simulation)
+2. `storage_throughput_tokens_per_sec` metric (additional output, no behavior change)
+3. `--max-requests` argument (optional early termination, backward compatible)
+4. `--request-rate` argument (optional rate limiting, backward compatible)
+5. `--xlsx-output` argument (optional export, backward compatible)
+6. `export_results_to_xlsx()` function (new code, called after benchmark completes)
+
+Existing benchmark invocations produce identical results. The seed-based reproducibility guarantee is maintained.
+
+## 6. Updated Requirements
+
+The `requirements.txt` file now documents all dependencies:
+
+```
+# Core (required)
+numpy>=1.20.0
+
+# GPU support (optional)
+torch>=2.0.0
+
+# ShareGPT replay (optional)
+tiktoken>=0.5.0
+
+# Excel export (optional)
+pandas>=2.0.0
+openpyxl>=3.1.0
+
+# Unit testing (optional)
+pytest>=7.0.0
+```
+
+## 7. Recommended Invocations: ShareGPT Workloads
+
+### ShareGPT Storage Validation (8B Model)
+```bash
+python3 kv-cache.py \
+    --model llama3.1-8b \
+    --dataset-path ShareGPT_V3_unfiltered_cleaned_split.json \
+    --max-conversations 1000 \
+    --num-users 100 \
+    --duration 300 \
+    --gpu-mem-gb 0 \
+    --cpu-mem-gb 4 \
+    --generation-mode realistic \
+    --cache-dir /mnt/nvme \
+    --seed 42 \
+    --output results_sharegpt_8b.json \
+    --xlsx-output results_sharegpt_8b.xlsx
+```
+
+### ShareGPT High-Stress (70B Model)
+```bash
+python3 kv-cache.py \
+    --model llama3.1-70b-instruct \
+    --dataset-path ShareGPT_V3_unfiltered_cleaned_split.json \
+    --max-conversations 500 \
+    --request-rate 5.0 \
+    --num-users 50 \
+    --duration 600 \
+    --gpu-mem-gb 0 \
+    --cpu-mem-gb 8 \
+    --generation-mode none \
+    --cache-dir /mnt/nvme \
+    --seed 42 \
+    --output results_sharegpt_70b.json
+```
+
+### ShareGPT Fixed Request Count
+```bash
+python3 kv-cache.py \
+    --model llama3.1-8b \
+    --dataset-path ShareGPT_V3_unfiltered_cleaned_split.json \
+    --max-requests 10000 \
+    --num-users 75 \
+    --gpu-mem-gb 0 \
+    --cpu-mem-gb 4 \
+    --generation-mode realistic \
+    --cache-dir /mnt/nvme \
+    --seed 42 \
+    --output results_sharegpt_fixed.json
+```
+
+---
+
+## Summary of January 9, 2026 Changes
+
+| Feature | Description | Impact |
+|---------|-------------|--------|
+| ShareGPT Integration | Merged `kv-cache_sharegpt_replay.py` into main script | Real workload validation |
+| Storage Throughput Metric | Added `storage_throughput_tokens_per_sec` | Fair tier comparisons |
+| Unit Test Suite | 12 pytest test classes, ~80 tests | Development velocity |
+| Excel Export | `--xlsx-output` with CSV fallback | Easier analysis |
+| Elapsed Time Tracking | Added to summary output | Debugging support |
+
+No regressions were introduced. All existing invocations and seed-based reproducibility remain intact.

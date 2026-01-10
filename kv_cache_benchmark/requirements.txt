@@ -1,0 +1,23 @@
+# MLPerf Storage KV Cache Benchmark - Dependencies
+# Version: MLPerf Storage v3.0
+
+# Core dependencies (required)
+numpy>=1.20.0
+
+# GPU support (optional - enables GPU tier testing)
+torch>=2.0.0  # For CUDA tensor support
+# cupy-cuda12x  # Alternative to torch for GPU (uncomment if using CuPy)
+
+# ShareGPT replay workload (optional - enables realistic conversation replay)
+tiktoken>=0.5.0  # OpenAI tokenizer for ShareGPT dataset processing
+
+# Excel/CSV export (optional - enables --xlsx-output)
+pandas>=2.0.0
+openpyxl>=3.1.0  # Required for .xlsx output; without this, falls back to .csv
+
+# Unit testing (optional - for running test_kv_cache.py)
+pytest>=7.0.0
+
+# Wrapper script utilities (system packages, not pip)
+# bc - arbitrary precision calculator (apt install bc)
+# jq - JSON processor (apt install jq)

@@ -1,0 +1,36 @@
+=== LMCache vs KV-Cache Comparison: 20260106_233959 ===
+
+=== Hardware ===
+name, memory.total [MiB], driver_version
+NVIDIA H100 NVL, 95830 MiB, 580.95.05
+
+=== Software ===
+OS: Linux sped 6.5.0-15-generic #15~22.04.1-Ubuntu SMP PREEMPT_DYNAMIC Fri Jan 12 18:54:30 UTC 2 x86_64 x86_64 x86_64 GNU/Linux
+Python: Python 3.10.12
+vLLM: 0.13.0
+LMCache: unknown
+PyTorch: 2.9.0+cu128, CUDA: 12.8
+
+=== Configuration ===
+Model: mistralai/Mistral-7B-Instruct-v0.2 / mistral-7b
+Number of trials: 3
+Prompts per run: 500
+GPU memory for KV cache: 16GB
+CPU memory for KV cache: 32GB
+Cache directory: /mnt/nvme
+Dataset: ShareGPT_V3_unfiltered_cleaned_split.json
+
+=== LMCache Environment Variables ===
+LMCACHE_CHUNK_SIZE: 256 (production default)
+LMCACHE_LOCAL_CPU: True/False (per test)
+LMCACHE_MAX_LOCAL_CPU_SIZE: 32GB
+
+=== Memory ===
+               total        used        free      shared  buff/cache   available
+Mem:           251Gi       3.1Gi       191Gi       198Mi        57Gi       246Gi
+Swap:             0B          0B          0B
+
+=== Disk ===
+Filesystem      Size  Used Avail Use% Mounted on
+/dev/nvme4n1    7.0T  2.5T  4.6T  35% /mnt
+

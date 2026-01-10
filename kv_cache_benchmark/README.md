@@ -4,7 +4,7 @@ A storage benchmarking tool for Large Language Model inference systems. This ben
 
 **Author:** Hazem Awadallah, Kingston Digital
 **License:** Apache 2.0
-**Version:** MLPerf Storage v3.0
+**Version:** MLPerf Storage v3.0 (Enhanced)
 
 ---
 
@@ -16,10 +16,13 @@ A storage benchmarking tool for Large Language Model inference systems. This ben
 4. [Installation](#installation)
 5. [Quick Start](#quick-start)
 6. [Running the Benchmark](#running-the-benchmark)
-7. [Using the Wrapper Script](#using-the-wrapper-script)
-8. [Understanding Results](#understanding-results)
-9. [MLPerf Submission Guidelines](#mlperf-submission-guidelines)
-10. [Troubleshooting](#troubleshooting)
+7. [ShareGPT Replay Workloads](#sharegpt-replay-workloads)
+8. [Using the Wrapper Script](#using-the-wrapper-script)
+9. [Understanding Results](#understanding-results)
+10. [Unit Testing](#unit-testing)
+11. [Excel Export](#excel-export)
+12. [MLPerf Submission Guidelines](#mlperf-submission-guidelines)
+13. [Troubleshooting](#troubleshooting)
 
 ---
 
@@ -96,18 +99,6 @@ The benchmark implements a three-tier memory hierarchy that mirrors production L
 │  └─────────────────────────────────────────────────────────────────────┘    │
 │                                                                              │
 └─────────────────────────────────────────────────────────────────────────────┘
-
-                                     │
-                                     ▼
-                    ┌──────────────────────────────────────┐
-                    │         Statistics Collector         │
-                    │                                      │
-                    │  - Latency percentiles (P50/P95/P99) │
-                    │  - Throughput (tokens/sec)           │
-                    │  - Cache hit rates                   │
-                    │  - Tier distribution                 │
-                    │  - QoS compliance                    │
-                    └──────────────────────────────────────┘
 ```
 
 ### Key Components
@@ -152,6 +143,12 @@ The benchmark implements a three-tier memory hierarchy that mirrors production L
 2. Install Python dependencies:
 
 ```bash
+pip install -r requirements.txt
+```
+
+Or install core dependencies manually:
+
+```bash
 pip install numpy
 ```
 
@@ -161,7 +158,19 @@ pip install numpy
 pip install torch  # or cupy-cuda12x for CuPy
 ```
 
-4. Verify the installation:
+4. For ShareGPT replay workloads (optional):
+
+```bash
+pip install tiktoken
+```
+
+5. For Excel export (optional):
+
+```bash
+pip install pandas openpyxl
+```
+
+6. Verify the installation:
 
 ```bash
 python3 kv-cache.py --help
@@ -228,23 +237,22 @@ Autoscaling:
   --target-saturation N Target storage saturation for QoS autoscaling (0.0-1.0,
                         default: 0.8)
 
+ShareGPT Replay (NEW):
+  --dataset-path PATH   Path to ShareGPT JSON for realistic workload replay
+  --max-conversations N Max conversations to load from dataset (default: 500)
+  --request-rate RATE   Target request arrival rate (requests/sec)
+  --max-requests N      Stop after N requests (for fixed-length runs)
+
 RAG Workload:
   --enable-rag          Enable RAG workload simulation
   --rag-num-docs N      Number of RAG documents to ingest
-
-Trace-Driven Workloads:
-  --use-burst-trace     Use BurstGPT trace for workload generation instead of
-                        synthetic traffic
-  --burst-trace-path PATH
-                        Path to the BurstGPT trace CSV file
-  --validation-trace PATH
-                        Path to a real-world trace file for accuracy validation
 
 Performance and Output:
   --performance-profile Profile for pass/fail criteria. Choices:
                         - latency: Default, evaluates P95 latency targets
                         - throughput: For MLPerf submission, evaluates tokens/sec
   --output FILE         Write results to JSON file
+  --xlsx-output FILE    Export results to Excel/CSV file (NEW)
   --seed N              Seed for random number generators (required for MLPerf
                         reproducibility)
 
@@ -259,7 +267,7 @@ Resource Limits:
 
 #### Scenario 1: Storage-Only Baseline
 
-Isolate your NVMe drive by setting both GPU and CPU memory to zero. This tells you the raw performance of your storage.
+Isolate your NVMe drive by setting GPU memory to zero. This tells you the raw performance of your storage.
 
 ```bash
 python3 kv-cache.py \
@@ -273,8 +281,6 @@ python3 kv-cache.py \
     --seed 42 \
     --output results_storage_only.json
 ```
-
-**What to look for:** NVMe read P95 should be under 200ms, write P95 under 500ms. If your drive cannot meet these targets here, it will bottleneck any multi-tier configuration.
 
 #### Scenario 2: Realistic Production Setup
 
@@ -292,8 +298,6 @@ python3 kv-cache.py \
     --seed 42 \
     --output results_production.json
 ```
-
-**What to look for:** Compare end-to-end latency against the storage-only test. You should see significant improvement. Check the cache tier distribution to understand how data flows through your hierarchy.
 
 #### Scenario 3: Find Maximum User Count (QoS Mode)
 
@@ -314,8 +318,6 @@ python3 kv-cache.py \
     --output results_autoscale_qos.json
 ```
 
-**What to look for:** The autoscaling_stats section in the output shows the final stable user count. Use this number (minus a safety margin) to configure your production load balancer.
-
 #### Scenario 4: Find Peak Storage Throughput (Capacity Mode)
 
 Discover the absolute maximum I/O your storage can deliver by ignoring latency constraints.
@@ -335,26 +337,100 @@ python3 kv-cache.py \
     --output results_capacity.json
 ```
 
-**What to look for:** The test stops when throughput plateaus. The peak_throughput value represents your storage device's maximum capability for this workload.
+---
 
-#### Scenario 5: RAG Workload
+## ShareGPT Replay Workloads
 
-Test the bursty I/O patterns characteristic of Retrieval-Augmented Generation.
+While synthetic workloads are excellent for controlled stress testing, they may not capture the nuances of real human-AI interaction. The **ShareGPT Replay** feature addresses this by loading actual conversation data.
+
+### Why Use ShareGPT?
+
+Real conversations exhibit different patterns than synthetic workloads:
+- **Higher cache locality**: Users ask follow-up questions, reusing context
+- **Variable context sizes**: Real queries vary wildly (10-16,000 tokens)
+- **Multi-turn structure**: Conversation flows are preserved
+
+### Downloading the ShareGPT Dataset
+
+Download the full dataset from Hugging Face (~1.2 GB):
+
+```bash
+wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split.json
+```
+
+**Alternative: Smaller subset for quick testing (~40 MB):**
+
+```bash
+wget https://huggingface.co/datasets/anon8231489123/ShareGPT_Vicuna_unfiltered/resolve/main/ShareGPT_V3_unfiltered_cleaned_split_no_imsorry.json
+```
+
+### Basic ShareGPT Invocation
 
 ```bash
 python3 kv-cache.py \
     --model llama3.1-8b \
-    --num-users 30 \
+    --dataset-path ShareGPT_V3_unfiltered_cleaned_split.json \
+    --max-conversations 500 \
+    --num-users 50 \
     --duration 300 \
-    --gpu-mem-gb 16 \
-    --cpu-mem-gb 32 \
-    --enable-rag \
-    --rag-num-docs 20 \
+    --gpu-mem-gb 0 \
+    --cpu-mem-gb 4 \
     --generation-mode realistic \
     --cache-dir /mnt/nvme \
     --seed 42 \
-    --output results_rag.json
+    --output results_sharegpt.json
 ```
+
+### ShareGPT with Rate Limiting
+
+Control the request arrival rate for steady-state testing:
+
+```bash
+python3 kv-cache.py \
+    --model llama3.1-70b-instruct \
+    --dataset-path ShareGPT_V3_unfiltered_cleaned_split.json \
+    --max-conversations 1000 \
+    --request-rate 10.0 \
+    --num-users 100 \
+    --duration 600 \
+    --gpu-mem-gb 0 \
+    --cpu-mem-gb 8 \
+    --generation-mode none \
+    --cache-dir /mnt/nvme \
+    --seed 42 \
+    --output results_sharegpt_rate_limited.json
+```
+
+### ShareGPT with Fixed Request Count
+
+Run exactly N requests for reproducible benchmarks:
+
+```bash
+python3 kv-cache.py \
+    --model llama3.1-8b \
+    --dataset-path ShareGPT_V3_unfiltered_cleaned_split.json \
+    --max-requests 5000 \
+    --num-users 50 \
+    --gpu-mem-gb 0 \
+    --cpu-mem-gb 4 \
+    --generation-mode realistic \
+    --cache-dir /mnt/nvme \
+    --seed 42 \
+    --output results_sharegpt_fixed.json
+```
+
+### Comparing Real vs Synthetic Workloads
+
+| Metric | ShareGPT (Real) | Synthetic (Random) |
+| :--- | :--- | :--- |
+| Mean Context Size | ~133 tokens | ~2,676 tokens |
+| Cache Hit Rate | 85-97% | 50-70% |
+| Multi-turn Locality | High | Medium |
+| Throughput | Higher | Lower |
+| NVMe Stress | Moderate | Extreme |
+
+**Use ShareGPT** when you want to model real chatbot/assistant usage.
+**Use Synthetic** when you want worst-case stress testing or controlled experiments.
 
 ---
 
@@ -368,7 +444,7 @@ The `kv-cache-wrapper.sh` script automates a complete benchmark suite. It detect
 ./kv-cache-wrapper.sh
 ```
 
-This runs all 10 test scenarios with default settings. Expect roughly 30 minutes for the full suite.
+This runs all test scenarios with default settings. Expect roughly 30 minutes for the full suite.
 
 ### Options
 
@@ -390,8 +466,6 @@ This runs all 10 test scenarios with default settings. Expect roughly 30 minutes
 
 ### Available Workloads
 
-You can run specific tests using the `-w` flag:
-
 ```bash
 # Run only the storage isolation test
 ./kv-cache-wrapper.sh -w storage-only
@@ -403,36 +477,6 @@ You can run specific tests using the `-w` flag:
 ./kv-cache-wrapper.sh -w mlperf_submission
 ```
 
-Valid workload names:
-- `gpu-only`: All cache in GPU VRAM
-- `cpu-only`: All cache in CPU RAM
-- `storage-only`: All cache on NVMe
-- `gpu-cpu`: Two-tier without storage
-- `cpu-storage`: Two-tier without GPU
-- `gpu-cpu-storage`: Full three-tier hierarchy
-- `storage-saturation`: Stress test for NVMe
-- `production`: Balanced realistic workload
-- `autoscale`: QoS-based user discovery
-- `capacity-autoscale`: Peak throughput discovery
-- `mlperf_submission`: Official MLPerf tests
-
-### Example: Custom Configuration
-
-```bash
-./kv-cache-wrapper.sh \
-    -m llama3.1-70b-instruct \
-    -t 90 \
-    -u 30 \
-    -U 100 \
-    -w cpu-storage,storage-saturation,production
-```
-
-This runs a 70B model test with 30 baseline users, 100 high-load users, and only three specific workloads.
-
-### Output
-
-The wrapper generates individual JSON files for each test and prints a comparison report at the end. The report shows throughput, latency percentiles, cache distribution, and pass/fail status for each scenario.
-
 ---
 
 ## Understanding Results
@@ -441,17 +485,17 @@ The wrapper generates individual JSON files for each test and prints a compariso
 
 **Throughput (tokens/sec)**: How many tokens the system processes per second. Higher is better.
 
-**End-to-End Latency**: Total time from request submission to completion. This includes queue wait time, storage I/O, and token generation. This is what users experience.
+**Storage Throughput (tokens/sec)**: Raw I/O performance calculated from storage latency, not wall-clock time. This is the fairer metric for comparing storage tiers.
 
-**Storage I/O Latency**: Time spent reading from and writing to storage tiers. Does not include queue wait or generation time. This measures your hardware.
+**End-to-End Latency**: Total time from request submission to completion. This is what users experience.
+
+**Storage I/O Latency**: Time spent reading from and writing to storage tiers. This measures your hardware.
 
 **Queue Wait Time**: Time requests spend waiting before processing begins. If this dominates, your system is overloaded.
 
 **Cache Hit Rate**: Percentage of reads served from cache. Higher rates mean less storage pressure.
 
 ### Reading the Output
-
-The benchmark prints a summary like this:
 
 ```
 ### STORAGE PERFORMANCE ASSESSMENT: PASS ###
@@ -464,27 +508,106 @@ The benchmark prints a summary like this:
 ### OVERALL PERFORMANCE ###
   Total Requests: 2847
   Total Tokens Generated: 489,231
-  Throughput: 1,630.77 tok/s
+  Avg Throughput: 1,630.77 tok/s
+  Storage Throughput: 2,105.32 tok/s
 
 ### LATENCY BREAKDOWN ###
   End-to-End: mean 89.3ms, P50 45.2ms, P95 312.4ms
   Storage I/O: mean 23.1ms, P50 12.4ms, P95 89.2ms
-
-### CACHE TIER DISTRIBUTION ###
-  GPU Entries: 0 (0.00 GB)
-  CPU Entries: 234 (2.34 GB)
-  NVMe Entries: 1,892 (18.92 GB)
 ```
 
-### Interpreting Latency Numbers
+---
 
-When you see high latency numbers, especially under stress tests, look at the breakdown:
+## Unit Testing
 
-1. **Queue wait dominates**: Your system is overloaded. Reduce users or add hardware.
-2. **Storage I/O dominates**: Your disk is the bottleneck. Get faster storage.
-3. **Generation dominates**: Expected behavior for realistic mode. GPU is doing its job.
+This package includes a comprehensive pytest-based test suite to verify core functionality without running the full benchmark.
 
-The MLPerf submission tests intentionally push the system into saturation. High latency in those tests is expected and informative.
+### Running Tests
+
+```bash
+# Run all tests with verbose output
+pytest test_kv_cache.py -v
+
+# Run with shorter traceback
+pytest test_kv_cache.py -v --tb=short
+
+# Run specific test class
+pytest test_kv_cache.py -k "TestModelConfig" -v
+
+# Run only CPU tests (skip GPU tests if no CUDA)
+pytest test_kv_cache.py -v -m "not skipif"
+```
+
+### Test Coverage
+
+The test suite covers 12 component categories:
+
+| Test Class | Coverage |
+|------------|----------|
+| `TestModelConfig` | Model configurations, KV cache size calculations |
+| `TestInferenceRequest` | Request dataclass, cache key generation |
+| `TestQoSProfiles` | QoS levels, SLA targets, priorities |
+| `TestKVCacheGenerator` | Determinism, shapes, dtypes, precomputed buffers |
+| `TestCPUMemoryBackend` | Write/read/delete/clear operations |
+| `TestNVMeBackend` | File I/O, metadata, temp directories |
+| `TestGPUMemoryBackend` | CUDA tensors, device placement (skipped without GPU) |
+| `TestConversationManager` | Multi-turn tracking, eviction |
+| `TestUserSimulator` | User generation, QoS distribution |
+| `TestMultiTierCache` | CPU-only mode, allocation, access |
+| `TestMultiTierCacheWithGPU` | GPU tier, waterfall eviction (skipped without GPU) |
+| `TestXLSXExport` | CSV/Excel export (skipped without pandas) |
+
+### Expected Runtime
+
+- **Without GPU**: ~3-5 seconds
+- **With GPU**: ~5-10 seconds
+
+GPU tests are automatically skipped if CUDA is not available.
+
+---
+
+## Excel Export
+
+The benchmark can export results directly to Excel or CSV format for analysis.
+
+### Basic Usage
+
+```bash
+python3 kv-cache.py \
+    --model llama3.1-8b \
+    --num-users 50 \
+    --duration 120 \
+    --gpu-mem-gb 0 \
+    --cpu-mem-gb 4 \
+    --seed 42 \
+    --output results.json \
+    --xlsx-output results.xlsx
+```
+
+### Output Format
+
+The Excel file contains a single row with all key metrics:
+
+| Column | Description |
+|--------|-------------|
+| Model | Model configuration used |
+| Num Users | Concurrent user count |
+| Duration (s) | Benchmark duration |
+| GPU Mem (GB) | GPU memory budget |
+| CPU Mem (GB) | CPU memory budget |
+| Total Requests | Requests completed |
+| Total Tokens | Tokens processed |
+| Avg Throughput (tok/s) | Wall-clock throughput |
+| Storage Throughput (tok/s) | Storage I/O throughput |
+| Cache Hit Rate | Percentage of cache hits |
+| E2E Latency P95 (ms) | End-to-end 95th percentile |
+| Storage IO P95 (ms) | Storage I/O 95th percentile |
+
+### Fallback Behavior
+
+- **With openpyxl**: Exports to `.xlsx` format
+- **Without openpyxl**: Falls back to `.csv` format
+- **Without pandas**: Export is skipped with a warning
 
 ---
 
@@ -527,9 +650,9 @@ python3 kv-cache.py \
 ### Critical Parameters
 
 - **seed 42**: Required for reproducibility across systems
-- **gpu-mem-gb 0, cpu-mem-gb 4**: Minimal CPU buffer prevents pathological queue contention while still forcing heavy NVMe usage. Analysis showed 0GB causes 25,942x queueing factor; 4GB reduces this 20x while maintaining 1,054 GB of NVMe reads.
+- **gpu-mem-gb 0, cpu-mem-gb 4**: Forces heavy NVMe usage while preventing pathological queue contention
 - **generation-mode realistic**: Simulates 30ms/token GPU backpressure
-- **performance-profile throughput**: Uses throughput as the primary metric instead of latency
+- **performance-profile throughput**: Uses throughput as the primary metric
 - **duration 600**: 10-minute run ensures steady-state measurement
 
 ---
@@ -546,15 +669,7 @@ python3 kv-cache.py ... --max-concurrent-allocs 50
 
 ### Benchmark Hangs
 
-The system may be thrashing. Reduce users or increase memory budgets. Check system logs for OOM killer activity.
-
-### No Disk I/O Visible in iostat
-
-The benchmark uses posix_fadvise to bypass page cache. If you still see zero reads, verify your cache directory is on the correct device:
-
-```bash
-df /mnt/nvme
-```
+The system may be thrashing. Reduce users or increase memory budgets.
 
 ### Poor Cache Hit Rates
 
@@ -565,42 +680,17 @@ Low hit rates indicate your working set exceeds available fast memory. Either:
 
 ### Results Vary Between Runs
 
-Use the `--seed` flag for reproducible results. Without a seed, workload generation is randomized.
+Use the `--seed` flag for reproducible results.
 
 ---
 
-## Model Configurations
+## Files in This Package
 
-| Model | KV Cache per Token | 8K Context Size |
-|-------|-------------------|-----------------|
-| tiny-1b | 24 KB | 192 MB |
-| mistral-7b | 128 KB | 1 GB |
-| llama3.1-8b | 128 KB | 1 GB |
-| llama2-7b | 512 KB | 4 GB |
-| llama3.1-70b-instruct | 320 KB | 2.5 GB |
-
-Choose your model based on how much memory pressure you want to apply. The 70B model generates the largest cache entries and stresses storage most heavily.
-
----
-
-## Files in This Repository
-
-- `kv-cache.py`: Main benchmark implementation
-- `kv-cache-wrapper.sh`: Automated test suite runner
-- `kv-cache_sharegpt_replay.py`: ShareGPT conversation replay benchmark
+- `kv-cache.py`: Main benchmark implementation with ShareGPT support
+- `test_kv_cache.py`: Pytest unit test suite
+- `requirements.txt`: Python dependencies
+- `README.md`: This documentation
 - `MLperf v3 KV cache proposal.md`: Detailed technical documentation
-- `validate.sh`: Results validation script
-
----
-
-## Contributing
-
-This benchmark is developed by the MLPerf Storage Working Group. Contributions are welcome in the following areas:
-
-- Additional storage backends (object storage, RDMA)
-- Improved GPU simulation models
-- Alternative cache eviction policies
-- Distributed multi-node support
 
 ---
 
