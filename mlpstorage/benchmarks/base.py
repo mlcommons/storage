@@ -98,13 +98,52 @@ class Benchmark(abc.ABC):
 
     @property
     def metadata(self):
-        metadata = dict()
-        keys_to_skip = ["command_method_map", "logger", 'benchmark_run_verifier', "cmd_executor"]
-        for k, v in self.__dict__.items():
-            if not k in keys_to_skip and not k.startswith("__"):
-                metadata[k] = v
+        """
+        Generate metadata dict capturing the benchmark run configuration.
 
-        metadata['benchmark_type'] = self.BENCHMARK_TYPE.name
+        This metadata is designed to be complete enough that BenchmarkRunData
+        can be reconstructed from it without needing tool-specific result files.
+        """
+        # Core fields required by BenchmarkRunData
+        metadata = {
+            'benchmark_type': self.BENCHMARK_TYPE.name,
+            'model': getattr(self.args, 'model', None),
+            'command': getattr(self.args, 'command', None),
+            'run_datetime': self.run_datetime,
+            'num_processes': getattr(self.args, 'num_processes', None),
+            'accelerator': getattr(self.args, 'accelerator_type', None),
+            'result_dir': self.run_result_output,
+        }
+
+        # Parameters - prefer combined_params if available (includes YAML + overrides)
+        if hasattr(self, 'combined_params'):
+            metadata['parameters'] = self.combined_params
+        else:
+            metadata['parameters'] = {}
+
+        # Override parameters - user-specified overrides only
+        if hasattr(self, 'params_dict'):
+            metadata['override_parameters'] = self.params_dict
+        else:
+            metadata['override_parameters'] = {}
+
+        # System info - serialize ClusterInformation if available
+        if hasattr(self, 'cluster_information') and self.cluster_information:
+            metadata['system_info'] = self.cluster_information.as_dict()
+        else:
+            metadata['system_info'] = None
+
+        # Additional context (not part of BenchmarkRunData but useful)
+        metadata['runtime'] = self.runtime
+        metadata['verification'] = self.verification.name if self.verification else None
+        metadata['executed_command'] = getattr(self, 'executed_command', None)
+        metadata['command_output_files'] = self.command_output_files
+
+        # Include full args for debugging/auditing (skip non-serializable)
+        try:
+            metadata['args'] = vars(self.args)
+        except Exception:
+            metadata['args'] = str(self.args)
 
         return metadata
 

@@ -64,16 +64,38 @@ class ProcessedRun:
     run_parameters: Dict[str, Any]
     run_metrics: Dict[str, Any]
     issues: List[Issue] = field(default_factory=list)
-    
+
     def is_valid(self) -> bool:
         """Check if the run is valid (no issues with INVALID validation)"""
         return not any(issue.validation == PARAM_VALIDATION.INVALID for issue in self.issues)
-    
+
     def is_closed(self) -> bool:
         """Check if the run is valid for closed submission"""
         if not self.is_valid():
             return False
         return all(issue.validation != PARAM_VALIDATION.OPEN for issue in self.issues)
+
+
+@dataclass
+class BenchmarkRunData:
+    """
+    Data contract for benchmark run information needed by RulesCheckers.
+
+    This dataclass defines exactly what data is required for rules verification,
+    regardless of whether the data comes from a live Benchmark instance or from
+    result files on disk.
+    """
+    benchmark_type: BENCHMARK_TYPES
+    model: Optional[str]
+    command: Optional[str]
+    run_datetime: str
+    num_processes: int
+    parameters: Dict[str, Any]
+    override_parameters: Dict[str, Any]
+    system_info: Optional['ClusterInformation'] = None
+    metrics: Optional[Dict[str, Any]] = None
+    result_dir: Optional[str] = None
+    accelerator: Optional[str] = None
 
 
 @dataclass
@@ -294,52 +316,429 @@ class BenchmarkResult:
                         self.logger.error(f"Failed to load Hydra config from {config_path}: {e}")
 
 
+class BenchmarkInstanceExtractor:
+    """
+    Extracts BenchmarkRunData from a live Benchmark instance.
+
+    Used for pre-execution verification where we have direct access to
+    the Benchmark object.
+    """
+
+    @staticmethod
+    def extract(benchmark) -> BenchmarkRunData:
+        """
+        Extract BenchmarkRunData from a Benchmark instance.
+
+        Args:
+            benchmark: A Benchmark instance (or subclass like DLIOBenchmark)
+
+        Returns:
+            BenchmarkRunData populated from the benchmark instance
+        """
+        # Get parameters - prefer combined_params if available
+        if hasattr(benchmark, 'combined_params'):
+            parameters = benchmark.combined_params
+        else:
+            parameters = {}
+
+        # Get override parameters
+        if hasattr(benchmark, 'params_dict'):
+            override_parameters = benchmark.params_dict
+        else:
+            override_parameters = {}
+
+        # Get system info
+        system_info = None
+        if hasattr(benchmark, 'cluster_information'):
+            system_info = benchmark.cluster_information
+
+        return BenchmarkRunData(
+            benchmark_type=benchmark.BENCHMARK_TYPE,
+            model=getattr(benchmark.args, 'model', None),
+            command=getattr(benchmark.args, 'command', None),
+            run_datetime=benchmark.run_datetime,
+            num_processes=benchmark.args.num_processes,
+            parameters=parameters,
+            override_parameters=override_parameters,
+            system_info=system_info,
+            accelerator=getattr(benchmark.args, 'accelerator_type', None),
+            result_dir=benchmark.run_result_output if hasattr(benchmark, 'run_result_output') else None,
+            metrics=None,  # No metrics available pre-execution
+        )
+
+
+class DLIOResultParser:
+    """
+    Parses DLIO benchmark result files into BenchmarkRunData.
+
+    This class handles DLIO-specific result file formats including:
+    - summary.json: DLIO benchmark metrics and run info
+    - Hydra config files: Configuration used for the run
+    """
+
+    def __init__(self, logger=None):
+        self.logger = logger
+
+    def parse(self, result_dir: str, metadata: Optional[Dict] = None) -> BenchmarkRunData:
+        """
+        Parse DLIO result files from a directory.
+
+        Args:
+            result_dir: Path to the result directory
+            metadata: Optional pre-loaded metadata dict (from _metadata.json)
+
+        Returns:
+            BenchmarkRunData populated from the result files
+        """
+        summary = self._load_summary(result_dir)
+        hydra_configs = self._load_hydra_configs(result_dir)
+
+        if summary is None:
+            raise ValueError(f"No summary.json found in {result_dir}")
+
+        # Determine benchmark type and command from workflow
+        hydra_workload_config = hydra_configs.get("config.yaml", {}).get("workload", {})
+        hydra_workload_overrides = hydra_configs.get("overrides.yaml", [])
+        hydra_workflow = hydra_workload_config.get("workflow", {})
+
+        workflow = (
+            hydra_workflow.get('generate_data', False),
+            hydra_workflow.get('train', False),
+            hydra_workflow.get('checkpoint', False),
+        )
+
+        # Determine benchmark type
+        benchmark_type = None
+        command = None
+        accelerator = None
+
+        if workflow[0] or workflow[1]:
+            benchmark_type = BENCHMARK_TYPES.training
+            workloads = [i for i in hydra_workload_overrides if i.startswith('workload=')]
+            if workflow[1]:
+                command = "run"
+                if workloads:
+                    accelerator = workloads[0].split('_')[1] if '_' in workloads[0] else None
+            elif workflow[0]:
+                command = "datagen"
+        elif workflow[2]:
+            benchmark_type = BENCHMARK_TYPES.checkpointing
+            command = "run"
+
+        # Extract model name and normalize it
+        model = hydra_workload_config.get('model', {}).get("name")
+        if model:
+            model = model.replace("llama_", "llama3-")
+            model = model.replace("_", "-")
+
+        # Extract override parameters from hydra overrides
+        override_parameters = {}
+        for param in hydra_workload_overrides:
+            if '=' in param:
+                p, v = param.split('=', 1)
+                if p.startswith('++workload.'):
+                    override_parameters[p[len('++workload.'):]] = v
+
+        # Build system info from summary
+        system_info = ClusterInformation.from_dlio_summary_json(summary, self.logger)
+
+        return BenchmarkRunData(
+            benchmark_type=benchmark_type,
+            model=model,
+            command=command,
+            run_datetime=summary.get("start", ""),
+            num_processes=summary.get("num_accelerators", 0),
+            parameters=hydra_workload_config,
+            override_parameters=override_parameters,
+            system_info=system_info,
+            metrics=summary.get("metric"),
+            result_dir=result_dir,
+            accelerator=accelerator,
+        )
+
+    def _load_summary(self, result_dir: str) -> Optional[Dict]:
+        """Load summary.json from result directory"""
+        summary_path = os.path.join(result_dir, 'summary.json')
+        if os.path.exists(summary_path):
+            try:
+                with open(summary_path, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                if self.logger:
+                    self.logger.error(f"Failed to load summary from {summary_path}: {e}")
+        return None
+
+    def _load_hydra_configs(self, result_dir: str) -> Dict[str, Any]:
+        """Load Hydra config files from result directory"""
+        hydra_configs = {}
+        hydra_dir = os.path.join(result_dir, HYDRA_OUTPUT_SUBDIR)
+
+        if os.path.exists(hydra_dir) and os.path.isdir(hydra_dir):
+            for config_file in os.listdir(hydra_dir):
+                if config_file.endswith('.yaml'):
+                    config_path = os.path.join(hydra_dir, config_file)
+                    try:
+                        with open(config_path, 'r') as f:
+                            hydra_configs[config_file] = yaml.load(f, Loader=yaml.Loader)
+                    except Exception as e:
+                        if self.logger:
+                            self.logger.error(f"Failed to load Hydra config from {config_path}: {e}")
+
+        return hydra_configs
+
+
+class ResultFilesExtractor:
+    """
+    Extracts BenchmarkRunData from result files on disk.
+
+    This extractor first attempts to load data from the metadata file
+    (preferred, as it contains complete information). If the metadata
+    is incomplete or missing, it falls back to using a tool-specific
+    parser (e.g., DLIOResultParser).
+    """
+
+    def __init__(self, result_parser=None):
+        """
+        Initialize the extractor.
+
+        Args:
+            result_parser: A parser for tool-specific result files.
+                          Defaults to DLIOResultParser if not provided.
+        """
+        self.result_parser = result_parser
+
+    def extract(self, result_dir: str, logger=None) -> BenchmarkRunData:
+        """
+        Extract BenchmarkRunData from a result directory.
+
+        Args:
+            result_dir: Path to the result directory
+            logger: Logger instance
+
+        Returns:
+            BenchmarkRunData populated from result files
+        """
+        # First, try to load from metadata file
+        metadata = self._load_metadata(result_dir, logger)
+
+        if metadata and self._is_complete_metadata(metadata):
+            return self._from_metadata(metadata, result_dir)
+
+        # Fall back to tool-specific parser
+        if self.result_parser is None:
+            self.result_parser = DLIOResultParser(logger=logger)
+
+        return self.result_parser.parse(result_dir, metadata)
+
+    def _load_metadata(self, result_dir: str, logger=None) -> Optional[Dict]:
+        """Load metadata JSON file from result directory"""
+        try:
+            metadata_files = [f for f in os.listdir(result_dir) if f.endswith('_metadata.json')]
+            if metadata_files:
+                metadata_path = os.path.join(result_dir, metadata_files[0])
+                with open(metadata_path, 'r') as f:
+                    return json.load(f)
+        except Exception as e:
+            if logger:
+                logger.debug(f"Could not load metadata from {result_dir}: {e}")
+        return None
+
+    def _is_complete_metadata(self, metadata: Dict) -> bool:
+        """
+        Check if metadata contains all required fields for BenchmarkRunData.
+
+        Returns True if metadata can be used directly without falling back
+        to tool-specific parsing.
+        """
+        required_fields = ['benchmark_type', 'run_datetime', 'num_processes', 'parameters']
+        return all(field in metadata for field in required_fields)
+
+    def _from_metadata(self, metadata: Dict, result_dir: str) -> BenchmarkRunData:
+        """Create BenchmarkRunData from a complete metadata dict"""
+        # Convert benchmark_type string to enum
+        benchmark_type_str = metadata.get('benchmark_type', '')
+        benchmark_type = None
+        for bt in BENCHMARK_TYPES:
+            if bt.name == benchmark_type_str or bt.value == benchmark_type_str:
+                benchmark_type = bt
+                break
+
+        # Reconstruct system_info if present
+        system_info = None
+        if 'system_info' in metadata and metadata['system_info']:
+            # This will need to be enhanced when we update Benchmark.metadata
+            pass
+
+        return BenchmarkRunData(
+            benchmark_type=benchmark_type,
+            model=metadata.get('model'),
+            command=metadata.get('command'),
+            run_datetime=metadata.get('run_datetime', ''),
+            num_processes=metadata.get('num_processes', 0),
+            parameters=metadata.get('parameters', {}),
+            override_parameters=metadata.get('override_parameters', {}),
+            system_info=system_info,
+            metrics=metadata.get('metrics'),
+            result_dir=result_dir,
+            accelerator=metadata.get('accelerator'),
+        )
+
+
 class BenchmarkRun:
     """
     Represents a benchmark run with all parameters and system information.
-    Can be constructed either from a benchmark instance or from result files.
+
+    This class provides a unified interface for accessing benchmark run data
+    regardless of whether it comes from a live Benchmark instance or from
+    result files on disk.
+
+    Preferred construction methods:
+        - BenchmarkRun.from_benchmark(benchmark, logger) - from live instance
+        - BenchmarkRun.from_result_dir(result_dir, logger) - from result files
+
+    The legacy constructor (benchmark_result/benchmark_instance params) is
+    maintained for backward compatibility but may be deprecated in future.
     """
-    def __init__(self, benchmark_result=None, benchmark_instance=None, logger=None):
+
+    def __init__(self, data: BenchmarkRunData = None, logger=None,
+                 # Legacy parameters for backward compatibility
+                 benchmark_result=None, benchmark_instance=None):
+        """
+        Initialize a BenchmarkRun.
+
+        Args:
+            data: BenchmarkRunData instance (preferred)
+            logger: Logger instance
+            benchmark_result: (Legacy) BenchmarkResult instance
+            benchmark_instance: (Legacy) Benchmark instance
+        """
         self.logger = logger
-        if benchmark_result is None and benchmark_instance is None:
-            self.logger.error(f"The BenchmarkRun instance needs either a benchmark_result or a benchmark_instance.")
-            raise ValueError("Either benchmark_result or benchmark_instance must be provided")
-        if benchmark_result and benchmark_instance:
-            self.logger.error(f"Both benchmark_result and benchmark_instance provided, which is not supported.")
-            raise ValueError("Only one of benchmark_result and benchmark_instance can be provided")
-            
-        self.benchmark_type = None
-        self.model = None
-        self.accelerator = None
-        self.command = None
-        self.num_processes = None
-        self.parameters = dict()
-        self.override_parameters = dict()
-        self.system_info = None
-        self.metrics = {}
-        self._run_id = None
         self._category = None
         self._issues = []
-        self.run_datetime = None
-        self.result_root_dir = None
 
-        self.benchmark_result = benchmark_result
-        self.benchmark_instance = benchmark_instance
+        # New path: direct initialization with BenchmarkRunData
+        if data is not None:
+            self._data = data
+            self._run_id = RunID(
+                program=data.benchmark_type.name if data.benchmark_type else "",
+                command=data.command,
+                model=data.model,
+                run_datetime=data.run_datetime
+            )
+            if self.logger:
+                self.logger.info(f"Created benchmark run: {self._run_id}")
+            return
 
+        # Legacy path: construct from benchmark_result or benchmark_instance
+        if benchmark_result is None and benchmark_instance is None:
+            if self.logger:
+                self.logger.error("BenchmarkRun needs data, benchmark_result, or benchmark_instance")
+            raise ValueError("Either data, benchmark_result, or benchmark_instance must be provided")
+
+        if benchmark_result and benchmark_instance:
+            if self.logger:
+                self.logger.error("Both benchmark_result and benchmark_instance provided")
+            raise ValueError("Only one of benchmark_result and benchmark_instance can be provided")
+
+        # Use extractors to create BenchmarkRunData
         if benchmark_instance:
-            self._process_benchmark_instance(benchmark_instance)
-            self.post_execution = False
+            self._data = BenchmarkInstanceExtractor.extract(benchmark_instance)
         elif benchmark_result:
-            self._process_benchmark_result(benchmark_result)
-            self.post_execution = True
-        else:
-            self.logger.error(f"Neither benchmark_result nor benchmark_instance provided.")
-            raise ValueError("Either benchmark_result or benchmark_instance must be provided")
+            # Use DLIOResultParser via the result files
+            parser = DLIOResultParser(logger=logger)
+            self._data = parser.parse(benchmark_result.benchmark_result_root_dir)
 
-        self._run_id = RunID(program=self.benchmark_type.name, command=self.command,  model=self.model,
-                            run_datetime=self.run_datetime)
-        self.logger.info(f"Found benchmark run: {self.run_id}")
+        self._run_id = RunID(
+            program=self._data.benchmark_type.name if self._data.benchmark_type else "",
+            command=self._data.command,
+            model=self._data.model,
+            run_datetime=self._data.run_datetime
+        )
+        if self.logger:
+            self.logger.info(f"Found benchmark run: {self._run_id}")
 
+    @classmethod
+    def from_benchmark(cls, benchmark, logger=None) -> 'BenchmarkRun':
+        """
+        Create a BenchmarkRun from a live Benchmark instance.
+
+        Args:
+            benchmark: A Benchmark instance (or subclass)
+            logger: Logger instance
+
+        Returns:
+            BenchmarkRun instance
+        """
+        data = BenchmarkInstanceExtractor.extract(benchmark)
+        return cls(data=data, logger=logger)
+
+    @classmethod
+    def from_result_dir(cls, result_dir: str, logger=None) -> 'BenchmarkRun':
+        """
+        Create a BenchmarkRun from result files on disk.
+
+        Args:
+            result_dir: Path to the result directory
+            logger: Logger instance
+
+        Returns:
+            BenchmarkRun instance
+        """
+        extractor = ResultFilesExtractor()
+        data = extractor.extract(result_dir, logger)
+        return cls(data=data, logger=logger)
+
+    # Property delegation to BenchmarkRunData
+    @property
+    def data(self) -> BenchmarkRunData:
+        """Access the underlying BenchmarkRunData"""
+        return self._data
+
+    @property
+    def benchmark_type(self):
+        return self._data.benchmark_type
+
+    @property
+    def model(self):
+        return self._data.model
+
+    @property
+    def command(self):
+        return self._data.command
+
+    @property
+    def run_datetime(self):
+        return self._data.run_datetime
+
+    @property
+    def num_processes(self):
+        return self._data.num_processes
+
+    @property
+    def parameters(self):
+        return self._data.parameters
+
+    @property
+    def override_parameters(self):
+        return self._data.override_parameters
+
+    @property
+    def system_info(self):
+        return self._data.system_info
+
+    @property
+    def metrics(self):
+        return self._data.metrics
+
+    @property
+    def accelerator(self):
+        return self._data.accelerator
+
+    @property
+    def result_dir(self):
+        return self._data.result_dir
+
+    # Verification state (not part of BenchmarkRunData)
     @property
     def issues(self):
         return self._issues
@@ -358,16 +757,19 @@ class BenchmarkRun:
 
     @property
     def run_id(self):
-        if self.post_execution:
-            return self.benchmark_result.benchmark_result_root_dir
-        else:
-            return self._run_id
+        """Returns the RunID for this benchmark run"""
+        return self._run_id
+
+    @property
+    def post_execution(self) -> bool:
+        """Returns True if this run was loaded from result files (has metrics)"""
+        return self._data.metrics is not None
 
     def as_dict(self):
         """Convert the BenchmarkRun object to a dictionary"""
         ret_dict = {
             "run_id": str(self.run_id),
-            "benchmark_type": self.benchmark_type.name,
+            "benchmark_type": self.benchmark_type.name if self.benchmark_type else None,
             "model": self.model,
             "command": self.command,
             "num_processes": self.num_processes,
@@ -379,79 +781,6 @@ class BenchmarkRun:
             ret_dict["accelerator"] = str(self.accelerator)
 
         return ret_dict
-
-    def _process_benchmark_instance(self, benchmark_instance):
-        """Extract parameters and system info from a running benchmark instance"""
-        self.benchmark_type = benchmark_instance.BENCHMARK_TYPE
-        self.model = getattr(benchmark_instance.args, 'model', None)
-        self.command = getattr(benchmark_instance.args, 'command', None)
-        self.run_datetime = benchmark_instance.run_datetime
-        self.num_processes = benchmark_instance.args.num_processes
-        
-        # Extract parameters from the benchmark instance
-        if hasattr(benchmark_instance, 'combined_params'):
-            self.parameters = benchmark_instance.combined_params
-        else:
-            # Fallback to args if combined_params not available
-            self.parameters = vars(benchmark_instance.args)
-
-        self.override_parameters = benchmark_instance.params_dict
-            
-        # Extract system information
-        if hasattr(benchmark_instance, 'cluster_information'):
-            self.system_info = benchmark_instance.cluster_information
-
-    def _process_benchmark_result(self, benchmark_result):
-        """Extract parameters and system info from result files"""
-        # Process the summary and hydra configs to find what was run
-        summary_workload = benchmark_result.summary.get('workload', {})
-        hydra_workload_config = benchmark_result.hydra_configs.get("config.yaml", {}).get("workload", {})
-        hydra_workload_overrides = benchmark_result.hydra_configs.get("overrides.yaml", {})
-        hydra_workflow = hydra_workload_config.get("workflow", {})
-        workflow = (
-            hydra_workflow.get('generate_data', {}),
-            hydra_workflow.get('train', {}),
-            hydra_workflow.get('checkpoint', {}),
-        )
-        workloads = [i for i in hydra_workload_overrides if i.startswith('workload=')]
-
-        # Get benchmark type based on workflow
-        if workflow[0] or workflow[1]:
-            # Unet3d can have workflow[2] == True but it'll get caught here first
-            self.benchmark_type = BENCHMARK_TYPES.training
-        elif workflow[2]:
-            self.benchmark_type = BENCHMARK_TYPES.checkpointing
-
-        # The model for checkpointing in dlio doesn't have the "3" and we match against inputs to the cli which
-        # use a hypen instead of an underscore. We should make this better in the next version
-        # TODO: Make this better
-        self.model = hydra_workload_config.get('model', {}).get("name")
-        self.model = self.model.replace("llama_", "llama3_")
-        self.model = self.model.replace("_", "-")
-
-        self.num_processes = benchmark_result.summary["num_accelerators"]
-
-        # Set command for training
-        if self.benchmark_type == BENCHMARK_TYPES.training:
-            if workflow[1]:
-                # If "workflow.train" is present, even if there is checkpoint or datagen, it's a run_benchmark.
-                # When running DLIO with datagen and run in a single run, the metrics are still available separately
-                self.command = "run_benchmark"
-                self.accelerator = workloads[0].split('_')[1]
-            if workflow[0]:
-                # If we don't get caught by run and workflow[0] (datagen) is True, then we have a datagen command
-                self.command = "datagen"
-
-        self.run_datetime = benchmark_result.summary.get("start")
-        self.parameters = benchmark_result.hydra_configs.get("config.yaml", {}).get("workload", {})
-
-        for param in benchmark_result.hydra_configs.get("overrides.yaml", list()):
-            p, v = param.split('=')
-            if p.startswith('++workload.'):
-                self.override_parameters[p[len('++workload.'):]] = v
-
-        self.metrics = benchmark_result.summary.get("metric")
-        self.system_info = ClusterInformation.from_dlio_summary_json(benchmark_result.summary, self.logger)
 
 
 class RulesChecker(abc.ABC):
@@ -763,50 +1092,87 @@ class TrainingSubmissionRulesChecker(MultiRunRulesChecker):
         """
 
 class BenchmarkVerifier:
+    """
+    Verifies benchmark runs against submission rules.
 
-    def __init__(self, *benchmark_runs, logger=None):
+    Accepts various input types:
+        - BenchmarkRun instances (preferred)
+        - Benchmark instances (live benchmarks, pre-execution)
+        - str paths to result directories (post-execution)
+
+    Usage:
+        # Single run verification
+        verifier = BenchmarkVerifier(benchmark_run, logger=logger)
+        result = verifier.verify()
+
+        # From a Benchmark instance
+        verifier = BenchmarkVerifier(training_benchmark, logger=logger)
+
+        # From a result directory
+        verifier = BenchmarkVerifier("/path/to/results", logger=logger)
+
+        # Multi-run verification
+        verifier = BenchmarkVerifier(run1, run2, run3, logger=logger)
+    """
+
+    def __init__(self, *sources, logger=None):
         self.logger = logger
         self.issues = []
 
-        if len(benchmark_runs) == 1:
+        if len(sources) == 0:
+            raise ValueError("At least one source is required")
+
+        # Convert all sources to BenchmarkRun instances
+        self.benchmark_runs = []
+        for source in sources:
+            if isinstance(source, BenchmarkRun):
+                self.benchmark_runs.append(source)
+            elif isinstance(source, str):
+                # Assume it's a result directory path
+                self.benchmark_runs.append(BenchmarkRun.from_result_dir(source, logger))
+            elif "mlpstorage.benchmarks." in str(type(source)):
+                # It's a Benchmark instance - use the factory method
+                self.benchmark_runs.append(BenchmarkRun.from_benchmark(source, logger))
+            else:
+                raise TypeError(f"Unsupported source type: {type(source)}. "
+                               f"Expected BenchmarkRun, Benchmark instance, or result directory path.")
+
+        # Determine mode
+        if len(self.benchmark_runs) == 1:
             self.mode = "single"
-        elif len(benchmark_runs) > 1:
-            self.mode = "multi"
         else:
-            raise ValueError("At least one benchmark run is required")
+            self.mode = "multi"
 
-        self.benchmark_runs = benchmark_runs
+        # Create appropriate rules checker
         if self.mode == "single":
-            if "mlpstorage.benchmarks." in str(type(benchmark_runs[0])):
-                # This is here if we get a Benchmark instance that needs to run the verifier
-                # on itself before execution. We map it to a BenchmarkRun instance
-                # We check against the string so we don't need to import the Benchmark classes here
-                self.benchmark_runs = [BenchmarkRun(benchmark_instance=benchmark_runs[0], logger=logger)]
-
             benchmark_run = self.benchmark_runs[0]
             if benchmark_run.benchmark_type == BENCHMARK_TYPES.training:
                 self.rules_checker = TrainingRunRulesChecker(benchmark_run, logger)
             elif benchmark_run.benchmark_type == BENCHMARK_TYPES.checkpointing:
                 self.rules_checker = CheckpointingRunRulesChecker(benchmark_run, logger)
+            else:
+                raise ValueError(f"Unsupported benchmark type: {benchmark_run.benchmark_type}")
 
         elif self.mode == "multi":
-            benchmark_types = {br.benchmark_type for br in benchmark_runs}
+            benchmark_types = {br.benchmark_type for br in self.benchmark_runs}
             if len(benchmark_types) > 1:
-                raise ValueError("Multi-run verification requires all runs are from the same benchmark type. Got types: {benchmark_types}")
-            else:
-                benchmark_type = benchmark_types.pop()
+                raise ValueError(f"Multi-run verification requires all runs are from the same "
+                               f"benchmark type. Got types: {benchmark_types}")
+            benchmark_type = benchmark_types.pop()
 
             if benchmark_type == BENCHMARK_TYPES.training:
-                self.rules_checker = TrainingSubmissionRulesChecker(benchmark_runs, logger)
-            if benchmark_type == BENCHMARK_TYPES.checkpointing:
-                self.rules_checker = CheckpointSubmissionRulesChecker(benchmark_runs, logger)
+                self.rules_checker = TrainingSubmissionRulesChecker(self.benchmark_runs, logger)
+            elif benchmark_type == BENCHMARK_TYPES.checkpointing:
+                self.rules_checker = CheckpointSubmissionRulesChecker(self.benchmark_runs, logger)
+            else:
+                raise ValueError(f"Unsupported benchmark type for multi-run: {benchmark_type}")
 
     def verify(self) -> PARAM_VALIDATION:
         run_ids = [br.run_id for br in self.benchmark_runs]
         if self.mode == "single":
             self.logger.status(f"Verifying benchmark run for {run_ids[0]}")
         elif self.mode == "multi":
-            self.logger.status(f"Verifying benchmark runs for {', '.join(run_ids)}")
+            self.logger.status(f"Verifying benchmark runs for {', '.join(str(rid) for rid in run_ids)}")
         self.issues = self.rules_checker.run_checks()
         num_invalid = 0
         num_open = 0
@@ -1006,14 +1372,19 @@ def generate_output_location(benchmark, datetime_str=None, **kwargs):
     return output_location
 
 
-def get_runs_files(results_dir, logger=None):
+def get_runs_files(results_dir, logger=None) -> List[BenchmarkRun]:
     """
-    Walk the results_dir location and return a list of BenchmarkResult objects that represent a single run
+    Walk the results_dir location and return a list of BenchmarkRun objects.
 
-    :param results_dir: Base directory containing benchmark results
-    :param benchmark_name: Optional filter for specific benchmark name
-    :param command: Optional filter for specific command
-    :return: List of dictionaries with run information
+    Scans the directory tree for benchmark result directories (identified by
+    metadata files and summary.json) and creates BenchmarkRun instances for each.
+
+    Args:
+        results_dir: Base directory containing benchmark results
+        logger: Logger instance
+
+    Returns:
+        List of BenchmarkRun instances
     """
     if logger is None:
         logger = setup_logging(name='mlpstorage.rules.get_runs_files')
@@ -1041,14 +1412,14 @@ def get_runs_files(results_dir, logger=None):
             logger.warning(f'Multiple metadata files found in directory {root}. Skipping this directory.')
             continue
 
-        # Find DLIO summary.json file if it exists
-        dlio_summary_file = None
-        for f in files:
-            if f == 'summary.json':
-                dlio_summary_file = os.path.join(root, f)
-                break
+        # Check for summary.json (indicates a complete DLIO run)
+        has_summary = 'summary.json' in files
 
-        if dlio_summary_file:
-            runs.append(BenchmarkRun(benchmark_result=BenchmarkResult(root, logger), logger=logger))
+        if has_summary:
+            try:
+                runs.append(BenchmarkRun.from_result_dir(root, logger))
+            except Exception as e:
+                logger.error(f'Failed to load benchmark run from {root}: {e}')
+                continue
 
     return runs
