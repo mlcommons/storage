@@ -1,0 +1,12 @@
+workload:
+  model:
+    name: llama3_8b
+  checkpoint:
+    checkpoint_folder: /data/checkpoints
+    num_checkpoints_read: 1
+    num_checkpoints_write: 1
+    mode: default
+  workflow:
+    generate_data: false
+    train: false
+    checkpoint: true

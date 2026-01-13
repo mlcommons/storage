@@ -1,0 +1,13 @@
+{
+  "start": "2025-01-11 15:00:00",
+  "end": "2025-01-11 15:05:30",
+  "num_accelerators": 8,
+  "num_hosts": 1,
+  "host_memory_GB": [512],
+  "host_cpu_count": [64],
+  "workload": "llama3_8b",
+  "metric": {
+    "checkpoint_write_throughput_GB_per_second": [45.2, 44.8, 45.0],
+    "checkpoint_read_throughput_GB_per_second": [52.1, 51.8, 52.0]
+  }
+}

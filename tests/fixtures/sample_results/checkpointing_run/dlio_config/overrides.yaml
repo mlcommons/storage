@@ -1,0 +1,2 @@
+- workload=llama3_8b
+- ++workload.checkpoint.checkpoint_folder=/data/checkpoints
