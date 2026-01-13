@@ -1,0 +1,22 @@
+{
+  "benchmark_type": "checkpointing",
+  "model": "llama3-8b",
+  "command": "run",
+  "run_datetime": "20250111_150000",
+  "num_processes": 8,
+  "parameters": {
+    "model": {"name": "llama3_8b"},
+    "checkpoint": {
+      "checkpoint_folder": "/data/checkpoints",
+      "num_checkpoints_read": 1,
+      "num_checkpoints_write": 1,
+      "mode": "default"
+    },
+    "workflow": {
+      "generate_data": false,
+      "train": false,
+      "checkpoint": true
+    }
+  },
+  "override_parameters": {}
+}

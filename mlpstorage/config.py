@@ -21,9 +21,9 @@ def check_env(setting, default_value=None):
             value_from_environment = False
 
     set_value = None
-    if value_from_environment:
+    if value_from_environment is not None:
         set_value = value_from_environment
-    elif default_value:
+    elif default_value is not None:
         set_value = default_value
     else:
         set_value = None

@@ -1,0 +1,20 @@
+workload:
+  model:
+    name: unet3d
+  dataset:
+    num_files_train: 42000
+    num_subfolders_train: 0
+    data_folder: /data/unet3d
+    format: npz
+    num_samples_per_file: 1
+  reader:
+    read_threads: 8
+    computation_threads: 1
+    prefetch_size: 2
+    transfer_size: 262144
+  workflow:
+    generate_data: false
+    train: true
+    checkpoint: true
+  checkpoint:
+    checkpoint_folder: /data/checkpoints
