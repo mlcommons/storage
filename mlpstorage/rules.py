@@ -101,15 +101,15 @@ class BenchmarkRunData:
 @dataclass
 class HostMemoryInfo:
     """Detailed memory information for a host"""
-    total: int  # Total physical memory in bytes
-    available: Optional[int]  # Memory available for allocation
-    used: Optional[int]  # Memory currently in use
-    free: Optional[int]  # Memory not being used
-    active: Optional[int]  # Memory actively used
-    inactive: Optional[int]  # Memory marked as inactive
-    buffers: Optional[int]  # Memory used for buffers
-    cached: Optional[int]  # Memory used for caching
-    shared: Optional[int]  # Memory shared between processes
+    total: int = 0  # Total physical memory in bytes
+    available: Optional[int] = None  # Memory available for allocation
+    used: Optional[int] = None  # Memory currently in use
+    free: Optional[int] = None  # Memory not being used
+    active: Optional[int] = None  # Memory actively used
+    inactive: Optional[int] = None  # Memory marked as inactive
+    buffers: Optional[int] = None  # Memory used for buffers
+    cached: Optional[int] = None  # Memory used for caching
+    shared: Optional[int] = None  # Memory shared between processes
 
     @classmethod
     def from_psutil_dict(cls, data: Dict[str, int]) -> 'HostMemoryInfo':
@@ -686,6 +686,23 @@ class BenchmarkRun:
         """
         extractor = ResultFilesExtractor()
         data = extractor.extract(result_dir, logger)
+        return cls(data=data, logger=logger)
+
+    @classmethod
+    def from_data(cls, data: BenchmarkRunData, logger=None) -> 'BenchmarkRun':
+        """
+        Create a BenchmarkRun from BenchmarkRunData.
+
+        This is a convenience method for creating BenchmarkRun instances
+        directly from data, particularly useful in testing.
+
+        Args:
+            data: BenchmarkRunData instance
+            logger: Logger instance
+
+        Returns:
+            BenchmarkRun instance
+        """
         return cls(data=data, logger=logger)
 
     # Property delegation to BenchmarkRunData

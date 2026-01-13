@@ -1,0 +1,4 @@
+- workload=unet3d_h100
+- ++workload.dataset.num_files_train=42000
+- ++workload.dataset.data_folder=/data/unet3d
+- ++workload.checkpoint.checkpoint_folder=/data/checkpoints
