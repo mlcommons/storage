@@ -67,7 +67,7 @@ This document validates **kv-cache.py**, a storage I/O benchmark for MLPerf Stor
 |-----------|---------------|
 | NVMe Device | /dev/nvme4n1 |
 | NVMe Capacity | 7.0 TB |
-| NVMe Bandwidth | ~7,000 MB/s (theoretical) |
+| NVMe Bandwidth | ~14,000 MB/s (theoretical) |
 
 ### Software
 
