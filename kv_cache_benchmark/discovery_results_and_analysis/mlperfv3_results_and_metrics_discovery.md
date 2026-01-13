@@ -676,7 +676,7 @@ done
 Larger models have larger KV cache blocks, which stress storage bandwidth more effectively:
 
 ```bash
-# Llama3.1-70b: ~10x larger KV cache per token than 8b models
+# Llama3.1-70b: ~2.5x larger KV cache per token than 8b models (320KB vs 128KB)
 # Better for systems with high-bandwidth storage (NVMe, CXL)
 for trial in 1 2 3; do
     python kv-cache.py \
@@ -694,11 +694,12 @@ done
 **Why llama3.1-70b matters:**
 | Model | KV Cache per Token | Storage I/O per Request | Use Case |
 |-------|-------------------|------------------------|----------|
-| llama3.1-8b | ~0.5 MB | Lower | Best differentiation ratio |
-| llama3.1-70b | ~5 MB | Higher | Maximum storage bandwidth stress |
-| mistral-7b | ~0.5 MB | Lower | Alternative to 8b |
+| llama3.1-8b | 128 KB | Lower | Best differentiation ratio |
+| llama3.1-70b | 320 KB | Higher | Maximum storage bandwidth stress |
+| mistral-7b | 128 KB | Lower | Alternative to 8b |
+| llama2-7b | 512 KB | Highest | MHA architecture (4x more than GQA) |
 
-The 70b model generates ~10x more storage I/O per token, making it ideal for:
+The 70b model generates ~2.5x more storage I/O per token than 8b (due to 80 vs 32 layers), making it ideal for:
 - High-bandwidth NVMe arrays (PCIe 5.0, multiple drives)
 - CXL memory expanders
 - Enterprise storage systems where small I/Os don't saturate bandwidth
