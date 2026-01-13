@@ -12,9 +12,23 @@ authors = [
 ]
 requires-python = ">=3.10.0"
 dependencies = [
-    "dlio-benchmark @ git+https://github.com/argonne-lcf/dlio_benchmark.git@mlperf_storage_v2.0",
     "psutil>=5.9",
-    "pyarrow"
+    "pyarrow",
+    "pyyaml>=6.0",
+]
+
+[project.optional-dependencies]
+dlio = [
+    "dlio-benchmark @ git+https://github.com/argonne-lcf/dlio_benchmark.git@mlperf_storage_v2.0",
+]
+test = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "pytest-mock>=3.0",
+]
+# Full installation with DLIO for running benchmarks
+full = [
+    "dlio-benchmark @ git+https://github.com/argonne-lcf/dlio_benchmark.git@mlperf_storage_v2.0",
 ]
 
 [project.urls]
@@ -29,3 +43,24 @@ packages = {find = {}}
 
 [project.scripts]
 mlpstorage = 'mlpstorage.main:main'
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["mlpstorage"]
+omit = ["*/tests/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
