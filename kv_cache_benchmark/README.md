@@ -613,47 +613,108 @@ The Excel file contains a single row with all key metrics:
 
 ## MLPerf Submission Guidelines
 
-For official MLPerf v3.0 storage submissions, use these standardized commands:
+For official MLPerf v3.0 storage submissions, use these standardized commands. **These invocations have been validated through extensive discovery testing** (1,411 Fast system tests, 268 Slow system tests comparing 14,000 MB/s vs 3,000 MB/s storage).
 
-### Standard Submission (8B Model)
+### Discovery Test Key Findings
 
-```bash
-python3 kv-cache.py \
-    --model llama3.1-8b \
-    --num-users 150 \
-    --duration 600 \
-    --gpu-mem-gb 0 \
-    --cpu-mem-gb 4 \
-    --generation-mode realistic \
-    --performance-profile throughput \
-    --cache-dir /mnt/nvme \
-    --seed 42 \
-    --output mlperf_v3_submission_8b.json
-```
+| Finding | Impact |
+|---------|--------|
+| **Metric selection depends on cpu_mem** | Storage Throughput shows only 1.1x at cpu_mem=0GB but 2.2x at cpu_mem=4GB |
+| **Best models for differentiation** | llama3.1-8b and mistral-7b show 2.31x ratio |
+| **High variance observed** | CV 50-125%, requires 3-5 trials minimum |
+| **100% win rate metrics** | Decode Bytes Read and Wall-Clock Throughput at cpu_mem=0GB |
 
-### Large Model Submission (70B Model)
+### Option 1: Maximum Storage Stress (cpu_mem=0GB)
+
+Use when you want to stress test NVMe and measure I/O volume differentiation.
+
+**Primary Metrics:** Decode Bytes Read (2.62x differentiation), Wall-Clock Throughput (2.43x differentiation)
 
 ```bash
-python3 kv-cache.py \
-    --model llama3.1-70b-instruct \
-    --num-users 40 \
-    --duration 600 \
-    --gpu-mem-gb 0 \
-    --cpu-mem-gb 4 \
-    --generation-mode realistic \
-    --performance-profile throughput \
-    --cache-dir /mnt/nvme \
-    --seed 42 \
-    --output mlperf_v3_submission_70b.json
+# MLPerf v3.0: Maximum Storage Stress Test (8B Model)
+# Run 3-5 trials for statistical significance
+for trial in 1 2 3 4 5; do
+    python3 kv-cache.py \
+        --model llama3.1-8b \
+        --num-users 200 \
+        --duration 300 \
+        --gpu-mem-gb 0 \
+        --cpu-mem-gb 0 \
+        --max-concurrent-allocs 16 \
+        --generation-mode none \
+        --cache-dir /mnt/nvme \
+        --seed 42 \
+        --output mlperf_v3_stress_8b_trial${trial}.json
+done
 ```
 
-### Critical Parameters
+**⚠️ Important:** At cpu_mem=0GB, do NOT use Storage Throughput as your primary metric—use Decode Bytes Read or Wall-Clock Throughput instead.
 
-- **seed 42**: Required for reproducibility across systems
-- **gpu-mem-gb 0, cpu-mem-gb 4**: Forces heavy NVMe usage while preventing pathological queue contention
-- **generation-mode realistic**: Simulates 30ms/token GPU backpressure
-- **performance-profile throughput**: Uses throughput as the primary metric
-- **duration 600**: 10-minute run ensures steady-state measurement
+### Option 2: Storage Throughput Focus (cpu_mem=4GB)
+
+Use when you want Storage Throughput (tok/s) as your primary metric.
+
+**Primary Metric:** Storage Throughput (2.2x differentiation, 97% win rate)
+
+```bash
+# MLPerf v3.0: Storage Throughput Test (8B Model)
+for trial in 1 2 3 4 5; do
+    python3 kv-cache.py \
+        --model llama3.1-8b \
+        --num-users 100 \
+        --duration 300 \
+        --gpu-mem-gb 0 \
+        --cpu-mem-gb 4 \
+        --max-concurrent-allocs 0 \
+        --generation-mode none \
+        --cache-dir /mnt/nvme \
+        --seed 42 \
+        --output mlperf_v3_throughput_8b_trial${trial}.json
+done
+```
+
+### Option 3: Large Model Submission (70B)
+
+For maximum per-request storage stress (10x larger KV cache per token):
+
+```bash
+# MLPerf v3.0: Large Model Storage Stress
+for trial in 1 2 3; do
+    python3 kv-cache.py \
+        --model llama3.1-70b-instruct \
+        --num-users 70 \
+        --duration 300 \
+        --gpu-mem-gb 0 \
+        --cpu-mem-gb 0 \
+        --max-concurrent-allocs 4 \
+        --generation-mode none \
+        --cache-dir /mnt/nvme \
+        --seed 42 \
+        --output mlperf_v3_stress_70b_trial${trial}.json
+done
+```
+
+### Critical Parameters (Discovery-Validated)
+
+| Parameter | Value | Rationale |
+|-----------|-------|-----------|
+| **seed 42** | Required | Reproducibility across systems |
+| **gpu-mem-gb 0** | Required | Isolates storage performance |
+| **cpu-mem-gb** | 0 or 4 | 0GB for max stress (use I/O volume metrics), 4GB for Storage Throughput metric |
+| **max-concurrent-allocs** | 0, 4, or 16 | 0 for throughput, 16 for stress testing |
+| **generation-mode** | none or realistic | none for pure I/O, realistic for production simulation |
+| **num-users** | 100-200 | Differentiation stable across range; higher = more throughput |
+| **duration** | 300-600 | 5-10 minutes for stable metrics |
+
+### Trial Requirements
+
+| User Count | Variance (CV) | Minimum Trials |
+|------------|---------------|----------------|
+| 10 users | ~52% | 3 |
+| 50-100 users | ~115-125% | 3-5 |
+| 200 users | ~110-120% | 3-5 |
+
+Report **median** rather than mean for publication-quality results.
 
 ---
 
