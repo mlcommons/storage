@@ -17,6 +17,7 @@ openpyxl>=3.1.0  # Required for .xlsx output; without this, falls back to .csv
 
 # Unit testing (optional - for running test_kv_cache.py)
 pytest>=7.0.0
+pytest-html>=4.0.0  # Required for HTML test reports
 
 # Wrapper script utilities (system packages, not pip)
 # bc - arbitrary precision calculator (apt install bc)
