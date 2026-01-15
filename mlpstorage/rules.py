@@ -240,6 +240,11 @@ class ClusterInformation:
             "total_cores": self.total_cores,
         }
 
+    @property
+    def info(self):
+        """Property used by MLPSJsonEncoder for serialization."""
+        return self.as_dict()
+
     def calculate_aggregated_info(self):
         """Calculate aggregated system information across all hosts"""
         for host_info in self.host_info_list:
@@ -248,16 +253,43 @@ class ClusterInformation:
                 self.total_cores += host_info.cpu.num_cores
 
     @classmethod
-    def from_dlio_summary_json(cls, summary, logger) -> 'ClusterInformation':
+    def from_dlio_summary_json(cls, summary, logger) -> Optional['ClusterInformation']:
+        """Create ClusterInformation from DLIO summary.json data.
+
+        Returns None if the required fields are missing from the summary.
+        """
         host_memories = summary.get("host_memory_GB")
         host_cpus = summary.get("host_cpu_count")
-        num_hosts = summary.get("num_hosts")
+        if host_memories is None or host_cpus is None:
+            return None
         host_info_list = []
         inst = cls(host_info_list, logger, calculate_aggregated_info=False)
         inst.total_memory_bytes = sum(host_memories) * 1024 * 1024 * 1024
         inst.total_cores = sum(host_cpus)
         return inst
 
+    @classmethod
+    def from_dict(cls, data: dict, logger) -> Optional['ClusterInformation']:
+        """Create ClusterInformation from a dictionary (e.g., from saved metadata).
+
+        Args:
+            data: Dictionary containing 'total_memory_bytes' and 'total_cores' keys.
+            logger: Logger instance.
+
+        Returns:
+            ClusterInformation instance, or None if required keys are missing.
+        """
+        if data is None:
+            return None
+        total_memory_bytes = data.get("total_memory_bytes")
+        total_cores = data.get("total_cores")
+        if total_memory_bytes is None:
+            return None
+        host_info_list = []
+        inst = cls(host_info_list, logger, calculate_aggregated_info=False)
+        inst.total_memory_bytes = total_memory_bytes
+        inst.total_cores = total_cores if total_cores is not None else 0
+        return inst
 
 
 class BenchmarkResult:
@@ -798,6 +830,85 @@ class BenchmarkRun:
             ret_dict["accelerator"] = str(self.accelerator)
 
         return ret_dict
+
+    def _process_benchmark_instance(self, benchmark_instance):
+        """Extract parameters and system info from a running benchmark instance"""
+        self.benchmark_type = benchmark_instance.BENCHMARK_TYPE
+        self.model = getattr(benchmark_instance.args, 'model', None)
+        self.command = getattr(benchmark_instance.args, 'command', None)
+        self.run_datetime = benchmark_instance.run_datetime
+        self.num_processes = benchmark_instance.args.num_processes
+        
+        # Extract parameters from the benchmark instance
+        if hasattr(benchmark_instance, 'combined_params'):
+            self.parameters = benchmark_instance.combined_params
+        else:
+            # Fallback to args if combined_params not available
+            self.parameters = vars(benchmark_instance.args)
+
+        self.override_parameters = benchmark_instance.params_dict
+            
+        # Extract system information
+        if hasattr(benchmark_instance, 'cluster_information'):
+            self.system_info = benchmark_instance.cluster_information
+
+    def _process_benchmark_result(self, benchmark_result):
+        """Extract parameters and system info from result files"""
+        # Process the summary and hydra configs to find what was run
+        summary_workload = benchmark_result.summary.get('workload', {})
+        hydra_workload_config = benchmark_result.hydra_configs.get("config.yaml", {}).get("workload", {})
+        hydra_workload_overrides = benchmark_result.hydra_configs.get("overrides.yaml", {})
+        hydra_workflow = hydra_workload_config.get("workflow", {})
+        workflow = (
+            hydra_workflow.get('generate_data', {}),
+            hydra_workflow.get('train', {}),
+            hydra_workflow.get('checkpoint', {}),
+        )
+        workloads = [i for i in hydra_workload_overrides if i.startswith('workload=')]
+
+        # Get benchmark type based on workflow
+        if workflow[0] or workflow[1]:
+            # Unet3d can have workflow[2] == True but it'll get caught here first
+            self.benchmark_type = BENCHMARK_TYPES.training
+        elif workflow[2]:
+            self.benchmark_type = BENCHMARK_TYPES.checkpointing
+
+        # The model for checkpointing in dlio doesn't have the "3" and we match against inputs to the cli which
+        # use a hypen instead of an underscore. We should make this better in the next version
+        # TODO: Make this better
+        self.model = hydra_workload_config.get('model', {}).get("name")
+        self.model = self.model.replace("llama_", "llama3_")
+        self.model = self.model.replace("_", "-")
+
+        self.num_processes = benchmark_result.summary["num_accelerators"]
+
+        # Set command for training
+        if self.benchmark_type == BENCHMARK_TYPES.training:
+            if workflow[1]:
+                # If "workflow.train" is present, even if there is checkpoint or datagen, it's a run_benchmark.
+                # When running DLIO with datagen and run in a single run, the metrics are still available separately
+                self.command = "run_benchmark"
+                self.accelerator = workloads[0].split('_')[1]
+            if workflow[0]:
+                # If we don't get caught by run and workflow[0] (datagen) is True, then we have a datagen command
+                self.command = "datagen"
+
+        self.run_datetime = benchmark_result.summary.get("start")
+        self.parameters = benchmark_result.hydra_configs.get("config.yaml", {}).get("workload", {})
+
+        for param in benchmark_result.hydra_configs.get("overrides.yaml", list()):
+            p, v = param.split('=')
+            if p.startswith('++workload.'):
+                self.override_parameters[p[len('++workload.'):]] = v
+
+        self.metrics = benchmark_result.summary.get("metric")
+
+        # Try to get system_info from DLIO summary first, then fall back to metadata
+        self.system_info = ClusterInformation.from_dlio_summary_json(benchmark_result.summary, self.logger)
+        if self.system_info is None and benchmark_result.metadata:
+            # Fall back to cluster_information from metadata if DLIO summary lacks it
+            cluster_info_dict = benchmark_result.metadata.get("cluster_information")
+            self.system_info = ClusterInformation.from_dict(cluster_info_dict, self.logger)
 
 
 class RulesChecker(abc.ABC):
