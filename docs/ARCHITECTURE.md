@@ -23,7 +23,8 @@ mlpstorage/
 │   ├── __init__.py       # Registers benchmarks with registry
 │   ├── base.py           # Abstract Benchmark base class
 │   ├── dlio.py           # Training and Checkpointing benchmarks
-│   └── vectordbbench.py  # VectorDB benchmark
+│   ├── vectordbbench.py  # VectorDB benchmark
+│   └── kvcache.py        # KV Cache benchmark for LLM inference
 │
 ├── interfaces/           # Abstract interfaces (Phase 1)
 │   ├── __init__.py
@@ -45,6 +46,7 @@ mlpstorage/
 │   ├── training_args.py  # Training benchmark arguments
 │   ├── checkpointing_args.py
 │   ├── vectordb_args.py
+│   ├── kvcache_args.py   # KV Cache benchmark arguments
 │   └── utility_args.py
 │
 ├── utils.py              # Utility functions
@@ -121,6 +123,7 @@ submission categories.
 ┌─────────────────────┐               ┌─────────────────────────┐
 │ • TrainingRunChecker│               │ • TrainingSubmission    │
 │ • CheckpointingRun  │               │ • CheckpointSubmission  │
+│ • KVCacheRunChecker │               │                         │
 └─────────────────────┘               └─────────────────────────┘
 ```
 
@@ -203,7 +206,8 @@ Rules are organized by scope (run vs submission) and benchmark type:
 rules/
 ├── run_checkers/           # Check individual runs
 │   ├── training.py         # Training-specific run rules
-│   └── checkpointing.py    # Checkpointing-specific run rules
+│   ├── checkpointing.py    # Checkpointing-specific run rules
+│   └── kvcache.py          # KV Cache run rules (preview)
 └── submission_checkers/    # Check submission completeness
     ├── training.py         # Training submission rules
     └── checkpointing.py    # Checkpointing submission rules
