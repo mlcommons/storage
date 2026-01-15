@@ -87,6 +87,24 @@ CHECKPOINT_RANKS_STRINGS = "\n    ".join(
 
 LLM_MODELS_STRINGS = "\n    ".join(LLM_MODELS)
 
+# KV Cache benchmark model configurations
+KVCACHE_MODELS = [
+    'tiny-1b',
+    'mistral-7b',
+    'llama2-7b',
+    'llama3.1-8b',
+    'llama3.1-70b-instruct',
+]
+
+# KV Cache performance profiles
+KVCACHE_PERFORMANCE_PROFILES = ['latency', 'throughput']
+
+# KV Cache generation modes
+KVCACHE_GENERATION_MODES = ['none', 'fast', 'realistic']
+
+# Default runtime for KV Cache benchmark (seconds)
+KVCACHE_DEFAULT_DURATION = 60
+
 MPIRUN = "mpirun"
 MPIEXEC = "mpiexec"
 MPI_CMDS = [MPIRUN, MPIEXEC]
@@ -137,6 +155,7 @@ class BENCHMARK_TYPES(enum.Enum):
     training = "training"
     vector_database = "vector_database"
     checkpointing = "checkpointing"
+    kv_cache = "kv_cache"
 
 # Enum for supported search metric types of COSINE, L2, IP
 SEARCH_METRICS = ["COSINE", "L2", "IP"]
