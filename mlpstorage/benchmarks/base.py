@@ -1,3 +1,37 @@
+"""
+Base Benchmark Class for MLPerf Storage.
+
+This module provides the abstract base class for all benchmark implementations.
+The Benchmark class implements BenchmarkInterface and provides common
+functionality including:
+
+- Cluster information collection via MPI
+- Result directory management
+- Metadata generation and persistence
+- Verification/validation integration
+- Command execution with signal handling
+
+Classes:
+    Benchmark: Abstract base class implementing BenchmarkInterface.
+
+Subclassing:
+    To create a new benchmark type:
+
+    1. Inherit from Benchmark
+    2. Set BENCHMARK_TYPE class attribute
+    3. Implement _run() method
+    4. Optionally override generate_command(), validate_args(), etc.
+
+Example:
+    class MyBenchmark(Benchmark):
+        BENCHMARK_TYPE = BENCHMARK_TYPES.my_benchmark
+
+        def _run(self):
+            cmd = self.generate_my_command()
+            stdout, stderr, rc = self._execute_command(cmd)
+            return rc
+"""
+
 import abc
 import json
 import os
@@ -6,8 +40,8 @@ import signal
 import sys
 import time
 import types
-
-from typing import Tuple, Dict, Any, List, Optional, Callable
+from argparse import Namespace
+from typing import Tuple, Dict, Any, List, Optional, Callable, Set, TYPE_CHECKING
 
 from functools import wraps
 
@@ -20,6 +54,9 @@ from mlpstorage.mlps_logging import setup_logging, apply_logging_options
 from mlpstorage.rules import BenchmarkVerifier, generate_output_location, ClusterInformation
 from mlpstorage.utils import CommandExecutor, MLPSJsonEncoder
 from mlpstorage.cluster_collector import collect_cluster_info
+
+if TYPE_CHECKING:
+    import logging
 
 
 class Benchmark(BenchmarkInterface, abc.ABC):
@@ -43,17 +80,27 @@ class Benchmark(BenchmarkInterface, abc.ABC):
 
     BENCHMARK_TYPE = None
 
-    def __init__(self, args, logger=None, run_datetime=None, run_number=0,
-                 cluster_collector=None, validator=None) -> None:
+    def __init__(
+        self,
+        args: Namespace,
+        logger: Optional['logging.Logger'] = None,
+        run_datetime: Optional[str] = None,
+        run_number: int = 0,
+        cluster_collector: Optional[Any] = None,
+        validator: Optional[Any] = None
+    ) -> None:
         """Initialize the benchmark.
 
         Args:
-            args: Parsed command-line arguments.
+            args: Parsed command-line arguments (argparse.Namespace).
             logger: Optional logger instance. If not provided, one will be created.
-            run_datetime: Optional datetime string for the run. Defaults to current time.
-            run_number: Run number for this benchmark execution.
+            run_datetime: Optional datetime string in YYYYMMDD_HHMMSS format.
+                          Defaults to current time.
+            run_number: Run number for this benchmark execution (for loops).
             cluster_collector: Optional cluster collector for dependency injection.
+                               Used for testing without MPI.
             validator: Optional validator for dependency injection.
+                       Used for testing validation logic.
         """
         self.args = args
         self.debug = self.args.debug or MLPS_DEBUG
@@ -176,13 +223,28 @@ class Benchmark(BenchmarkInterface, abc.ABC):
     # Original Benchmark Methods
     # =========================================================================
 
-    def _execute_command(self, command, output_file_prefix=None, print_stdout=True, print_stderr=True) -> Tuple[str, str, int]:
-        """
-        Execute the given command and return stdout, stderr, and return code.
-        :param command: Command to execute
-        :param print_stdout: Whether to print stdout
-        :param print_stderr: Whether to print stderr
-        :return: (stdout, stderr, return code)
+    def _execute_command(
+        self,
+        command: str,
+        output_file_prefix: Optional[str] = None,
+        print_stdout: bool = True,
+        print_stderr: bool = True
+    ) -> Tuple[str, str, int]:
+        """Execute the given command and return stdout, stderr, and return code.
+
+        Handles what-if mode, signal watching for graceful termination,
+        and optionally saves output to log files.
+
+        Args:
+            command: Shell command string to execute.
+            output_file_prefix: If provided, stdout/stderr are saved to
+                                {prefix}.stdout.log and {prefix}.stderr.log
+            print_stdout: Whether to print stdout to console in real-time.
+            print_stderr: Whether to print stderr to console in real-time.
+
+        Returns:
+            Tuple of (stdout_content, stderr_content, return_code).
+            In what-if mode, returns ("", "", 0) without execution.
         """
 
         self.__dict__.update({'executed_command': command})
@@ -220,12 +282,21 @@ class Benchmark(BenchmarkInterface, abc.ABC):
             return stdout, stderr, return_code
 
     @property
-    def metadata(self):
-        """
-        Generate metadata dict capturing the benchmark run configuration.
+    def metadata(self) -> Dict[str, Any]:
+        """Generate metadata dict capturing the benchmark run configuration.
 
         This metadata is designed to be complete enough that BenchmarkRunData
         can be reconstructed from it without needing tool-specific result files.
+
+        The metadata includes:
+        - benchmark_type, model, command, run_datetime
+        - parameters and override_parameters
+        - system_info (cluster configuration)
+        - runtime, verification status
+        - executed_command and output files
+
+        Returns:
+            Dictionary containing all benchmark metadata.
         """
         # Core fields required by BenchmarkRunData
         metadata = {
@@ -270,7 +341,12 @@ class Benchmark(BenchmarkInterface, abc.ABC):
 
         return metadata
 
-    def write_metadata(self):
+    def write_metadata(self) -> None:
+        """Write benchmark metadata to JSON file.
+
+        Writes metadata to {metadata_file_path}. In verbose/debug mode,
+        also prints metadata to stdout.
+        """
         with open(self.metadata_file_path, 'w+') as fd:
             json.dump(self.metadata, fd, indent=2, cls=MLPSJsonEncoder)
 
@@ -375,11 +451,30 @@ class Benchmark(BenchmarkInterface, abc.ABC):
             return None
 
     def generate_output_location(self) -> str:
+        """Generate the output directory path for this benchmark run.
+
+        Creates a path based on BENCHMARK_TYPE, model, command, and datetime.
+
+        Returns:
+            Absolute path string for the result directory.
+
+        Raises:
+            ValueError: If BENCHMARK_TYPE is not set.
+        """
         if not self.BENCHMARK_TYPE:
-            raise ValueError(f'No benchmark specified. Unable to generate output location')
+            raise ValueError('No benchmark specified. Unable to generate output location')
         return generate_output_location(self, self.run_datetime)
 
     def verify_benchmark(self) -> bool:
+        """Verify benchmark parameters meet OPEN or CLOSED requirements.
+
+        Uses BenchmarkVerifier to check if the current configuration
+        meets the requirements for closed or open submission.
+
+        Returns:
+            True if verification passes, False otherwise.
+            May call sys.exit(1) if invalid and --allow-invalid-params not set.
+        """
         self.logger.verboser(f'Verifying benchmark parameters: {self.args}')
         if not self.benchmark_run_verifier:
             self.benchmark_run_verifier = BenchmarkVerifier(self, logger=self.logger)
@@ -416,14 +511,31 @@ class Benchmark(BenchmarkInterface, abc.ABC):
                 sys.exit(1)
 
     @abc.abstractmethod
-    def _run(self):
-        """
-        Run the command for the given benchmark.
-        :return:
+    def _run(self) -> int:
+        """Run the actual benchmark execution.
+
+        Subclasses must implement this method to define the benchmark
+        execution logic. The method should:
+
+        1. Generate and execute the benchmark command
+        2. Collect and process results
+        3. Write metadata and output files
+        4. Return the exit code
+
+        Returns:
+            Exit code (0 for success, non-zero for failure).
         """
         raise NotImplementedError
 
-    def run(self):
+    def run(self) -> int:
+        """Execute the benchmark and track runtime.
+
+        Wraps _run() with timing measurement. Updates self.runtime
+        with the execution duration in seconds.
+
+        Returns:
+            Exit code from _run().
+        """
         start_time = time.time()
         result = self._run()
         self.runtime = time.time() - start_time

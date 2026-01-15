@@ -1,3 +1,27 @@
+"""
+Utility Functions for MLPerf Storage Benchmarks.
+
+This module provides shared utility functions used throughout the mlpstorage
+framework, including:
+
+- JSON encoding with custom type handling
+- Configuration file loading and manipulation
+- Dictionary operations (nesting, flattening, updates)
+- Command execution with signal handling
+- MPI command generation
+
+Classes:
+    MLPSJsonEncoder: Custom JSON encoder for mlpstorage types.
+    CommandExecutor: Execute shell commands with live output streaming.
+
+Functions:
+    read_config_from_file: Load YAML configuration files.
+    generate_mpi_prefix_cmd: Generate MPI command prefix for distributed execution.
+    update_nested_dict: Recursively merge two dictionaries.
+    create_nested_dict: Convert flat dotted keys to nested dictionary.
+    flatten_nested_dict: Convert nested dictionary to flat dotted keys.
+"""
+
 import concurrent.futures
 import enum
 import io
@@ -15,15 +39,38 @@ import sys
 import threading
 import yaml
 from datetime import datetime
-
-from typing import List, Union, Optional, Dict, Tuple, Set
+from typing import Any, List, Union, Optional, Dict, Tuple, Set
 
 from mlpstorage.config import CONFIGS_ROOT_DIR, MPIRUN, MPIEXEC, MPI_RUN_BIN, MPI_EXEC_BIN
 
 
 class MLPSJsonEncoder(json.JSONEncoder):
+    """Custom JSON encoder for mlpstorage types.
 
-    def default(self, obj):
+    Handles serialization of special types that the standard JSON encoder
+    cannot process:
+    - Sets are converted to lists
+    - Enums are converted to their values
+    - Logger objects are converted to placeholder strings
+    - ClusterInformation objects use their .info property
+    - Objects with __dict__ are serialized as dictionaries
+
+    Example:
+        >>> import json
+        >>> data = {'status': PARAM_VALIDATION.CLOSED, 'hosts': {'a', 'b'}}
+        >>> json.dumps(data, cls=MLPSJsonEncoder)
+        '{"status": "closed", "hosts": ["a", "b"]}'
+    """
+
+    def default(self, obj: Any) -> Any:
+        """Convert special types to JSON-serializable forms.
+
+        Args:
+            obj: Object to serialize.
+
+        Returns:
+            JSON-serializable representation of the object.
+        """
         try:
             if isinstance(obj, (float, int, str, list, tuple, dict)):
                 return super().default(obj)
@@ -43,34 +90,66 @@ class MLPSJsonEncoder(json.JSONEncoder):
             return str(obj)
 
 
-def is_valid_datetime_format(datetime_str):
-    """
-    Check if a string is a valid datetime in the format "yyyymmdd_hhMMss"
-    
-    :param datetime_str: String to check
-    :return: True if the string is a valid datetime, False otherwise
+def is_valid_datetime_format(datetime_str: str) -> bool:
+    """Check if a string is a valid datetime in the format "YYYYMMDD_HHMMSS".
+
+    Args:
+        datetime_str: String to validate.
+
+    Returns:
+        True if the string matches the datetime format, False otherwise.
+
+    Example:
+        >>> is_valid_datetime_format("20250115_143022")
+        True
+        >>> is_valid_datetime_format("invalid")
+        False
     """
     try:
-        # Check if the string has the correct length and format
         if len(datetime_str) != 15 or datetime_str[8] != '_':
             return False
-        
-        # Try to parse the datetime string
-        parsed_datetime = datetime.strptime(datetime_str, "%Y%m%d_%H%M%S")
+        datetime.strptime(datetime_str, "%Y%m%d_%H%M%S")
         return True
     except ValueError:
-        # If parsing fails, the format is invalid
         return False
 
 
-def get_datetime_from_timestamp(datetime_str):
+def get_datetime_from_timestamp(datetime_str: str) -> Optional[datetime]:
+    """Parse a datetime string in YYYYMMDD_HHMMSS format.
+
+    Args:
+        datetime_str: String in "YYYYMMDD_HHMMSS" format.
+
+    Returns:
+        datetime object if valid, None otherwise.
+
+    Example:
+        >>> get_datetime_from_timestamp("20250115_143022")
+        datetime.datetime(2025, 1, 15, 14, 30, 22)
+    """
     if is_valid_datetime_format(datetime_str):
         return datetime.strptime(datetime_str, "%Y%m%d_%H%M%S")
-    else:
-        return None
+    return None
 
 
-def read_config_from_file(relative_path):
+def read_config_from_file(relative_path: str) -> Dict[str, Any]:
+    """Load configuration from a YAML file.
+
+    Args:
+        relative_path: Path relative to CONFIGS_ROOT_DIR.
+
+    Returns:
+        Dictionary containing the parsed YAML configuration.
+
+    Raises:
+        FileNotFoundError: If the configuration file doesn't exist.
+        yaml.YAMLError: If the file contains invalid YAML.
+
+    Example:
+        >>> config = read_config_from_file("workloads/unet3d_h100.yaml")
+        >>> config['model']['name']
+        'unet3d'
+    """
     config_path = os.path.join(CONFIGS_ROOT_DIR, relative_path)
     if not os.path.isfile(config_path):
         raise FileNotFoundError(f"Configuration file not found: {config_path}")
@@ -81,8 +160,29 @@ def read_config_from_file(relative_path):
     return config
 
 
-def update_nested_dict(original_dict, update_dict):
-    updated_dict = {}
+def update_nested_dict(
+    original_dict: Dict[str, Any],
+    update_dict: Dict[str, Any]
+) -> Dict[str, Any]:
+    """Recursively merge two nested dictionaries.
+
+    Values from update_dict override values in original_dict. Nested
+    dictionaries are merged recursively rather than replaced.
+
+    Args:
+        original_dict: Base dictionary to update.
+        update_dict: Dictionary with values to merge in.
+
+    Returns:
+        New dictionary with merged values.
+
+    Example:
+        >>> original = {'a': 1, 'b': {'c': 2, 'd': 3}}
+        >>> update = {'b': {'c': 4}}
+        >>> update_nested_dict(original, update)
+        {'a': 1, 'b': {'c': 4, 'd': 3}}
+    """
+    updated_dict: Dict[str, Any] = {}
     for key, value in original_dict.items():
         if key in update_dict:
             if isinstance(value, dict) and isinstance(update_dict[key], dict):
@@ -97,7 +197,26 @@ def update_nested_dict(original_dict, update_dict):
     return updated_dict
 
 
-def create_nested_dict(flat_dict, parent_dict=None, separator='.'):
+def create_nested_dict(
+    flat_dict: Dict[str, Any],
+    parent_dict: Optional[Dict[str, Any]] = None,
+    separator: str = '.'
+) -> Dict[str, Any]:
+    """Convert a flat dictionary with dotted keys to a nested structure.
+
+    Args:
+        flat_dict: Dictionary with dotted keys (e.g., "a.b.c").
+        parent_dict: Optional existing dictionary to merge into.
+        separator: Character used to separate key levels.
+
+    Returns:
+        Nested dictionary structure.
+
+    Example:
+        >>> flat = {'a.b.c': 1, 'a.b.d': 2, 'e': 3}
+        >>> create_nested_dict(flat)
+        {'a': {'b': {'c': 1, 'd': 2}}, 'e': 3}
+    """
     if parent_dict is None:
         parent_dict = {}
 
@@ -145,14 +264,33 @@ def flatten_nested_dict(nested_dict, parent_key='', separator='.'):
     return flat_dict
 
 
-def remove_nan_values(input_dict):
-    # Remove any NaN values from the input dictionary
-    ret_dict = dict()
+def remove_nan_values(input_dict: Dict[str, Any]) -> Dict[str, Any]:
+    """Remove any NaN values from a dictionary.
+
+    Useful for cleaning up metrics dictionaries before JSON serialization,
+    as JSON doesn't support NaN values.
+
+    Args:
+        input_dict: Dictionary that may contain NaN float values.
+
+    Returns:
+        New dictionary with NaN values removed.
+
+    Example:
+        >>> import math
+        >>> d = {'valid': 1.5, 'invalid': float('nan'), 'other': 'text'}
+        >>> remove_nan_values(d)
+        {'valid': 1.5, 'other': 'text'}
+    """
+    ret_dict: Dict[str, Any] = {}
     for k, v in input_dict.items():
-        if type(v) in [float, int] and math.isnan(v):  # Ignore NaN values
-            continue
-        else:
-            ret_dict[k] = v
+        if isinstance(v, (float, int)):
+            try:
+                if math.isnan(v):
+                    continue
+            except (TypeError, ValueError):
+                pass
+        ret_dict[k] = v
 
     return ret_dict
 
@@ -327,36 +465,69 @@ class CommandExecutor:
         self._original_handlers = {}
 
 
-def generate_mpi_prefix_cmd(mpi_cmd, hosts, num_processes, oversubscribe, allow_run_as_root, params, logger):
-    # Check if we got slot definitions with the hosts:
-    slots_configured = False
-    for host in hosts:
-        if ":" in host:
-            slots_configured = True
-            break
+def generate_mpi_prefix_cmd(
+    mpi_cmd: str,
+    hosts: List[str],
+    num_processes: int,
+    oversubscribe: bool,
+    allow_run_as_root: bool,
+    params: Optional[List[str]],
+    logger: logging.Logger
+) -> str:
+    """Generate MPI command prefix for distributed execution.
+
+    Constructs the mpirun/mpiexec command prefix with proper host
+    distribution, slot allocation, and CPU binding settings.
+
+    Args:
+        mpi_cmd: MPI binary to use ('mpirun' or 'mpiexec').
+        hosts: List of hostnames, optionally with slots (e.g., 'host1:4').
+        num_processes: Total number of MPI processes to run.
+        oversubscribe: Allow more processes than available CPU slots.
+        allow_run_as_root: Allow running MPI as root user.
+        params: Additional MPI parameters to append.
+        logger: Logger instance for debug output.
+
+    Returns:
+        MPI command prefix string ready for command execution.
+
+    Raises:
+        ValueError: If configured slots are insufficient for num_processes.
+        ValueError: If unsupported MPI command is specified.
+
+    Example:
+        >>> prefix = generate_mpi_prefix_cmd(
+        ...     'mpirun', ['host1', 'host2'], 8, False, False, None, logger
+        ... )
+        >>> prefix
+        'mpirun -n 8 -host host1:4,host2:4 --bind-to none --map-by node'
+    """
+    # Check if we got slot definitions with the hosts
+    slots_configured = any(":" in host for host in hosts)
 
     if slots_configured:
         # Ensure the configured number of slots is >= num_processes
-        num_slots = sum(int(slot) for host, slot in (host.split(":") for host in hosts))
+        num_slots = sum(int(slot) for _, slot in (host.split(":") for host in hosts))
         logger.debug(f"Configured slots: {num_slots}")
         if num_slots < num_processes:
-            raise ValueError(f"Configured slots ({num_slots}) are not sufficient to run {num_processes} processes")
-    elif not slots_configured:
-        slotted_hosts = []
-        # manually define how many slots per host to evenly distribute the processes across hosts. If num_processes
-        # is not divisible by the number of hosts, distribute the remaining processes to the rest of the hosts.
+            raise ValueError(
+                f"Configured slots ({num_slots}) are not sufficient "
+                f"to run {num_processes} processes"
+            )
+    else:
+        # Manually define slots to evenly distribute processes across hosts
+        slotted_hosts: List[str] = []
         base_slots_per_host = num_processes // len(hosts)
         remaining_slots = num_processes % len(hosts)
 
         for i, host in enumerate(hosts):
-            # Add one extra slot to hosts until we've distributed all remaining slots
             slots_for_this_host = base_slots_per_host + (1 if i < remaining_slots else 0)
             slotted_hosts.append(f"{host}:{slots_for_this_host}")
 
-        # Replace the original hosts list with the slotted version
         hosts = slotted_hosts
         logger.debug(f"Configured slots for hosts: {hosts}")
 
+    # Build MPI command prefix
     if mpi_cmd == MPIRUN:
         prefix = f"{MPI_RUN_BIN} -n {num_processes} -host {','.join(hosts)}"
     elif mpi_cmd == MPIEXEC:
@@ -364,12 +535,12 @@ def generate_mpi_prefix_cmd(mpi_cmd, hosts, num_processes, oversubscribe, allow_
     else:
         raise ValueError(f"Unsupported MPI command: {mpi_cmd}")
 
-    # CPU scheduling optimizations for multi-host I/O workloads
-    unique_hosts = set()
+    # CPU scheduling optimizations for I/O workloads
+    unique_hosts: Set[str] = set()
     for host in hosts:
         host_part = host.split(':')[0] if ':' in host else host
         unique_hosts.add(host_part)
-    
+
     if len(unique_hosts) > 1:
         # Multi-host: prioritize even distribution across nodes
         prefix += " --bind-to none --map-by node"
