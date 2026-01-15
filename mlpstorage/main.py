@@ -1,7 +1,16 @@
 #!/usr/bin/python3.9
 #!/usr/bin/env python3
+"""
+MLPerf Storage Benchmark - Main Entry Point
+
+This module provides the main entry point for the MLPerf Storage
+benchmark suite, with comprehensive error handling and user-friendly
+messaging.
+"""
+
 import signal
 import sys
+import traceback
 
 from mlpstorage.benchmarks import TrainingBenchmark, VectorDBBenchmark, CheckpointingBenchmark
 from mlpstorage.cli_parser import parse_arguments, validate_args, update_args
@@ -10,9 +19,21 @@ from mlpstorage.debug import debugger_hook, MLPS_DEBUG
 from mlpstorage.history import HistoryTracker
 from mlpstorage.mlps_logging import setup_logging, apply_logging_options
 from mlpstorage.reporting import ReportGenerator
+from mlpstorage.errors import (
+    MLPStorageException,
+    ConfigurationError,
+    BenchmarkExecutionError,
+    ValidationError,
+    FileSystemError,
+    MPIError,
+    DependencyError,
+    ErrorCode,
+)
+from mlpstorage.error_messages import format_error, ErrorFormatter
 
 logger = setup_logging("MLPerfStorage")
 signal_received = False
+error_formatter = ErrorFormatter(use_colors=True)
 
 
 def signal_handler(sig, frame):
@@ -27,40 +48,80 @@ def signal_handler(sig, frame):
 
     # For SIGTERM, exit immediately
     if sig in (signal.SIGTERM, signal.SIGINT):
-        logger.info("Exiting immediately due to SIGTERM")
+        logger.info("Exiting due to signal")
         sys.exit(EXIT_CODE.INTERRUPTED)
 
 
 def run_benchmark(args, run_datetime):
-    """Run a benchmark based on the provided args."""
+    """
+    Run a benchmark based on the provided args.
+
+    Args:
+        args: Parsed command line arguments.
+        run_datetime: Datetime string for this run.
+
+    Returns:
+        Exit code indicating success or failure.
+
+    Raises:
+        ConfigurationError: If benchmark type is unsupported.
+        BenchmarkExecutionError: If benchmark execution fails.
+    """
+    from mlpstorage.benchmarks import KVCacheBenchmark
+
     program_switch_dict = dict(
         training=TrainingBenchmark,
         checkpointing=CheckpointingBenchmark,
         vectordb=VectorDBBenchmark,
+        kvcache=KVCacheBenchmark,
     )
 
     benchmark_class = program_switch_dict.get(args.program)
     if not benchmark_class:
-        print(f"Unsupported program: {args.program}")
-        return 1
-        
+        available = list(program_switch_dict.keys())
+        raise ConfigurationError(
+            f"Unsupported benchmark type: {args.program}",
+            parameter="program",
+            expected=available,
+            actual=args.program,
+            suggestion=f"Use one of: {', '.join(available)}",
+            code=ErrorCode.CONFIG_INVALID_VALUE
+        )
+
     benchmark = benchmark_class(args, run_datetime=run_datetime, logger=logger)
+    ret_code = EXIT_CODE.SUCCESS
+
     try:
         ret_code = benchmark.run()
+    except MLPStorageException:
+        # Re-raise our custom exceptions to be handled by main()
+        raise
     except Exception as e:
-        logger.error(f"Error running benchmark: {str(e)}")
-        ret_code = EXIT_CODE.ERROR
+        # Wrap unexpected exceptions
+        raise BenchmarkExecutionError(
+            f"Benchmark execution failed: {str(e)}",
+            exit_code=getattr(e, 'returncode', None),
+            suggestion="Check the benchmark logs for details",
+            code=ErrorCode.BENCHMARK_COMMAND_FAILED
+        ) from e
     finally:
-        logger.status(f'Writing metadata for benchmark to: {benchmark.metadata_file_path}')
+        # Always try to write metadata
         try:
+            logger.status(f'Writing metadata for benchmark to: {benchmark.metadata_file_path}')
             benchmark.write_metadata()
-            return ret_code
         except Exception as e:
-            logger.error(f"Error writing metadata: {str(e)}")
-            return ret_code
+            logger.warning(f"Failed to write metadata: {str(e)}")
+
+    return ret_code
 
 
-def main():
+def _main_impl():
+    """
+    Main implementation with error handling.
+
+    This is the actual implementation of main(), separated out
+    so that main() can wrap it with exception handling.
+    """
     signal.signal(signal.SIGINT, signal_handler)
     signal.signal(signal.SIGTERM, signal_handler)
     global signal_received
@@ -94,7 +155,7 @@ def main():
                (hasattr(new_args, 'stream_log_level') and new_args.stream_log_level != args.stream_log_level):
                 # Apply the new logging options
                 apply_logging_options(logger, new_args)
-            
+
             args = new_args
         else:
             # If handle_history_command returned an exit code, return it
@@ -113,7 +174,7 @@ def main():
     # For other commands, run the benchmark
     for i in range(args.loops):
         if signal_received:
-            print(f'Caught signal, exiting...')
+            logger.warning('Caught signal, exiting...')
             return EXIT_CODE.INTERRUPTED
 
         ret_code = run_benchmark(args, run_datetime)
@@ -125,6 +186,83 @@ def main():
         run_datetime = get_datetime_string()
 
     return EXIT_CODE.SUCCESS
+
+
+def main():
+    """
+    Main entry point with comprehensive error handling.
+
+    This function wraps _main_impl() to catch and handle all
+    exceptions with user-friendly error messages.
+    """
+    try:
+        return _main_impl()
+
+    except ConfigurationError as e:
+        logger.error(str(e))
+        if e.suggestion:
+            logger.info(f"Suggestion: {e.suggestion}")
+        return EXIT_CODE.CONFIG_ERROR if hasattr(EXIT_CODE, 'CONFIG_ERROR') else EXIT_CODE.FAILURE
+
+    except BenchmarkExecutionError as e:
+        logger.error(str(e))
+        if e.suggestion:
+            logger.info(f"Suggestion: {e.suggestion}")
+        return EXIT_CODE.ERROR if hasattr(EXIT_CODE, 'ERROR') else EXIT_CODE.FAILURE
+
+    except ValidationError as e:
+        logger.error(str(e))
+        if e.suggestion:
+            logger.info(f"Suggestion: {e.suggestion}")
+        return EXIT_CODE.FAILURE
+
+    except FileSystemError as e:
+        logger.error(str(e))
+        if e.suggestion:
+            logger.info(f"Suggestion: {e.suggestion}")
+        return EXIT_CODE.FILE_NOT_FOUND if hasattr(EXIT_CODE, 'FILE_NOT_FOUND') else EXIT_CODE.FAILURE
+
+    except MPIError as e:
+        logger.error(str(e))
+        if e.suggestion:
+            logger.info(f"Suggestion: {e.suggestion}")
+        return EXIT_CODE.FAILURE
+
+    except DependencyError as e:
+        logger.error(str(e))
+        if e.suggestion:
+            logger.info(f"Suggestion: {e.suggestion}")
+        return EXIT_CODE.FAILURE
+
+    except MLPStorageException as e:
+        # Catch-all for any other custom exceptions
+        logger.error(str(e))
+        if e.suggestion:
+            logger.info(f"Suggestion: {e.suggestion}")
+        return EXIT_CODE.FAILURE
+
+    except KeyboardInterrupt:
+        logger.warning("Interrupted by user")
+        return EXIT_CODE.INTERRUPTED
+
+    except SystemExit as e:
+        # Re-raise SystemExit to allow clean exits
+        raise
+
+    except Exception as e:
+        # Unexpected exceptions - show full traceback in debug mode
+        logger.error(f"Unexpected error: {str(e)}")
+        logger.error(format_error('INTERNAL_ERROR', error=str(e)))
+
+        # Show traceback if in debug mode
+        if MLPS_DEBUG:
+            logger.debug("Stack trace:")
+            traceback.print_exc()
+        else:
+            logger.info("Run with --debug for full stack trace")
+
+        return EXIT_CODE.ERROR if hasattr(EXIT_CODE, 'ERROR') else EXIT_CODE.FAILURE
+
 
 if __name__ == "__main__":
     sys.exit(main())
