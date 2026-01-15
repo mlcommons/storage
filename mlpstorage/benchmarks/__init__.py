@@ -7,12 +7,14 @@ the BenchmarkRegistry for dynamic CLI construction.
 
 from mlpstorage.benchmarks.dlio import TrainingBenchmark, CheckpointingBenchmark
 from mlpstorage.benchmarks.vectordbbench import VectorDBBenchmark
+from mlpstorage.benchmarks.kvcache import KVCacheBenchmark
 from mlpstorage.registry import BenchmarkRegistry
 from mlpstorage.cli import (
     PROGRAM_DESCRIPTIONS,
     add_training_arguments,
     add_checkpointing_arguments,
     add_vectordb_arguments,
+    add_kvcache_arguments,
 )
 
 
@@ -46,8 +48,22 @@ def register_benchmarks():
         help_text="VectorDB benchmark options"
     )
 
+    BenchmarkRegistry.register(
+        name='kvcache',
+        benchmark_class=KVCacheBenchmark,
+        cli_builder=add_kvcache_arguments,
+        description=PROGRAM_DESCRIPTIONS['kvcache'],
+        help_text="KV Cache benchmark options"
+    )
+
 
 # Register benchmarks at import time
 register_benchmarks()
 
-__all__ = ['TrainingBenchmark', 'VectorDBBenchmark', 'CheckpointingBenchmark', 'register_benchmarks']
+__all__ = [
+    'TrainingBenchmark',
+    'CheckpointingBenchmark',
+    'VectorDBBenchmark',
+    'KVCacheBenchmark',
+    'register_benchmarks',
+]
