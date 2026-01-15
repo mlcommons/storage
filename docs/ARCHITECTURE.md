@@ -54,6 +54,9 @@ mlpstorage/
 │   ├── directory_validator.py  # Results directory structure validation
 │   └── formatters.py     # OPEN/CLOSED message formatters
 │
+├── errors.py             # Custom exception classes (Phase 8)
+├── error_messages.py     # Error message templates (Phase 8)
+├── validation_helpers.py # Pre-run validation functions (Phase 8)
 ├── utils.py              # Utility functions
 ├── mlps_logging.py       # Custom logging setup
 ├── reporting.py          # Result reporting (uses reporting/ package)
