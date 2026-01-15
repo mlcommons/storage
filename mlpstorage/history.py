@@ -188,7 +188,7 @@ class HistoryTracker:
             command_parts = command_parts[1:]
             
         # Import here to avoid circular imports
-        from mlpstorage.cli import parse_arguments
+        from mlpstorage.cli_parser import parse_arguments
         
         # Save original argv and restore after parsing
         original_argv = sys.argv
