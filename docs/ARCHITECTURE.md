@@ -49,9 +49,14 @@ mlpstorage/
 │   ├── kvcache_args.py   # KV Cache benchmark arguments
 │   └── utility_args.py
 │
+├── reporting/            # Reporting system (Phase 7)
+│   ├── __init__.py       # Public API exports
+│   ├── directory_validator.py  # Results directory structure validation
+│   └── formatters.py     # OPEN/CLOSED message formatters
+│
 ├── utils.py              # Utility functions
 ├── mlps_logging.py       # Custom logging setup
-├── reporting.py          # Result reporting
+├── reporting.py          # Result reporting (uses reporting/ package)
 ├── history.py            # Command history tracking
 └── cluster_collector.py  # MPI-based cluster info collection
 ```
