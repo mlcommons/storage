@@ -12,7 +12,8 @@ This document outlines a comprehensive, phased improvement plan for the mlpstora
 6. [Phase 4: Test Infrastructure Enhancement](#phase-4-test-infrastructure-enhancement)
 7. [Phase 5: Documentation and Type Annotations](#phase-5-documentation-and-type-annotations)
 8. [Phase 6: KV Cache Benchmark Integration](#phase-6-kv-cache-benchmark-integration)
-9. [Phase 7: Plugin Architecture](#phase-7-plugin-architecture)
+9. [Phase 7: Reporting System Refactoring](#phase-7-reporting-system-refactoring)
+10. [Phase 8: Error Handling and User Messaging](#phase-8-error-handling-and-user-messaging)
 
 ---
 
@@ -234,27 +235,38 @@ class Benchmark(BenchmarkInterface, abc.ABC):
 
 ## Phase 2: Modular Rules Engine
 
-**Goal:** Split the monolithic `rules.py` (1,434 LOC) into focused modules.
+**Goal:** Split the monolithic `rules.py` (1,434 LOC) into focused modules with a clear separation between single-run rule checkers (`RunRulesChecker`) and multi-run submission checkers (`MultiRunRulesChecker`).
 
 ### Step 2.1: Create Rules Package Structure
 
+The rules package should separate concerns into distinct subpackages:
+
 ```
 mlpstorage/rules/
-├── __init__.py           # Public API exports
-├── base.py               # RulesChecker ABC, RuleState enum
-├── issues.py             # Issue dataclass
-├── models.py             # Data classes (HostInfo, ClusterInformation, etc.)
-├── training.py           # TrainingRunRulesChecker, TrainingSubmissionRulesChecker
-├── checkpointing.py      # CheckpointingRunRulesChecker, CheckpointSubmissionRulesChecker
-├── vectordb.py           # VectorDBRulesChecker (new)
-├── kvcache.py            # KVCacheRulesChecker (placeholder)
-├── verifier.py           # BenchmarkVerifier
-└── utils.py              # calculate_training_data_size, generate_output_location
+├── __init__.py              # Public API exports
+├── base.py                  # RulesChecker ABC, RuleState enum, RunRulesChecker, MultiRunRulesChecker
+├── issues.py                # Issue dataclass
+├── models.py                # Data classes (HostInfo, ClusterInformation, etc.)
+├── run_checkers/            # Single-run validation checkers
+│   ├── __init__.py
+│   ├── base.py              # RunRulesChecker base class
+│   ├── training.py          # TrainingRunRulesChecker
+│   ├── checkpointing.py     # CheckpointingRunRulesChecker
+│   ├── vectordb.py          # VectorDBRunRulesChecker
+│   └── kvcache.py           # KVCacheRunRulesChecker
+├── submission_checkers/     # Multi-run submission validation checkers
+│   ├── __init__.py
+│   ├── base.py              # MultiRunRulesChecker base class
+│   ├── training.py          # TrainingSubmissionRulesChecker
+│   └── checkpointing.py     # CheckpointSubmissionRulesChecker
+├── verifier.py              # BenchmarkVerifier orchestrator
+└── utils.py                 # calculate_training_data_size, generate_output_location
 ```
 
 ### Step 2.2: Extract Data Classes to models.py
 
 Move to `mlpstorage/rules/models.py`:
+
 - `HostMemoryInfo`
 - `HostCPUInfo`
 - `HostInfo`
@@ -263,98 +275,479 @@ Move to `mlpstorage/rules/models.py`:
 - `ProcessedRun`
 - `BenchmarkResult`
 - `BenchmarkRun`
+- `BenchmarkRunData`
 
-### Step 2.3: Extract Training Rules
+### Step 2.3: Define Base Classes with Clear Contracts
 
-Create `mlpstorage/rules/training.py`:
+Create `mlpstorage/rules/base.py`:
 
 ```python
-from mlpstorage.rules.base import RulesChecker, RunRulesChecker, MultiRunRulesChecker
+from abc import ABC, abstractmethod
+from typing import List, Optional
 from mlpstorage.rules.issues import Issue
 
+class RulesChecker(ABC):
+    """Base class for all rule checkers."""
+
+    def __init__(self, logger, *args, **kwargs):
+        self.logger = logger
+        self.issues = []
+        self.check_methods = [
+            getattr(self, method) for method in dir(self)
+            if callable(getattr(self, method)) and method.startswith('check_')
+        ]
+
+    def run_checks(self) -> List[Issue]:
+        """Run all check methods and return issues."""
+        self.issues = []
+        for check_method in self.check_methods:
+            try:
+                result = check_method()
+                if result:
+                    if isinstance(result, list):
+                        self.issues.extend(result)
+                    else:
+                        self.issues.append(result)
+            except Exception as e:
+                self.logger.error(f"Check {check_method.__name__} failed: {e}")
+                self.issues.append(Issue(
+                    validation=PARAM_VALIDATION.INVALID,
+                    message=f"Check failed: {e}",
+                    severity="error"
+                ))
+        return self.issues
+```
+
+### Step 2.4: Create RunRulesChecker Base Class
+
+Create `mlpstorage/rules/run_checkers/base.py`:
+
+```python
+from mlpstorage.rules.base import RulesChecker
+from mlpstorage.rules.models import BenchmarkRun
+
+class RunRulesChecker(RulesChecker):
+    """
+    Base class for single-run validation.
+
+    RunRulesCheckers validate individual benchmark runs for:
+    - Parameter correctness (model, accelerator, batch size, etc.)
+    - System requirements (memory, CPU, etc.)
+    - Configuration validity (allowed parameter overrides)
+
+    Each check method should:
+    1. Return None if the check passes for CLOSED submission
+    2. Return Issue with PARAM_VALIDATION.OPEN if the check fails but is allowed for OPEN
+    3. Return Issue with PARAM_VALIDATION.INVALID if the check fails completely
+    """
+
+    def __init__(self, benchmark_run: BenchmarkRun, logger, *args, **kwargs):
+        super().__init__(logger, *args, **kwargs)
+        self.benchmark_run = benchmark_run
+
+    @property
+    def parameters(self):
+        """Access benchmark run parameters."""
+        return self.benchmark_run.parameters
+
+    @property
+    def override_parameters(self):
+        """Access override parameters."""
+        return self.benchmark_run.override_parameters
+
+    @property
+    def system_info(self):
+        """Access system information."""
+        return self.benchmark_run.system_info
+```
+
+### Step 2.5: Create MultiRunRulesChecker Base Class
+
+Create `mlpstorage/rules/submission_checkers/base.py`:
+
+```python
+from typing import List
+from mlpstorage.rules.base import RulesChecker
+from mlpstorage.rules.models import BenchmarkRun
+from mlpstorage.rules.issues import Issue
+from mlpstorage.config import PARAM_VALIDATION
+
+class MultiRunRulesChecker(RulesChecker):
+    """
+    Base class for multi-run submission validation.
+
+    MultiRunRulesCheckers validate groups of benchmark runs as a submission:
+    - Required number of runs per workload
+    - Consistency across runs (same model, accelerator, etc.)
+    - Aggregate metrics requirements
+
+    These checkers operate on already-validated individual runs.
+    """
+
+    def __init__(self, benchmark_runs: List[BenchmarkRun], logger, *args, **kwargs):
+        super().__init__(logger, *args, **kwargs)
+        if not isinstance(benchmark_runs, (list, tuple)):
+            raise TypeError("benchmark_runs must be a list or tuple")
+        self.benchmark_runs = benchmark_runs
+
+    def check_runs_valid(self) -> Optional[Issue]:
+        """Verify all individual runs passed validation."""
+        category_set = {run.category for run in self.benchmark_runs}
+
+        if PARAM_VALIDATION.INVALID in category_set:
+            return Issue(
+                validation=PARAM_VALIDATION.INVALID,
+                message="Submission contains INVALID runs",
+                parameter="run_categories",
+                expected="All runs OPEN or CLOSED",
+                actual=[cat.value.upper() for cat in category_set]
+            )
+        elif PARAM_VALIDATION.OPEN in category_set:
+            return Issue(
+                validation=PARAM_VALIDATION.OPEN,
+                message="Submission contains OPEN runs - qualifies for OPEN category only",
+                parameter="run_categories",
+                actual=[cat.value.upper() for cat in category_set]
+            )
+        return None  # All runs are CLOSED
+
+    def check_run_consistency(self) -> Optional[Issue]:
+        """Verify all runs have consistent configuration."""
+        models = {run.model for run in self.benchmark_runs}
+        if len(models) > 1:
+            return Issue(
+                validation=PARAM_VALIDATION.INVALID,
+                message="Inconsistent models across runs in submission",
+                parameter="model",
+                expected="Single model",
+                actual=list(models)
+            )
+        return None
+```
+
+### Step 2.6: Extract Training Run Rules
+
+Create `mlpstorage/rules/run_checkers/training.py`:
+
+```python
+from typing import Optional, List
+from mlpstorage.rules.run_checkers.base import RunRulesChecker
+from mlpstorage.rules.issues import Issue
+from mlpstorage.config import PARAM_VALIDATION, BENCHMARK_TYPES
+
 class TrainingRunRulesChecker(RunRulesChecker):
-    """Validate training benchmark parameters."""
+    """Validate training benchmark parameters for a single run."""
 
-    def check_model(self) -> Optional[Issue]:
-        # Move from rules.py
+    # Parameters allowed for CLOSED submission
+    CLOSED_ALLOWED_PARAMS = [
+        'dataset.num_files_train',
+        'dataset.num_subfolders_train',
+        'dataset.data_folder',
+        'reader.read_threads',
+        'reader.computation_threads',
+        'reader.transfer_size',
+        'reader.odirect',
+        'reader.prefetch_size',
+        'checkpoint.checkpoint_folder',
+        'storage.storage_type',
+        'storage.storage_root',
+    ]
+
+    # Parameters allowed for OPEN submission (but not CLOSED)
+    OPEN_ALLOWED_PARAMS = [
+        'framework',
+        'dataset.format',
+        'dataset.num_samples_per_file',
+        'reader.data_loader',
+    ]
+
+    def check_benchmark_type(self) -> Optional[Issue]:
+        """Verify this is a training benchmark."""
+        if self.benchmark_run.benchmark_type != BENCHMARK_TYPES.training:
+            return Issue(
+                validation=PARAM_VALIDATION.INVALID,
+                message=f"Expected training benchmark, got {self.benchmark_run.benchmark_type}",
+                parameter="benchmark_type",
+                expected=BENCHMARK_TYPES.training.name,
+                actual=self.benchmark_run.benchmark_type.name if self.benchmark_run.benchmark_type else None
+            )
+        return None
+
+    def check_allowed_params(self) -> List[Issue]:
+        """Check if parameter overrides are allowed for CLOSED submission."""
+        issues = []
+        for param, value in self.override_parameters.items():
+            if param.startswith("workflow"):
+                continue  # Handled separately
+
+            if param in self.CLOSED_ALLOWED_PARAMS:
+                issues.append(Issue(
+                    validation=PARAM_VALIDATION.CLOSED,
+                    message=f"Parameter override allowed for CLOSED: {param}",
+                    parameter=param,
+                    actual=value
+                ))
+            elif param in self.OPEN_ALLOWED_PARAMS:
+                issues.append(Issue(
+                    validation=PARAM_VALIDATION.OPEN,
+                    message=f"Parameter override only allowed for OPEN: {param}",
+                    parameter=param,
+                    actual=value
+                ))
+            else:
+                issues.append(Issue(
+                    validation=PARAM_VALIDATION.INVALID,
+                    message=f"Parameter override not allowed: {param}",
+                    parameter=param,
+                    expected="Allowed parameter",
+                    actual=value
+                ))
+        return issues
+
+    def check_num_files_train(self) -> Optional[Issue]:
+        """Check if training file count meets requirements."""
+        # Implementation moved from rules.py
         pass
-
-    def check_accelerator(self) -> Optional[Issue]:
-        # Move from rules.py
-        pass
-
-    # ... other training-specific checks
 ```
 
-### Step 2.4: Extract Checkpointing Rules
+### Step 2.7: Extract Training Submission Rules
 
-Create `mlpstorage/rules/checkpointing.py`:
+Create `mlpstorage/rules/submission_checkers/training.py`:
 
 ```python
+from typing import Optional
+from mlpstorage.rules.submission_checkers.base import MultiRunRulesChecker
+from mlpstorage.rules.issues import Issue
+from mlpstorage.config import PARAM_VALIDATION, MODELS
+
+class TrainingSubmissionRulesChecker(MultiRunRulesChecker):
+    """Validate training benchmark submissions (multiple runs)."""
+
+    REQUIRED_RUNS = 5  # Required number of runs for closed submission
+    supported_models = MODELS
+
+    def check_num_runs(self) -> Optional[Issue]:
+        """Require 5 runs for training benchmark closed submission."""
+        num_runs = len(self.benchmark_runs)
+        if num_runs < self.REQUIRED_RUNS:
+            return Issue(
+                validation=PARAM_VALIDATION.INVALID,
+                message=f"Training submission requires {self.REQUIRED_RUNS} runs",
+                parameter="num_runs",
+                expected=self.REQUIRED_RUNS,
+                actual=num_runs
+            )
+        return Issue(
+            validation=PARAM_VALIDATION.CLOSED,
+            message=f"Training submission has required {self.REQUIRED_RUNS} runs",
+            parameter="num_runs",
+            expected=self.REQUIRED_RUNS,
+            actual=num_runs
+        )
+```
+
+### Step 2.8: Extract Checkpointing Run Rules
+
+Create `mlpstorage/rules/run_checkers/checkpointing.py`:
+
+```python
+from typing import Optional
+from mlpstorage.rules.run_checkers.base import RunRulesChecker
+from mlpstorage.rules.issues import Issue
+from mlpstorage.config import PARAM_VALIDATION, BENCHMARK_TYPES, LLM_MODELS
+
 class CheckpointingRunRulesChecker(RunRulesChecker):
-    """Validate checkpointing benchmark parameters."""
+    """Validate checkpointing benchmark parameters for a single run."""
+
+    def check_benchmark_type(self) -> Optional[Issue]:
+        """Verify this is a checkpointing benchmark."""
+        if self.benchmark_run.benchmark_type != BENCHMARK_TYPES.checkpointing:
+            return Issue(
+                validation=PARAM_VALIDATION.INVALID,
+                message=f"Expected checkpointing benchmark",
+                parameter="benchmark_type",
+                expected=BENCHMARK_TYPES.checkpointing.name,
+                actual=self.benchmark_run.benchmark_type.name if self.benchmark_run.benchmark_type else None
+            )
+        return None
 
     def check_model(self) -> Optional[Issue]:
-        # LLM model validation
-        pass
-
-    def check_zero_level(self) -> Optional[Issue]:
-        # DeepSpeed Zero level validation
-        pass
+        """Verify model is a valid LLM model."""
+        if self.benchmark_run.model not in [m.value for m in LLM_MODELS]:
+            return Issue(
+                validation=PARAM_VALIDATION.INVALID,
+                message=f"Invalid model for checkpointing benchmark",
+                parameter="model",
+                expected=[m.value for m in LLM_MODELS],
+                actual=self.benchmark_run.model
+            )
+        return None
 ```
 
-### Step 2.5: Create VectorDB Rules (New)
+### Step 2.9: Extract Checkpointing Submission Rules
 
-Create `mlpstorage/rules/vectordb.py`:
+Create `mlpstorage/rules/submission_checkers/checkpointing.py`:
 
 ```python
-class VectorDBRunRulesChecker(RunRulesChecker):
-    """Validate vector database benchmark parameters."""
+from typing import Optional, List
+from mlpstorage.rules.submission_checkers.base import MultiRunRulesChecker
+from mlpstorage.rules.issues import Issue
+from mlpstorage.config import PARAM_VALIDATION, BENCHMARK_TYPES, LLM_MODELS
 
-    def check_dimension(self) -> Optional[Issue]:
-        pass
+class CheckpointSubmissionRulesChecker(MultiRunRulesChecker):
+    """Validate checkpointing benchmark submissions."""
 
-    def check_index_type(self) -> Optional[Issue]:
-        pass
+    REQUIRED_WRITES = 10
+    REQUIRED_READS = 10
+    supported_models = LLM_MODELS
 
-    def check_metric_type(self) -> Optional[Issue]:
-        pass
+    def check_num_operations(self) -> List[Issue]:
+        """
+        Require 10 total writes and 10 total reads for checkpointing submissions.
+
+        Operations can be spread across multiple runs.
+        """
+        issues = []
+        num_writes = num_reads = 0
+
+        for run in self.benchmark_runs:
+            if run.benchmark_type == BENCHMARK_TYPES.checkpointing:
+                checkpoint_params = run.parameters.get('checkpoint', {})
+                num_writes += checkpoint_params.get('num_checkpoints_write', 0)
+                num_reads += checkpoint_params.get('num_checkpoints_read', 0)
+
+        # Check writes
+        if num_writes < self.REQUIRED_WRITES:
+            issues.append(Issue(
+                validation=PARAM_VALIDATION.INVALID,
+                message=f"Insufficient checkpoint write operations",
+                parameter="num_checkpoints_write",
+                expected=self.REQUIRED_WRITES,
+                actual=num_writes
+            ))
+        else:
+            issues.append(Issue(
+                validation=PARAM_VALIDATION.CLOSED,
+                message=f"Checkpoint write operations meet requirement",
+                parameter="num_checkpoints_write",
+                expected=self.REQUIRED_WRITES,
+                actual=num_writes
+            ))
+
+        # Check reads
+        if num_reads < self.REQUIRED_READS:
+            issues.append(Issue(
+                validation=PARAM_VALIDATION.INVALID,
+                message=f"Insufficient checkpoint read operations",
+                parameter="num_checkpoints_read",
+                expected=self.REQUIRED_READS,
+                actual=num_reads
+            ))
+        else:
+            issues.append(Issue(
+                validation=PARAM_VALIDATION.CLOSED,
+                message=f"Checkpoint read operations meet requirement",
+                parameter="num_checkpoints_read",
+                expected=self.REQUIRED_READS,
+                actual=num_reads
+            ))
+
+        return issues
 ```
 
-### Step 2.6: Update __init__.py for Backwards Compatibility
+### Step 2.10: Create KV Cache Rules
+
+Create `mlpstorage/rules/run_checkers/kvcache.py`:
+
+```python
+from typing import Optional
+from mlpstorage.rules.run_checkers.base import RunRulesChecker
+from mlpstorage.rules.issues import Issue
+from mlpstorage.config import PARAM_VALIDATION
+
+class KVCacheRunRulesChecker(RunRulesChecker):
+    """Validation rules for KV cache benchmark runs."""
+
+    CLOSED_REQUIREMENTS = {
+        'min_runtime': 60,  # seconds
+        'allowed_backends': ['disk', 'lmcache'],
+    }
+
+    def check_runtime(self) -> Optional[Issue]:
+        """Check runtime meets CLOSED requirements."""
+        runtime = getattr(self.benchmark_run.args, 'runtime', 0)
+        min_runtime = self.CLOSED_REQUIREMENTS['min_runtime']
+
+        if runtime < min_runtime:
+            return Issue(
+                validation=PARAM_VALIDATION.OPEN,
+                message=f"Runtime below CLOSED requirement",
+                parameter='runtime',
+                expected=f">= {min_runtime}s",
+                actual=f"{runtime}s"
+            )
+        return None
+
+    def check_cache_backend(self) -> Optional[Issue]:
+        """Check cache backend is allowed for CLOSED submission."""
+        backend = getattr(self.benchmark_run.args, 'cache_backend', 'memory')
+        allowed = self.CLOSED_REQUIREMENTS['allowed_backends']
+
+        if backend not in allowed:
+            return Issue(
+                validation=PARAM_VALIDATION.OPEN,
+                message=f"Cache backend not allowed for CLOSED submission",
+                parameter='cache_backend',
+                expected=allowed,
+                actual=backend
+            )
+        return None
+```
+
+### Step 2.11: Update __init__.py for Backwards Compatibility
 
 Create `mlpstorage/rules/__init__.py`:
 
 ```python
 # Maintain backwards compatibility
 from mlpstorage.rules.models import (
-    HostMemoryInfo,
-    HostCPUInfo,
-    HostInfo,
-    ClusterInformation,
-    RunID,
-    ProcessedRun,
-    BenchmarkResult,
-    BenchmarkRun,
+    HostMemoryInfo, HostCPUInfo, HostInfo, ClusterInformation,
+    RunID, ProcessedRun, BenchmarkResult, BenchmarkRun, BenchmarkRunData,
 )
 from mlpstorage.rules.base import RulesChecker, RuleState
 from mlpstorage.rules.issues import Issue
-from mlpstorage.rules.training import TrainingRunRulesChecker, TrainingSubmissionRulesChecker
-from mlpstorage.rules.checkpointing import CheckpointingRunRulesChecker, CheckpointSubmissionRulesChecker
-from mlpstorage.rules.vectordb import VectorDBRunRulesChecker
+
+# Run checkers (single-run validation)
+from mlpstorage.rules.run_checkers import (
+    RunRulesChecker,
+    TrainingRunRulesChecker,
+    CheckpointingRunRulesChecker,
+    VectorDBRunRulesChecker,
+    KVCacheRunRulesChecker,
+)
+
+# Submission checkers (multi-run validation)
+from mlpstorage.rules.submission_checkers import (
+    MultiRunRulesChecker,
+    TrainingSubmissionRulesChecker,
+    CheckpointSubmissionRulesChecker,
+)
+
 from mlpstorage.rules.verifier import BenchmarkVerifier
 from mlpstorage.rules.utils import calculate_training_data_size, generate_output_location, get_runs_files
 
 __all__ = [
     # Models
     'HostMemoryInfo', 'HostCPUInfo', 'HostInfo', 'ClusterInformation',
-    'RunID', 'ProcessedRun', 'BenchmarkResult', 'BenchmarkRun',
+    'RunID', 'ProcessedRun', 'BenchmarkResult', 'BenchmarkRun', 'BenchmarkRunData',
     # Base
     'RulesChecker', 'RuleState', 'Issue',
-    # Validators
-    'TrainingRunRulesChecker', 'TrainingSubmissionRulesChecker',
-    'CheckpointingRunRulesChecker', 'CheckpointSubmissionRulesChecker',
-    'VectorDBRunRulesChecker',
+    # Run Checkers
+    'RunRulesChecker', 'TrainingRunRulesChecker', 'CheckpointingRunRulesChecker',
+    'VectorDBRunRulesChecker', 'KVCacheRunRulesChecker',
+    # Submission Checkers
+    'MultiRunRulesChecker', 'TrainingSubmissionRulesChecker', 'CheckpointSubmissionRulesChecker',
+    # Verifier
     'BenchmarkVerifier',
     # Utils
     'calculate_training_data_size', 'generate_output_location', 'get_runs_files',
@@ -946,11 +1339,19 @@ Create `mlpstorage/tests/benchmarks/test_mybenchmark.py`
 
 ### Step 6.1: Analyze Existing KV Cache Code
 
-The `kv_cache_benchmark/` directory contains:
-- `kv-cache.py` (168K) - Main benchmark implementation
-- `kv-cache_sharegpt_replay.py` (141K) - ShareGPT replay variant
-- `kv-cache-wrapper.sh` (51K) - Shell wrapper
-- `validate.sh` - Validation script
+The `kv_cache_benchmark/` directory contains several files, but only the main benchmark script should be wrapped:
+
+**Main Entrypoint (to be wrapped):**
+
+- `kv-cache.py` - Main benchmark implementation for KV cache benchmarking
+
+**Test/Development Scripts (NOT to be wrapped):**
+
+- `kv-cache_sharegpt_replay.py` - ShareGPT replay variant (for testing only)
+- `kv-cache-wrapper.sh` - Shell wrapper (for development/testing)
+- `validate.sh` - Validation script (for testing)
+
+The KVCacheBenchmark class should only invoke `kv-cache.py`. The other scripts in the directory are for development, testing, and validation purposes and should not be exposed through the mlpstorage CLI.
 
 ### Step 6.2: Create KVCacheBenchmark Class
 
@@ -1119,122 +1520,770 @@ BenchmarkRegistry.register('kvcache', KVCacheBenchmark, add_kvcache_arguments)
 
 ---
 
-## Phase 7: Plugin Architecture
+## Phase 7: Reporting System Refactoring
 
-**Goal:** Enable third-party benchmarks to be added without modifying core code.
+**Goal:** Improve the reporting system to provide clear validation feedback, better error handling for malformed directory structures, and explicit OPEN vs CLOSED submission messaging.
 
-### Step 7.1: Create Plugin Discovery
+### Step 7.1: Analyze Current Reporting Issues
 
-Create `mlpstorage/plugins/__init__.py`:
+The current `reporting.py` has several areas for improvement:
+
+**Current Architecture:**
+
+- `ReportGenerator` class handles all reporting logic
+- `accumulate_results()` walks directory tree and validates runs
+- `print_results()` outputs to console
+- Limited error handling for malformed directories
+
+**Issues Identified:**
+
+1. **Directory Structure Validation**: No explicit validation of expected directory structure
+2. **Error Recovery**: Errors during directory walking can halt the entire process
+3. **Message Clarity**: OPEN vs CLOSED distinction not always clear to users
+4. **Workload Grouping**: Implicit grouping by (model, accelerator) without validation
+
+### Step 7.2: Create Directory Structure Validator
+
+Create `mlpstorage/reporting/directory_validator.py`:
 
 ```python
-import importlib
-import pkgutil
+from dataclasses import dataclass
+from typing import List, Optional, Dict, Any
 from pathlib import Path
-from typing import List, Type
+import os
 
-from mlpstorage.interfaces import BenchmarkInterface
-from mlpstorage.registry import BenchmarkRegistry
+@dataclass
+class DirectoryValidationError:
+    """Represents an error in the results directory structure."""
+    path: str
+    error_type: str  # 'missing', 'malformed', 'unexpected'
+    message: str
+    suggestion: str  # How to fix the issue
 
-def discover_plugins(plugin_dirs: List[str] = None) -> List[str]:
-    """Discover and load benchmark plugins.
-
-    Args:
-        plugin_dirs: Additional directories to search for plugins.
-
-    Returns:
-        List of loaded plugin names.
+class ResultsDirectoryValidator:
     """
-    loaded = []
+    Validates the structure of a results directory.
 
-    # Default plugin locations
-    search_paths = [
-        Path(__file__).parent / "builtin",  # Built-in plugins
-        Path.home() / ".mlpstorage" / "plugins",  # User plugins
-    ]
+    Expected structure:
+    results_dir/
+        <benchmark_type>/           # training, checkpointing, vector_database
+            <model>/                # unet3d, resnet50, llama3-8b, etc.
+                <command>/          # run, datagen (for training)
+                    <datetime>/     # YYYYMMDD_HHMMSS format
+                        *_metadata.json
+                        summary.json (for DLIO runs)
+    """
 
-    if plugin_dirs:
-        search_paths.extend(Path(d) for d in plugin_dirs)
+    EXPECTED_BENCHMARK_TYPES = ['training', 'checkpointing', 'vector_database', 'kv_cache']
 
-    for path in search_paths:
-        if not path.exists():
-            continue
+    def __init__(self, results_dir: str, logger=None):
+        self.results_dir = Path(results_dir)
+        self.logger = logger
+        self.errors: List[DirectoryValidationError] = []
+        self.warnings: List[str] = []
 
-        for finder, name, ispkg in pkgutil.iter_modules([str(path)]):
+    def validate(self) -> bool:
+        """
+        Validate the directory structure.
+
+        Returns:
+            True if structure is valid, False otherwise.
+        """
+        self.errors = []
+        self.warnings = []
+
+        if not self.results_dir.exists():
+            self.errors.append(DirectoryValidationError(
+                path=str(self.results_dir),
+                error_type='missing',
+                message=f"Results directory does not exist: {self.results_dir}",
+                suggestion="Create the directory or specify a different --results-dir path"
+            ))
+            return False
+
+        if not self.results_dir.is_dir():
+            self.errors.append(DirectoryValidationError(
+                path=str(self.results_dir),
+                error_type='malformed',
+                message=f"Results path is not a directory: {self.results_dir}",
+                suggestion="Specify a directory path, not a file"
+            ))
+            return False
+
+        # Check for benchmark type directories
+        found_benchmark_dirs = False
+        for entry in self.results_dir.iterdir():
+            if entry.is_dir():
+                if entry.name in self.EXPECTED_BENCHMARK_TYPES:
+                    found_benchmark_dirs = True
+                    self._validate_benchmark_type_dir(entry)
+                else:
+                    self.warnings.append(
+                        f"Unexpected directory '{entry.name}' in results root. "
+                        f"Expected benchmark types: {self.EXPECTED_BENCHMARK_TYPES}"
+                    )
+
+        if not found_benchmark_dirs:
+            self.errors.append(DirectoryValidationError(
+                path=str(self.results_dir),
+                error_type='malformed',
+                message="No benchmark type directories found",
+                suggestion=f"Results should contain directories named: {self.EXPECTED_BENCHMARK_TYPES}"
+            ))
+
+        return len(self.errors) == 0
+
+    def _validate_benchmark_type_dir(self, benchmark_dir: Path):
+        """Validate a benchmark type directory (e.g., training/)."""
+        for model_dir in benchmark_dir.iterdir():
+            if model_dir.is_dir():
+                self._validate_model_dir(model_dir, benchmark_dir.name)
+
+    def _validate_model_dir(self, model_dir: Path, benchmark_type: str):
+        """Validate a model directory."""
+        has_valid_runs = False
+
+        for entry in model_dir.iterdir():
+            if entry.is_dir():
+                # Check if this is a datetime directory or a command directory
+                if self._is_datetime_dir(entry.name):
+                    self._validate_run_dir(entry)
+                    has_valid_runs = True
+                elif entry.name in ['run', 'datagen', 'datasize']:
+                    # Training has command subdirectories
+                    for datetime_dir in entry.iterdir():
+                        if datetime_dir.is_dir() and self._is_datetime_dir(datetime_dir.name):
+                            self._validate_run_dir(datetime_dir)
+                            has_valid_runs = True
+
+        if not has_valid_runs:
+            self.warnings.append(
+                f"No valid run directories found in {model_dir}"
+            )
+
+    def _validate_run_dir(self, run_dir: Path):
+        """Validate a single run directory."""
+        files = list(run_dir.iterdir())
+        file_names = [f.name for f in files if f.is_file()]
+
+        # Check for metadata file
+        metadata_files = [f for f in file_names if f.endswith('_metadata.json')]
+        if not metadata_files:
+            self.errors.append(DirectoryValidationError(
+                path=str(run_dir),
+                error_type='malformed',
+                message=f"Missing metadata file in {run_dir.name}",
+                suggestion="Run directory should contain a *_metadata.json file"
+            ))
+
+        # Check for summary.json (required for completed DLIO runs)
+        if 'summary.json' not in file_names:
+            self.warnings.append(
+                f"Missing summary.json in {run_dir} - run may be incomplete"
+            )
+
+    def _is_datetime_dir(self, name: str) -> bool:
+        """Check if directory name matches expected datetime format."""
+        # Expected format: YYYYMMDD_HHMMSS or similar
+        import re
+        return bool(re.match(r'^\d{8}_\d{6}', name))
+
+    def get_error_report(self) -> str:
+        """Generate a human-readable error report."""
+        lines = []
+
+        if self.errors:
+            lines.append("=== Directory Structure Errors ===\n")
+            for error in self.errors:
+                lines.append(f"ERROR: {error.message}")
+                lines.append(f"  Path: {error.path}")
+                lines.append(f"  Fix: {error.suggestion}")
+                lines.append("")
+
+        if self.warnings:
+            lines.append("=== Warnings ===\n")
+            for warning in self.warnings:
+                lines.append(f"WARNING: {warning}")
+
+        return "\n".join(lines)
+```
+
+### Step 7.3: Refactor ReportGenerator with Better Error Handling
+
+Update `mlpstorage/reporting.py`:
+
+```python
+from mlpstorage.reporting.directory_validator import ResultsDirectoryValidator, DirectoryValidationError
+
+class ReportGenerator:
+    """Generate validation reports for benchmark results."""
+
+    def __init__(self, results_dir, args=None, logger=None):
+        self.args = args
+        self.logger = logger or setup_logging(name="mlpstorage_reporter")
+        self.results_dir = results_dir
+
+        # Validate directory structure first
+        self.validator = ResultsDirectoryValidator(results_dir, logger=self.logger)
+        if not self.validator.validate():
+            self._report_directory_errors()
+            raise ValueError(f"Invalid results directory structure: {results_dir}")
+
+        self.run_results = dict()
+        self.workload_results = dict()
+
+    def _report_directory_errors(self):
+        """Report directory structure errors to user."""
+        self.logger.error("Results directory structure validation failed:")
+        self.logger.error(self.validator.get_error_report())
+
+        # Provide specific guidance
+        self.logger.error("\nExpected directory structure:")
+        self.logger.error("  results_dir/")
+        self.logger.error("    training/")
+        self.logger.error("      <model>/")
+        self.logger.error("        run/")
+        self.logger.error("          <datetime>/")
+        self.logger.error("            *_metadata.json")
+        self.logger.error("            summary.json")
+
+    def accumulate_results(self):
+        """Accumulate results with improved error handling."""
+        try:
+            benchmark_runs = get_runs_files(self.results_dir, logger=self.logger)
+        except Exception as e:
+            self.logger.error(f"Failed to scan results directory: {e}")
+            raise
+
+        if not benchmark_runs:
+            self.logger.warning(
+                f"No valid benchmark runs found in {self.results_dir}. "
+                "Ensure runs have completed and contain summary.json files."
+            )
+            return
+
+        self.logger.info(f"Found {len(benchmark_runs)} benchmark runs")
+
+        # Process each run with error isolation
+        for benchmark_run in benchmark_runs:
             try:
-                module = importlib.import_module(f"mlpstorage.plugins.{name}")
-                if hasattr(module, 'register_benchmark'):
-                    module.register_benchmark(BenchmarkRegistry)
-                    loaded.append(name)
-            except ImportError as e:
-                print(f"Warning: Failed to load plugin {name}: {e}")
+                self._process_single_run(benchmark_run)
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to process run {benchmark_run.run_id}: {e}. Skipping."
+                )
+                continue
 
-    return loaded
+        # Process workload groups
+        self._process_workload_groups(benchmark_runs)
+
+    def _process_single_run(self, benchmark_run):
+        """Process a single benchmark run with clear error handling."""
+        verifier = BenchmarkVerifier(benchmark_run, logger=self.logger)
+        category = verifier.verify()
+        issues = verifier.issues
+
+        result = Result(
+            multi=False,
+            benchmark_run=benchmark_run,
+            benchmark_type=benchmark_run.benchmark_type,
+            benchmark_command=benchmark_run.command,
+            benchmark_model=benchmark_run.model,
+            issues=issues,
+            category=category,
+            metrics=benchmark_run.metrics
+        )
+        self.run_results[benchmark_run.run_id] = result
 ```
 
-### Step 7.2: Create Plugin Template
+### Step 7.4: Add Clear OPEN vs CLOSED Messaging
 
-Create `mlpstorage/plugins/template.py`:
+Create `mlpstorage/reporting/formatters.py`:
+
+```python
+from typing import List
+from mlpstorage.rules.issues import Issue
+from mlpstorage.config import PARAM_VALIDATION
+
+class ValidationMessageFormatter:
+    """Format validation results with clear OPEN vs CLOSED messaging."""
+
+    @staticmethod
+    def format_category_summary(category: PARAM_VALIDATION, issues: List[Issue]) -> str:
+        """Generate a clear summary of why a run is in a particular category."""
+        if category == PARAM_VALIDATION.CLOSED:
+            return (
+                "This run qualifies for CLOSED submission.\n"
+                "All parameters meet the strict requirements for closed division."
+            )
+
+        elif category == PARAM_VALIDATION.OPEN:
+            open_issues = [i for i in issues if i.validation == PARAM_VALIDATION.OPEN]
+            reasons = []
+            for issue in open_issues:
+                reasons.append(f"  - {issue.parameter}: {issue.message}")
+
+            return (
+                "This run qualifies for OPEN submission only.\n"
+                "The following parameters do not meet CLOSED requirements:\n"
+                + "\n".join(reasons) +
+                "\n\nTo qualify for CLOSED submission, modify these parameters."
+            )
+
+        else:  # INVALID
+            invalid_issues = [i for i in issues if i.validation == PARAM_VALIDATION.INVALID]
+            reasons = []
+            for issue in invalid_issues:
+                reasons.append(f"  - {issue.parameter}: {issue.message}")
+                if issue.expected and issue.actual:
+                    reasons.append(f"    Expected: {issue.expected}")
+                    reasons.append(f"    Actual: {issue.actual}")
+
+            return (
+                "This run is INVALID and cannot be submitted.\n"
+                "The following issues must be resolved:\n"
+                + "\n".join(reasons) +
+                "\n\nFix these issues and re-run the benchmark."
+            )
+
+    @staticmethod
+    def format_closed_requirements_checklist(benchmark_type: str) -> str:
+        """Generate a checklist of CLOSED submission requirements."""
+        if benchmark_type == "training":
+            return """
+CLOSED Submission Requirements for Training:
+  [ ] Dataset size >= 5x total cluster memory
+  [ ] At least 500 steps per epoch
+  [ ] 5 complete runs required
+  [ ] Only allowed parameter overrides used
+  [ ] No modifications to core workload parameters
+
+Allowed Parameter Overrides (CLOSED):
+  - dataset.num_files_train
+  - dataset.num_subfolders_train
+  - dataset.data_folder
+  - reader.read_threads
+  - reader.computation_threads
+  - reader.transfer_size
+  - storage.storage_type
+  - storage.storage_root
+"""
+        elif benchmark_type == "checkpointing":
+            return """
+CLOSED Submission Requirements for Checkpointing:
+  [ ] 10 checkpoint write operations
+  [ ] 10 checkpoint read operations
+  [ ] Valid LLM model (llama3-8b, llama3-70b, llama3-405b)
+  [ ] Only allowed parameter overrides used
+"""
+        return ""
+```
+
+### Step 7.5: Update Print Methods with Better Formatting
+
+```python
+def print_results(self):
+    """Print results with clear OPEN/CLOSED distinction."""
+    formatter = ValidationMessageFormatter()
+
+    print("\n" + "=" * 60)
+    print("BENCHMARK VALIDATION REPORT")
+    print("=" * 60)
+
+    # Summary counts
+    closed_count = sum(1 for r in self.run_results.values()
+                       if r.category == PARAM_VALIDATION.CLOSED)
+    open_count = sum(1 for r in self.run_results.values()
+                     if r.category == PARAM_VALIDATION.OPEN)
+    invalid_count = sum(1 for r in self.run_results.values()
+                        if r.category == PARAM_VALIDATION.INVALID)
+
+    print(f"\nSummary: {len(self.run_results)} runs analyzed")
+    print(f"  CLOSED: {closed_count} runs")
+    print(f"  OPEN:   {open_count} runs")
+    print(f"  INVALID: {invalid_count} runs")
+
+    # Print INVALID runs first (most important)
+    if invalid_count > 0:
+        print("\n" + "-" * 60)
+        print("INVALID RUNS - These runs cannot be submitted")
+        print("-" * 60)
+        for result in self.run_results.values():
+            if result.category == PARAM_VALIDATION.INVALID:
+                self._print_run_details(result, formatter)
+
+    # Print OPEN runs
+    if open_count > 0:
+        print("\n" + "-" * 60)
+        print("OPEN RUNS - These runs qualify for OPEN division only")
+        print("-" * 60)
+        for result in self.run_results.values():
+            if result.category == PARAM_VALIDATION.OPEN:
+                self._print_run_details(result, formatter)
+
+    # Print CLOSED runs
+    if closed_count > 0:
+        print("\n" + "-" * 60)
+        print("CLOSED RUNS - These runs qualify for CLOSED division")
+        print("-" * 60)
+        for result in self.run_results.values():
+            if result.category == PARAM_VALIDATION.CLOSED:
+                self._print_run_details(result, formatter)
+```
+
+---
+
+## Phase 8: Error Handling and User Messaging
+
+**Goal:** Improve error handling throughout the project to provide clear, actionable messages when users make mistakes.
+
+### Step 8.1: Create Error Handling Framework
+
+Create `mlpstorage/errors.py`:
+
+```python
+from typing import Optional, List
+from dataclasses import dataclass
+
+@dataclass
+class MLPSError:
+    """Base error class with user-friendly messaging."""
+    code: str           # Machine-readable error code
+    message: str        # User-facing error message
+    details: str        # Technical details
+    suggestion: str     # How to fix the issue
+    related_docs: Optional[str] = None  # Link to documentation
+
+class ConfigurationError(Exception):
+    """Raised when configuration is invalid."""
+
+    def __init__(self, message: str, parameter: str = None,
+                 expected: str = None, actual: str = None,
+                 suggestion: str = None):
+        self.parameter = parameter
+        self.expected = expected
+        self.actual = actual
+        self.suggestion = suggestion
+
+        full_message = f"Configuration Error: {message}"
+        if parameter:
+            full_message += f"\n  Parameter: {parameter}"
+        if expected:
+            full_message += f"\n  Expected: {expected}"
+        if actual:
+            full_message += f"\n  Actual: {actual}"
+        if suggestion:
+            full_message += f"\n  Suggestion: {suggestion}"
+
+        super().__init__(full_message)
+
+class BenchmarkExecutionError(Exception):
+    """Raised when benchmark execution fails."""
+
+    def __init__(self, message: str, command: str = None,
+                 exit_code: int = None, stderr: str = None,
+                 suggestion: str = None):
+        self.command = command
+        self.exit_code = exit_code
+        self.stderr = stderr
+        self.suggestion = suggestion
+
+        full_message = f"Benchmark Execution Failed: {message}"
+        if command:
+            full_message += f"\n  Command: {command}"
+        if exit_code is not None:
+            full_message += f"\n  Exit Code: {exit_code}"
+        if stderr:
+            full_message += f"\n  Error Output: {stderr[:500]}..."
+        if suggestion:
+            full_message += f"\n  Suggestion: {suggestion}"
+
+        super().__init__(full_message)
+
+class ValidationError(Exception):
+    """Raised when validation fails."""
+
+    def __init__(self, message: str, issues: List = None,
+                 category: str = None, suggestion: str = None):
+        self.issues = issues or []
+        self.category = category
+        self.suggestion = suggestion
+
+        full_message = f"Validation Failed: {message}"
+        if category:
+            full_message += f"\n  Category: {category}"
+        if issues:
+            full_message += "\n  Issues:"
+            for issue in issues[:5]:  # Limit to first 5
+                full_message += f"\n    - {issue}"
+            if len(issues) > 5:
+                full_message += f"\n    ... and {len(issues) - 5} more"
+        if suggestion:
+            full_message += f"\n  Suggestion: {suggestion}"
+
+        super().__init__(full_message)
+
+class FileSystemError(Exception):
+    """Raised when file system operations fail."""
+
+    def __init__(self, message: str, path: str = None,
+                 operation: str = None, suggestion: str = None):
+        self.path = path
+        self.operation = operation
+        self.suggestion = suggestion
+
+        full_message = f"File System Error: {message}"
+        if path:
+            full_message += f"\n  Path: {path}"
+        if operation:
+            full_message += f"\n  Operation: {operation}"
+        if suggestion:
+            full_message += f"\n  Suggestion: {suggestion}"
+
+        super().__init__(full_message)
+```
+
+### Step 8.2: Create Error Message Templates
+
+Create `mlpstorage/error_messages.py`:
 
 ```python
 """
-Template for creating a new benchmark plugin.
-
-To create a plugin:
-1. Copy this file to ~/.mlpstorage/plugins/my_plugin.py
-2. Implement the required classes and functions
-3. The plugin will be auto-discovered on next run
+Centralized error message templates for consistent user messaging.
 """
 
-from mlpstorage.benchmarks.base import Benchmark
-from mlpstorage.interfaces import BenchmarkInterface
-from mlpstorage.registry import BenchmarkRegistry
+ERROR_MESSAGES = {
+    # Configuration Errors
+    'CONFIG_MISSING_REQUIRED': (
+        "Required parameter '{param}' is missing.\n"
+        "Please provide this parameter via command line or configuration file.\n"
+        "Example: mlpstorage {benchmark} run --{param} <value>"
+    ),
 
-class MyPluginBenchmark(Benchmark):
-    """Example plugin benchmark implementation."""
+    'CONFIG_INVALID_VALUE': (
+        "Invalid value for parameter '{param}': {actual}\n"
+        "Expected: {expected}\n"
+        "Please correct this value and try again."
+    ),
 
-    BENCHMARK_TYPE = None  # Will be set dynamically
+    'CONFIG_FILE_NOT_FOUND': (
+        "Configuration file not found: {path}\n"
+        "Please ensure the file exists and the path is correct.\n"
+        "You can create a default config with: mlpstorage init --config"
+    ),
 
-    def __init__(self, args, **kwargs):
-        super().__init__(args, **kwargs)
+    # Benchmark Execution Errors
+    'BENCHMARK_COMMAND_FAILED': (
+        "Benchmark command failed with exit code {exit_code}.\n"
+        "Command: {command}\n"
+        "This may indicate:\n"
+        "  - Missing dependencies (check that DLIO/benchmark tool is installed)\n"
+        "  - Insufficient permissions\n"
+        "  - Invalid benchmark parameters\n"
+        "Check the error output above for specific details."
+    ),
 
-    def _run(self):
-        # Implement benchmark logic
-        pass
+    'BENCHMARK_TIMEOUT': (
+        "Benchmark timed out after {timeout} seconds.\n"
+        "The benchmark may still be running in the background.\n"
+        "Consider:\n"
+        "  - Increasing the timeout with --timeout\n"
+        "  - Reducing the workload size\n"
+        "  - Checking system resources"
+    ),
 
-def add_cli_arguments(parser):
-    """Add CLI arguments for this benchmark."""
-    subparsers = parser.add_subparsers(dest='command')
-    run = subparsers.add_parser('run')
-    run.add_argument('--my-option', help='Plugin-specific option')
+    # Validation Errors
+    'VALIDATION_NOT_CLOSED': (
+        "This run does not qualify for CLOSED submission.\n"
+        "Category: {category}\n"
+        "To submit in the CLOSED division, the following must be addressed:\n"
+        "{issues}\n"
+        "See the MLPerf Storage rules for CLOSED submission requirements."
+    ),
 
-def register_benchmark(registry: BenchmarkRegistry):
-    """Called by plugin discovery to register this benchmark."""
-    registry.register(
-        name='my-plugin',
-        benchmark_class=MyPluginBenchmark,
-        cli_builder=add_cli_arguments
-    )
+    'VALIDATION_INVALID': (
+        "This run is INVALID and cannot be submitted.\n"
+        "The following critical issues were found:\n"
+        "{issues}\n"
+        "These issues must be resolved before submission."
+    ),
+
+    # File System Errors
+    'RESULTS_DIR_NOT_FOUND': (
+        "Results directory not found: {path}\n"
+        "Please ensure:\n"
+        "  - The directory exists\n"
+        "  - You have read permissions\n"
+        "  - The path is correct"
+    ),
+
+    'RESULTS_DIR_EMPTY': (
+        "No benchmark results found in: {path}\n"
+        "This directory should contain completed benchmark runs.\n"
+        "Expected structure:\n"
+        "  {path}/\n"
+        "    training/\n"
+        "      <model>/\n"
+        "        run/\n"
+        "          <datetime>/\n"
+        "            summary.json\n"
+        "            *_metadata.json"
+    ),
+
+    'METADATA_FILE_MISSING': (
+        "Metadata file not found in: {path}\n"
+        "Each run directory should contain a *_metadata.json file.\n"
+        "This file is created automatically when running benchmarks.\n"
+        "If missing, the run may have failed or been interrupted."
+    ),
+
+    # MPI/Cluster Errors
+    'MPI_NOT_AVAILABLE': (
+        "MPI is not available on this system.\n"
+        "MPI is required for distributed benchmarks.\n"
+        "Install MPI:\n"
+        "  - Ubuntu/Debian: apt-get install openmpi-bin libopenmpi-dev\n"
+        "  - RHEL/CentOS: yum install openmpi openmpi-devel\n"
+        "Or use --skip-cluster-info to skip cluster information collection."
+    ),
+
+    'HOST_UNREACHABLE': (
+        "Cannot reach host: {host}\n"
+        "Please verify:\n"
+        "  - The hostname is correct\n"
+        "  - The host is online and reachable\n"
+        "  - SSH access is configured (passwordless SSH recommended)"
+    ),
+}
+
+def format_error(error_key: str, **kwargs) -> str:
+    """Format an error message with the given parameters."""
+    template = ERROR_MESSAGES.get(error_key, f"Unknown error: {error_key}")
+    try:
+        return template.format(**kwargs)
+    except KeyError as e:
+        return f"{template}\n(Missing format parameter: {e})"
 ```
 
-### Step 7.3: Update Main Entry Point for Plugin Loading
+### Step 8.3: Add Error Handling to CLI
 
-Modify `mlpstorage/main.py`:
+Update `mlpstorage/cli.py`:
 
 ```python
-from mlpstorage.plugins import discover_plugins
+from mlpstorage.errors import ConfigurationError, BenchmarkExecutionError, ValidationError
+from mlpstorage.error_messages import format_error
 
 def main():
-    # Discover and load plugins before parsing arguments
-    plugin_dirs = os.environ.get('MLPS_PLUGIN_DIRS', '').split(':')
-    loaded_plugins = discover_plugins(plugin_dirs)
+    try:
+        args = parse_arguments()
+        validate_args(args)
+        run_benchmark(args)
+    except ConfigurationError as e:
+        logger.error(str(e))
+        sys.exit(EXIT_CODE.CONFIG_ERROR)
+    except BenchmarkExecutionError as e:
+        logger.error(str(e))
+        sys.exit(EXIT_CODE.BENCHMARK_FAILED)
+    except ValidationError as e:
+        logger.error(str(e))
+        sys.exit(EXIT_CODE.VALIDATION_FAILED)
+    except FileNotFoundError as e:
+        logger.error(format_error('RESULTS_DIR_NOT_FOUND', path=str(e)))
+        sys.exit(EXIT_CODE.FILE_NOT_FOUND)
+    except KeyboardInterrupt:
+        logger.info("Benchmark interrupted by user")
+        sys.exit(EXIT_CODE.USER_INTERRUPTED)
+    except Exception as e:
+        logger.error(f"Unexpected error: {e}")
+        logger.debug("Stack trace:", exc_info=True)
+        sys.exit(EXIT_CODE.UNKNOWN_ERROR)
+```
 
-    if loaded_plugins:
-        logging.debug(f"Loaded plugins: {loaded_plugins}")
+### Step 8.4: Add User-Friendly Validation Messages
 
-    # Continue with normal argument parsing
-    args = parse_arguments()
-    # ...
+Update benchmark validation to provide clear guidance:
+
+```python
+def validate_for_closed_submission(benchmark, logger):
+    """
+    Validate benchmark for CLOSED submission with clear messaging.
+    """
+    verifier = BenchmarkVerifier(benchmark, logger=logger)
+    result = verifier.verify()
+
+    if result == PARAM_VALIDATION.CLOSED:
+        logger.success("Benchmark meets CLOSED submission requirements")
+        return True
+
+    elif result == PARAM_VALIDATION.OPEN:
+        logger.warning("Benchmark qualifies for OPEN submission only")
+        logger.warning("")
+        logger.warning("To qualify for CLOSED submission, address these items:")
+        for issue in verifier.issues:
+            if issue.validation == PARAM_VALIDATION.OPEN:
+                logger.warning(f"  - {issue.parameter}: {issue.message}")
+                if issue.expected:
+                    logger.warning(f"      Required: {issue.expected}")
+                if issue.actual:
+                    logger.warning(f"      Current:  {issue.actual}")
+        logger.warning("")
+        logger.warning("See MLPerf Storage rules for CLOSED requirements.")
+        return False
+
+    else:  # INVALID
+        logger.error("Benchmark is INVALID - cannot be submitted")
+        logger.error("")
+        logger.error("The following errors must be fixed:")
+        for issue in verifier.issues:
+            if issue.validation == PARAM_VALIDATION.INVALID:
+                logger.error(f"  - {issue.parameter}: {issue.message}")
+                if issue.expected:
+                    logger.error(f"      Required: {issue.expected}")
+                if issue.actual:
+                    logger.error(f"      Actual:   {issue.actual}")
+        logger.error("")
+        logger.error("Fix these issues and re-run the benchmark.")
+        return False
+```
+
+### Step 8.5: Add Pre-Run Validation with Clear Messages
+
+```python
+def validate_pre_run(args, logger):
+    """
+    Validate configuration before running benchmark.
+    Provides clear error messages for common mistakes.
+    """
+    errors = []
+
+    # Check required parameters
+    if not args.model:
+        errors.append(format_error('CONFIG_MISSING_REQUIRED', param='model'))
+
+    if not args.results_dir:
+        errors.append(format_error('CONFIG_MISSING_REQUIRED', param='results-dir'))
+
+    # Check hosts are reachable (if provided)
+    if args.hosts:
+        for host in args.hosts:
+            if not is_host_reachable(host):
+                errors.append(format_error('HOST_UNREACHABLE', host=host))
+
+    # Check data directory exists (for run command)
+    if args.command == 'run' and hasattr(args, 'data_dir'):
+        if not os.path.exists(args.data_dir):
+            errors.append(format_error('RESULTS_DIR_NOT_FOUND', path=args.data_dir))
+
+    if errors:
+        logger.error("Pre-run validation failed:")
+        for error in errors:
+            logger.error(error)
+        raise ConfigurationError(
+            "Configuration validation failed",
+            suggestion="Fix the above errors and try again"
+        )
+
+    logger.info("Pre-run validation passed")
 ```
 
 ---
@@ -1247,19 +2296,21 @@ def main():
 | Phase 2: Rules Modularization | High | High | Better organization, testability |
 | Phase 4: Test Infrastructure | High | Medium | Enables safe refactoring |
 | Phase 6: KV Cache Integration | High | Medium | Immediate user value |
+| Phase 7: Reporting Refactoring | High | Medium | Better validation feedback |
+| Phase 8: Error Handling | High | Medium | Improved user experience |
 | Phase 3: CLI Refactoring | Medium | High | Extensibility |
 | Phase 5: Documentation | Medium | Low | Long-term maintainability |
-| Phase 7: Plugin Architecture | Low | Medium | Future extensibility |
 
 ## Recommended Order
 
 1. **Phase 1** (Interfaces) - Create foundation
 2. **Phase 4** (Tests) - Ensure safety net for refactoring
-3. **Phase 2** (Rules) - Modularize largest file
-4. **Phase 6** (KV Cache) - Add new benchmark using new patterns
-5. **Phase 3** (CLI) - Improve extensibility
-6. **Phase 5** (Docs) - Document everything
-7. **Phase 7** (Plugins) - Enable external extensions
+3. **Phase 2** (Rules) - Modularize largest file, separate RunRulesChecker from MultiRunRulesChecker
+4. **Phase 8** (Error Handling) - Improve user-facing error messages
+5. **Phase 7** (Reporting) - Improve validation reporting and directory handling
+6. **Phase 6** (KV Cache) - Add new benchmark using new patterns
+7. **Phase 3** (CLI) - Improve extensibility
+8. **Phase 5** (Docs) - Document everything
 
 ---
 
@@ -1268,31 +2319,38 @@ def main():
 After completing all phases:
 
 - [ ] All benchmarks implement `BenchmarkInterface`
-- [ ] `rules.py` split into <300 LOC modules
+- [ ] `rules.py` split into <300 LOC modules with clear separation between RunRulesChecker and MultiRunRulesChecker hierarchies
 - [ ] New benchmarks can be added without modifying `cli.py`
 - [ ] Test coverage >80%
 - [ ] All public functions have docstrings and type annotations
 - [ ] KV Cache benchmark integrated and working
-- [ ] Plugin system allows external benchmark registration
+- [ ] Reporting system provides clear feedback for OPEN vs CLOSED validation failures
+- [ ] All error messages clearly indicate what failed and how to fix it
+- [ ] Malformed directory structures are handled gracefully with actionable error messages
 
 ---
 
 ## Appendix: File Changes Summary
 
 ### New Files Created
+
 - `mlpstorage/interfaces/__init__.py`
 - `mlpstorage/interfaces/benchmark.py`
 - `mlpstorage/interfaces/validator.py`
 - `mlpstorage/interfaces/collector.py`
 - `mlpstorage/registry.py`
 - `mlpstorage/rules/__init__.py` (package)
-- `mlpstorage/rules/base.py`
+- `mlpstorage/rules/base.py` - RulesChecker, RunRulesChecker, MultiRunRulesChecker base classes
 - `mlpstorage/rules/issues.py`
 - `mlpstorage/rules/models.py`
-- `mlpstorage/rules/training.py`
-- `mlpstorage/rules/checkpointing.py`
-- `mlpstorage/rules/vectordb.py`
-- `mlpstorage/rules/kvcache.py`
+- `mlpstorage/rules/run_checkers/__init__.py` - Package for single-run rule checkers
+- `mlpstorage/rules/run_checkers/training.py` - TrainingRunRulesChecker
+- `mlpstorage/rules/run_checkers/checkpointing.py` - CheckpointingRunRulesChecker
+- `mlpstorage/rules/run_checkers/vectordb.py` - VectorDBRunRulesChecker
+- `mlpstorage/rules/run_checkers/kvcache.py` - KVCacheRunRulesChecker
+- `mlpstorage/rules/submission_checkers/__init__.py` - Package for multi-run submission checkers
+- `mlpstorage/rules/submission_checkers/training.py` - TrainingSubmissionRulesChecker
+- `mlpstorage/rules/submission_checkers/checkpointing.py` - CheckpointSubmissionRulesChecker
 - `mlpstorage/rules/verifier.py`
 - `mlpstorage/rules/utils.py`
 - `mlpstorage/cli/__init__.py` (package)
@@ -1301,8 +2359,6 @@ After completing all phases:
 - `mlpstorage/cli/vectordb_args.py`
 - `mlpstorage/cli/kvcache_args.py`
 - `mlpstorage/benchmarks/kvcache.py`
-- `mlpstorage/plugins/__init__.py`
-- `mlpstorage/plugins/template.py`
 - `mlpstorage/tests/fixtures/__init__.py`
 - `mlpstorage/tests/fixtures/mock_*.py`
 - `mlpstorage/tests/conftest.py`
@@ -1310,12 +2366,14 @@ After completing all phases:
 - `mlpstorage/docs/ADDING_BENCHMARKS.md`
 
 ### Files Modified
+
 - `mlpstorage/benchmarks/base.py` - Implement interface
 - `mlpstorage/benchmarks/__init__.py` - Registry integration
 - `mlpstorage/cli.py` - Dynamic parser building
 - `mlpstorage/config.py` - Add kv_cache benchmark type
-- `mlpstorage/main.py` - Plugin discovery
+- `mlpstorage/reporting.py` - Refactored with better error handling and directory validation
 - `mlpstorage/rules.py` - Converted to package (deprecated)
 
 ### Files Deprecated
+
 - `mlpstorage/rules.py` - Replaced by `mlpstorage/rules/` package
