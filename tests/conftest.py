@@ -17,6 +17,21 @@ import pytest
 
 from mlpstorage.config import BENCHMARK_TYPES, PARAM_VALIDATION
 
+# Import from fixtures package
+from tests.fixtures import (
+    MockLogger,
+    create_mock_logger,
+    MockCommandExecutor,
+    MockClusterCollector,
+    SAMPLE_MEMINFO,
+    SAMPLE_CPUINFO,
+    SAMPLE_DISKSTATS,
+    SAMPLE_HOSTS,
+    create_sample_cluster_info,
+    create_sample_benchmark_args,
+    create_sample_benchmark_run_data,
+)
+
 
 # =============================================================================
 # Path Fixtures
@@ -67,23 +82,82 @@ def capturing_logger():
             some_function(logger=logger)
             assert "expected" in messages['info'][0]
     """
-    messages = {
-        'debug': [], 'info': [], 'warning': [], 'error': [],
-        'critical': [], 'status': [], 'verbose': [], 'verboser': [],
-        'ridiculous': [], 'result': []
-    }
+    return create_mock_logger()
 
-    logger = MagicMock()
 
-    def make_capture(level):
-        def capture(msg, *args, **kwargs):
-            messages[level].append(msg)
-        return capture
+@pytest.fixture
+def test_logger():
+    """Create a MockLogger instance from fixtures package."""
+    return MockLogger()
 
-    for level in messages:
-        setattr(logger, level, make_capture(level))
 
-    return logger, messages
+# =============================================================================
+# Command Executor Fixtures
+# =============================================================================
+
+@pytest.fixture
+def mock_executor():
+    """
+    Create a MockCommandExecutor for testing without subprocess calls.
+
+    Usage:
+        def test_benchmark(mock_executor):
+            mock_executor.add_response('dlio_benchmark', 'output', '', 0)
+            benchmark.cmd_executor = mock_executor
+            benchmark.run()
+            mock_executor.assert_command_executed('dlio_benchmark')
+    """
+    return MockCommandExecutor()
+
+
+@pytest.fixture
+def mock_executor_with_dlio():
+    """Create a MockCommandExecutor with DLIO responses configured."""
+    executor = MockCommandExecutor({
+        'dlio_benchmark': ('Benchmark completed successfully', '', 0),
+        'mpirun.*dlio': ('MPI benchmark completed', '', 0),
+    })
+    return executor
+
+
+@pytest.fixture
+def mock_executor_failure():
+    """Create a MockCommandExecutor that simulates failures."""
+    return MockCommandExecutor({
+        'dlio_benchmark': ('', 'Error: benchmark failed', 1),
+        'mpirun': ('', 'MPI initialization failed', 1),
+    })
+
+
+# =============================================================================
+# Cluster Collector Fixtures
+# =============================================================================
+
+@pytest.fixture
+def mock_collector():
+    """
+    Create a MockClusterCollector for testing without MPI.
+
+    Usage:
+        def test_benchmark_init(mock_collector):
+            benchmark = TrainingBenchmark(args, cluster_collector=mock_collector)
+            mock_collector.assert_collected()
+    """
+    return MockClusterCollector()
+
+
+@pytest.fixture
+def mock_collector_multi_host():
+    """Create a MockClusterCollector with multiple hosts configured."""
+    collector = MockClusterCollector()
+    collector.set_hosts(num_hosts=4, memory_gb=256, cpu_cores=64)
+    return collector
+
+
+@pytest.fixture
+def mock_collector_failure():
+    """Create a MockClusterCollector that simulates failure."""
+    return MockClusterCollector(should_fail=True, fail_message="MPI not available")
 
 
 # =============================================================================
