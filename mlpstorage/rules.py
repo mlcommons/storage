@@ -13,6 +13,12 @@ from mlpstorage.config import (MODELS, PARAM_VALIDATION, MAX_READ_THREADS_TRAINI
                                DATETIME_STR, LLM_ALLOWED_VALUES, LLM_SUBSET_PROCS, HYDRA_OUTPUT_SUBDIR, UNET)
 from mlpstorage.mlps_logging import setup_logging
 from mlpstorage.utils import is_valid_datetime_format
+from mlpstorage.cluster_collector import (
+    HostDiskInfo,
+    HostNetworkInfo,
+    HostSystemInfo,
+    summarize_cpuinfo,
+)
 
 
 class RuleState(enum.Enum):
@@ -128,20 +134,39 @@ class HostMemoryInfo:
 
     @classmethod
     def from_proc_meminfo_dict(cls, data: Dict[str, Any]) -> 'HostMemoryInfo':
-        """Create a HostMemoryInfo instance from a dictionary"""
-        converted_dict = dict(
-            total=data.get('MemTotal', 0) * 1024,
-            available=data.get('MemAvailable', 0) * 1024,
-            used=data.get('MemUsed', 0) * 1024,
-            free=data.get('MemFree', 0) * 1024,
-            active=data.get('Active', 0) * 1024,
-            inactive=data.get('Inactive', 0) * 1024,
-            buffers=data.get('Buffers', 0) * 1024,
-            cached=data.get('Cached', 0) * 1024,
-            shared=data.get('Shmem', 0) * 1024
+        """Create a HostMemoryInfo instance from a parsed /proc/meminfo dictionary.
+
+        Args:
+            data: Dictionary with keys like 'MemTotal', 'MemFree', etc.
+                  Values should be integers in kB (as returned by parse_proc_meminfo).
+
+        Returns:
+            HostMemoryInfo instance with values converted to bytes.
+        """
+        def get_bytes(key: str, default: int = 0) -> int:
+            """Get value in bytes (input is in kB)."""
+            val = data.get(key, default)
+            if isinstance(val, (int, float)):
+                return int(val) * 1024
+            # Handle string values with units (legacy support)
+            if isinstance(val, str):
+                try:
+                    return int(val.split()[0]) * 1024
+                except (ValueError, IndexError):
+                    return default
+            return default
+
+        return cls(
+            total=get_bytes('MemTotal'),
+            available=get_bytes('MemAvailable'),
+            used=get_bytes('MemTotal') - get_bytes('MemFree') - get_bytes('Buffers') - get_bytes('Cached'),
+            free=get_bytes('MemFree'),
+            active=get_bytes('Active'),
+            inactive=get_bytes('Inactive'),
+            buffers=get_bytes('Buffers'),
+            cached=get_bytes('Cached'),
+            shared=get_bytes('Shmem'),
         )
-        converted_dict = {k: int(v.split(" ")[0]) for k, v in converted_dict.items()}
-        return cls(**converted_dict)
 
     @classmethod
     def from_total_mem_int(cls, total_mem_int: int) -> 'HostMemoryInfo':
@@ -180,10 +205,24 @@ class HostCPUInfo:
 
 @dataclass
 class HostInfo:
-    """Information about a single host in the system"""
+    """Information about a single host in the system.
+
+    Attributes:
+        hostname: The hostname or IP address of the host.
+        memory: Memory information from /proc/meminfo.
+        cpu: CPU information from /proc/cpuinfo.
+        disks: List of disk statistics from /proc/diskstats.
+        network: List of network interface statistics from /proc/net/dev.
+        system: Extended system information (kernel, OS, uptime, load).
+        collection_timestamp: ISO timestamp when the data was collected.
+    """
     hostname: str
     memory: HostMemoryInfo = field(default_factory=HostMemoryInfo)
     cpu: Optional[HostCPUInfo] = None
+    disks: Optional[List[HostDiskInfo]] = None
+    network: Optional[List[HostNetworkInfo]] = None
+    system: Optional[HostSystemInfo] = None
+    collection_timestamp: Optional[str] = None
 
     @classmethod
     def from_dict(cls, hostname: str, data: Dict[str, Any]) -> 'HostInfo':
@@ -216,14 +255,145 @@ class HostInfo:
             cpu=cpu,
         )
 
+    @classmethod
+    def from_collected_data(cls, data: Dict[str, Any]) -> 'HostInfo':
+        """Create a HostInfo instance from MPI-collected data.
+
+        Args:
+            data: Dictionary from collect_local_system_info() containing:
+                - hostname: str
+                - meminfo: Dict from /proc/meminfo
+                - cpuinfo: List[Dict] from /proc/cpuinfo
+                - diskstats: List[Dict] disk info
+                - netdev: List[Dict] network info
+                - version: str kernel version
+                - loadavg: Dict with load averages
+                - uptime_seconds: float
+                - os_release: Dict OS info
+                - collection_timestamp: str
+
+        Returns:
+            HostInfo instance with all collected data.
+        """
+        hostname = data.get('hostname', 'unknown')
+
+        # Parse memory info
+        meminfo = data.get('meminfo', {})
+        if meminfo:
+            memory = HostMemoryInfo.from_proc_meminfo_dict(meminfo)
+        else:
+            memory = HostMemoryInfo(total=0, available=None, used=None, free=None,
+                                    active=None, inactive=None, buffers=None,
+                                    cached=None, shared=None)
+
+        # Parse CPU info
+        cpuinfo = data.get('cpuinfo', [])
+        cpu = None
+        if cpuinfo:
+            cpu_summary = summarize_cpuinfo(cpuinfo)
+            cpu = HostCPUInfo(
+                num_cores=cpu_summary.get('num_physical_cores', 0),
+                num_logical_cores=cpu_summary.get('num_logical_cores', 0),
+                model=cpu_summary.get('model', ''),
+                architecture=cpu_summary.get('architecture', ''),
+            )
+
+        # Parse disk info
+        diskstats = data.get('diskstats', [])
+        disks = None
+        if diskstats:
+            disks = [HostDiskInfo.from_dict(d) for d in diskstats]
+
+        # Parse network info
+        netdev = data.get('netdev', [])
+        network = None
+        if netdev:
+            network = [HostNetworkInfo.from_dict(n) for n in netdev]
+
+        # Parse system info
+        loadavg = data.get('loadavg', {})
+        system = HostSystemInfo(
+            hostname=hostname,
+            kernel_version=data.get('version', ''),
+            os_release=data.get('os_release', {}),
+            uptime_seconds=data.get('uptime_seconds', 0.0),
+            load_average_1min=loadavg.get('load_1min', 0.0),
+            load_average_5min=loadavg.get('load_5min', 0.0),
+            load_average_15min=loadavg.get('load_15min', 0.0),
+            running_processes=loadavg.get('running_processes', 0),
+            total_processes=loadavg.get('total_processes', 0),
+        )
+
+        return cls(
+            hostname=hostname,
+            memory=memory,
+            cpu=cpu,
+            disks=disks,
+            network=network,
+            system=system,
+            collection_timestamp=data.get('collection_timestamp'),
+        )
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert HostInfo to a dictionary for JSON serialization."""
+        result = {
+            'hostname': self.hostname,
+            'memory': {
+                'total': self.memory.total,
+                'available': self.memory.available,
+                'used': self.memory.used,
+                'free': self.memory.free,
+                'active': self.memory.active,
+                'inactive': self.memory.inactive,
+                'buffers': self.memory.buffers,
+                'cached': self.memory.cached,
+                'shared': self.memory.shared,
+            },
+            'collection_timestamp': self.collection_timestamp,
+        }
+
+        if self.cpu:
+            result['cpu'] = {
+                'num_cores': self.cpu.num_cores,
+                'num_logical_cores': self.cpu.num_logical_cores,
+                'model': self.cpu.model,
+                'architecture': self.cpu.architecture,
+            }
+
+        if self.disks:
+            result['disks'] = [d.to_dict() for d in self.disks]
+
+        if self.network:
+            result['network'] = [n.to_dict() for n in self.network]
+
+        if self.system:
+            result['system'] = self.system.to_dict()
+
+        return result
+
 
 class ClusterInformation:
     """
     Comprehensive system information for all hosts in the benchmark environment.
-    This includes detailed memory, CPU, and accelerator information.
+
+    This class aggregates information from all hosts in a cluster, including
+    memory, CPU, disk, and network statistics. It supports multiple collection
+    methods: MPI-based collection, DLIO summary extraction, and CLI args.
+
+    Attributes:
+        host_info_list: List of HostInfo objects, one per host.
+        logger: Logger instance for output.
+        total_memory_bytes: Total memory across all hosts in bytes.
+        total_cores: Total physical CPU cores across all hosts.
+        num_hosts: Number of hosts in the cluster.
+        min_memory_bytes: Minimum memory of any single host.
+        max_memory_bytes: Maximum memory of any single host.
+        collection_method: How data was collected ('mpi', 'dlio_summary', 'args', 'unknown').
+        collection_timestamp: ISO timestamp of when data was collected.
+        host_consistency_issues: List of detected inconsistencies between hosts.
     """
 
-    def __init__(self, host_info_list: List[str], logger, calculate_aggregated_info=True):
+    def __init__(self, host_info_list: List[HostInfo], logger, calculate_aggregated_info=True):
         self.logger = logger
         self.host_info_list = host_info_list
 
@@ -231,14 +401,43 @@ class ClusterInformation:
         self.total_memory_bytes = 0
         self.total_cores = 0
 
+        # Extended aggregated attributes
+        self.num_hosts = len(host_info_list)
+        self.min_memory_bytes = 0
+        self.max_memory_bytes = 0
+        self.collection_method = "unknown"
+        self.collection_timestamp = None
+        self.host_consistency_issues: List[str] = []
+
         if calculate_aggregated_info:
             self.calculate_aggregated_info()
 
-    def as_dict(self):
-        return {
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        result = {
             "total_memory_bytes": self.total_memory_bytes,
             "total_cores": self.total_cores,
+            "num_hosts": self.num_hosts,
+            "min_memory_bytes": self.min_memory_bytes,
+            "max_memory_bytes": self.max_memory_bytes,
+            "collection_method": self.collection_method,
+            "collection_timestamp": self.collection_timestamp,
         }
+
+        # Include host details if available
+        if self.host_info_list:
+            result["hosts"] = [h.to_dict() if hasattr(h, 'to_dict') else str(h)
+                               for h in self.host_info_list]
+
+        # Include consistency issues if any
+        if self.host_consistency_issues:
+            result["host_consistency_issues"] = self.host_consistency_issues
+
+        return result
+
+    def to_detailed_dict(self) -> Dict[str, Any]:
+        """Convert to detailed dictionary including all host information."""
+        return self.as_dict()
 
     @property
     def info(self):
@@ -246,11 +445,126 @@ class ClusterInformation:
         return self.as_dict()
 
     def calculate_aggregated_info(self):
-        """Calculate aggregated system information across all hosts"""
+        """Calculate aggregated system information across all hosts."""
+        if not self.host_info_list:
+            return
+
+        memory_values = []
         for host_info in self.host_info_list:
-            self.total_memory_bytes += host_info.memory.total
-            if host_info.cpu:
+            if hasattr(host_info, 'memory') and host_info.memory:
+                self.total_memory_bytes += host_info.memory.total
+                memory_values.append(host_info.memory.total)
+            if hasattr(host_info, 'cpu') and host_info.cpu:
                 self.total_cores += host_info.cpu.num_cores
+
+        if memory_values:
+            self.min_memory_bytes = min(memory_values)
+            self.max_memory_bytes = max(memory_values)
+
+    def validate_cluster_consistency(self) -> List[str]:
+        """
+        Check that all nodes have consistent configurations.
+
+        Validates:
+        - Memory variance (warns if >10% difference between hosts)
+        - CPU core count consistency
+        - OS version consistency
+        - Kernel version consistency
+
+        Returns:
+            List of warning messages for any inconsistencies detected.
+        """
+        issues = []
+
+        if len(self.host_info_list) < 2:
+            return issues
+
+        # Check memory consistency
+        memory_values = [h.memory.total for h in self.host_info_list
+                        if hasattr(h, 'memory') and h.memory and h.memory.total > 0]
+        if memory_values:
+            min_mem = min(memory_values)
+            max_mem = max(memory_values)
+            if min_mem > 0:
+                variance = (max_mem - min_mem) / min_mem
+                if variance > 0.1:  # >10% difference
+                    issues.append(
+                        f"Memory variance across hosts: {variance:.1%} "
+                        f"(min: {min_mem / (1024**3):.1f}GB, max: {max_mem / (1024**3):.1f}GB)"
+                    )
+
+        # Check CPU core count consistency
+        core_counts = [h.cpu.num_cores for h in self.host_info_list
+                      if hasattr(h, 'cpu') and h.cpu and h.cpu.num_cores > 0]
+        if core_counts and len(set(core_counts)) > 1:
+            issues.append(
+                f"CPU core count varies across hosts: {sorted(set(core_counts))}"
+            )
+
+        # Check OS version consistency
+        os_versions = []
+        for h in self.host_info_list:
+            if hasattr(h, 'system') and h.system and h.system.os_release:
+                version = h.system.os_release.get('VERSION_ID', '')
+                if version:
+                    os_versions.append(version)
+        if os_versions and len(set(os_versions)) > 1:
+            issues.append(
+                f"OS version varies across hosts: {sorted(set(os_versions))}"
+            )
+
+        # Check kernel version consistency
+        kernel_versions = []
+        for h in self.host_info_list:
+            if hasattr(h, 'system') and h.system and h.system.kernel_version:
+                # Extract just the kernel version number
+                kv = h.system.kernel_version.split()[2] if len(h.system.kernel_version.split()) > 2 else h.system.kernel_version
+                kernel_versions.append(kv)
+        if kernel_versions and len(set(kernel_versions)) > 1:
+            issues.append(
+                f"Kernel version varies across hosts: {sorted(set(kernel_versions))}"
+            )
+
+        self.host_consistency_issues = issues
+        return issues
+
+    @classmethod
+    def from_mpi_collection(cls, collected_data: Dict[str, Any], logger) -> 'ClusterInformation':
+        """Create ClusterInformation from MPI collector output.
+
+        Args:
+            collected_data: Dictionary from collect_cluster_info(), mapping
+                hostname -> system_info dict, plus '_metadata' key.
+            logger: Logger instance.
+
+        Returns:
+            ClusterInformation instance with full host details.
+        """
+        host_info_list = []
+
+        # Extract metadata
+        metadata = collected_data.pop('_metadata', {})
+        collection_method = metadata.get('collection_method', 'mpi')
+        collection_timestamp = metadata.get('collection_timestamp')
+
+        # Create HostInfo for each host
+        for hostname, host_data in collected_data.items():
+            if hostname.startswith('_'):
+                continue  # Skip metadata keys
+            host_info = HostInfo.from_collected_data(host_data)
+            host_info_list.append(host_info)
+
+        # Restore metadata to collected_data (don't mutate caller's data permanently)
+        collected_data['_metadata'] = metadata
+
+        inst = cls(host_info_list, logger, calculate_aggregated_info=True)
+        inst.collection_method = collection_method
+        inst.collection_timestamp = collection_timestamp
+
+        # Validate cluster consistency
+        inst.validate_cluster_consistency()
+
+        return inst
 
     @classmethod
     def from_dlio_summary_json(cls, summary, logger) -> Optional['ClusterInformation']:
@@ -262,10 +576,21 @@ class ClusterInformation:
         host_cpus = summary.get("host_cpu_count")
         if host_memories is None or host_cpus is None:
             return None
+
+        # Create basic HostInfo objects from the summary data
         host_info_list = []
-        inst = cls(host_info_list, logger, calculate_aggregated_info=False)
-        inst.total_memory_bytes = sum(host_memories) * 1024 * 1024 * 1024
-        inst.total_cores = sum(host_cpus)
+        num_hosts = len(host_memories)
+        for i in range(num_hosts):
+            memory_bytes = int(host_memories[i] * 1024 * 1024 * 1024)
+            host_info = HostInfo(
+                hostname=f"host_{i}",
+                memory=HostMemoryInfo.from_total_mem_int(memory_bytes),
+                cpu=HostCPUInfo(num_cores=host_cpus[i]) if i < len(host_cpus) else None,
+            )
+            host_info_list.append(host_info)
+
+        inst = cls(host_info_list, logger, calculate_aggregated_info=True)
+        inst.collection_method = "dlio_summary"
         return inst
 
     @classmethod
@@ -273,7 +598,7 @@ class ClusterInformation:
         """Create ClusterInformation from a dictionary (e.g., from saved metadata).
 
         Args:
-            data: Dictionary containing 'total_memory_bytes' and 'total_cores' keys.
+            data: Dictionary containing cluster information.
             logger: Logger instance.
 
         Returns:
@@ -281,14 +606,31 @@ class ClusterInformation:
         """
         if data is None:
             return None
+
         total_memory_bytes = data.get("total_memory_bytes")
-        total_cores = data.get("total_cores")
         if total_memory_bytes is None:
             return None
+
+        # Try to reconstruct host_info_list from saved hosts data
         host_info_list = []
+        hosts_data = data.get("hosts", [])
+        for host_data in hosts_data:
+            if isinstance(host_data, dict):
+                host_info = HostInfo.from_collected_data(host_data)
+                host_info_list.append(host_info)
+
         inst = cls(host_info_list, logger, calculate_aggregated_info=False)
+
+        # Restore aggregated values from saved data
         inst.total_memory_bytes = total_memory_bytes
-        inst.total_cores = total_cores if total_cores is not None else 0
+        inst.total_cores = data.get("total_cores", 0)
+        inst.num_hosts = data.get("num_hosts", len(host_info_list))
+        inst.min_memory_bytes = data.get("min_memory_bytes", 0)
+        inst.max_memory_bytes = data.get("max_memory_bytes", 0)
+        inst.collection_method = data.get("collection_method", "unknown")
+        inst.collection_timestamp = data.get("collection_timestamp")
+        inst.host_consistency_issues = data.get("host_consistency_issues", [])
+
         return inst
 
 
