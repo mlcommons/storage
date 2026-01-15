@@ -7,24 +7,54 @@ import sys
 import time
 import types
 
-from typing import Tuple
+from typing import Tuple, Dict, Any, List, Optional, Callable
+
 from functools import wraps
 
 from pyarrow.ipc import open_stream
 
 from mlpstorage.config import PARAM_VALIDATION, DATETIME_STR, MLPS_DEBUG, EXEC_TYPE
 from mlpstorage.debug import debug_tryer_wrapper
+from mlpstorage.interfaces import BenchmarkInterface, BenchmarkConfig, BenchmarkCommand
 from mlpstorage.mlps_logging import setup_logging, apply_logging_options
 from mlpstorage.rules import BenchmarkVerifier, generate_output_location, ClusterInformation
 from mlpstorage.utils import CommandExecutor, MLPSJsonEncoder
 from mlpstorage.cluster_collector import collect_cluster_info
 
 
-class Benchmark(abc.ABC):
+class Benchmark(BenchmarkInterface, abc.ABC):
+    """Base class for all MLPerf Storage benchmarks.
+
+    This abstract class implements BenchmarkInterface and provides common
+    functionality for all benchmark types. Subclasses must implement:
+    - _run(): The actual benchmark execution logic
+    - BENCHMARK_TYPE: Class attribute defining the benchmark type
+
+    The class supports dependency injection for cluster collectors and validators
+    to enable easier testing and flexibility.
+
+    Attributes:
+        BENCHMARK_TYPE: Class attribute defining the benchmark type enum value.
+        args: Parsed command-line arguments.
+        logger: Logger instance for output.
+        run_datetime: Timestamp string for the run.
+        cluster_information: Collected cluster system information.
+    """
 
     BENCHMARK_TYPE = None
 
-    def __init__(self, args, logger=None, run_datetime=None, run_number=0) -> None:
+    def __init__(self, args, logger=None, run_datetime=None, run_number=0,
+                 cluster_collector=None, validator=None) -> None:
+        """Initialize the benchmark.
+
+        Args:
+            args: Parsed command-line arguments.
+            logger: Optional logger instance. If not provided, one will be created.
+            run_datetime: Optional datetime string for the run. Defaults to current time.
+            run_number: Run number for this benchmark execution.
+            cluster_collector: Optional cluster collector for dependency injection.
+            validator: Optional validator for dependency injection.
+        """
         self.args = args
         self.debug = self.args.debug or MLPS_DEBUG
         if logger:
@@ -41,6 +71,10 @@ class Benchmark(abc.ABC):
         self.run_number = run_number
         self.runtime = 0
 
+        # Dependency injection for testability
+        self._cluster_collector = cluster_collector
+        self._validator = validator
+
         self.benchmark_run_verifier = None
         self.verification = None
         self.cmd_executor = CommandExecutor(logger=self.logger, debug=args.debug)
@@ -53,6 +87,94 @@ class Benchmark(abc.ABC):
         self.metadata_file_path = os.path.join(self.run_result_output, self.metadata_filename)
 
         self.logger.status(f'Benchmark results directory: {self.run_result_output}')
+
+    # =========================================================================
+    # BenchmarkInterface Implementation
+    # =========================================================================
+
+    @property
+    def config(self) -> BenchmarkConfig:
+        """Return benchmark configuration.
+
+        Subclasses can override this to provide more specific configuration.
+        """
+        return BenchmarkConfig(
+            name=self.BENCHMARK_TYPE.value if self.BENCHMARK_TYPE else "unknown",
+            benchmark_type=self.BENCHMARK_TYPE.name if self.BENCHMARK_TYPE else "unknown",
+            supported_commands=self._get_supported_commands(),
+            requires_cluster_info=True,
+            requires_mpi=getattr(self.args, 'exec_type', None) == EXEC_TYPE.MPI,
+        )
+
+    def _get_supported_commands(self) -> List[BenchmarkCommand]:
+        """Get list of supported commands. Override in subclass."""
+        return [BenchmarkCommand.RUN]
+
+    def validate_args(self, args) -> List[str]:
+        """Validate command-line arguments.
+
+        Args:
+            args: Parsed command-line arguments.
+
+        Returns:
+            List of error messages. Empty list indicates valid arguments.
+        """
+        errors = []
+        # Subclasses should override to add specific validation
+        return errors
+
+    def get_command_handler(self, command: str) -> Optional[Callable]:
+        """Return handler function for the given command.
+
+        Args:
+            command: Command string (e.g., 'run', 'datagen').
+
+        Returns:
+            Callable that handles the command, or None if not supported.
+        """
+        # Default implementation - subclasses should override
+        handlers = {
+            'run': self._run,
+        }
+        return handlers.get(command)
+
+    def generate_command(self, command: str) -> str:
+        """Generate the shell command to execute.
+
+        Args:
+            command: Command string (e.g., 'run', 'datagen').
+
+        Returns:
+            Shell command string ready for execution.
+        """
+        # Default implementation - subclasses must override for actual command generation
+        raise NotImplementedError("Subclasses must implement generate_command()")
+
+    def collect_results(self) -> Dict[str, Any]:
+        """Collect and return benchmark results.
+
+        Returns:
+            Dictionary containing benchmark results and metadata.
+        """
+        return {
+            'benchmark_type': self.BENCHMARK_TYPE.name if self.BENCHMARK_TYPE else None,
+            'run_datetime': self.run_datetime,
+            'runtime': self.runtime,
+            'verification': self.verification.name if self.verification else None,
+            'result_dir': self.run_result_output,
+        }
+
+    def get_metadata(self) -> Dict[str, Any]:
+        """Get benchmark metadata for recording.
+
+        Returns:
+            Dictionary containing benchmark configuration and parameters.
+        """
+        return self.metadata
+
+    # =========================================================================
+    # Original Benchmark Methods
+    # =========================================================================
 
     def _execute_command(self, command, output_file_prefix=None, print_stdout=True, print_stderr=True) -> Tuple[str, str, int]:
         """
