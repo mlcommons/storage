@@ -37,6 +37,29 @@ class DLIOBenchmark(Benchmark, abc.ABC):
             self.cluster_information = self.accumulate_host_info(args)
 
     def accumulate_host_info(self, args):
+        """Collect cluster information from all hosts.
+
+        This method first attempts to collect detailed system information via MPI.
+        If MPI collection fails or is not available, it falls back to using the
+        CLI argument `client_host_memory_in_gb` applied uniformly to all hosts.
+
+        Args:
+            args: Parsed command-line arguments.
+
+        Returns:
+            ClusterInformation instance with host details.
+        """
+        # Try MPI-based collection first
+        cluster_info = self._collect_cluster_information()
+        if cluster_info is not None:
+            self.logger.verbose(
+                f'Using MPI-collected cluster info: {cluster_info.num_hosts} hosts, '
+                f'{cluster_info.total_memory_bytes / (1024**3):.1f} GB total memory'
+            )
+            return cluster_info
+
+        # Fall back to CLI args-based collection
+        self.logger.debug('Using CLI args for cluster info (MPI collection not available)')
         host_info_list = []
         per_host_mem = args.client_host_memory_in_gb
         for host in args.hosts:
@@ -46,7 +69,10 @@ class DLIOBenchmark(Benchmark, abc.ABC):
                 memory=HostMemoryInfo.from_total_mem_int(per_host_mem * 1024 * 1024 * 1024)
             )
             host_info_list.append(host_info)
-        return ClusterInformation(host_info_list=host_info_list, logger=self.logger)
+
+        cluster_info = ClusterInformation(host_info_list=host_info_list, logger=self.logger)
+        cluster_info.collection_method = "args"
+        return cluster_info
 
     @property
     def config_name(self):

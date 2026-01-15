@@ -12,11 +12,12 @@ from functools import wraps
 
 from pyarrow.ipc import open_stream
 
-from mlpstorage.config import PARAM_VALIDATION, DATETIME_STR, MLPS_DEBUG
+from mlpstorage.config import PARAM_VALIDATION, DATETIME_STR, MLPS_DEBUG, EXEC_TYPE
 from mlpstorage.debug import debug_tryer_wrapper
 from mlpstorage.mlps_logging import setup_logging, apply_logging_options
-from mlpstorage.rules import BenchmarkVerifier, generate_output_location
+from mlpstorage.rules import BenchmarkVerifier, generate_output_location, ClusterInformation
 from mlpstorage.utils import CommandExecutor, MLPSJsonEncoder
+from mlpstorage.cluster_collector import collect_cluster_info
 
 
 class Benchmark(abc.ABC):
@@ -153,6 +154,103 @@ class Benchmark(abc.ABC):
 
         if self.args.verbose or self.args.debug or self.debug:
             json.dump(self.metadata, sys.stdout, indent=2, cls=MLPSJsonEncoder)
+
+    def write_cluster_info(self):
+        """Write detailed cluster information to a separate JSON file."""
+        if not hasattr(self, 'cluster_information') or not self.cluster_information:
+            return
+
+        cluster_info_filename = f"{self.BENCHMARK_TYPE.value}_cluster_info.json"
+        cluster_info_path = os.path.join(self.run_result_output, cluster_info_filename)
+
+        try:
+            with open(cluster_info_path, 'w') as fd:
+                json.dump(self.cluster_information.to_detailed_dict(), fd, indent=2)
+            self.logger.verbose(f'Cluster information saved to: {cluster_info_filename}')
+        except Exception as e:
+            self.logger.warning(f'Failed to write cluster info: {e}')
+
+    def _should_collect_cluster_info(self) -> bool:
+        """Determine if we should collect cluster information via MPI.
+
+        Returns True if:
+        - hosts argument is provided and not empty
+        - command is not 'datagen' or 'configview' (data generation doesn't need cluster info)
+        - skip_cluster_collection is not set
+        """
+        # Check if hosts are specified
+        if not hasattr(self.args, 'hosts') or not self.args.hosts:
+            return False
+
+        # Skip for certain commands that don't need cluster info
+        if hasattr(self.args, 'command') and self.args.command in ('datagen', 'configview'):
+            return False
+
+        # Check if user explicitly disabled collection
+        if hasattr(self.args, 'skip_cluster_collection') and self.args.skip_cluster_collection:
+            return False
+
+        return True
+
+    def _collect_cluster_information(self) -> 'ClusterInformation':
+        """Collect cluster information using MPI if available, otherwise return None.
+
+        This method attempts to collect detailed system information from all hosts
+        using MPI. If MPI collection fails or is not available, it returns None
+        and the subclass should fall back to CLI args-based collection.
+
+        Returns:
+            ClusterInformation instance if collection succeeds, None otherwise.
+        """
+        if not self._should_collect_cluster_info():
+            self.logger.debug('Skipping cluster info collection (conditions not met)')
+            return None
+
+        # Only attempt MPI collection if exec_type is MPI
+        if not hasattr(self.args, 'exec_type') or self.args.exec_type != EXEC_TYPE.MPI:
+            self.logger.debug('Skipping MPI cluster collection (exec_type is not MPI)')
+            return None
+
+        try:
+            self.logger.debug('Collecting cluster information via MPI...')
+
+            # Get collection parameters
+            mpi_bin = getattr(self.args, 'mpi_bin', 'mpirun')
+            allow_run_as_root = getattr(self.args, 'allow_run_as_root', False)
+            timeout = getattr(self.args, 'cluster_collection_timeout', 60)
+
+            # Collect cluster info
+            collected_data = collect_cluster_info(
+                hosts=self.args.hosts,
+                mpi_bin=mpi_bin,
+                logger=self.logger,
+                allow_run_as_root=allow_run_as_root,
+                timeout_seconds=timeout,
+                fallback_to_local=True
+            )
+
+            # Create ClusterInformation from collected data
+            cluster_info = ClusterInformation.from_mpi_collection(collected_data, self.logger)
+
+            # Log collection results
+            collection_method = collected_data.get('_metadata', {}).get('collection_method', 'unknown')
+            self.logger.debug(
+                f'Cluster info collected via {collection_method}: '
+                f'{cluster_info.num_hosts} hosts, '
+                f'{cluster_info.total_memory_bytes / (1024**3):.1f} GB total memory, '
+                f'{cluster_info.total_cores} total cores'
+            )
+
+            # Log any consistency warnings
+            if cluster_info.host_consistency_issues:
+                for issue in cluster_info.host_consistency_issues:
+                    self.logger.warning(f'Cluster consistency: {issue}')
+
+            return cluster_info
+
+        except Exception as e:
+            self.logger.warning(f'MPI cluster info collection failed: {e}')
+            return None
 
     def generate_output_location(self) -> str:
         if not self.BENCHMARK_TYPE:
