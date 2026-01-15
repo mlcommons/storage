@@ -17,6 +17,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 
+# Import argument builders from cli package
 from mlpstorage.cli import (
     add_training_arguments,
     add_checkpointing_arguments,
@@ -24,7 +25,12 @@ from mlpstorage.cli import (
     add_reports_arguments,
     add_history_arguments,
     add_universal_arguments,
-    add_mpi_group,
+    add_mpi_arguments,
+    HELP_MESSAGES,
+    PROGRAM_DESCRIPTIONS,
+)
+# Import parser functions from cli_parser module
+from mlpstorage.cli_parser import (
     validate_args,
     update_args,
     apply_yaml_config_overrides,
@@ -111,8 +117,8 @@ class TestAddUniversalArguments:
         assert args.config_file == '/path/to/config.yaml'
 
 
-class TestAddMpiGroup:
-    """Tests for add_mpi_group function."""
+class TestAddMpiArguments:
+    """Tests for add_mpi_arguments function."""
 
     @pytest.fixture
     def parser(self):
@@ -121,25 +127,25 @@ class TestAddMpiGroup:
 
     def test_adds_mpi_bin_argument(self, parser):
         """Should add --mpi-bin argument."""
-        add_mpi_group(parser)
+        add_mpi_arguments(parser)
         args = parser.parse_args(['--mpi-bin', 'mpirun'])
         assert args.mpi_bin == 'mpirun'
 
     def test_adds_oversubscribe_argument(self, parser):
         """Should add --oversubscribe argument."""
-        add_mpi_group(parser)
+        add_mpi_arguments(parser)
         args = parser.parse_args(['--oversubscribe'])
         assert args.oversubscribe is True
 
     def test_adds_allow_run_as_root_argument(self, parser):
         """Should add --allow-run-as-root argument."""
-        add_mpi_group(parser)
+        add_mpi_arguments(parser)
         args = parser.parse_args(['--allow-run-as-root'])
         assert args.allow_run_as_root is True
 
     def test_adds_mpi_params_argument(self, parser):
         """Should add --mpi-params argument."""
-        add_mpi_group(parser)
+        add_mpi_arguments(parser)
         args = parser.parse_args(['--mpi-params', 'param1', 'param2'])
         assert args.mpi_params == [['param1', 'param2']]
 
