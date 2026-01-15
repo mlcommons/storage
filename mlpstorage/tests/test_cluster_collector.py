@@ -653,6 +653,99 @@ class TestMPICollectorScript:
         """Script should handle case where mpi4py is not available."""
         assert "except ImportError" in MPI_COLLECTOR_SCRIPT
 
+    def test_script_exits_nonzero_on_mpi_import_error(self):
+        """Script should exit with non-zero code when mpi4py is missing."""
+        assert "sys.exit(1)" in MPI_COLLECTOR_SCRIPT
+
+    def test_script_writes_error_marker_on_mpi_import_error(self):
+        """Script should write error marker when mpi4py import fails."""
+        assert "_mpi_import_error" in MPI_COLLECTOR_SCRIPT
+        assert "_error_message" in MPI_COLLECTOR_SCRIPT
+
+
+class TestMPIImportErrorHandling:
+    """Tests for MPI import error detection and handling."""
+
+    def test_collector_detects_mpi_import_error(self, mock_logger):
+        """Collector should detect and raise error for mpi4py import failure."""
+        collector = MPIClusterCollector(
+            hosts=["host1"],
+            mpi_bin="mpirun",
+            logger=mock_logger
+        )
+
+        # Simulate what the script writes when mpi4py is missing
+        error_output = {
+            '_mpi_import_error': True,
+            '_error_message': 'mpi4py not available: No module named mpi4py',
+            '_hostname': 'host1',
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = os.path.join(tmpdir, 'cluster_info.json')
+            with open(output_path, 'w') as f:
+                json.dump(error_output, f)
+
+            # Mock subprocess.run to return the error output
+            import subprocess
+            from unittest.mock import patch, MagicMock
+
+            mock_result = MagicMock()
+            mock_result.returncode = 1
+            mock_result.stderr = "mpi4py not found"
+
+            with patch('subprocess.run', return_value=mock_result):
+                with patch.object(collector, '_write_collector_script'):
+                    with patch.object(collector, '_generate_mpi_command', return_value="mpirun test"):
+                        # Override tempdir to use our test dir
+                        with patch('tempfile.TemporaryDirectory') as mock_tmpdir:
+                            mock_tmpdir.return_value.__enter__.return_value = tmpdir
+
+                            with pytest.raises(RuntimeError) as exc_info:
+                                collector.collect()
+
+                            assert "mpi4py" in str(exc_info.value).lower()
+                            assert "host1" in str(exc_info.value)
+
+    def test_collector_returns_valid_data_without_error_marker(self, mock_logger):
+        """Collector should return data normally when no error marker present."""
+        collector = MPIClusterCollector(
+            hosts=["host1"],
+            mpi_bin="mpirun",
+            logger=mock_logger
+        )
+
+        # Valid output without error marker
+        valid_output = {
+            'host1': {
+                'hostname': 'host1',
+                'meminfo': {'MemTotal': 16384000},
+            }
+        }
+
+        with tempfile.TemporaryDirectory() as tmpdir:
+            output_path = os.path.join(tmpdir, 'cluster_info.json')
+            with open(output_path, 'w') as f:
+                json.dump(valid_output, f)
+
+            import subprocess
+            from unittest.mock import patch, MagicMock
+
+            mock_result = MagicMock()
+            mock_result.returncode = 0
+            mock_result.stderr = ""
+
+            with patch('subprocess.run', return_value=mock_result):
+                with patch.object(collector, '_write_collector_script'):
+                    with patch.object(collector, '_generate_mpi_command', return_value="mpirun test"):
+                        with patch('tempfile.TemporaryDirectory') as mock_tmpdir:
+                            mock_tmpdir.return_value.__enter__.return_value = tmpdir
+
+                            result = collector.collect()
+
+                            assert 'host1' in result
+                            assert result['host1']['hostname'] == 'host1'
+
 
 # =============================================================================
 # Integration Tests

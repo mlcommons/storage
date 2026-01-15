@@ -912,13 +912,19 @@ def main():
         comm = MPI.COMM_WORLD
         rank = comm.Get_rank()
         size = comm.Get_size()
-    except ImportError:
-        # No MPI available, just collect local info
-        local_info = collect_local_info()
-        output = {local_info['hostname']: local_info}
+    except ImportError as e:
+        # mpi4py not available - this is a critical error when running under MPI
+        # because each rank would write to the same file, corrupting the output.
+        # Write an error marker and exit with non-zero code so the launcher
+        # knows MPI collection failed and can fall back to local-only collection.
+        error_output = {
+            '_mpi_import_error': True,
+            '_error_message': f'mpi4py not available: {e}',
+            '_hostname': socket.gethostname(),
+        }
         with open(output_file, 'w') as f:
-            json.dump(output, f, indent=2)
-        return
+            json.dump(error_output, f, indent=2)
+        sys.exit(1)
 
     # Collect local info
     local_info = collect_local_info()
@@ -1078,16 +1084,26 @@ class MPIClusterCollector:
                     timeout=self.timeout
                 )
 
-                if result.returncode != 0:
-                    self.logger.warning(
-                        f"MPI collection returned non-zero exit code: {result.returncode}\n"
-                        f"stderr: {result.stderr}"
-                    )
-
-                # Read and parse the output
+                # Read and parse the output if it exists
                 if os.path.exists(output_path):
                     with open(output_path, 'r') as f:
                         collected_data = json.load(f)
+
+                    # Check for MPI import error marker
+                    if collected_data.get('_mpi_import_error'):
+                        error_msg = collected_data.get('_error_message', 'mpi4py not available')
+                        error_host = collected_data.get('_hostname', 'unknown')
+                        raise RuntimeError(
+                            f"MPI collection failed on host '{error_host}': {error_msg}. "
+                            f"Ensure mpi4py is installed on all cluster nodes."
+                        )
+
+                    # Check for non-zero return code (other MPI errors)
+                    if result.returncode != 0:
+                        self.logger.warning(
+                            f"MPI collection returned non-zero exit code: {result.returncode}\n"
+                            f"stderr: {result.stderr}"
+                        )
 
                     self.logger.debug(
                         f"Successfully collected info from {len(collected_data)} hosts"
@@ -1096,7 +1112,7 @@ class MPIClusterCollector:
                 else:
                     raise RuntimeError(
                         f"MPI collection did not produce output file. "
-                        f"stderr: {result.stderr}"
+                        f"Return code: {result.returncode}, stderr: {result.stderr}"
                     )
 
             except subprocess.TimeoutExpired:
