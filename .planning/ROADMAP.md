@@ -23,6 +23,15 @@ This roadmap delivers MLPerf Storage v3.0 with fully integrated KV cache and Vec
 3. User installing default package does not pull GPU-related dependencies (torch-cuda, etc.)
 4. Benchmark execution fails with clear message when package versions differ from lockfile
 
+**Plans:** 5 plans
+
+Plans:
+- [ ] 01-01-PLAN.md - Lockfile module structure and data models
+- [ ] 01-02-PLAN.md - CPU-only pyproject.toml configuration
+- [ ] 01-03-PLAN.md - Lockfile generation with uv pip compile
+- [ ] 01-04-PLAN.md - Runtime version validation
+- [ ] 01-05-PLAN.md - CLI integration and benchmark hookup
+
 ---
 
 ## Phase 2: Environment Validation and Fail-Fast
@@ -192,7 +201,7 @@ This roadmap delivers MLPerf Storage v3.0 with fully integrated KV cache and Vec
 
 | Phase | Name | Status | Requirements |
 |-------|------|--------|--------------|
-| 1 | Package Management Foundation | Not Started | PKG-01, PKG-02, PKG-03 |
+| 1 | Package Management Foundation | Planned | PKG-01, PKG-02, PKG-03 |
 | 2 | Environment Validation and Fail-Fast | Not Started | UX-01, UX-02, UX-03 |
 | 3 | KV Cache Benchmark Integration | Not Started | BENCH-01, BENCH-02 |
 | 4 | VectorDB Benchmark Integration | Not Started | BENCH-03, BENCH-04 |
