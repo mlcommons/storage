@@ -21,6 +21,7 @@ from mlpstorage.cli import (
     add_vectordb_arguments,
     add_reports_arguments,
     add_history_arguments,
+    add_lockfile_arguments,
 )
 
 # Backwards compatibility aliases
@@ -65,6 +66,11 @@ def parse_arguments():
         description=PROGRAM_DESCRIPTIONS.get('history', ''),
         help="Display benchmark history"
     )
+    lockfile_parsers = sub_programs.add_parser(
+        "lockfile",
+        description="Manage package lockfiles for reproducible environments",
+        help="Generate and verify package lockfiles"
+    )
 
     sub_programs_map = {
         'training': training_parsers,
@@ -72,6 +78,7 @@ def parse_arguments():
         'vectordb': vectordb_parsers,
         'reports': reports_parsers,
         'history': history_parsers,
+        'lockfile': lockfile_parsers,
     }
 
     # Add arguments using modular builders from cli package
@@ -80,6 +87,7 @@ def parse_arguments():
     add_vectordb_arguments(vectordb_parsers)
     add_reports_arguments(reports_parsers)
     add_history_arguments(history_parsers)
+    add_lockfile_arguments(lockfile_parsers)
 
     # Universal arguments are added within each argument builder now
     # (except for top-level parsers that need them)
