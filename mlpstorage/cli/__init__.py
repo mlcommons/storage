@@ -36,6 +36,7 @@ from mlpstorage.cli.checkpointing_args import add_checkpointing_arguments
 from mlpstorage.cli.vectordb_args import add_vectordb_arguments
 from mlpstorage.cli.kvcache_args import add_kvcache_arguments
 from mlpstorage.cli.utility_args import add_reports_arguments, add_history_arguments
+from mlpstorage.cli.lockfile_args import add_lockfile_arguments
 
 __all__ = [
     # Common
@@ -53,4 +54,5 @@ __all__ = [
     # Utility argument builders
     'add_reports_arguments',
     'add_history_arguments',
+    'add_lockfile_arguments',
 ]
