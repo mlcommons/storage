@@ -18,7 +18,7 @@ from mlpstorage.config import HISTFILE, DATETIME_STR, EXIT_CODE, DEFAULT_RESULTS
 from mlpstorage.debug import debugger_hook, MLPS_DEBUG
 from mlpstorage.history import HistoryTracker
 from mlpstorage.mlps_logging import setup_logging, apply_logging_options
-from mlpstorage.reporting import ReportGenerator
+from mlpstorage.report_generator import ReportGenerator
 from mlpstorage.errors import (
     MLPStorageException,
     ConfigurationError,
