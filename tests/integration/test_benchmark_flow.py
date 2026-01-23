@@ -16,6 +16,7 @@ from tests.fixtures import (
     MockClusterCollector,
     MockLogger,
     create_sample_benchmark_args,
+    create_sample_benchmark_run_data,
 )
 
 
@@ -338,3 +339,215 @@ class TestValidationIntegration:
 
         except ImportError as e:
             pytest.skip(f"Required module not available: {e}")
+
+
+class TestVerificationFlowIntegration:
+    """Integration tests for the benchmark verification flow.
+
+    These tests validate that the complete verification flow works correctly,
+    from BenchmarkRun creation through BenchmarkVerifier execution.
+    This catches initialization order bugs and other integration issues.
+    """
+
+    @pytest.fixture
+    def mock_logger(self):
+        """Create a mock logger."""
+        return MockLogger()
+
+    def test_verifier_can_verify_training_benchmark_run(self, mock_logger):
+        """BenchmarkVerifier can verify a training benchmark run end-to-end.
+
+        This is a regression test for the initialization order bug where
+        TrainingRunRulesChecker.__init__ called super().__init__() before
+        setting self.benchmark_run.
+        """
+        from mlpstorage.rules import BenchmarkRun, BenchmarkVerifier, BenchmarkRunData
+        from mlpstorage.config import BENCHMARK_TYPES, PARAM_VALIDATION
+
+        # Create a sample benchmark run
+        run_data = create_sample_benchmark_run_data(
+            benchmark_type='training',
+            model='unet3d',
+            command='run',
+            num_processes=8,
+        )
+
+        run = BenchmarkRun.from_data(run_data, logger=mock_logger)
+
+        # Create verifier and run verification
+        # This would have failed before the fix with:
+        # AttributeError: 'TrainingRunRulesChecker' object has no attribute 'benchmark_run'
+        verifier = BenchmarkVerifier(run, logger=mock_logger)
+        result = verifier.verify()
+
+        # Should return a valid PARAM_VALIDATION enum
+        assert result in [PARAM_VALIDATION.CLOSED, PARAM_VALIDATION.OPEN, PARAM_VALIDATION.INVALID]
+
+    def test_verifier_can_verify_checkpointing_benchmark_run(self, mock_logger):
+        """BenchmarkVerifier can verify a checkpointing benchmark run end-to-end."""
+        from mlpstorage.rules import BenchmarkRun, BenchmarkVerifier, BenchmarkRunData
+        from mlpstorage.config import BENCHMARK_TYPES, PARAM_VALIDATION
+
+        run_data = create_sample_benchmark_run_data(
+            benchmark_type='checkpointing',
+            model='llama3-8b',
+            command='run',
+            num_processes=8,
+            parameters={
+                'model': {'name': 'llama3_8b'},
+                'checkpoint': {
+                    'num_checkpoints_read': 10,
+                    'num_checkpoints_write': 10,
+                },
+                'workflow': {'checkpoint': True},
+            }
+        )
+
+        run = BenchmarkRun.from_data(run_data, logger=mock_logger)
+
+        verifier = BenchmarkVerifier(run, logger=mock_logger)
+        result = verifier.verify()
+
+        assert result in [PARAM_VALIDATION.CLOSED, PARAM_VALIDATION.OPEN, PARAM_VALIDATION.INVALID]
+
+    def test_verifier_runs_all_checks(self, mock_logger):
+        """BenchmarkVerifier runs all check methods and collects issues."""
+        from mlpstorage.rules import BenchmarkRun, BenchmarkVerifier
+
+        run_data = create_sample_benchmark_run_data(
+            benchmark_type='training',
+            model='unet3d',
+            command='run',
+            parameters={
+                'dataset': {'num_files_train': 10},  # Too small
+                'workflow': {'train': True},
+            }
+        )
+
+        run = BenchmarkRun.from_data(run_data, logger=mock_logger)
+        verifier = BenchmarkVerifier(run, logger=mock_logger)
+        verifier.verify()
+
+        # Should have collected some issues (dataset too small)
+        assert len(verifier.issues) > 0
+
+
+class TestDependencyValidationIntegration:
+    """Integration tests for dependency validation in benchmarks.
+
+    These tests verify that benchmarks properly validate dependencies
+    (MPI, DLIO) before execution, providing clear error messages.
+    """
+
+    @pytest.fixture
+    def training_args(self, tmp_path):
+        """Create training benchmark args with valid temp directories."""
+        from mlpstorage.config import EXEC_TYPE
+
+        # Create data directory in temp path
+        data_dir = tmp_path / "data"
+        data_dir.mkdir()
+
+        args = create_sample_benchmark_args(
+            benchmark_type='training',
+            command='run',
+            model='unet3d',
+            what_if=False,
+            data_dir=str(data_dir),
+            results_dir=str(tmp_path / "results"),
+        )
+        args.exec_type = EXEC_TYPE.MPI
+        return args
+
+    def test_benchmark_fails_fast_when_dlio_missing(self, training_args):
+        """Benchmark should fail fast with clear message when DLIO not found."""
+        def mock_which(cmd):
+            # MPI found, but DLIO not found
+            if cmd == 'mpirun':
+                return '/usr/bin/mpirun'
+            return None
+
+        with patch('shutil.which', side_effect=mock_which):
+            with patch('mlpstorage.benchmarks.base.ClusterInformation') as mock_ci:
+                mock_ci.return_value = MagicMock()
+                mock_ci.return_value.total_memory_bytes = 256 * 1024**3
+                mock_ci.return_value.host_info_list = []
+
+                from mlpstorage.errors import DependencyError
+
+                with pytest.raises(DependencyError) as exc_info:
+                    from mlpstorage.benchmarks.dlio import TrainingBenchmark
+                    TrainingBenchmark(training_args, logger=MockLogger())
+
+                # Error should mention DLIO and how to install
+                assert 'DLIO' in str(exc_info.value) or 'dlio' in str(exc_info.value).lower()
+
+    def test_benchmark_fails_fast_when_mpi_missing(self, training_args):
+        """Benchmark should fail fast with clear message when MPI not found."""
+        def mock_which(cmd):
+            # DLIO found, but MPI not found
+            if cmd == 'dlio_benchmark':
+                return '/usr/bin/dlio_benchmark'
+            return None
+
+        with patch('shutil.which', side_effect=mock_which):
+            with patch('mlpstorage.benchmarks.base.ClusterInformation') as mock_ci:
+                mock_ci.return_value = MagicMock()
+                mock_ci.return_value.total_memory_bytes = 256 * 1024**3
+                mock_ci.return_value.host_info_list = []
+
+                from mlpstorage.errors import DependencyError
+
+                with pytest.raises(DependencyError) as exc_info:
+                    from mlpstorage.benchmarks.dlio import TrainingBenchmark
+                    TrainingBenchmark(training_args, logger=MockLogger())
+
+                # Error should mention MPI
+                assert 'MPI' in str(exc_info.value) or 'mpi' in str(exc_info.value).lower()
+
+    def test_benchmark_skips_dependency_check_in_whatif_mode(self, training_args):
+        """Benchmark should skip dependency validation in what-if mode."""
+        training_args.what_if = True
+
+        # Even with no executables found, what-if mode should succeed
+        with patch('shutil.which', return_value=None):
+            with patch('mlpstorage.benchmarks.base.ClusterInformation') as mock_ci:
+                mock_ci.return_value = MagicMock()
+                mock_ci.return_value.total_memory_bytes = 256 * 1024**3
+                mock_ci.return_value.host_info_list = []
+
+                from mlpstorage.benchmarks.dlio import TrainingBenchmark
+
+                # Should not raise DependencyError
+                benchmark = TrainingBenchmark(training_args, logger=MockLogger())
+                assert benchmark is not None
+
+    def test_dependency_check_finds_dlio_in_custom_path(self, training_args, tmp_path):
+        """Benchmark should find DLIO in custom path specified by --dlio-bin-path."""
+        training_args.what_if = True
+
+        # Create fake DLIO executable in custom path
+        custom_bin_path = tmp_path / "custom_bin"
+        custom_bin_path.mkdir()
+        dlio_exe = custom_bin_path / "dlio_benchmark"
+        dlio_exe.touch()
+        dlio_exe.chmod(0o755)
+
+        training_args.dlio_bin_path = str(custom_bin_path)
+
+        def mock_which(cmd):
+            if cmd == 'mpirun':
+                return '/usr/bin/mpirun'
+            return None  # DLIO not in PATH
+
+        with patch('shutil.which', side_effect=mock_which):
+            with patch('mlpstorage.benchmarks.base.ClusterInformation') as mock_ci:
+                mock_ci.return_value = MagicMock()
+                mock_ci.return_value.total_memory_bytes = 256 * 1024**3
+                mock_ci.return_value.host_info_list = []
+
+                from mlpstorage.benchmarks.dlio import TrainingBenchmark
+
+                # Should find DLIO in custom path
+                benchmark = TrainingBenchmark(training_args, logger=MockLogger())
+                assert benchmark.base_command_path == str(dlio_exe)
