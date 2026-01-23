@@ -16,7 +16,7 @@ from typing import List, Dict, Any, Optional, Union
 
 from mlpstorage.mlps_logging import setup_logging, apply_logging_options
 from mlpstorage.config import MLPS_DEBUG, BENCHMARK_TYPES, EXIT_CODE, PARAM_VALIDATION, LLM_MODELS, MODELS, ACCELERATORS
-from mlpstorage.rules import get_runs_files, BenchmarkVerifier, BenchmarkRun, Issue
+from mlpstorage.rules import get_runs_files, BenchmarkVerifier, BenchmarkRun, Issue, RunID
 from mlpstorage.utils import flatten_nested_dict, remove_nan_values
 from mlpstorage.reporting import (
     ResultsDirectoryValidator,
@@ -83,7 +83,7 @@ class ReportGenerator:
             if not self._validate_directory_structure():
                 sys.exit(EXIT_CODE.FILE_NOT_FOUND)
 
-        self.run_results: Dict[str, Result] = {}
+        self.run_results: Dict[RunID, Result] = {}
         self.workload_results: Dict[tuple, Result] = {}
         self.processing_errors: List[str] = []
 
