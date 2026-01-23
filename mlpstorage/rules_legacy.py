@@ -46,7 +46,7 @@ class Issue:
         return result
 
 
-@dataclass
+@dataclass(frozen=True)
 class RunID:
     program: str
     command: str

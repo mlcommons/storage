@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from mlpstorage.rules.issues import Issue
 
 
-@dataclass
+@dataclass(frozen=True)
 class RunID:
     """Identifier for a benchmark run."""
     program: str
