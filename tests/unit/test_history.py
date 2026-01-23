@@ -338,7 +338,7 @@ class TestCreateArgsFromCommand:
         tracker.add_entry("mlpstorage training datasize --model unet3d --max-accelerators 8 --accelerator-type h100 --client-host-memory-in-gb 128")
 
         # Mock parse_arguments to capture what's passed
-        with patch('mlpstorage.cli.parse_arguments') as mock_parse:
+        with patch('mlpstorage.cli_parser.parse_arguments') as mock_parse:
             mock_parse.return_value = Namespace(program='training')
             tracker.create_args_from_command(1)
             # Verify sys.argv was set without the script name at front

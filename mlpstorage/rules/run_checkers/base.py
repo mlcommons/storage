@@ -32,8 +32,10 @@ class RunRulesChecker(RulesChecker):
             *args: Additional positional arguments passed to parent.
             **kwargs: Must include 'logger' for parent class.
         """
-        super().__init__(*args, **kwargs)
+        # Set benchmark_run BEFORE calling super().__init__() because
+        # the parent class dynamically discovers check methods that access self.benchmark_run
         self.benchmark_run = benchmark_run
+        super().__init__(*args, **kwargs)
 
     @property
     def parameters(self):
