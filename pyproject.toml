@@ -26,7 +26,9 @@ test = [
     "pytest-cov>=4.0",
     "pytest-mock>=3.0",
 ]
-# Full installation with DLIO for running benchmarks
+# Full installation with DLIO for running benchmarks.
+# Note: DLIO depends on PyTorch. The [tool.uv] configuration ensures
+# CPU-only PyTorch wheels are used to avoid GPU dependencies.
 full = [
     "dlio-benchmark @ git+https://github.com/argonne-lcf/dlio_benchmark.git@mlperf_storage_v2.0",
 ]
@@ -64,3 +66,20 @@ exclude_lines = [
     "raise NotImplementedError",
     "if __name__ == .__main__.:",
 ]
+
+# =============================================================================
+# UV Configuration for CPU-only builds
+# =============================================================================
+# MLPerf Storage is a storage benchmark and does not require GPU support.
+# These settings ensure CPU-only PyTorch wheels are used, avoiding large
+# CUDA downloads and nvidia-* package dependencies.
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+torchvision = [{ index = "pytorch-cpu" }]
+torchaudio = [{ index = "pytorch-cpu" }]
