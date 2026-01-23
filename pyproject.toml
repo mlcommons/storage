@@ -15,6 +15,7 @@ dependencies = [
     "psutil>=5.9",
     "pyarrow",
     "pyyaml>=6.0",
+    "packaging>=21.0",  # For PEP 440 version parsing in lockfile validation
 ]
 
 [project.optional-dependencies]
