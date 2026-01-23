@@ -141,6 +141,29 @@ def run_benchmark(args, run_datetime):
     """
     from mlpstorage.benchmarks import KVCacheBenchmark
 
+    # Validate lockfile if requested
+    if hasattr(args, 'verify_lockfile') and args.verify_lockfile:
+        logger.info(f"Validating packages against lockfile: {args.verify_lockfile}")
+        try:
+            result = validate_lockfile(args.verify_lockfile, fail_on_missing=False)
+            if not result.valid:
+                report = format_validation_report(result)
+                logger.error("Package version mismatch detected:")
+                logger.error(report)
+                logger.error("")
+                logger.error("To fix, run one of:")
+                logger.error(f"  pip install -r {args.verify_lockfile}")
+                logger.error("  uv pip sync " + args.verify_lockfile)
+                logger.error("")
+                logger.error("Or run without lockfile validation:")
+                logger.error(f"  {' '.join(sys.argv).replace('--verify-lockfile ' + args.verify_lockfile, '').strip()}")
+                return EXIT_CODE.FAILURE
+            logger.status(f"Package validation passed ({result.matched} packages verified)")
+        except FileNotFoundError:
+            logger.error(f"Lockfile not found: {args.verify_lockfile}")
+            logger.error("Generate a lockfile with: mlpstorage lockfile generate")
+            return EXIT_CODE.FAILURE
+
     program_switch_dict = dict(
         training=TrainingBenchmark,
         checkpointing=CheckpointingBenchmark,
