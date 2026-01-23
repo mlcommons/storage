@@ -124,7 +124,38 @@ Tests use pytest with fixtures in `tests/fixtures/`:
 
 ### Test Environment
 
-When running the `mlpstorage` CLI for manual testing or integration tests, use the directory `/mnt/nvme/mlpstorage` for data storage and results.
+When running the `mlpstorage` CLI for manual testing or integration tests, use:
+- **Data directory**: `/databases/mlps-v3.0/data/`
+- **Results directory**: `/databases/mlps-v3.0/results/`
+
+#### Example Commands
+
+```bash
+# Generate dataset for unet3d with 4 processes
+mlpstorage training datagen \
+    --model unet3d \
+    --num-processes 4 \
+    --data-dir /databases/mlps-v3.0/data/ \
+    --results-dir /databases/mlps-v3.0/results
+
+# Run training benchmark for unet3d with 2 h100 accelerators
+mlpstorage training run \
+    --model unet3d \
+    --num-accelerators 2 \
+    --accelerator-type h100 \
+    --client-host-memory-in-gb 64 \
+    --data-dir /databases/mlps-v3.0/data/ \
+    --results-dir /databases/mlps-v3.0/results
+```
+
+**Note**: These benchmarks require MPI (OpenMPI) to be installed. Install with:
+```bash
+# Ubuntu/Debian
+sudo apt-get install openmpi-bin
+
+# RHEL/CentOS
+sudo yum install openmpi
+```
 
 ## Key Constants
 
