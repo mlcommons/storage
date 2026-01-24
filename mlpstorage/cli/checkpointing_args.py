@@ -12,6 +12,7 @@ from mlpstorage.cli.common_args import (
     add_mpi_arguments,
     add_host_arguments,
     add_dlio_arguments,
+    add_timeseries_arguments,
 )
 
 
@@ -95,3 +96,6 @@ def add_checkpointing_arguments(parser):
             add_mpi_arguments(_parser)
 
         add_universal_arguments(_parser)
+
+    # Add time-series arguments to run command only
+    add_timeseries_arguments(run_benchmark)
