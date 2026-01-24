@@ -17,9 +17,12 @@ from typing import List, Optional, Tuple
 
 
 @dataclass
-class ValidationIssue:
+class ValidationIssue(Exception):
     """
     A validation problem with suggested remediation.
+
+    This class is both a dataclass for structured data and an Exception
+    so it can be raised when critical validation fails (e.g., SSH not found).
 
     Attributes:
         severity: Issue severity ('error' or 'warning')
@@ -35,6 +38,17 @@ class ValidationIssue:
     suggestion: str
     install_cmd: Optional[str] = None
     host: Optional[str] = None
+
+    def __str__(self) -> str:
+        """Return a human-readable representation for exception messages."""
+        parts = [f"[{self.severity.upper()}] {self.message}"]
+        if self.suggestion:
+            parts.append(f"Suggestion: {self.suggestion}")
+        if self.install_cmd:
+            parts.append(f"Install command: {self.install_cmd}")
+        if self.host:
+            parts.append(f"Host: {self.host}")
+        return "\n".join(parts)
 
 
 def validate_ssh_connectivity(
