@@ -127,6 +127,13 @@ Plans:
 3. Validation rules for KV cache and VectorDB benchmarks produce CLOSED/OPEN/INVALID categories
 4. Combined reports can include all benchmark types (training, checkpointing, kvcache, vectordb)
 
+**Plans:** 3 plans
+
+Plans:
+- [ ] 05-01-PLAN.md - Create VectorDBRunRulesChecker
+- [ ] 05-02-PLAN.md - Update BenchmarkVerifier routing and formatters
+- [ ] 05-03-PLAN.md - Unit tests for VectorDB validation
+
 ---
 
 ## Phase 6: SSH-Based Host Collection
@@ -228,7 +235,7 @@ Plans:
 | 2 | Environment Validation and Fail-Fast | Complete | UX-01, UX-02, UX-03 |
 | 3 | KV Cache Benchmark Integration | Complete | BENCH-01, BENCH-02 |
 | 4 | VectorDB Benchmark Integration | Complete | BENCH-03, BENCH-04 |
-| 5 | Benchmark Validation Pipeline Integration | Not Started | BENCH-05 |
+| 5 | Benchmark Validation Pipeline Integration | In Progress | BENCH-05 |
 | 6 | SSH-Based Host Collection | Not Started | HOST-01, HOST-02, HOST-03 |
 | 7 | Time-Series Host Data Collection | Not Started | HOST-04, HOST-05 |
 | 8 | New Training Models | Not Started | TRAIN-01, TRAIN-02, TRAIN-03 |
