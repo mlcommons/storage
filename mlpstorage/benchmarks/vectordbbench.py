@@ -92,6 +92,8 @@ class VectorDBBenchmark(Benchmark):
 
         self.logger.verbose(f'Executing data generation.')
         self._execute_command(cmd)
+        # Write metadata for history tracking
+        self.write_metadata()
 
     def execute_run(self):
         """Execute the benchmark run command using simple_bench.py"""
@@ -108,6 +110,8 @@ class VectorDBBenchmark(Benchmark):
         cmd = self.build_command("vdbbench", additional_params)
         self.logger.verbose(f'Execuging benchmark run.')
         self._execute_command(cmd, output_file_prefix=f"{self.BENCHMARK_TYPE.value}_{self.args.command}")
+        # Write metadata for history tracking
+        self.write_metadata()
 
     @property
     def metadata(self) -> Dict[str, Any]:
@@ -138,7 +142,7 @@ class VectorDBBenchmark(Benchmark):
                 'vector_dtype': getattr(self.args, 'vector_dtype', None),
                 'distribution': getattr(self.args, 'distribution', None),
             })
-        elif self.command == 'run-search':
+        elif self.command == 'run':
             base_metadata.update({
                 'num_query_processes': getattr(self.args, 'num_query_processes', None),
                 'batch_size': getattr(self.args, 'batch_size', None),
