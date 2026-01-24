@@ -6,15 +6,18 @@ before benchmark execution, providing clear error messages for
 common mistakes.
 
 Usage:
-    from mlpstorage.validation_helpers import validate_pre_run
+    from mlpstorage.validation_helpers import validate_pre_run, validate_benchmark_environment
 
     # Validate before running benchmark
     validate_pre_run(args, logger)  # Raises ConfigurationError on failure
+
+    # Comprehensive environment validation (fail-fast)
+    validate_benchmark_environment(args, logger)  # Collects ALL issues before raising
 """
 
 import os
 import shutil
-from typing import List, Optional, Tuple
+from typing import List, Optional, Tuple, Union
 
 from mlpstorage.errors import (
     ConfigurationError,
@@ -24,6 +27,8 @@ from mlpstorage.errors import (
     ErrorCode,
 )
 from mlpstorage.error_messages import format_error
+from mlpstorage.dependency_check import check_mpi_with_hints, check_dlio_with_hints, check_ssh_available
+from mlpstorage.environment import detect_os, validate_ssh_connectivity, ValidationIssue
 
 
 def validate_pre_run(args, logger=None) -> None:
@@ -430,3 +435,226 @@ def check_disk_space(path: str, required_bytes: int, logger=None) -> bool:
         )
 
     return True
+
+
+def _requires_mpi(args) -> bool:
+    """
+    Determine if MPI is required based on the run configuration.
+
+    MPI is required when running distributed benchmarks with multiple hosts.
+
+    Args:
+        args: Parsed command line arguments.
+
+    Returns:
+        True if MPI is required, False otherwise.
+    """
+    hosts = getattr(args, 'hosts', None)
+    if not hosts:
+        return False
+
+    # Filter out localhost entries
+    remote_hosts = [
+        h.split(':')[0].strip() for h in hosts
+        if h.split(':')[0].strip().lower() not in ('localhost', '127.0.0.1')
+    ]
+
+    return len(remote_hosts) > 0
+
+
+def _is_distributed_run(args) -> bool:
+    """
+    Determine if this is a distributed (multi-host) run.
+
+    Args:
+        args: Parsed command line arguments.
+
+    Returns:
+        True if running on multiple hosts, False otherwise.
+    """
+    hosts = getattr(args, 'hosts', None)
+    if not hosts:
+        return False
+
+    # Check if there are any non-localhost hosts
+    for host in hosts:
+        hostname = host.split(':')[0].strip().lower()
+        if hostname not in ('localhost', '127.0.0.1'):
+            return True
+
+    return False
+
+
+def _requires_dlio(args) -> bool:
+    """
+    Determine if DLIO benchmark is required.
+
+    DLIO is required for training and checkpointing benchmarks.
+
+    Args:
+        args: Parsed command line arguments.
+
+    Returns:
+        True if DLIO is required, False otherwise.
+    """
+    program = getattr(args, 'program', None)
+    return program in ('training', 'checkpointing')
+
+
+def validate_benchmark_environment(
+    args,
+    logger=None,
+    skip_remote_checks: bool = False
+) -> None:
+    """
+    Comprehensive fail-fast environment validation.
+
+    Validates all required environment dependencies before benchmark execution
+    starts. Collects ALL issues first, then reports them together, providing
+    users with a complete picture of what needs to be fixed.
+
+    This function checks:
+    - MPI availability (for distributed runs with multiple hosts)
+    - DLIO benchmark availability (for training/checkpointing)
+    - SSH connectivity (for distributed runs with remote hosts)
+    - File system paths (data directory, results directory, etc.)
+    - Required parameters (model, results-dir, etc.)
+
+    Args:
+        args: Parsed command line arguments.
+        logger: Optional logger for status messages.
+        skip_remote_checks: If True, skip SSH connectivity checks to remote hosts.
+
+    Raises:
+        DependencyError: If required dependencies are missing.
+        MPIError: If hosts are unreachable via SSH.
+        ConfigurationError: If required parameters are missing or invalid.
+        FileSystemError: If required paths don't exist.
+
+    Examples:
+        >>> from argparse import Namespace
+        >>> args = Namespace(program='training', command='run', model='unet3d',
+        ...                  data_dir='/data', results_dir='/results')
+        >>> validate_benchmark_environment(args)  # Raises if issues found
+    """
+    issues: List[Union[Exception, ValidationIssue]] = []
+
+    # Detect OS once at start for all checks
+    os_info = detect_os()
+
+    if logger:
+        logger.debug(f"Starting environment validation (OS: {os_info.system})")
+
+    # Check MPI if needed for distributed run
+    if _requires_mpi(args):
+        if logger:
+            logger.debug("Checking MPI availability for distributed run...")
+        try:
+            mpi_bin = getattr(args, 'mpi_bin', 'mpirun')
+            check_mpi_with_hints(mpi_bin)
+            if logger:
+                logger.debug("MPI check passed")
+        except DependencyError as e:
+            if logger:
+                logger.debug(f"MPI check failed: {e}")
+            issues.append(e)
+
+    # Check DLIO if needed for training/checkpointing
+    if _requires_dlio(args):
+        if logger:
+            logger.debug("Checking DLIO benchmark availability...")
+        try:
+            dlio_bin_path = getattr(args, 'dlio_bin_path', None)
+            check_dlio_with_hints(dlio_bin_path)
+            if logger:
+                logger.debug("DLIO check passed")
+        except DependencyError as e:
+            if logger:
+                logger.debug(f"DLIO check failed: {e}")
+            issues.append(e)
+
+    # Check SSH connectivity for distributed runs (unless skipped)
+    if _is_distributed_run(args) and not skip_remote_checks:
+        hosts = getattr(args, 'hosts', [])
+        if hosts:
+            if logger:
+                logger.debug(f"Checking SSH connectivity to {len(hosts)} host(s)...")
+            try:
+                # First verify SSH binary exists
+                check_ssh_available()
+
+                # Then check connectivity to each host
+                ssh_results = validate_ssh_connectivity(hosts)
+                for hostname, success, message in ssh_results:
+                    if not success:
+                        issue = ValidationIssue(
+                            severity='error',
+                            category='connectivity',
+                            message=f"Cannot connect to host via SSH: {hostname}",
+                            suggestion=f"Verify SSH access with: ssh {hostname} hostname",
+                            host=hostname
+                        )
+                        issues.append(issue)
+                        if logger:
+                            logger.debug(f"SSH to {hostname} failed: {message}")
+                    else:
+                        if logger:
+                            logger.debug(f"SSH to {hostname}: {message}")
+
+            except (DependencyError, ValidationIssue) as e:
+                if logger:
+                    logger.debug(f"SSH check failed: {e}")
+                issues.append(e)
+
+    # Validate file system paths
+    path_errors = _validate_paths(args)
+    issues.extend(path_errors)
+
+    # Validate required parameters
+    param_errors = _validate_required_params(args)
+    issues.extend(param_errors)
+
+    # After ALL checks complete, report all issues together
+    if issues:
+        if logger:
+            logger.error("Environment validation failed with the following issues:")
+            for i, issue in enumerate(issues, 1):
+                if isinstance(issue, ValidationIssue):
+                    logger.error(f"  {i}. [{issue.category}] {issue.message}")
+                else:
+                    logger.error(f"  {i}. {str(issue).split(chr(10))[0]}")
+
+        # Format summary message
+        error_list = []
+        for i, issue in enumerate(issues, 1):
+            if isinstance(issue, ValidationIssue):
+                error_list.append(f"  {i}. [{issue.category.upper()}] {issue.message}")
+                if issue.suggestion:
+                    error_list.append(f"     Suggestion: {issue.suggestion}")
+            else:
+                # Extract first line of error message
+                error_msg = str(issue).split('\n')[0]
+                error_list.append(f"  {i}. {error_msg}")
+
+        summary = format_error(
+            'ENVIRONMENT_VALIDATION_SUMMARY',
+            error_count=len(issues),
+            error_list='\n'.join(error_list)
+        )
+
+        if logger:
+            logger.error(summary)
+
+        # Raise the first error (preserves specific error type)
+        first_error = issues[0]
+        if isinstance(first_error, Exception):
+            raise first_error
+        else:
+            raise ConfigurationError(
+                "Environment validation failed",
+                suggestion="Fix the above errors and try again",
+                code=ErrorCode.CONFIG_INVALID_VALUE
+            )
+
+    if logger:
+        logger.info("Environment validation passed")
