@@ -284,6 +284,64 @@ class HostInfo:
         return result
 
 
+@dataclass
+class ClusterSnapshots:
+    """Cluster information snapshots from benchmark start and end.
+
+    Captures cluster state at two points during benchmark execution:
+    - start: Collected immediately before benchmark execution begins
+    - end: Collected immediately after benchmark execution completes
+
+    This allows analysis of system state changes during the benchmark,
+    such as memory pressure, I/O statistics delta, and load changes.
+
+    Attributes:
+        start: ClusterInformation collected at benchmark start
+        end: ClusterInformation collected at benchmark end (may be None if not yet collected)
+        collection_method: Method used for collection ('mpi', 'ssh', 'local')
+    """
+    start: 'ClusterInformation'
+    end: Optional['ClusterInformation'] = None
+    collection_method: str = 'unknown'
+
+    def as_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary for JSON serialization."""
+        return {
+            'start': self.start.as_dict() if self.start else None,
+            'end': self.end.as_dict() if self.end else None,
+            'collection_method': self.collection_method,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], logger) -> Optional['ClusterSnapshots']:
+        """Create ClusterSnapshots from a dictionary.
+
+        Args:
+            data: Dictionary containing cluster snapshot data.
+            logger: Logger instance for ClusterInformation reconstruction.
+
+        Returns:
+            ClusterSnapshots instance if data is valid, None otherwise.
+        """
+        if data is None:
+            return None
+
+        start_data = data.get('start')
+        end_data = data.get('end')
+
+        start = ClusterInformation.from_dict(start_data, logger) if start_data else None
+        end = ClusterInformation.from_dict(end_data, logger) if end_data else None
+
+        if start is None:
+            return None
+
+        return cls(
+            start=start,
+            end=end,
+            collection_method=data.get('collection_method', 'unknown')
+        )
+
+
 class ClusterInformation:
     """Comprehensive system information for all hosts in the benchmark environment."""
 
