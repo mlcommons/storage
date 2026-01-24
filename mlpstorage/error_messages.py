@@ -232,6 +232,74 @@ ERROR_MESSAGES: Dict[str, str] = {
         "Reduce --num-parallel or use a machine with more memory."
     ),
 
+    # Dependency Errors with OS-specific hints
+    'DEPENDENCY_MPI_MISSING': (
+        "MPI runtime is required for distributed benchmarks.\n"
+        "\n"
+        "MPI (Message Passing Interface) enables communication between\n"
+        "processes running on multiple nodes during benchmark execution.\n"
+        "\n"
+        "Install MPI for your system:\n"
+        "  {install_cmd}\n"
+        "\n"
+        "After installation, ensure MPI is in your PATH by running:\n"
+        "  which mpirun\n"
+        "\n"
+        "If using a module system, you may need to load the MPI module first:\n"
+        "  module load openmpi\n"
+        "\n"
+        "Alternatively, specify a custom MPI path with:\n"
+        "  --mpi-bin /path/to/mpirun"
+    ),
+
+    'DEPENDENCY_DLIO_MISSING': (
+        "DLIO benchmark is required for training and checkpointing benchmarks.\n"
+        "\n"
+        "DLIO (Deep Learning I/O) is the benchmark engine that MLPerf Storage\n"
+        "uses to generate I/O workloads representative of ML training.\n"
+        "\n"
+        "Install DLIO with one of these options:\n"
+        "\n"
+        "  Option 1 - Install with MLPerf Storage (recommended):\n"
+        "    pip install -e '.[full]'\n"
+        "\n"
+        "  Option 2 - Install DLIO directly:\n"
+        "    pip install dlio-benchmark\n"
+        "\n"
+        "Verify installation by running:\n"
+        "  dlio_benchmark --help\n"
+        "\n"
+        "If DLIO is installed in a non-standard location, specify the path:\n"
+        "  --dlio-bin-path /path/to/dlio/bin"
+    ),
+
+    'DEPENDENCY_SSH_MISSING': (
+        "SSH client is required for distributed benchmarks.\n"
+        "\n"
+        "SSH enables communication with remote nodes during distributed\n"
+        "benchmark execution and cluster information collection.\n"
+        "\n"
+        "Install SSH client for your system:\n"
+        "  {install_cmd}\n"
+        "\n"
+        "After installation, verify SSH is available:\n"
+        "  which ssh\n"
+        "\n"
+        "For distributed benchmarks, configure passwordless SSH:\n"
+        "  1. Generate SSH keys: ssh-keygen -t rsa\n"
+        "  2. Copy to remote hosts: ssh-copy-id user@remote-host\n"
+        "  3. Verify: ssh user@remote-host hostname"
+    ),
+
+    'ENVIRONMENT_VALIDATION_SUMMARY': (
+        "Environment validation found {error_count} issue(s):\n"
+        "\n"
+        "{error_list}\n"
+        "\n"
+        "Please resolve these issues before running benchmarks.\n"
+        "Some checks can be skipped with --skip-validation flags."
+    ),
+
     # General Errors
     'UNKNOWN_COMMAND': (
         "Unknown command: '{command}'\n"
