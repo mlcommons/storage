@@ -123,7 +123,7 @@ HELP_MESSAGES = {
     'distribution': f"Distribution of the vectors. Supported options: {DISTRIBUTIONS}",
     'vdb_datagen_batch_size': "Batch size for data insertion.",
     'vdb_datagen_chunk_size': "Number of vectors to generate in each insertion chunk. Tune for memory management.",
-    'vdb_run_search': "Run the VectorDB Search benchmark with the specified parameters.",
+    'vdb_run': "Run the VectorDB Search benchmark with the specified parameters.",
     'vdb_datagen': "Generate a dataset for the VectorDB benchmark.",
     'vdb_report_count': "Number of batches between print statements",
     'num_query_processes': "Number of parallel processes to use for query execution.",
