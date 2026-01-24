@@ -6,7 +6,7 @@ Validates training benchmark parameters for individual runs.
 
 from typing import Optional, List
 
-from mlpstorage.config import BENCHMARK_TYPES, PARAM_VALIDATION, UNET
+from mlpstorage.config import BENCHMARK_TYPES, PARAM_VALIDATION, UNET, DLRM, RETINANET, FLUX, MODELS
 from mlpstorage.rules.issues import Issue
 from mlpstorage.rules.run_checkers.base import RunRulesChecker
 from mlpstorage.rules.utils import calculate_training_data_size
@@ -47,6 +47,18 @@ class TrainingRunRulesChecker(RunRulesChecker):
                 parameter="benchmark_type",
                 expected=BENCHMARK_TYPES.training,
                 actual=self.benchmark_run.benchmark_type
+            )
+        return None
+
+    def check_model_recognized(self) -> Optional[Issue]:
+        """Verify the model is a recognized training model."""
+        if self.benchmark_run.model not in MODELS:
+            return Issue(
+                validation=PARAM_VALIDATION.INVALID,
+                message=f"Unrecognized model: {self.benchmark_run.model}",
+                parameter="model",
+                expected=f"One of: {', '.join(MODELS)}",
+                actual=self.benchmark_run.model
             )
         return None
 
@@ -161,15 +173,16 @@ class TrainingRunRulesChecker(RunRulesChecker):
     def check_odirect_supported_model(self) -> Optional[Issue]:
         """Check if reader.odirect is only used with supported models."""
         odirect = self.benchmark_run.parameters.get('reader', {}).get('odirect')
-        if self.benchmark_run.model != UNET and odirect:
+        # odirect is only supported for UNet3D
+        odirect_supported_models = [UNET]
+        if odirect and self.benchmark_run.model not in odirect_supported_models:
             return Issue(
                 validation=PARAM_VALIDATION.INVALID,
-                message="The reader.odirect option is only supported for Unet3d model",
+                message=f"The reader.odirect option is only supported for {', '.join(odirect_supported_models)}",
                 parameter="reader.odirect",
                 expected="False",
                 actual=odirect
             )
-
         return None
 
     def check_checkpoint_files_in_code(self) -> Optional[Issue]:
