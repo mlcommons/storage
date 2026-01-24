@@ -4,28 +4,28 @@
 
 **Core Value:** Orchestrate multiple benchmark types (training, checkpointing, kv-cache, vectordb) across distributed systems and produce verified, rules-compliant results.
 
-**Current Focus:** Phase 3 Complete - Ready for Phase 4
+**Current Focus:** Phase 4 - VectorDB Benchmark Integration (Plan 01 Complete)
 
 ## Current Position
 
-**Phase:** 3 of 10 - KV Cache Benchmark Integration
-**Plan:** 03-03 of 3 (COMPLETE)
-**Status:** Complete
-**Last activity:** 2026-01-24 - Phase 3 verified (16/16 must-haves)
+**Phase:** 4 of 10 - VectorDB Benchmark Integration
+**Plan:** 04-01 of 3 (COMPLETE)
+**Status:** In progress
+**Last activity:** 2026-01-24 - Completed 04-01-PLAN.md (VectorDB CLI rename)
 
 **Progress:**
 ```
 Phase 1:  [##########] 100% (5/5 plans) COMPLETE
 Phase 2:  [##########] 100% (5/5 plans) COMPLETE
 Phase 3:  [##########] 100% (3/3 plans) COMPLETE
-Phase 4:  [----------] 0%
+Phase 4:  [###-------] 33% (1/3 plans)
 Phase 5:  [----------] 0%
 Phase 6:  [----------] 0%
 Phase 7:  [----------] 0%
 Phase 8:  [----------] 0%
 Phase 9:  [----------] 0%
 Phase 10: [----------] 0%
-Overall:  [######----] 54% (13/24 plans complete)
+Overall:  [######----] 58% (14/24 plans complete)
 ```
 
 ## Performance Metrics
@@ -34,7 +34,7 @@ Overall:  [######----] 54% (13/24 plans complete)
 |--------|-------|
 | Phases completed | 3/10 |
 | Requirements delivered | 7/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02) |
-| Plans executed | 13 |
+| Plans executed | 14 |
 | Avg tasks per plan | 2.4 |
 
 ## Accumulated Context
@@ -84,6 +84,7 @@ Overall:  [######----] 54% (13/24 plans complete)
 | Model field consistency | Add 'model' field in addition to 'kvcache_model' for history compatibility | 2026-01-24 |
 | num_processes always in metadata | Include num_processes in metadata even when None for consistency | 2026-01-24 |
 | Conditional distributed fields | hosts and exec_type only appear in metadata when set | 2026-01-24 |
+| Rename run-search to run for vectordb | All benchmarks use 'run' subcommand for consistency | 2026-01-24 |
 
 ### Technical Patterns Established
 
@@ -112,6 +113,7 @@ Overall:  [######----] 54% (13/24 plans complete)
 - Distributed argument builder pattern (reuse common args)
 - MPI command wrapping pattern (generate_mpi_prefix_cmd)
 - Consistent metadata structure across benchmark types
+- Consistent CLI subcommand naming (all use 'run' for execution)
 
 ### Open TODOs
 
@@ -145,29 +147,22 @@ None currently.
 
 ### Last Session
 - **Date:** 2026-01-24
-- **Accomplished:** Completed Phase 3: KV Cache Benchmark Integration (verified 16/16 must-haves)
-- **Next:** Begin Phase 4: VectorDB Benchmark Integration
+- **Accomplished:** Completed 04-01-PLAN.md (VectorDB CLI rename from run-search to run)
+- **Next:** Continue Phase 4 with 04-02-PLAN.md
 
 ### Context for Next Session
-- Phase 3 COMPLETE: KV Cache Benchmark Integration
-  - 03-01: KV Cache Distributed CLI Arguments COMPLETE
-    - Added --hosts, --exec-type, --num-processes, MPI args to run command
-    - 38 unit tests in tests/unit/test_cli_kvcache.py
-  - 03-02: MPI Execution Support COMPLETE
-    - KVCacheBenchmark._build_kvcache_command() now wraps with MPI prefix
-    - Cluster information collected for 'run' command
-    - 12 unit tests in tests/unit/test_benchmarks_kvcache.py
-  - 03-03: Metadata and History Integration COMPLETE
-    - KVCacheBenchmark.metadata includes model, num_processes, hosts, exec_type
-    - 5 new metadata tests (17 total benchmark tests, 38 CLI tests = 55 total)
-- Phase 4 is READY: VectorDB Benchmark Integration
-  - Depends on Phase 2 (fail-fast validation) - COMPLETE
-  - Requirements: BENCH-03, BENCH-04
+- Phase 4 IN PROGRESS: VectorDB Benchmark Integration
+  - 04-01: VectorDB CLI Command Rename COMPLETE
+    - Renamed 'run-search' to 'run' for CLI consistency
+    - Updated CLI args, help messages, command_method_map
+    - Updated tests to match new command name
+    - 6 VectorDB tests pass
+  - 04-02: Metadata and History Integration PENDING
+  - 04-03: [TBD] PENDING
 - Available for downstream use:
-  - KV cache run command: --hosts, --exec-type, --num-processes, --mpi-bin, --oversubscribe, --allow-run-as-root, --mpi-params
-  - KVCacheBenchmark generates MPI-wrapped commands when exec_type=MPI
-  - KVCacheBenchmark.metadata includes all required fields for history integration
-- Note: kvcache not yet wired into cli_parser.py (out of scope for Phase 3)
+  - `mlpstorage vectordb run` command (consistent with other benchmarks)
+  - `mlpstorage vectordb datagen` command
+  - VectorDBBenchmark routes 'run' to execute_run method
 - No blockers
 
 ---
