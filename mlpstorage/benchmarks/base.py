@@ -527,15 +527,40 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         """
         raise NotImplementedError
 
+    def _validate_environment(self) -> None:
+        """Validate environment before benchmark execution.
+
+        Called early in run() to catch configuration issues before
+        any work is done. Subclasses can override to add benchmark-
+        specific validation.
+
+        Note: Primary environment validation is done in main.py via
+        validate_benchmark_environment() BEFORE benchmark instantiation.
+        This hook is for benchmark-specific validation that requires
+        the benchmark instance to exist.
+
+        Raises:
+            DependencyError: If required dependencies are missing.
+            ConfigurationError: If configuration is invalid.
+        """
+        # Environment validation is primarily done in main.py before
+        # benchmark instantiation. This hook allows subclasses to add
+        # benchmark-specific validation if needed.
+        pass
+
     def run(self) -> int:
         """Execute the benchmark and track runtime.
 
         Wraps _run() with timing measurement. Updates self.runtime
         with the execution duration in seconds.
 
+        Calls _validate_environment() first to allow benchmark-specific
+        validation before execution begins.
+
         Returns:
             Exit code from _run().
         """
+        self._validate_environment()
         start_time = time.time()
         result = self._run()
         self.runtime = time.time() - start_time
