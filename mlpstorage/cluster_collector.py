@@ -8,14 +8,48 @@ including meminfo, cpuinfo, diskstats, and network statistics.
 
 import json
 import os
+import shutil
 import socket
 import subprocess
 import tempfile
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional, Tuple
 
 from mlpstorage.config import MPIRUN, MPIEXEC, MPI_RUN_BIN, MPI_EXEC_BIN
+from mlpstorage.interfaces.collector import ClusterCollectorInterface, CollectionResult
+
+
+# =============================================================================
+# Localhost Detection
+# =============================================================================
+
+LOCALHOST_IDENTIFIERS = ('localhost', '127.0.0.1', '::1')
+
+
+def _is_localhost(hostname: str) -> bool:
+    """Check if hostname refers to local machine.
+
+    Args:
+        hostname: The hostname to check.
+
+    Returns:
+        True if hostname refers to localhost, False otherwise.
+    """
+    hostname_lower = hostname.lower()
+    if hostname_lower in LOCALHOST_IDENTIFIERS:
+        return True
+    try:
+        local_hostname = socket.gethostname()
+        if hostname_lower == local_hostname.lower():
+            return True
+        local_fqdn = socket.getfqdn()
+        if hostname_lower == local_fqdn.lower():
+            return True
+    except Exception:
+        pass
+    return False
 
 
 # =============================================================================
@@ -1361,3 +1395,321 @@ def collect_cluster_info(
             return result
         else:
             raise
+
+
+# =============================================================================
+# SSH Collection Script
+# =============================================================================
+
+SSH_COLLECTOR_SCRIPT = '''
+import json
+import socket
+import time
+
+def collect():
+    result = {"hostname": socket.gethostname(), "errors": {}}
+
+    files = [
+        ("/proc/meminfo", "meminfo"),
+        ("/proc/cpuinfo", "cpuinfo"),
+        ("/proc/diskstats", "diskstats"),
+        ("/proc/net/dev", "netdev"),
+        ("/proc/version", "version"),
+        ("/proc/loadavg", "loadavg"),
+        ("/proc/uptime", "uptime"),
+        ("/proc/vmstat", "vmstat"),
+        ("/proc/mounts", "mounts"),
+        ("/proc/cgroups", "cgroups"),
+    ]
+
+    for path, key in files:
+        try:
+            with open(path) as f:
+                result[key] = f.read()
+        except Exception as e:
+            result["errors"][key] = str(e)
+            result[key] = ""
+
+    try:
+        with open("/etc/os-release") as f:
+            result["os_release_raw"] = f.read()
+    except Exception as e:
+        result["errors"]["os_release"] = str(e)
+
+    result["collection_timestamp"] = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
+    print(json.dumps(result))
+
+collect()
+'''
+
+
+# =============================================================================
+# SSH Cluster Collector Class
+# =============================================================================
+
+class SSHClusterCollector(ClusterCollectorInterface):
+    """Collects system information from hosts using SSH.
+
+    This collector uses SSH to gather system information from remote hosts.
+    For localhost, it uses direct local collection to avoid SSH overhead
+    and configuration requirements.
+
+    Attributes:
+        hosts: List of hostnames or IP addresses to collect from.
+        logger: Logger instance for output.
+        ssh_username: Optional SSH username (defaults to current user).
+        timeout: Timeout in seconds for SSH connections.
+        max_workers: Maximum number of parallel SSH connections.
+    """
+
+    def __init__(
+        self,
+        hosts: List[str],
+        logger,
+        ssh_username: Optional[str] = None,
+        timeout_seconds: int = 60,
+        max_workers: int = 10
+    ):
+        """Initialize the SSH cluster collector.
+
+        Args:
+            hosts: List of hostnames/IPs, optionally with slot counts (e.g., "host1:4").
+            logger: Logger instance for messages.
+            ssh_username: Optional SSH username. If not provided, uses current user.
+            timeout_seconds: Maximum time to wait for SSH connections.
+            max_workers: Maximum number of parallel SSH connections.
+        """
+        self.hosts = hosts
+        self.logger = logger
+        self.ssh_username = ssh_username
+        self.timeout = timeout_seconds
+        self.max_workers = max_workers
+
+    def _get_unique_hosts(self) -> List[str]:
+        """Extract unique hostnames from the hosts list (removing slot counts)."""
+        unique = []
+        seen = set()
+        for host in self.hosts:
+            hostname = host.split(':')[0].strip() if ':' in host else host.strip()
+            if hostname and hostname not in seen:
+                seen.add(hostname)
+                unique.append(hostname)
+        return unique
+
+    def _build_ssh_command(self, hostname: str, remote_cmd: str) -> List[str]:
+        """Build SSH command with proper options for automation."""
+        cmd = [
+            'ssh',
+            '-o', 'BatchMode=yes',
+            '-o', f'ConnectTimeout={self.timeout}',
+            '-o', 'StrictHostKeyChecking=accept-new',
+        ]
+        if self.ssh_username:
+            cmd.extend(['-l', self.ssh_username])
+        cmd.extend([hostname, remote_cmd])
+        return cmd
+
+    def _parse_raw_collection(self, raw_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Parse raw /proc file contents into structured data."""
+        parsed = {
+            'hostname': raw_data.get('hostname', 'unknown'),
+            'collection_timestamp': raw_data.get('collection_timestamp'),
+            'errors': raw_data.get('errors', {}),
+        }
+
+        # Parse meminfo
+        if raw_data.get('meminfo'):
+            parsed['meminfo'] = parse_proc_meminfo(raw_data['meminfo'])
+        else:
+            parsed['meminfo'] = {}
+
+        # Parse cpuinfo
+        if raw_data.get('cpuinfo'):
+            parsed['cpuinfo'] = parse_proc_cpuinfo(raw_data['cpuinfo'])
+        else:
+            parsed['cpuinfo'] = []
+
+        # Parse diskstats
+        if raw_data.get('diskstats'):
+            disks = parse_proc_diskstats(raw_data['diskstats'])
+            parsed['diskstats'] = [d.to_dict() for d in disks]
+        else:
+            parsed['diskstats'] = []
+
+        # Parse netdev
+        if raw_data.get('netdev'):
+            interfaces = parse_proc_net_dev(raw_data['netdev'])
+            parsed['netdev'] = [n.to_dict() for n in interfaces]
+        else:
+            parsed['netdev'] = []
+
+        # Parse version
+        parsed['version'] = parse_proc_version(raw_data.get('version', ''))
+
+        # Parse loadavg
+        if raw_data.get('loadavg'):
+            load_1, load_5, load_15, running, total = parse_proc_loadavg(raw_data['loadavg'])
+            parsed['loadavg'] = {
+                'load_1min': load_1,
+                'load_5min': load_5,
+                'load_15min': load_15,
+                'running_processes': running,
+                'total_processes': total
+            }
+        else:
+            parsed['loadavg'] = {}
+
+        # Parse uptime
+        parsed['uptime_seconds'] = parse_proc_uptime(raw_data.get('uptime', ''))
+
+        # Parse os_release
+        if raw_data.get('os_release_raw'):
+            parsed['os_release'] = parse_os_release(raw_data['os_release_raw'])
+        else:
+            parsed['os_release'] = {}
+
+        # Parse vmstat
+        if raw_data.get('vmstat'):
+            parsed['vmstat'] = parse_proc_vmstat(raw_data['vmstat'])
+        else:
+            parsed['vmstat'] = {}
+
+        # Parse mounts
+        if raw_data.get('mounts'):
+            mounts = parse_proc_mounts(raw_data['mounts'])
+            parsed['mounts'] = [m.to_dict() for m in mounts]
+        else:
+            parsed['mounts'] = []
+
+        # Parse cgroups
+        if raw_data.get('cgroups'):
+            cgroups = parse_proc_cgroups(raw_data['cgroups'])
+            parsed['cgroups'] = [c.to_dict() for c in cgroups]
+        else:
+            parsed['cgroups'] = []
+
+        if not parsed['errors']:
+            del parsed['errors']
+
+        return parsed
+
+    def _collect_from_single_host(self, hostname: str) -> Dict[str, Any]:
+        """Collect system information from a single host via SSH."""
+        if _is_localhost(hostname):
+            self.logger.debug(f'Collecting from {hostname} (localhost) via direct access')
+            return collect_local_system_info()
+
+        self.logger.debug(f'Collecting from {hostname} via SSH')
+
+        # Build the remote command to run the collector script
+        remote_cmd = f"python3 -c '{SSH_COLLECTOR_SCRIPT}'"
+        cmd = self._build_ssh_command(hostname, remote_cmd)
+
+        try:
+            result = subprocess.run(
+                cmd,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout + 10  # Extra buffer for SSH overhead
+            )
+
+            if result.returncode != 0:
+                error_msg = result.stderr.strip() or f'SSH failed with code {result.returncode}'
+                self.logger.warning(f'SSH collection from {hostname} failed: {error_msg}')
+                return {'hostname': hostname, 'error': error_msg}
+
+            # Parse the JSON output
+            try:
+                raw_data = json.loads(result.stdout)
+                return self._parse_raw_collection(raw_data)
+            except json.JSONDecodeError as e:
+                self.logger.warning(f'Failed to parse JSON from {hostname}: {e}')
+                return {'hostname': hostname, 'error': f'JSON parse error: {e}'}
+
+        except subprocess.TimeoutExpired:
+            self.logger.warning(f'SSH to {hostname} timed out after {self.timeout}s')
+            return {'hostname': hostname, 'error': f'Timeout after {self.timeout}s'}
+
+        except Exception as e:
+            self.logger.warning(f'SSH collection from {hostname} failed: {e}')
+            return {'hostname': hostname, 'error': str(e)}
+
+    def collect(self, hosts: List[str], timeout: int = 60) -> CollectionResult:
+        """Collect information from all specified hosts in parallel.
+
+        Args:
+            hosts: List of hostnames or IP addresses to collect from.
+                   Note: This parameter is ignored; uses self.hosts instead.
+            timeout: Maximum time in seconds to wait for collection.
+                   Note: This parameter is ignored; uses self.timeout instead.
+
+        Returns:
+            CollectionResult with data from all hosts.
+        """
+        unique_hosts = self._get_unique_hosts()
+        self.logger.debug(f'Starting SSH cluster collection on {len(unique_hosts)} hosts')
+
+        results = {}
+        errors = []
+
+        with ThreadPoolExecutor(max_workers=min(self.max_workers, len(unique_hosts))) as executor:
+            future_to_host = {
+                executor.submit(self._collect_from_single_host, host): host
+                for host in unique_hosts
+            }
+
+            for future in as_completed(future_to_host):
+                host = future_to_host[future]
+                try:
+                    host_data = future.result()
+                    if 'error' in host_data and len(host_data) <= 2:
+                        # Collection failed for this host
+                        errors.append(f"{host}: {host_data.get('error', 'Unknown error')}")
+                    results[host] = host_data
+                except Exception as e:
+                    self.logger.warning(f'Exception collecting from {host}: {e}')
+                    errors.append(f"{host}: {str(e)}")
+                    results[host] = {'hostname': host, 'error': str(e)}
+
+        success = len(errors) == 0 or len(results) > len(errors)
+
+        return CollectionResult(
+            success=success,
+            data=results,
+            errors=errors,
+            collection_method='ssh',
+            timestamp=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+        )
+
+    def collect_local(self) -> CollectionResult:
+        """Collect information from local host only.
+
+        Returns:
+            CollectionResult with local host data.
+        """
+        local_info = collect_local_system_info()
+        hostname = local_info.get('hostname', 'localhost')
+
+        return CollectionResult(
+            success=True,
+            data={hostname: local_info},
+            errors=[],
+            collection_method='local',
+            timestamp=time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+        )
+
+    def is_available(self) -> bool:
+        """Check if SSH is available for use.
+
+        Returns:
+            True if SSH command is available, False otherwise.
+        """
+        return shutil.which('ssh') is not None
+
+    def get_collection_method(self) -> str:
+        """Return the name of the collection method.
+
+        Returns:
+            String identifier 'ssh'.
+        """
+        return 'ssh'
