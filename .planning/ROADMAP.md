@@ -178,6 +178,13 @@ Plans:
 3. User can verify collection process runs in parallel (separate process/thread)
 4. Benchmark performance metrics show no measurable degradation with collection enabled vs disabled
 
+**Plans:** 3 plans
+
+Plans:
+- [ ] 07-01-PLAN.md - Core time-series dataclasses and single-host collector
+- [ ] 07-02-PLAN.md - Multi-host time-series collection with SSH
+- [ ] 07-03-PLAN.md - Benchmark integration and CLI arguments
+
 ---
 
 ## Phase 8: New Training Models
