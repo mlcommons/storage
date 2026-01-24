@@ -4,17 +4,17 @@
 
 ### Package Management
 
-- [ ] **PKG-01**: Lockfile for Python dependencies with pinned versions
-- [ ] **PKG-02**: Remove GPU package dependencies from default install
-- [ ] **PKG-03**: Validate package versions match lockfile before benchmark execution
+- [x] **PKG-01**: Lockfile for Python dependencies with pinned versions
+- [x] **PKG-02**: Remove GPU package dependencies from default install
+- [x] **PKG-03**: Validate package versions match lockfile before benchmark execution
 
 ### Benchmark Integration
 
-- [ ] **BENCH-01**: KVCacheBenchmark class extending Benchmark base (wraps kv-cache.py)
-- [ ] **BENCH-02**: KV cache MPI execution across multiple hosts
-- [ ] **BENCH-03**: VectorDBBenchmark class extending Benchmark base (wraps VDB scripts)
-- [ ] **BENCH-04**: VectorDB CLI commands (run, datagen operations)
-- [ ] **BENCH-05**: Integration with existing validation/reporting pipeline
+- [x] **BENCH-01**: KVCacheBenchmark class extending Benchmark base (wraps kv-cache.py)
+- [x] **BENCH-02**: KV cache MPI execution across multiple hosts
+- [x] **BENCH-03**: VectorDBBenchmark class extending Benchmark base (wraps VDB scripts)
+- [x] **BENCH-04**: VectorDB CLI commands (run, datagen operations)
+- [x] **BENCH-05**: Integration with existing validation/reporting pipeline
 
 ### Training Updates
 
@@ -33,9 +33,9 @@
 
 ### Error Handling & UX
 
-- [ ] **UX-01**: Detect missing commands/packages with actionable error messages
-- [ ] **UX-02**: Suggest installation steps for missing dependencies
-- [ ] **UX-03**: Validate environment before benchmark execution (fail-fast)
+- [x] **UX-01**: Detect missing commands/packages with actionable error messages
+- [x] **UX-02**: Suggest installation steps for missing dependencies
+- [x] **UX-03**: Validate environment before benchmark execution (fail-fast)
 - [ ] **UX-04**: Clear progress indication during long operations
 
 ---
@@ -62,17 +62,17 @@
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| PKG-01 | Phase 1 | Pending |
-| PKG-02 | Phase 1 | Pending |
-| PKG-03 | Phase 1 | Pending |
-| UX-01 | Phase 2 | Pending |
-| UX-02 | Phase 2 | Pending |
-| UX-03 | Phase 2 | Pending |
-| BENCH-01 | Phase 3 | Pending |
-| BENCH-02 | Phase 3 | Pending |
-| BENCH-03 | Phase 4 | Pending |
-| BENCH-04 | Phase 4 | Pending |
-| BENCH-05 | Phase 5 | Pending |
+| PKG-01 | Phase 1 | Complete |
+| PKG-02 | Phase 1 | Complete |
+| PKG-03 | Phase 1 | Complete |
+| UX-01 | Phase 2 | Complete |
+| UX-02 | Phase 2 | Complete |
+| UX-03 | Phase 2 | Complete |
+| BENCH-01 | Phase 3 | Complete |
+| BENCH-02 | Phase 3 | Complete |
+| BENCH-03 | Phase 4 | Complete |
+| BENCH-04 | Phase 4 | Complete |
+| BENCH-05 | Phase 5 | Complete |
 | HOST-01 | Phase 6 | Pending |
 | HOST-02 | Phase 6 | Pending |
 | HOST-03 | Phase 6 | Pending |
@@ -85,4 +85,4 @@
 | UX-04 | Phase 10 | Pending |
 
 ---
-*Last updated: 2026-01-23*
+*Last updated: 2026-01-24*

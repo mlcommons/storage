@@ -33,7 +33,7 @@ Overall:  [#######---] 73% (19/26 plans complete)
 | Metric | Value |
 |--------|-------|
 | Phases completed | 5/10 |
-| Requirements delivered | 9/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02, BENCH-03, BENCH-04) |
+| Requirements delivered | 10/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02, BENCH-03, BENCH-04, BENCH-05) |
 | Plans executed | 19 |
 | Avg tasks per plan | 2.4 |
 
