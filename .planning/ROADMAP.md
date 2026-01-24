@@ -78,6 +78,13 @@ Plans:
 3. KV cache benchmark generates metadata JSON file consistent with training/checkpointing benchmarks
 4. User can view KV cache benchmark in `mlpstorage history list` output
 
+**Plans:** 3 plans
+
+Plans:
+- [ ] 03-01-PLAN.md - Add distributed execution CLI arguments
+- [ ] 03-02-PLAN.md - MPI command wrapping in KVCacheBenchmark
+- [ ] 03-03-PLAN.md - Metadata verification and history integration
+
 ---
 
 ## Phase 4: VectorDB Benchmark Integration
@@ -212,7 +219,7 @@ Plans:
 |-------|------|--------|--------------|
 | 1 | Package Management Foundation | Complete | PKG-01, PKG-02, PKG-03 |
 | 2 | Environment Validation and Fail-Fast | Complete | UX-01, UX-02, UX-03 |
-| 3 | KV Cache Benchmark Integration | Not Started | BENCH-01, BENCH-02 |
+| 3 | KV Cache Benchmark Integration | Planned | BENCH-01, BENCH-02 |
 | 4 | VectorDB Benchmark Integration | Not Started | BENCH-03, BENCH-04 |
 | 5 | Benchmark Validation Pipeline Integration | Not Started | BENCH-05 |
 | 6 | SSH-Based Host Collection | Not Started | HOST-01, HOST-02, HOST-03 |
