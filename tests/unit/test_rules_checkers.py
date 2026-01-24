@@ -462,6 +462,118 @@ class TestTrainingRunRulesChecker:
         assert issue is None
 
 
+class TestTrainingRunRulesCheckerNewModels:
+    """Tests for TrainingRunRulesChecker with new models (DLRM, RetinaNet, Flux)."""
+
+    @pytest.fixture
+    def mock_logger(self):
+        """Create a mock logger."""
+        return MagicMock()
+
+    def create_benchmark_run(self, mock_logger, model, parameters=None, override_parameters=None):
+        """Helper to create a BenchmarkRun for testing."""
+        default_params = {
+            'dataset': {
+                'num_files_train': 1000,
+                'data_folder': f'data/{model}/'
+            },
+            'reader': {
+                'batch_size': 16
+            },
+            'workflow': {}
+        }
+        if parameters:
+            for key, value in parameters.items():
+                if key in default_params and isinstance(value, dict):
+                    default_params[key].update(value)
+                else:
+                    default_params[key] = value
+
+        # Create minimal required objects
+        host_memory = HostMemoryInfo.from_total_mem_int(137438953472)  # 128 GB
+        host_info = HostInfo(
+            hostname="test-host",
+            memory=host_memory
+        )
+        cluster_info = ClusterInformation([host_info], mock_logger)
+
+        data = BenchmarkRunData(
+            benchmark_type=BENCHMARK_TYPES.training,
+            model=model,
+            command="run_benchmark",
+            run_datetime="20250124_120000",
+            num_processes=8,
+            parameters=default_params,
+            override_parameters=override_parameters or {},
+            system_info=cluster_info
+        )
+        return BenchmarkRun.from_data(data, mock_logger)
+
+    @pytest.mark.parametrize("model", ["dlrm", "retinanet", "flux"])
+    def test_new_model_recognized(self, mock_logger, model):
+        """New models are recognized by the checker."""
+        benchmark_run = self.create_benchmark_run(mock_logger, model)
+        checker = TrainingRunRulesChecker(benchmark_run, logger=mock_logger)
+
+        issue = checker.check_model_recognized()
+        assert issue is None, f"Model {model} should be recognized"
+
+    @pytest.mark.parametrize("model", ["dlrm", "retinanet", "flux"])
+    def test_new_model_odirect_not_supported(self, mock_logger, model):
+        """odirect is not supported for new models."""
+        benchmark_run = self.create_benchmark_run(
+            mock_logger,
+            model,
+            parameters={'reader': {'odirect': True}}
+        )
+        checker = TrainingRunRulesChecker(benchmark_run, logger=mock_logger)
+
+        issue = checker.check_odirect_supported_model()
+        assert issue is not None
+        assert issue.validation == PARAM_VALIDATION.INVALID
+        assert "odirect" in issue.message.lower()
+
+    @pytest.mark.parametrize("model", ["dlrm", "retinanet", "flux"])
+    def test_new_model_no_checkpoint_requirement(self, mock_logger, model):
+        """New models don't require checkpoint workflow."""
+        benchmark_run = self.create_benchmark_run(
+            mock_logger,
+            model,
+            parameters={'workflow': {'checkpoint': False}}
+        )
+        checker = TrainingRunRulesChecker(benchmark_run, logger=mock_logger)
+
+        # Should not return INVALID for missing checkpoint
+        issue = checker.check_workflow_parameters()
+        # Either None or not INVALID (UNET requires checkpoint, others don't)
+        if issue is not None:
+            assert issue.validation != PARAM_VALIDATION.INVALID
+
+    def test_unrecognized_model_invalid(self, mock_logger):
+        """Unrecognized model returns INVALID issue."""
+        benchmark_run = self.create_benchmark_run(mock_logger, "unknown_model")
+        checker = TrainingRunRulesChecker(benchmark_run, logger=mock_logger)
+
+        issue = checker.check_model_recognized()
+        assert issue is not None
+        assert issue.validation == PARAM_VALIDATION.INVALID
+        assert "unknown_model" in issue.message
+
+    def test_check_model_recognized_in_check_methods(self, mock_logger):
+        """Verify check_model_recognized is discovered and executed by run_checks."""
+        benchmark_run = self.create_benchmark_run(mock_logger, "dlrm")
+        checker = TrainingRunRulesChecker(benchmark_run, logger=mock_logger)
+
+        # Verify method is in check_methods list
+        method_names = [m.__name__ for m in checker.check_methods]
+        assert 'check_model_recognized' in method_names, \
+            f"check_model_recognized should be discovered, found: {method_names}"
+
+        # Verify it gets called during run_checks (no exception)
+        issues = checker.run_checks()
+        assert isinstance(issues, list)
+
+
 class TestCheckpointSubmissionRulesChecker:
     """Tests for CheckpointSubmissionRulesChecker class."""
 
