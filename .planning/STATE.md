@@ -4,28 +4,28 @@
 
 **Core Value:** Orchestrate multiple benchmark types (training, checkpointing, kv-cache, vectordb) across distributed systems and produce verified, rules-compliant results.
 
-**Current Focus:** Phase 4 - VectorDB Benchmark Integration (Plan 01 Complete)
+**Current Focus:** Phase 4 - VectorDB Benchmark Integration (Plan 02 Complete)
 
 ## Current Position
 
 **Phase:** 4 of 10 - VectorDB Benchmark Integration
-**Plan:** 04-01 of 3 (COMPLETE)
+**Plan:** 04-02 of 3 (COMPLETE)
 **Status:** In progress
-**Last activity:** 2026-01-24 - Completed 04-01-PLAN.md (VectorDB CLI rename)
+**Last activity:** 2026-01-24 - Completed 04-02-PLAN.md (VectorDB metadata integration)
 
 **Progress:**
 ```
 Phase 1:  [##########] 100% (5/5 plans) COMPLETE
 Phase 2:  [##########] 100% (5/5 plans) COMPLETE
 Phase 3:  [##########] 100% (3/3 plans) COMPLETE
-Phase 4:  [###-------] 33% (1/3 plans)
+Phase 4:  [######----] 67% (2/3 plans)
 Phase 5:  [----------] 0%
 Phase 6:  [----------] 0%
 Phase 7:  [----------] 0%
 Phase 8:  [----------] 0%
 Phase 9:  [----------] 0%
 Phase 10: [----------] 0%
-Overall:  [######----] 58% (14/24 plans complete)
+Overall:  [######----] 58% (15/26 plans complete)
 ```
 
 ## Performance Metrics
@@ -34,7 +34,7 @@ Overall:  [######----] 58% (14/24 plans complete)
 |--------|-------|
 | Phases completed | 3/10 |
 | Requirements delivered | 7/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02) |
-| Plans executed | 14 |
+| Plans executed | 15 |
 | Avg tasks per plan | 2.4 |
 
 ## Accumulated Context
@@ -85,6 +85,9 @@ Overall:  [######----] 58% (14/24 plans complete)
 | num_processes always in metadata | Include num_processes in metadata even when None for consistency | 2026-01-24 |
 | Conditional distributed fields | hosts and exec_type only appear in metadata when set | 2026-01-24 |
 | Rename run-search to run for vectordb | All benchmarks use 'run' subcommand for consistency | 2026-01-24 |
+| Config name as model (VectorDB) | Use config_name as 'model' field since VectorDB doesn't have ML models | 2026-01-24 |
+| Command-specific metadata (VectorDB) | Include different fields for datagen vs run commands | 2026-01-24 |
+| Write metadata for both commands | Both run and datagen write metadata for history tracking | 2026-01-24 |
 
 ### Technical Patterns Established
 
@@ -120,10 +123,12 @@ Overall:  [######----] 58% (14/24 plans complete)
 - [x] Complete Phase 1: Package Management Foundation
 - [x] Complete Phase 2: Environment Validation and Fail-Fast
 - [x] Complete Phase 3: KV Cache Benchmark Integration
+- [ ] Complete Phase 4: VectorDB Benchmark Integration
 - [ ] Review external KV cache code in `kv_cache_benchmark/`
 - [ ] Review VectorDB scripts from external branch
 - [ ] Verify DLIO parquet support requirements
 - [ ] Wire kvcache into cli_parser.py (noticed during 03-01)
+- [ ] Wire vectordb into cli_parser.py
 
 ### Active Blockers
 
@@ -133,7 +138,7 @@ None currently.
 
 - 6-week feature freeze timeline
 - Existing KVCacheBenchmark class exists but needs full integration
-- VectorDBBenchmark class exists as stub, needs implementation
+- VectorDBBenchmark class now has metadata property and write_metadata integration
 - MPI collection works, SSH collection needs to be added
 - Environment module now provides OS-aware install hints
 - Dependency checking now uses environment module for OS-specific error messages
@@ -142,13 +147,14 @@ None currently.
 - KV cache CLI arguments now support distributed execution (run command only)
 - KVCacheBenchmark now wraps commands with MPI prefix when exec_type=MPI
 - KV cache metadata includes all required fields for history integration
+- VectorDB metadata includes all required fields for history integration
 
 ## Session Continuity
 
 ### Last Session
 - **Date:** 2026-01-24
-- **Accomplished:** Completed 04-01-PLAN.md (VectorDB CLI rename from run-search to run)
-- **Next:** Continue Phase 4 with 04-02-PLAN.md
+- **Accomplished:** Completed 04-02-PLAN.md (VectorDB metadata integration)
+- **Next:** Execute 04-03-PLAN.md
 
 ### Context for Next Session
 - Phase 4 IN PROGRESS: VectorDB Benchmark Integration
@@ -157,12 +163,17 @@ None currently.
     - Updated CLI args, help messages, command_method_map
     - Updated tests to match new command name
     - 6 VectorDB tests pass
-  - 04-02: Metadata and History Integration PENDING
-  - 04-03: [TBD] PENDING
+  - 04-02: VectorDB Metadata and History Integration COMPLETE
+    - VectorDBBenchmark.metadata includes model (using config_name), host, port, collection
+    - Command-specific fields for datagen vs run
+    - write_metadata() called after both execute_run and execute_datagen
+  - 04-03: VectorDB Verification and Integration PENDING
 - Available for downstream use:
   - `mlpstorage vectordb run` command (consistent with other benchmarks)
   - `mlpstorage vectordb datagen` command
-  - VectorDBBenchmark routes 'run' to execute_run method
+  - VectorDBBenchmark.metadata includes all required fields for history integration
+  - Metadata JSON written after both run and datagen commands
+- Note: vectordb not yet wired into cli_parser.py
 - No blockers
 
 ---
