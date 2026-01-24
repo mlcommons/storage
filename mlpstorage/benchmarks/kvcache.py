@@ -385,6 +385,7 @@ class KVCacheBenchmark(Benchmark):
         # Add KV cache specific metadata
         base_metadata.update({
             'kvcache_model': self.model,
+            'model': self.model,  # Add for consistency with other benchmarks
             'num_users': self.num_users,
             'duration': self.duration,
             'gpu_mem_gb': self.gpu_mem_gb,
@@ -392,7 +393,17 @@ class KVCacheBenchmark(Benchmark):
             'cache_dir': self.cache_dir,
             'generation_mode': self.generation_mode,
             'performance_profile': self.performance_profile,
+            'num_processes': self.num_processes,  # Include for distributed runs
         })
+
+        # Add execution info for distributed runs
+        exec_type = getattr(self.args, 'exec_type', None)
+        if exec_type:
+            base_metadata['exec_type'] = exec_type.value if hasattr(exec_type, 'value') else str(exec_type)
+
+        hosts = getattr(self.args, 'hosts', None)
+        if hosts:
+            base_metadata['hosts'] = hosts
 
         # Add metrics if available
         if hasattr(self, 'metrics'):
