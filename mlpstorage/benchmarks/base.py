@@ -52,8 +52,9 @@ from mlpstorage.debug import debug_tryer_wrapper
 from mlpstorage.interfaces import BenchmarkInterface, BenchmarkConfig, BenchmarkCommand
 from mlpstorage.mlps_logging import setup_logging, apply_logging_options
 from mlpstorage.rules import BenchmarkVerifier, generate_output_location, ClusterInformation
+from mlpstorage.rules.models import ClusterSnapshots
 from mlpstorage.utils import CommandExecutor, MLPSJsonEncoder
-from mlpstorage.cluster_collector import collect_cluster_info
+from mlpstorage.cluster_collector import collect_cluster_info, SSHClusterCollector
 
 if TYPE_CHECKING:
     import logging
@@ -327,6 +328,10 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         else:
             metadata['system_info'] = None
 
+        # Include cluster snapshots if available (start and end collection)
+        if hasattr(self, 'cluster_snapshots') and self.cluster_snapshots:
+            metadata['cluster_snapshots'] = self.cluster_snapshots.as_dict()
+
         # Additional context (not part of BenchmarkRunData but useful)
         metadata['runtime'] = self.runtime
         metadata['verification'] = self.verification.name if self.verification else None
@@ -450,6 +455,128 @@ class Benchmark(BenchmarkInterface, abc.ABC):
             self.logger.warning(f'MPI cluster info collection failed: {e}')
             return None
 
+    def _should_use_ssh_collection(self) -> bool:
+        """Determine if SSH-based collection should be used.
+
+        SSH collection is used when:
+        - hosts are specified
+        - exec_type is NOT MPI (or exec_type is not set)
+        - command is 'run' (not datagen/configview)
+
+        Returns:
+            True if SSH collection should be used, False otherwise.
+        """
+        if not hasattr(self.args, 'hosts') or not self.args.hosts:
+            return False
+
+        if hasattr(self.args, 'command') and self.args.command in ('datagen', 'configview'):
+            return False
+
+        if hasattr(self.args, 'skip_cluster_collection') and self.args.skip_cluster_collection:
+            return False
+
+        # Use SSH for non-MPI execution
+        if not hasattr(self.args, 'exec_type') or self.args.exec_type != EXEC_TYPE.MPI:
+            return True
+
+        return False
+
+    def _collect_via_ssh(self) -> Optional['ClusterInformation']:
+        """Collect cluster information using SSH.
+
+        Returns:
+            ClusterInformation instance if collection succeeds, None otherwise.
+        """
+        try:
+            self.logger.debug('Collecting cluster information via SSH...')
+
+            ssh_username = getattr(self.args, 'ssh_username', None)
+            timeout = getattr(self.args, 'cluster_collection_timeout', 60)
+
+            collector = SSHClusterCollector(
+                hosts=self.args.hosts,
+                logger=self.logger,
+                ssh_username=ssh_username,
+                timeout_seconds=timeout
+            )
+
+            if not collector.is_available():
+                self.logger.warning('SSH not available for cluster collection')
+                return None
+
+            result = collector.collect(self.args.hosts, timeout)
+
+            if not result.success:
+                self.logger.warning(f'SSH collection had errors: {result.errors}')
+
+            # Create ClusterInformation from collected data
+            cluster_info = ClusterInformation.from_mpi_collection(
+                {**result.data, '_metadata': {
+                    'collection_method': 'ssh',
+                    'collection_timestamp': result.timestamp
+                }},
+                self.logger
+            )
+
+            self.logger.debug(
+                f'Cluster info collected via SSH: '
+                f'{cluster_info.num_hosts} hosts, '
+                f'{cluster_info.total_memory_bytes / (1024**3):.1f} GB total memory'
+            )
+
+            return cluster_info
+
+        except Exception as e:
+            self.logger.warning(f'SSH cluster info collection failed: {e}')
+            return None
+
+    def _collect_cluster_start(self) -> None:
+        """Collect cluster information at benchmark start.
+
+        Stores the result in self._cluster_info_start for later use.
+        Called at the beginning of run().
+        """
+        if not self._should_collect_cluster_info() and not self._should_use_ssh_collection():
+            self.logger.debug('Skipping start cluster collection (conditions not met)')
+            return
+
+        if self._should_use_ssh_collection():
+            self._cluster_info_start = self._collect_via_ssh()
+            self._collection_method = 'ssh'
+        else:
+            self._cluster_info_start = self._collect_cluster_information()
+            self._collection_method = 'mpi'
+
+        if self._cluster_info_start:
+            self.logger.debug(f'Collected start cluster info via {self._collection_method}')
+
+    def _collect_cluster_end(self) -> None:
+        """Collect cluster information at benchmark end.
+
+        Only collects if start collection was performed.
+        Creates ClusterSnapshots with both start and end data.
+        """
+        if not hasattr(self, '_cluster_info_start') or self._cluster_info_start is None:
+            return
+
+        if self._should_use_ssh_collection():
+            self._cluster_info_end = self._collect_via_ssh()
+        else:
+            self._cluster_info_end = self._collect_cluster_information()
+
+        if self._cluster_info_end:
+            self.logger.debug(f'Collected end cluster info via {self._collection_method}')
+
+        # Create ClusterSnapshots
+        self.cluster_snapshots = ClusterSnapshots(
+            start=self._cluster_info_start,
+            end=self._cluster_info_end,
+            collection_method=getattr(self, '_collection_method', 'unknown')
+        )
+
+        # Also set cluster_information to the start snapshot for backward compatibility
+        self.cluster_information = self._cluster_info_start
+
     def generate_output_location(self) -> str:
         """Generate the output directory path for this benchmark run.
 
@@ -551,19 +678,27 @@ class Benchmark(BenchmarkInterface, abc.ABC):
     def run(self) -> int:
         """Execute the benchmark and track runtime.
 
-        Wraps _run() with timing measurement. Updates self.runtime
-        with the execution duration in seconds.
+        Wraps _run() with timing measurement and cluster collection.
+        Updates self.runtime with the execution duration in seconds.
 
-        Calls _validate_environment() first to allow benchmark-specific
-        validation before execution begins.
+        Collects cluster information at start and end of benchmark
+        (HOST-03 requirement).
 
         Returns:
             Exit code from _run().
         """
         self._validate_environment()
+
+        # Collect cluster info at start (HOST-03)
+        self._collect_cluster_start()
+
         start_time = time.time()
         result = self._run()
         self.runtime = time.time() - start_time
+
+        # Collect cluster info at end (HOST-03)
+        self._collect_cluster_end()
+
         return result
 
 
