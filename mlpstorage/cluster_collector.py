@@ -123,6 +123,44 @@ class HostSystemInfo:
         return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
 
 
+@dataclass
+class MountInfo:
+    """Mount point information from /proc/mounts."""
+    device: str
+    mount_point: str
+    fs_type: str
+    options: str
+    dump_freq: int = 0
+    pass_num: int = 0
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'MountInfo':
+        """Create instance from dictionary."""
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+
+@dataclass
+class CgroupInfo:
+    """Cgroup subsystem information from /proc/cgroups."""
+    subsys_name: str
+    hierarchy: int
+    num_cgroups: int
+    enabled: bool
+
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert to dictionary."""
+        return asdict(self)
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> 'CgroupInfo':
+        """Create instance from dictionary."""
+        return cls(**{k: v for k, v in data.items() if k in cls.__dataclass_fields__})
+
+
 # =============================================================================
 # /proc File Parsers
 # =============================================================================
@@ -444,6 +482,106 @@ def parse_os_release(content: str) -> Dict[str, str]:
         result[key] = value
 
     return result
+
+
+def parse_proc_vmstat(content: str) -> Dict[str, int]:
+    """
+    Parse /proc/vmstat content into a dictionary.
+
+    Args:
+        content: Raw content of /proc/vmstat file.
+
+    Returns:
+        Dictionary mapping field names to integer values.
+
+    Example:
+        >>> content = "nr_free_pages 12345\\nnr_zone_inactive_anon 6789\\n"
+        >>> parse_proc_vmstat(content)
+        {'nr_free_pages': 12345, 'nr_zone_inactive_anon': 6789}
+    """
+    result = {}
+    for line in content.strip().split('\n'):
+        parts = line.split()
+        if len(parts) == 2:
+            try:
+                result[parts[0]] = int(parts[1])
+            except ValueError:
+                pass
+    return result
+
+
+def parse_proc_mounts(content: str) -> List[MountInfo]:
+    """
+    Parse /proc/mounts content into a list of MountInfo objects.
+
+    Args:
+        content: Raw content of /proc/mounts file.
+
+    Returns:
+        List of MountInfo objects, one per mount point.
+
+    Example:
+        >>> content = "/dev/sda1 / ext4 rw,relatime 0 1"
+        >>> mounts = parse_proc_mounts(content)
+        >>> mounts[0].mount_point
+        '/'
+    """
+    mounts = []
+    for line in content.strip().split('\n'):
+        if not line.strip():
+            continue
+        parts = line.split()
+        if len(parts) >= 4:
+            try:
+                mount = MountInfo(
+                    device=parts[0],
+                    mount_point=parts[1],
+                    fs_type=parts[2],
+                    options=parts[3],
+                    dump_freq=int(parts[4]) if len(parts) > 4 else 0,
+                    pass_num=int(parts[5]) if len(parts) > 5 else 0,
+                )
+                mounts.append(mount)
+            except (ValueError, IndexError):
+                continue
+    return mounts
+
+
+def parse_proc_cgroups(content: str) -> List[CgroupInfo]:
+    """
+    Parse /proc/cgroups content into a list of CgroupInfo objects.
+
+    Args:
+        content: Raw content of /proc/cgroups file.
+
+    Returns:
+        List of CgroupInfo objects, one per cgroup subsystem.
+
+    Example:
+        >>> content = "#subsys_name\\thierarchy\\tnum_cgroups\\tenabled\\ncpu\\t0\\t1\\t1\\n"
+        >>> cgroups = parse_proc_cgroups(content)
+        >>> cgroups[0].subsys_name
+        'cpu'
+    """
+    cgroups = []
+    lines = content.strip().split('\n')
+    for line in lines:
+        # Skip header line and comments
+        if line.startswith('#') or 'subsys_name' in line:
+            continue
+        parts = line.split()
+        if len(parts) >= 4:
+            try:
+                cgroup = CgroupInfo(
+                    subsys_name=parts[0],
+                    hierarchy=int(parts[1]),
+                    num_cgroups=int(parts[2]),
+                    enabled=parts[3] == '1',
+                )
+                cgroups.append(cgroup)
+            except (ValueError, IndexError):
+                continue
+    return cgroups
 
 
 # =============================================================================
