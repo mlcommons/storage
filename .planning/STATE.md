@@ -9,9 +9,9 @@
 ## Current Position
 
 **Phase:** 7 of 10 - Time-Series Host Data Collection
-**Plan:** 07-01 of 3 (COMPLETE)
+**Plan:** 07-02 of 3 (COMPLETE)
 **Status:** In progress
-**Last activity:** 2026-01-24 - Completed 07-01-PLAN.md (Core Time-Series Infrastructure)
+**Last activity:** 2026-01-24 - Completed 07-02-PLAN.md (Multi-Host Time-Series Collection)
 
 **Progress:**
 ```
@@ -21,11 +21,11 @@ Phase 3:  [##########] 100% (3/3 plans) COMPLETE
 Phase 4:  [##########] 100% (3/3 plans) COMPLETE
 Phase 5:  [##########] 100% (3/3 plans) COMPLETE
 Phase 6:  [##########] 100% (3/3 plans) COMPLETE
-Phase 7:  [###-------] 33% (1/3 plans)
+Phase 7:  [######----] 66% (2/3 plans)
 Phase 8:  [----------] 0%
 Phase 9:  [----------] 0%
 Phase 10: [----------] 0%
-Overall:  [########--] 88% (23/26 plans complete)
+Overall:  [#########-] 92% (24/26 plans complete)
 ```
 
 ## Performance Metrics
@@ -34,7 +34,7 @@ Overall:  [########--] 88% (23/26 plans complete)
 |--------|-------|
 | Phases completed | 6/10 |
 | Requirements delivered | 11/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02, BENCH-03, BENCH-04, BENCH-05, HOST-03) |
-| Plans executed | 23 |
+| Plans executed | 24 |
 | Avg tasks per plan | 2.5 |
 
 ## Accumulated Context
@@ -103,6 +103,9 @@ Overall:  [########--] 88% (23/26 plans complete)
 | threading.Event for graceful shutdown | Use Event.wait(timeout) instead of sleep for quick stop response | 2026-01-24 |
 | max_samples limit for time-series | Default 3600 samples to prevent memory exhaustion | 2026-01-24 |
 | Check stopped before started in TimeSeriesCollector | Provides more accurate error messages when restarting | 2026-01-24 |
+| Parallel SSH for multi-host time-series | ThreadPoolExecutor for simultaneous collection from all hosts | 2026-01-24 |
+| Localhost direct collection for time-series | Use _is_localhost to skip SSH for local hosts | 2026-01-24 |
+| Graceful host failure handling | Continue collection even when some hosts fail | 2026-01-24 |
 
 ### Technical Patterns Established
 
@@ -156,7 +159,7 @@ Overall:  [########--] 88% (23/26 plans complete)
 - [x] Complete Phase 4: VectorDB Benchmark Integration
 - [x] Complete Phase 5: Benchmark Validation Pipeline Integration
 - [x] Complete Phase 6: SSH-Based Host Collection
-- [ ] Complete Phase 7: Time-Series Host Data Collection (1/3 plans done)
+- [ ] Complete Phase 7: Time-Series Host Data Collection (2/3 plans done)
 - [ ] Review external KV cache code in `kv_cache_benchmark/`
 - [ ] Review VectorDB scripts from external branch
 - [ ] Verify DLIO parquet support requirements
@@ -193,14 +196,17 @@ None currently.
 - TimeSeriesSample and TimeSeriesData dataclasses added (07-01)
 - collect_timeseries_sample() and TimeSeriesCollector class added (07-01)
 - 23 new unit tests for time-series collection (07-01)
-- Total cluster_collector tests: 85 (62 + 23 new)
+- MultiHostTimeSeriesCollector for parallel multi-host collection (07-02)
+- TIMESERIES_SSH_SCRIPT for lightweight remote collection (07-02)
+- 13 new unit tests for multi-host time-series collection (07-02)
+- Total cluster_collector tests: 98 (85 + 13 new)
 
 ## Session Continuity
 
 ### Last Session
 - **Date:** 2026-01-24
-- **Accomplished:** Completed 07-01-PLAN.md (Core Time-Series Infrastructure)
-- **Next:** 07-02-PLAN.md (Benchmark Integration)
+- **Accomplished:** Completed 07-02-PLAN.md (Multi-Host Time-Series Collection)
+- **Next:** 07-03-PLAN.md (Benchmark Integration)
 
 ### Context for Next Session
 - Phase 7 IN PROGRESS: Time-Series Host Data Collection
@@ -210,17 +216,24 @@ None currently.
     - collect_timeseries_sample() function for /proc metric collection
     - TimeSeriesCollector class with background thread and start()/stop() lifecycle
     - 23 new unit tests for time-series collection
-    - Total: 85 tests in test_cluster_collector.py
-  - 07-02: Benchmark Integration (NEXT)
-  - 07-03: Multi-host Time-Series Collection
+  - 07-02: Multi-Host Time-Series Collection COMPLETE
+    - MultiHostTimeSeriesCollector with parallel SSH collection
+    - TIMESERIES_SSH_SCRIPT for lightweight remote collection
+    - Localhost optimization via _is_localhost
+    - Graceful failure handling (collection continues when hosts fail)
+    - Samples organized by hostname
+    - 13 new unit tests for multi-host collection
+    - Total: 98 tests in test_cluster_collector.py
+  - 07-03: Benchmark Integration (NEXT)
 - Available for downstream use:
+  - MultiHostTimeSeriesCollector can collect from multiple hosts in parallel
   - TimeSeriesCollector can collect samples at configurable intervals
   - Samples include diskstats, vmstat, loadavg, meminfo, netdev
   - max_samples limit prevents memory exhaustion
 - Note: vectordb and kvcache not yet wired into cli_parser.py
 - Note: 2 pre-existing test failures in test_rules_calculations.py (unrelated to Phase 7)
 - No blockers
-- Ready to proceed with 07-02
+- Ready to proceed with 07-03
 
 ---
 
