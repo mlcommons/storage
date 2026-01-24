@@ -28,8 +28,8 @@
 - [x] **HOST-01**: SSH-based host collection for non-MPI benchmarks
 - [x] **HOST-02**: Collect /proc/ data (diskstats, vmstat, cpuinfo, filesystems, cgroups)
 - [x] **HOST-03**: Collection at benchmark start and end
-- [ ] **HOST-04**: Time-series collection (10 sec intervals) during execution
-- [ ] **HOST-05**: Parallel collection process without benchmark performance impact
+- [x] **HOST-04**: Time-series collection (10 sec intervals) during execution
+- [x] **HOST-05**: Parallel collection process without benchmark performance impact
 
 ### Error Handling & UX
 
@@ -76,8 +76,8 @@
 | HOST-01 | Phase 6 | Complete |
 | HOST-02 | Phase 6 | Complete |
 | HOST-03 | Phase 6 | Complete |
-| HOST-04 | Phase 7 | Pending |
-| HOST-05 | Phase 7 | Pending |
+| HOST-04 | Phase 7 | Complete |
+| HOST-05 | Phase 7 | Complete |
 | TRAIN-01 | Phase 8 | Pending |
 | TRAIN-02 | Phase 8 | Pending |
 | TRAIN-03 | Phase 8 | Pending |

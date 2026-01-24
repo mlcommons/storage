@@ -181,9 +181,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 07-01-PLAN.md - Core time-series dataclasses and single-host collector
-- [ ] 07-02-PLAN.md - Multi-host time-series collection with SSH
-- [ ] 07-03-PLAN.md - Benchmark integration and CLI arguments
+- [x] 07-01-PLAN.md - Core time-series dataclasses and single-host collector
+- [x] 07-02-PLAN.md - Multi-host time-series collection with SSH
+- [x] 07-03-PLAN.md - Benchmark integration and CLI arguments
 
 ---
 
@@ -251,7 +251,7 @@ Plans:
 | 4 | VectorDB Benchmark Integration | Complete | BENCH-03, BENCH-04 |
 | 5 | Benchmark Validation Pipeline Integration | Complete | BENCH-05 |
 | 6 | SSH-Based Host Collection | Complete | HOST-01, HOST-02, HOST-03 |
-| 7 | Time-Series Host Data Collection | Not Started | HOST-04, HOST-05 |
+| 7 | Time-Series Host Data Collection | Complete | HOST-04, HOST-05 |
 | 8 | New Training Models | Not Started | TRAIN-01, TRAIN-02, TRAIN-03 |
 | 9 | DLIO Parquet Support | Not Started | TRAIN-04 |
 | 10 | Progress Indication | Not Started | UX-04 |
