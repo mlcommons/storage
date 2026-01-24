@@ -1870,10 +1870,10 @@ class TimeSeriesCollector:
         Raises:
             RuntimeError: If collector was already started or stopped.
         """
-        if self._started:
-            raise RuntimeError('TimeSeriesCollector already started')
         if self._stopped:
             raise RuntimeError('TimeSeriesCollector already stopped; create a new instance')
+        if self._started:
+            raise RuntimeError('TimeSeriesCollector already started')
 
         self._start_time = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
         self._started = True
