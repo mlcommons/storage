@@ -4,14 +4,14 @@
 
 **Core Value:** Orchestrate multiple benchmark types (training, checkpointing, kv-cache, vectordb) across distributed systems and produce verified, rules-compliant results.
 
-**Current Focus:** Phase 4 Complete - VectorDB Benchmark Integration
+**Current Focus:** Phase 5 In Progress - Benchmark Validation Pipeline Integration
 
 ## Current Position
 
-**Phase:** 4 of 10 - VectorDB Benchmark Integration
-**Plan:** 04-03 of 3 (COMPLETE)
-**Status:** Phase complete
-**Last activity:** 2026-01-24 - Completed 04-03-PLAN.md (VectorDB verification and integration tests)
+**Phase:** 5 of 10 - Benchmark Validation Pipeline Integration
+**Plan:** 05-01 of 3 (COMPLETE)
+**Status:** In progress
+**Last activity:** 2026-01-24 - Completed 05-01-PLAN.md (VectorDBRunRulesChecker)
 
 **Progress:**
 ```
@@ -19,13 +19,13 @@ Phase 1:  [##########] 100% (5/5 plans) COMPLETE
 Phase 2:  [##########] 100% (5/5 plans) COMPLETE
 Phase 3:  [##########] 100% (3/3 plans) COMPLETE
 Phase 4:  [##########] 100% (3/3 plans) COMPLETE
-Phase 5:  [----------] 0%
+Phase 5:  [###-------] 33% (1/3 plans)
 Phase 6:  [----------] 0%
 Phase 7:  [----------] 0%
 Phase 8:  [----------] 0%
 Phase 9:  [----------] 0%
 Phase 10: [----------] 0%
-Overall:  [######----] 62% (16/26 plans complete)
+Overall:  [######----] 65% (17/26 plans complete)
 ```
 
 ## Performance Metrics
@@ -34,7 +34,7 @@ Overall:  [######----] 62% (16/26 plans complete)
 |--------|-------|
 | Phases completed | 4/10 |
 | Requirements delivered | 9/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02, BENCH-03, BENCH-04) |
-| Plans executed | 16 |
+| Plans executed | 17 |
 | Avg tasks per plan | 2.4 |
 
 ## Accumulated Context
@@ -89,6 +89,8 @@ Overall:  [######----] 62% (16/26 plans complete)
 | Command-specific metadata (VectorDB) | Include different fields for datagen vs run commands | 2026-01-24 |
 | Write metadata for both commands | Both run and datagen write metadata for history tracking | 2026-01-24 |
 | Test patterns from KVCache | Follow KVCache test patterns for VectorDB test consistency | 2026-01-24 |
+| Preview status always returns OPEN | VectorDB is preview, check_preview_status always returns OPEN | 2026-01-24 |
+| Minimum runtime 30 seconds for VectorDB | Matches VECTORDB_DEFAULT_RUNTIME, prevents trivially short runs | 2026-01-24 |
 
 ### Technical Patterns Established
 
@@ -120,6 +122,8 @@ Overall:  [######----] 62% (16/26 plans complete)
 - Consistent CLI subcommand naming (all use 'run' for execution)
 - CLI test pattern with fixture-based parser
 - Benchmark test pattern with mocked dependencies
+- RunRulesChecker inheritance for benchmark-specific validation
+- check_* method pattern for auto-discovered validation rules
 
 ### Open TODOs
 
@@ -157,30 +161,21 @@ None currently.
 
 ### Last Session
 - **Date:** 2026-01-24
-- **Accomplished:** Completed 04-03-PLAN.md (VectorDB verification and integration tests)
-- **Next:** Begin Phase 5
+- **Accomplished:** Completed 05-01-PLAN.md (VectorDBRunRulesChecker)
+- **Next:** Continue Phase 5 (05-02 next)
 
 ### Context for Next Session
-- Phase 4 COMPLETE: VectorDB Benchmark Integration
-  - 04-01: VectorDB CLI Command Rename COMPLETE
-    - Renamed 'run-search' to 'run' for CLI consistency
-    - Updated CLI args, help messages, command_method_map
-    - Updated tests to match new command name
-  - 04-02: VectorDB Metadata and History Integration COMPLETE
-    - VectorDBBenchmark.metadata includes model (using config_name), host, port, collection
-    - Command-specific fields for datagen vs run
-    - write_metadata() called after both execute_run and execute_datagen
-  - 04-03: VectorDB Verification and Integration COMPLETE
-    - 53 CLI tests in test_cli_vectordb.py
-    - 15 benchmark tests in test_benchmarks_vectordb.py
-    - All 68 tests pass
+- Phase 5 IN PROGRESS: Benchmark Validation Pipeline Integration
+  - 05-01: VectorDBRunRulesChecker COMPLETE
+    - Created VectorDBRunRulesChecker class with check_benchmark_type, check_runtime, check_preview_status
+    - Exported from mlpstorage.rules.run_checkers and mlpstorage.rules
+    - Follows KVCacheRunRulesChecker pattern
+    - All 28 existing rules tests pass
 - Available for downstream use:
-  - `mlpstorage vectordb run` command (consistent with other benchmarks)
-  - `mlpstorage vectordb datagen` command
-  - VectorDBBenchmark.metadata includes all required fields for history integration
-  - Metadata JSON written after both run and datagen commands
-  - Comprehensive test coverage for regression detection
-- Note: vectordb not yet wired into cli_parser.py
+  - `from mlpstorage.rules import VectorDBRunRulesChecker`
+  - VectorDBRunRulesChecker.check_preview_status() always returns OPEN
+  - VectorDBRunRulesChecker.check_runtime() enforces 30 second minimum
+- Note: vectordb and kvcache not yet wired into cli_parser.py
 - No blockers
 
 ---
