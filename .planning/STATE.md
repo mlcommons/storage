@@ -4,14 +4,14 @@
 
 **Core Value:** Orchestrate multiple benchmark types (training, checkpointing, kv-cache, vectordb) across distributed systems and produce verified, rules-compliant results.
 
-**Current Focus:** Phase 5 In Progress - Benchmark Validation Pipeline Integration
+**Current Focus:** Phase 6 In Progress - SSH-Based Host Collection
 
 ## Current Position
 
-**Phase:** 5 of 10 - Benchmark Validation Pipeline Integration (COMPLETE)
-**Plan:** 05-03 of 3 (COMPLETE)
-**Status:** Phase 5 complete
-**Last activity:** 2026-01-24 - Completed 05-03-PLAN.md (VectorDB Rules Checker Tests)
+**Phase:** 6 of 10 - SSH-Based Host Collection
+**Plan:** 06-01 of 3 (COMPLETE)
+**Status:** In progress
+**Last activity:** 2026-01-24 - Completed 06-01-PLAN.md (/proc Parsers for HOST-02)
 
 **Progress:**
 ```
@@ -20,12 +20,12 @@ Phase 2:  [##########] 100% (5/5 plans) COMPLETE
 Phase 3:  [##########] 100% (3/3 plans) COMPLETE
 Phase 4:  [##########] 100% (3/3 plans) COMPLETE
 Phase 5:  [##########] 100% (3/3 plans) COMPLETE
-Phase 6:  [----------] 0%
+Phase 6:  [###-------] 33% (1/3 plans)
 Phase 7:  [----------] 0%
 Phase 8:  [----------] 0%
 Phase 9:  [----------] 0%
 Phase 10: [----------] 0%
-Overall:  [#######---] 73% (19/26 plans complete)
+Overall:  [########--] 77% (20/26 plans complete)
 ```
 
 ## Performance Metrics
@@ -34,7 +34,7 @@ Overall:  [#######---] 73% (19/26 plans complete)
 |--------|-------|
 | Phases completed | 5/10 |
 | Requirements delivered | 10/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02, BENCH-03, BENCH-04, BENCH-05) |
-| Plans executed | 19 |
+| Plans executed | 20 |
 | Avg tasks per plan | 2.4 |
 
 ## Accumulated Context
@@ -93,6 +93,7 @@ Overall:  [#######---] 73% (19/26 plans complete)
 | Minimum runtime 30 seconds for VectorDB | Matches VECTORDB_DEFAULT_RUNTIME, prevents trivially short runs | 2026-01-24 |
 | Base MultiRunRulesChecker for preview benchmarks | KV Cache and VectorDB use base checker for multi-run (no specific submission rules yet) | 2026-01-24 |
 | VECTORDB_REQUIREMENTS follows KVCACHE pattern | Consistent preview benchmark documentation structure | 2026-01-24 |
+| Follow existing dataclass pattern for /proc parsers | Match HostDiskInfo/HostNetworkInfo pattern with to_dict/from_dict | 2026-01-24 |
 
 ### Technical Patterns Established
 
@@ -129,6 +130,7 @@ Overall:  [#######---] 73% (19/26 plans complete)
 - Benchmark type routing in BenchmarkVerifier for all 4 types
 - Preview benchmark requirements formatting pattern
 - RunRulesChecker test pattern with mock logger and valid run fixtures
+- Line-by-line /proc file parsing pattern with graceful error handling
 
 ### Open TODOs
 
@@ -137,6 +139,7 @@ Overall:  [#######---] 73% (19/26 plans complete)
 - [x] Complete Phase 3: KV Cache Benchmark Integration
 - [x] Complete Phase 4: VectorDB Benchmark Integration
 - [x] Complete Phase 5: Benchmark Validation Pipeline Integration
+- [ ] Complete Phase 6: SSH-Based Host Collection
 - [ ] Review external KV cache code in `kv_cache_benchmark/`
 - [ ] Review VectorDB scripts from external branch
 - [ ] Verify DLIO parquet support requirements
@@ -163,30 +166,30 @@ None currently.
 - VectorDB metadata includes all required fields for history integration
 - VectorDB has comprehensive unit tests: 53 CLI tests + 15 benchmark tests = 68 total
 - VectorDB rules checker has 12 unit tests for complete validation coverage
+- cluster_collector.py now has parsers for /proc/vmstat, /proc/mounts, /proc/cgroups
+- 29 new unit tests for cluster_collector parsers
 
 ## Session Continuity
 
 ### Last Session
 - **Date:** 2026-01-24
-- **Accomplished:** Completed 05-03-PLAN.md (VectorDB Rules Checker Tests)
-- **Next:** Start Phase 6 (next phase)
+- **Accomplished:** Completed 06-01-PLAN.md (/proc Parsers for HOST-02)
+- **Next:** Continue Phase 6 with 06-02
 
 ### Context for Next Session
-- Phase 5 COMPLETE: Benchmark Validation Pipeline Integration
-  - 05-01: VectorDBRunRulesChecker COMPLETE
-  - 05-02: BenchmarkVerifier Routing COMPLETE
-  - 05-03: VectorDB Rules Checker Tests COMPLETE
-    - 12 test methods covering all check_* methods
-    - Tests for valid/invalid benchmark types
-    - Tests for runtime validation (valid, insufficient, default, boundary)
-    - Tests for preview status always returning OPEN
-    - Tests for run_checks integration
+- Phase 6 IN PROGRESS: SSH-Based Host Collection
+  - 06-01: /proc Parsers for HOST-02 COMPLETE
+    - MountInfo and CgroupInfo dataclasses added
+    - parse_proc_vmstat, parse_proc_mounts, parse_proc_cgroups functions added
+    - collect_local_system_info updated to include vmstat, mounts, cgroups
+    - 29 unit tests added to tests/unit/test_cluster_collector.py
+  - 06-02: Pending (SSH collection implementation)
+  - 06-03: Pending
 - Available for downstream use:
-  - BenchmarkVerifier can validate any benchmark type
-  - ClosedRequirementsFormatter.get_requirements('vector_database') returns requirements
-  - VectorDBRunRulesChecker has comprehensive test coverage
+  - All /proc parsers ready for SSH-based collection
+  - collect_local_system_info returns comprehensive system info
 - Note: vectordb and kvcache not yet wired into cli_parser.py
-- Note: 2 pre-existing test failures in test_rules_calculations.py (unrelated to Phase 5)
+- Note: 2 pre-existing test failures in test_rules_calculations.py (unrelated to Phase 6)
 - No blockers
 
 ---
