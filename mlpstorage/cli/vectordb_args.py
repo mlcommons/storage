@@ -9,6 +9,7 @@ from mlpstorage.config import VECTOR_DTYPES, DISTRIBUTIONS, VECTORDB_DEFAULT_RUN
 from mlpstorage.cli.common_args import (
     HELP_MESSAGES,
     add_universal_arguments,
+    add_timeseries_arguments,
 )
 
 
@@ -147,3 +148,6 @@ def add_vectordb_arguments(parser):
     # Add universal arguments to all subcommands
     for _parser in [datagen, run_benchmark]:
         add_universal_arguments(_parser)
+
+    # Add time-series arguments to run command only
+    add_timeseries_arguments(run_benchmark)
