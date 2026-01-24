@@ -4,14 +4,14 @@
 
 **Core Value:** Orchestrate multiple benchmark types (training, checkpointing, kv-cache, vectordb) across distributed systems and produce verified, rules-compliant results.
 
-**Current Focus:** Phase 7 COMPLETE - Time-Series Host Data Collection
+**Current Focus:** Phase 8 IN PROGRESS - New Training Models
 
 ## Current Position
 
-**Phase:** 7 of 10 - Time-Series Host Data Collection
-**Plan:** 07-03 of 3 (COMPLETE)
+**Phase:** 8 of 10 - New Training Models
+**Plan:** 08-01 of 1 (COMPLETE)
 **Status:** Phase complete
-**Last activity:** 2026-01-24 - Completed 07-03-PLAN.md (Benchmark Integration)
+**Last activity:** 2026-01-24 - Completed 08-01-PLAN.md (New Training Model Configurations)
 
 **Progress:**
 ```
@@ -22,19 +22,19 @@ Phase 4:  [##########] 100% (3/3 plans) COMPLETE
 Phase 5:  [##########] 100% (3/3 plans) COMPLETE
 Phase 6:  [##########] 100% (3/3 plans) COMPLETE
 Phase 7:  [##########] 100% (3/3 plans) COMPLETE
-Phase 8:  [----------] 0%
+Phase 8:  [##########] 100% (1/1 plans) COMPLETE
 Phase 9:  [----------] 0%
 Phase 10: [----------] 0%
-Overall:  [##########] 96% (25/26 plans complete)
+Overall:  [##########] 96% (26/27 plans complete)
 ```
 
 ## Performance Metrics
 
 | Metric | Value |
 |--------|-------|
-| Phases completed | 7/10 |
-| Requirements delivered | 13/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02, BENCH-03, BENCH-04, BENCH-05, HOST-03, HOST-04, HOST-05) |
-| Plans executed | 25 |
+| Phases completed | 8/10 |
+| Requirements delivered | 14/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02, BENCH-03, BENCH-04, BENCH-05, HOST-03, HOST-04, HOST-05, TRAIN-01) |
+| Plans executed | 26 |
 | Avg tasks per plan | 2.5 |
 
 ## Accumulated Context
@@ -110,6 +110,9 @@ Overall:  [##########] 96% (25/26 plans complete)
 | Time-series only for run command | datagen/configview don't execute benchmarks, no time-series needed | 2026-01-24 |
 | Skip time-series in what-if mode | No actual execution happens, no point collecting metrics | 2026-01-24 |
 | try/finally for time-series cleanup | Ensures collector stops and data written even if _run() fails | 2026-01-24 |
+| Omit model.type for non-CNN models | DLRM and Flux omit model.type; DLIO identifies by name | 2026-01-24 |
+| Model.type=cnn for CNN-based models | RetinaNet uses model.type: cnn like unet3d/resnet50 | 2026-01-24 |
+| PyTorch framework for new models | DLRM, RetinaNet, Flux all use pytorch framework | 2026-01-24 |
 
 ### Technical Patterns Established
 
@@ -157,6 +160,7 @@ Overall:  [##########] 96% (25/26 plans complete)
 - Time-series CLI arguments pattern (add_timeseries_arguments)
 - Benchmark.run() lifecycle integration with try/finally
 - JSON file output with naming convention pattern
+- Model constant with YAML configuration triplet (h100, a100, datagen)
 
 ### Open TODOs
 
@@ -167,6 +171,7 @@ Overall:  [##########] 96% (25/26 plans complete)
 - [x] Complete Phase 5: Benchmark Validation Pipeline Integration
 - [x] Complete Phase 6: SSH-Based Host Collection
 - [x] Complete Phase 7: Time-Series Host Data Collection
+- [x] Complete Phase 8: New Training Models
 - [ ] Review external KV cache code in `kv_cache_benchmark/`
 - [ ] Review VectorDB scripts from external branch
 - [ ] Verify DLIO parquet support requirements
@@ -219,39 +224,25 @@ None currently.
 
 ### Last Session
 - **Date:** 2026-01-24
-- **Accomplished:** Completed 07-03-PLAN.md (Benchmark Integration) and Phase 7
-- **Next:** Phase 8 or continue to remaining phases
+- **Accomplished:** Completed 08-01-PLAN.md (New Training Model Configurations) and Phase 8
+- **Next:** Phase 9 or continue to remaining phases
 
 ### Context for Next Session
-- Phase 7 COMPLETE: Time-Series Host Data Collection
-  - 07-01: Core Time-Series Infrastructure COMPLETE
-    - TimeSeriesSample dataclass with timestamp, hostname, and dynamic metrics
-    - TimeSeriesData dataclass for aggregated samples by host
-    - collect_timeseries_sample() function for /proc metric collection
-    - TimeSeriesCollector class with background thread and start()/stop() lifecycle
-    - 23 new unit tests for time-series collection
-  - 07-02: Multi-Host Time-Series Collection COMPLETE
-    - MultiHostTimeSeriesCollector with parallel SSH collection
-    - TIMESERIES_SSH_SCRIPT for lightweight remote collection
-    - Localhost optimization via _is_localhost
-    - Graceful failure handling (collection continues when hosts fail)
-    - Samples organized by hostname
-    - 13 new unit tests for multi-host collection
-  - 07-03: Benchmark Integration COMPLETE
-    - CLI arguments: --timeseries-interval, --skip-timeseries, --max-timeseries-samples
-    - Arguments wired into all benchmark run parsers
-    - Benchmark.run() integrates time-series lifecycle with try/finally
-    - Time-series JSON file output to results directory
-    - Metadata includes timeseries_data reference
-    - 19 new unit tests for benchmark integration
-- Requirements delivered in Phase 7:
-  - HOST-04: Time-series data files with proper naming convention
-  - HOST-05: Background collection with minimal performance impact
-- 171 tests pass (98 cluster_collector + 73 benchmark_base)
+- Phase 8 COMPLETE: New Training Models
+  - 08-01: New Training Model Configurations COMPLETE
+    - Added DLRM, RETINANET, FLUX model constants to config.py
+    - Updated MODELS list to include all 6 training models
+    - Created 9 YAML configuration files (3 models x 3 configs: h100, a100, datagen)
+    - DLRM: npz format, 65536 files, 8192 batch size, AU 0.70
+    - RetinaNet: jpeg format, 1.7M files, model.type=cnn, AU 0.85
+    - Flux: jpeg format, 1.1M files, high computation_time, AU 0.80
+- Requirements delivered in Phase 8:
+  - TRAIN-01: New training models (DLRM, RetinaNet, Flux) with configurations
+- 769 unit tests pass (pre-existing reporting test failures unrelated to Phase 8)
 - Note: vectordb and kvcache not yet wired into cli_parser.py
-- Note: 2 pre-existing test failures in test_rules_calculations.py (unrelated to Phase 7)
+- Note: Pre-existing test failures in test_rules_calculations.py and test_reporting.py (unrelated to Phase 8)
 - No blockers
-- Ready to proceed with Phase 8
+- Ready to proceed with Phase 9
 
 ---
 
