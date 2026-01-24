@@ -4,19 +4,19 @@
 
 **Core Value:** Orchestrate multiple benchmark types (training, checkpointing, kv-cache, vectordb) across distributed systems and produce verified, rules-compliant results.
 
-**Current Focus:** Phase 1 - Package Management Foundation
+**Current Focus:** Phase 2 - Environment Validation and Fail-Fast
 
 ## Current Position
 
-**Phase:** 1 of 10 - Package Management Foundation
-**Plan:** 01-05 of 5 (COMPLETE)
-**Status:** Phase complete
-**Last activity:** 2026-01-23 - Completed 01-05-PLAN.md
+**Phase:** 2 of 10 - Environment Validation and Fail-Fast
+**Plan:** 02-01 of 5
+**Status:** In progress
+**Last activity:** 2026-01-24 - Completed 02-01-PLAN.md
 
 **Progress:**
 ```
-Phase 1:  [██████████] 100% (5/5 plans) ✓ COMPLETE
-Phase 2:  [----------] 0%
+Phase 1:  [##########] 100% (5/5 plans) COMPLETE
+Phase 2:  [##--------] 20% (1/5 plans)
 Phase 3:  [----------] 0%
 Phase 4:  [----------] 0%
 Phase 5:  [----------] 0%
@@ -25,7 +25,7 @@ Phase 7:  [----------] 0%
 Phase 8:  [----------] 0%
 Phase 9:  [----------] 0%
 Phase 10: [----------] 0%
-Overall:  [██--------] 19% (4/21 requirements - PKG-01, PKG-02, PKG-03 complete)
+Overall:  [##--------] 22% (6/27 plans complete)
 ```
 
 ## Performance Metrics
@@ -34,8 +34,8 @@ Overall:  [██--------] 19% (4/21 requirements - PKG-01, PKG-02, PKG-03 compl
 |--------|-------|
 | Phases completed | 1/10 |
 | Requirements delivered | 4/21 (PKG-01, PKG-02, PKG-03, CLI integration) |
-| Plans executed | 5 |
-| Avg tasks per plan | 2.0 |
+| Plans executed | 6 |
+| Avg tasks per plan | 2.3 |
 
 ## Accumulated Context
 
@@ -61,6 +61,9 @@ Overall:  [██--------] 19% (4/21 requirements - PKG-01, PKG-02, PKG-03 compl
 | Universal arguments for --verify-lockfile | Add flag to add_universal_arguments for all benchmarks | 2026-01-23 |
 | Validate before benchmark instantiation | Fail fast before collecting cluster info | 2026-01-23 |
 | Show copy-paste commands in errors | Include pip install and uv pip sync in error messages | 2026-01-23 |
+| OSInfo dataclass with optional distro | Simple, type-safe OS info with None for non-Linux distro fields | 2026-01-24 |
+| distro package with fallback | Try distro package first, fall back to platform.freedesktop_os_release (3.10+) | 2026-01-24 |
+| Tuple key lookup for install hints | Use (dependency, system, distro) tuples with specificity-based fallback | 2026-01-24 |
 
 ### Technical Patterns Established
 
@@ -78,11 +81,17 @@ Overall:  [██--------] 19% (4/21 requirements - PKG-01, PKG-02, PKG-03 compl
 - Universal arguments for cross-cutting concerns
 - Command handler pattern in main.py
 - Fail-fast validation before execution
+- OS detection with distro fallback pattern
+- Specificity-based lookup for OS-specific instructions
 
 ### Open TODOs
 
 - [x] Complete Phase 1: Package Management Foundation
-- [ ] Plan Phase 2 with `/gsd:plan-phase 2`
+- [x] Complete 02-01: Environment Detection Module
+- [ ] Complete 02-02: Executable Checking Module
+- [ ] Complete 02-03: Pre-Run Validation
+- [ ] Complete 02-04: SSH Connectivity Validation
+- [ ] Complete 02-05: Integration Tests
 - [ ] Review external KV cache code in `kv_cache_benchmark/`
 - [ ] Review VectorDB scripts from external branch
 - [ ] Verify DLIO parquet support requirements
@@ -97,27 +106,29 @@ None currently.
 - Existing KVCacheBenchmark class exists but needs full integration
 - VectorDBBenchmark class exists as stub, needs implementation
 - MPI collection works, SSH collection needs to be added
+- Environment module now provides OS-aware install hints
 
 ## Session Continuity
 
 ### Last Session
-- **Date:** 2026-01-23
-- **Accomplished:** Completed 01-05-PLAN.md execution (CLI Integration) - Phase 1 COMPLETE
-- **Next:** Plan and execute Phase 2 (Fail-Fast Dependency Validation)
+- **Date:** 2026-01-24
+- **Accomplished:** Completed 02-01-PLAN.md execution (Environment Detection Module)
+- **Next:** Execute 02-02-PLAN.md (Executable Checking Module)
 
 ### Context for Next Session
-- Phase 1 complete: Package Management Foundation
-  - Lockfile generation with uv (PKG-01) ✓
-  - CPU-only PyTorch config (PKG-02) ✓
-  - Runtime version validation (PKG-03) ✓
-  - Full CLI integration ✓
-- Available commands:
-  - `mlpstorage lockfile generate` - Create lockfiles from pyproject.toml
-  - `mlpstorage lockfile verify` - Validate installed packages
-  - `--verify-lockfile PATH` - Available on all benchmark commands
-- Ready for Phase 2: Fail-fast dependency validation can leverage lockfile infrastructure
+- Phase 2 in progress: Environment Validation and Fail-Fast
+  - 02-01: Environment detection module COMPLETE
+    - `mlpstorage/environment/os_detect.py` - OSInfo dataclass, detect_os()
+    - `mlpstorage/environment/install_hints.py` - INSTALL_INSTRUCTIONS, get_install_instruction()
+  - 02-02: Next up - executable checking with OS-aware hints
+  - 02-03: Pre-run validation orchestration
+  - 02-04: SSH connectivity checking
+  - 02-05: Integration tests
+- Available for downstream use:
+  - `from mlpstorage.environment import detect_os, get_install_instruction, OSInfo`
+  - Supports Ubuntu, Debian, RHEL, CentOS, Fedora, Arch, macOS, Windows
 - No blockers
 
 ---
 
-*State updated: 2026-01-23*
+*State updated: 2026-01-24*
