@@ -17,6 +17,7 @@ from mlpstorage.cli.common_args import (
     add_universal_arguments,
     add_host_arguments,
     add_mpi_arguments,
+    add_timeseries_arguments,
 )
 
 
@@ -245,3 +246,6 @@ def _add_kvcache_distributed_arguments(parser):
 
     # Add MPI arguments from common_args
     add_mpi_arguments(parser)
+
+    # Add time-series arguments
+    add_timeseries_arguments(parser)

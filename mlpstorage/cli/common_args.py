@@ -136,6 +136,20 @@ HELP_MESSAGES = {
     # MPI help messages
     'mpi_bin': f"Execution type for MPI commands. Supported options: {MPI_CMDS}",
     'exec_type': f"Execution type for benchmark commands. Supported options: {list(EXEC_TYPE)}",
+
+    # Time-series collection help messages
+    'timeseries_interval': (
+        "Interval in seconds between time-series data collection samples during benchmark execution. "
+        "Lower values provide more granular data but increase collection overhead. Default: 10 seconds."
+    ),
+    'skip_timeseries': (
+        "Disable time-series host data collection during benchmark execution. "
+        "Useful for debugging or when collection overhead is a concern."
+    ),
+    'max_timeseries_samples': (
+        "Maximum number of time-series samples to keep per host. Prevents memory issues "
+        "in long-running benchmarks. Default: 3600 (10 hours at 10-second intervals)."
+    ),
 }
 
 # Program descriptions
@@ -295,4 +309,33 @@ def add_dlio_arguments(parser):
         type=str,
         action="append",
         help=HELP_MESSAGES['params']
+    )
+
+
+def add_timeseries_arguments(parser):
+    """Add time-series collection arguments.
+
+    These arguments control the collection of time-series host metrics
+    during benchmark execution (HOST-04, HOST-05 requirements).
+
+    Args:
+        parser: Argparse parser to add arguments to.
+    """
+    timeseries_group = parser.add_argument_group("Time-Series Collection")
+    timeseries_group.add_argument(
+        '--timeseries-interval',
+        type=float,
+        default=10.0,
+        help=HELP_MESSAGES['timeseries_interval']
+    )
+    timeseries_group.add_argument(
+        '--skip-timeseries',
+        action='store_true',
+        help=HELP_MESSAGES['skip_timeseries']
+    )
+    timeseries_group.add_argument(
+        '--max-timeseries-samples',
+        type=int,
+        default=3600,
+        help=HELP_MESSAGES['max_timeseries_samples']
     )
