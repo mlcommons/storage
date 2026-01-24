@@ -6,6 +6,8 @@ Tests cover:
 - MPI runtime validation
 - DLIO benchmark validation
 - Combined dependency validation
+- OS-aware dependency checking with install hints
+- SSH availability checking
 """
 
 import os
@@ -17,7 +19,11 @@ from mlpstorage.dependency_check import (
     check_mpi_available,
     check_dlio_available,
     validate_benchmark_dependencies,
+    check_mpi_with_hints,
+    check_dlio_with_hints,
+    check_ssh_available,
 )
+from mlpstorage.environment import OSInfo
 from mlpstorage.errors import DependencyError
 
 
@@ -218,3 +224,227 @@ class TestValidateBenchmarkDependencies:
                 )
 
             assert 'DLIO' in str(exc_info.value)
+
+
+class TestCheckMpiWithHints:
+    """Tests for check_mpi_with_hints function with OS-aware error messages."""
+
+    def test_finds_mpirun_when_available(self):
+        """Should return path when mpirun is available."""
+        with patch('mlpstorage.dependency_check.shutil.which', return_value='/usr/bin/mpirun'):
+            path = check_mpi_with_hints('mpirun')
+            assert path == '/usr/bin/mpirun'
+
+    def test_finds_mpiexec_when_available(self):
+        """Should return path when mpiexec is available."""
+        with patch('mlpstorage.dependency_check.shutil.which', return_value='/usr/local/bin/mpiexec'):
+            path = check_mpi_with_hints('mpiexec')
+            assert path == '/usr/local/bin/mpiexec'
+
+    def test_raises_dependency_error_when_missing(self):
+        """Should raise DependencyError when MPI is not found."""
+        mock_os_info = OSInfo(
+            system='Linux',
+            release='5.15.0',
+            machine='x86_64',
+            distro_id='ubuntu',
+            distro_name='Ubuntu',
+            distro_version='22.04'
+        )
+
+        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
+            with patch('mlpstorage.dependency_check.detect_os', return_value=mock_os_info):
+                with pytest.raises(DependencyError) as exc_info:
+                    check_mpi_with_hints('mpirun')
+
+                error = exc_info.value
+                assert 'mpirun' in str(error) or 'MPI' in str(error)
+
+    def test_error_contains_ubuntu_install_command(self):
+        """Error message should contain apt-get for Ubuntu."""
+        mock_os_info = OSInfo(
+            system='Linux',
+            release='5.15.0',
+            machine='x86_64',
+            distro_id='ubuntu',
+            distro_name='Ubuntu',
+            distro_version='22.04'
+        )
+
+        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
+            with patch('mlpstorage.dependency_check.detect_os', return_value=mock_os_info):
+                with pytest.raises(DependencyError) as exc_info:
+                    check_mpi_with_hints('mpirun')
+
+                error = exc_info.value
+                # Check suggestion contains apt-get command
+                assert 'apt-get' in error.suggestion or 'apt-get' in str(error)
+
+    def test_error_contains_macos_install_command(self):
+        """Error message should contain brew for macOS."""
+        mock_os_info = OSInfo(
+            system='Darwin',
+            release='21.6.0',
+            machine='x86_64'
+        )
+
+        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
+            with patch('mlpstorage.dependency_check.detect_os', return_value=mock_os_info):
+                with pytest.raises(DependencyError) as exc_info:
+                    check_mpi_with_hints('mpirun')
+
+                error = exc_info.value
+                # Check suggestion contains brew command
+                assert 'brew' in error.suggestion or 'brew' in str(error)
+
+    def test_error_contains_rhel_install_command(self):
+        """Error message should contain dnf for RHEL."""
+        mock_os_info = OSInfo(
+            system='Linux',
+            release='5.14.0',
+            machine='x86_64',
+            distro_id='rhel',
+            distro_name='Red Hat Enterprise Linux',
+            distro_version='8.5'
+        )
+
+        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
+            with patch('mlpstorage.dependency_check.detect_os', return_value=mock_os_info):
+                with pytest.raises(DependencyError) as exc_info:
+                    check_mpi_with_hints('mpirun')
+
+                error = exc_info.value
+                # Check suggestion contains dnf command for RHEL
+                assert 'dnf' in error.suggestion or 'dnf' in str(error)
+
+
+class TestCheckDlioWithHints:
+    """Tests for check_dlio_with_hints function."""
+
+    def test_finds_dlio_in_path(self):
+        """Should find dlio_benchmark when available in PATH."""
+        with patch('mlpstorage.dependency_check.shutil.which', return_value='/usr/local/bin/dlio_benchmark'):
+            path = check_dlio_with_hints()
+            assert path == '/usr/local/bin/dlio_benchmark'
+
+    def test_finds_dlio_in_custom_path(self, tmp_path):
+        """Should find dlio_benchmark in custom path."""
+        # Create fake dlio executable
+        dlio_exe = tmp_path / "dlio_benchmark"
+        dlio_exe.touch()
+        dlio_exe.chmod(0o755)
+
+        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
+            path = check_dlio_with_hints(dlio_bin_path=str(tmp_path))
+            assert path == str(dlio_exe)
+
+    def test_raises_dependency_error_when_missing(self):
+        """Should raise DependencyError when DLIO is not found."""
+        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
+            with pytest.raises(DependencyError) as exc_info:
+                check_dlio_with_hints()
+
+            error = exc_info.value
+            assert 'dlio' in str(error).lower() or 'DLIO' in str(error)
+
+    def test_error_contains_pip_install_suggestion(self):
+        """Error message should contain pip install command."""
+        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
+            with pytest.raises(DependencyError) as exc_info:
+                check_dlio_with_hints()
+
+            error = exc_info.value
+            # Check suggestion contains pip install options
+            assert 'pip' in error.suggestion or 'pip' in str(error)
+
+    def test_prefers_path_over_custom_path(self):
+        """Should prefer PATH location over custom path."""
+        with patch('mlpstorage.dependency_check.shutil.which', return_value='/usr/bin/dlio_benchmark'):
+            path = check_dlio_with_hints(dlio_bin_path='/custom/path')
+            # Should use PATH, not custom path
+            assert path == '/usr/bin/dlio_benchmark'
+
+
+class TestCheckSshAvailable:
+    """Tests for check_ssh_available function."""
+
+    def test_finds_ssh_when_available(self):
+        """Should find ssh when available in PATH."""
+        with patch('mlpstorage.dependency_check.shutil.which', return_value='/usr/bin/ssh'):
+            path = check_ssh_available()
+            assert path == '/usr/bin/ssh'
+
+    def test_raises_dependency_error_when_missing(self):
+        """Should raise DependencyError when SSH is not found."""
+        mock_os_info = OSInfo(
+            system='Linux',
+            release='5.15.0',
+            machine='x86_64',
+            distro_id='ubuntu',
+            distro_name='Ubuntu',
+            distro_version='22.04'
+        )
+
+        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
+            with patch('mlpstorage.dependency_check.detect_os', return_value=mock_os_info):
+                with pytest.raises(DependencyError) as exc_info:
+                    check_ssh_available()
+
+                error = exc_info.value
+                assert 'ssh' in str(error).lower() or 'SSH' in str(error)
+
+    def test_error_contains_ubuntu_install_command(self):
+        """Error message should contain apt-get for Ubuntu."""
+        mock_os_info = OSInfo(
+            system='Linux',
+            release='5.15.0',
+            machine='x86_64',
+            distro_id='ubuntu',
+            distro_name='Ubuntu',
+            distro_version='22.04'
+        )
+
+        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
+            with patch('mlpstorage.dependency_check.detect_os', return_value=mock_os_info):
+                with pytest.raises(DependencyError) as exc_info:
+                    check_ssh_available()
+
+                error = exc_info.value
+                assert 'apt-get' in error.suggestion or 'apt-get' in str(error)
+
+    def test_error_contains_rhel_install_command(self):
+        """Error message should contain dnf for RHEL."""
+        mock_os_info = OSInfo(
+            system='Linux',
+            release='5.14.0',
+            machine='x86_64',
+            distro_id='rhel',
+            distro_name='Red Hat Enterprise Linux',
+            distro_version='8.5'
+        )
+
+        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
+            with patch('mlpstorage.dependency_check.detect_os', return_value=mock_os_info):
+                with pytest.raises(DependencyError) as exc_info:
+                    check_ssh_available()
+
+                error = exc_info.value
+                # RHEL uses openssh-clients (not openssh-client)
+                assert 'dnf' in error.suggestion or 'dnf' in str(error)
+
+    def test_error_contains_macos_message(self):
+        """Error message should mention macOS includes SSH."""
+        mock_os_info = OSInfo(
+            system='Darwin',
+            release='21.6.0',
+            machine='x86_64'
+        )
+
+        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
+            with patch('mlpstorage.dependency_check.detect_os', return_value=mock_os_info):
+                with pytest.raises(DependencyError) as exc_info:
+                    check_ssh_available()
+
+                error = exc_info.value
+                # macOS should say SSH is included
+                assert 'macOS' in error.suggestion or 'included' in error.suggestion.lower()
