@@ -4,14 +4,14 @@
 
 **Core Value:** Orchestrate multiple benchmark types (training, checkpointing, kv-cache, vectordb) across distributed systems and produce verified, rules-compliant results.
 
-**Current Focus:** Phase 6 In Progress - SSH-Based Host Collection
+**Current Focus:** Phase 6 COMPLETE - SSH-Based Host Collection
 
 ## Current Position
 
 **Phase:** 6 of 10 - SSH-Based Host Collection
-**Plan:** 06-02 of 3 (COMPLETE)
-**Status:** In progress
-**Last activity:** 2026-01-24 - Completed 06-02-PLAN.md (SSHClusterCollector Implementation)
+**Plan:** 06-03 of 3 (COMPLETE)
+**Status:** Phase complete
+**Last activity:** 2026-01-24 - Completed 06-03-PLAN.md (Benchmark Base Integration)
 
 **Progress:**
 ```
@@ -20,22 +20,22 @@ Phase 2:  [##########] 100% (5/5 plans) COMPLETE
 Phase 3:  [##########] 100% (3/3 plans) COMPLETE
 Phase 4:  [##########] 100% (3/3 plans) COMPLETE
 Phase 5:  [##########] 100% (3/3 plans) COMPLETE
-Phase 6:  [######----] 67% (2/3 plans)
+Phase 6:  [##########] 100% (3/3 plans) COMPLETE
 Phase 7:  [----------] 0%
 Phase 8:  [----------] 0%
 Phase 9:  [----------] 0%
 Phase 10: [----------] 0%
-Overall:  [########--] 81% (21/26 plans complete)
+Overall:  [########--] 85% (22/26 plans complete)
 ```
 
 ## Performance Metrics
 
 | Metric | Value |
 |--------|-------|
-| Phases completed | 5/10 |
-| Requirements delivered | 10/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02, BENCH-03, BENCH-04, BENCH-05) |
-| Plans executed | 21 |
-| Avg tasks per plan | 2.4 |
+| Phases completed | 6/10 |
+| Requirements delivered | 11/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02, BENCH-03, BENCH-04, BENCH-05, HOST-03) |
+| Plans executed | 22 |
+| Avg tasks per plan | 2.5 |
 
 ## Accumulated Context
 
@@ -97,6 +97,9 @@ Overall:  [########--] 81% (21/26 plans complete)
 | Localhost skip for SSH collection | Use direct local collection for localhost/127.0.0.1/::1 | 2026-01-24 |
 | Parallel SSH collection | ThreadPoolExecutor with configurable max_workers for parallel host collection | 2026-01-24 |
 | BatchMode SSH for collection | Use BatchMode=yes for non-interactive automated collection | 2026-01-24 |
+| SSH for non-MPI benchmarks | Use SSH collection when exec_type is not MPI | 2026-01-24 |
+| Start/end cluster snapshots | ClusterSnapshots dataclass for HOST-03 requirement | 2026-01-24 |
+| Backward-compatible cluster_information | Set cluster_information from start snapshot for compatibility | 2026-01-24 |
 
 ### Technical Patterns Established
 
@@ -137,6 +140,8 @@ Overall:  [########--] 81% (21/26 plans complete)
 - ClusterCollectorInterface implementation pattern (SSHClusterCollector)
 - ThreadPoolExecutor for parallel operations
 - Localhost detection and optimization pattern
+- Collection method selection based on exec_type
+- Start/end cluster snapshots for state comparison
 
 ### Open TODOs
 
@@ -145,7 +150,7 @@ Overall:  [########--] 81% (21/26 plans complete)
 - [x] Complete Phase 3: KV Cache Benchmark Integration
 - [x] Complete Phase 4: VectorDB Benchmark Integration
 - [x] Complete Phase 5: Benchmark Validation Pipeline Integration
-- [ ] Complete Phase 6: SSH-Based Host Collection (2/3 plans done)
+- [x] Complete Phase 6: SSH-Based Host Collection
 - [ ] Review external KV cache code in `kv_cache_benchmark/`
 - [ ] Review VectorDB scripts from external branch
 - [ ] Verify DLIO parquet support requirements
@@ -161,7 +166,7 @@ None currently.
 - 6-week feature freeze timeline
 - Existing KVCacheBenchmark class exists but needs full integration
 - VectorDBBenchmark class now has metadata property, write_metadata integration, and comprehensive tests
-- MPI collection works, SSH collection now implemented via SSHClusterCollector
+- MPI collection works, SSH collection now integrated into benchmark base class
 - Environment module now provides OS-aware install hints
 - Dependency checking now uses environment module for OS-specific error messages
 - validate_benchmark_environment now collects all issues before reporting
@@ -176,17 +181,20 @@ None currently.
 - 29 unit tests for cluster_collector parsers (from 06-01)
 - SSHClusterCollector implemented with parallel collection and localhost optimization
 - 33 new unit tests for SSHClusterCollector and _is_localhost (from 06-02)
-- Total cluster_collector tests: 62
+- SSH collection integrated into Benchmark base class with start/end snapshots (06-03)
+- ClusterSnapshots dataclass for HOST-03 requirement (start/end state)
+- 15 new tests for collection selection and cluster snapshots (from 06-03)
+- Total cluster_collector tests: 62, Total benchmark_base tests: 54
 
 ## Session Continuity
 
 ### Last Session
 - **Date:** 2026-01-24
-- **Accomplished:** Completed 06-02-PLAN.md (SSHClusterCollector Implementation)
-- **Next:** Continue Phase 6 with 06-03 (wiring SSHClusterCollector into benchmarks)
+- **Accomplished:** Completed 06-03-PLAN.md (Benchmark Base Integration)
+- **Next:** Ready for Phase 7
 
 ### Context for Next Session
-- Phase 6 IN PROGRESS: SSH-Based Host Collection
+- Phase 6 COMPLETE: SSH-Based Host Collection
   - 06-01: /proc Parsers for HOST-02 COMPLETE
     - MountInfo and CgroupInfo dataclasses added
     - parse_proc_vmstat, parse_proc_mounts, parse_proc_cgroups functions added
@@ -198,14 +206,20 @@ None currently.
     - SSHClusterCollector implementing ClusterCollectorInterface
     - Parallel collection via ThreadPoolExecutor
     - 33 new unit tests for SSHClusterCollector
-  - 06-03: Pending (integration with benchmarks)
+  - 06-03: Benchmark Base Integration COMPLETE
+    - ClusterSnapshots dataclass in models.py
+    - SSH collection integrated into Benchmark base class
+    - _should_use_ssh_collection, _collect_via_ssh, _collect_cluster_start, _collect_cluster_end methods
+    - run() calls start/end collection (HOST-03)
+    - 15 new unit tests for collection selection
 - Available for downstream use:
-  - All /proc parsers ready for collection
-  - collect_local_system_info returns comprehensive system info
-  - SSHClusterCollector ready for non-MPI benchmarks
+  - Non-MPI benchmarks automatically use SSH collection
+  - ClusterSnapshots captures start/end state
+  - Metadata includes cluster_snapshots
 - Note: vectordb and kvcache not yet wired into cli_parser.py
 - Note: 2 pre-existing test failures in test_rules_calculations.py (unrelated to Phase 6)
 - No blockers
+- Ready to proceed with Phase 7
 
 ---
 
