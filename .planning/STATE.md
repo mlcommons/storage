@@ -9,9 +9,9 @@
 ## Current Position
 
 **Phase:** 6 of 10 - SSH-Based Host Collection
-**Plan:** 06-01 of 3 (COMPLETE)
+**Plan:** 06-02 of 3 (COMPLETE)
 **Status:** In progress
-**Last activity:** 2026-01-24 - Completed 06-01-PLAN.md (/proc Parsers for HOST-02)
+**Last activity:** 2026-01-24 - Completed 06-02-PLAN.md (SSHClusterCollector Implementation)
 
 **Progress:**
 ```
@@ -20,12 +20,12 @@ Phase 2:  [##########] 100% (5/5 plans) COMPLETE
 Phase 3:  [##########] 100% (3/3 plans) COMPLETE
 Phase 4:  [##########] 100% (3/3 plans) COMPLETE
 Phase 5:  [##########] 100% (3/3 plans) COMPLETE
-Phase 6:  [###-------] 33% (1/3 plans)
+Phase 6:  [######----] 67% (2/3 plans)
 Phase 7:  [----------] 0%
 Phase 8:  [----------] 0%
 Phase 9:  [----------] 0%
 Phase 10: [----------] 0%
-Overall:  [########--] 77% (20/26 plans complete)
+Overall:  [########--] 81% (21/26 plans complete)
 ```
 
 ## Performance Metrics
@@ -34,7 +34,7 @@ Overall:  [########--] 77% (20/26 plans complete)
 |--------|-------|
 | Phases completed | 5/10 |
 | Requirements delivered | 10/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02, BENCH-03, BENCH-04, BENCH-05) |
-| Plans executed | 20 |
+| Plans executed | 21 |
 | Avg tasks per plan | 2.4 |
 
 ## Accumulated Context
@@ -94,12 +94,15 @@ Overall:  [########--] 77% (20/26 plans complete)
 | Base MultiRunRulesChecker for preview benchmarks | KV Cache and VectorDB use base checker for multi-run (no specific submission rules yet) | 2026-01-24 |
 | VECTORDB_REQUIREMENTS follows KVCACHE pattern | Consistent preview benchmark documentation structure | 2026-01-24 |
 | Follow existing dataclass pattern for /proc parsers | Match HostDiskInfo/HostNetworkInfo pattern with to_dict/from_dict | 2026-01-24 |
+| Localhost skip for SSH collection | Use direct local collection for localhost/127.0.0.1/::1 | 2026-01-24 |
+| Parallel SSH collection | ThreadPoolExecutor with configurable max_workers for parallel host collection | 2026-01-24 |
+| BatchMode SSH for collection | Use BatchMode=yes for non-interactive automated collection | 2026-01-24 |
 
 ### Technical Patterns Established
 
 - Benchmark base class pattern: Subclass, set BENCHMARK_TYPE, implement _run()
 - Registry pattern for CLI construction
-- MPI-based cluster collection existing, SSH to be added
+- MPI-based cluster collection existing, SSH collection now added
 - DLIO as underlying engine for training/checkpointing
 - Dataclass-based models for structured data
 - Regex-based parsing for lockfile requirements.txt format
@@ -131,6 +134,9 @@ Overall:  [########--] 77% (20/26 plans complete)
 - Preview benchmark requirements formatting pattern
 - RunRulesChecker test pattern with mock logger and valid run fixtures
 - Line-by-line /proc file parsing pattern with graceful error handling
+- ClusterCollectorInterface implementation pattern (SSHClusterCollector)
+- ThreadPoolExecutor for parallel operations
+- Localhost detection and optimization pattern
 
 ### Open TODOs
 
@@ -139,7 +145,7 @@ Overall:  [########--] 77% (20/26 plans complete)
 - [x] Complete Phase 3: KV Cache Benchmark Integration
 - [x] Complete Phase 4: VectorDB Benchmark Integration
 - [x] Complete Phase 5: Benchmark Validation Pipeline Integration
-- [ ] Complete Phase 6: SSH-Based Host Collection
+- [ ] Complete Phase 6: SSH-Based Host Collection (2/3 plans done)
 - [ ] Review external KV cache code in `kv_cache_benchmark/`
 - [ ] Review VectorDB scripts from external branch
 - [ ] Verify DLIO parquet support requirements
@@ -155,7 +161,7 @@ None currently.
 - 6-week feature freeze timeline
 - Existing KVCacheBenchmark class exists but needs full integration
 - VectorDBBenchmark class now has metadata property, write_metadata integration, and comprehensive tests
-- MPI collection works, SSH collection needs to be added
+- MPI collection works, SSH collection now implemented via SSHClusterCollector
 - Environment module now provides OS-aware install hints
 - Dependency checking now uses environment module for OS-specific error messages
 - validate_benchmark_environment now collects all issues before reporting
@@ -167,14 +173,17 @@ None currently.
 - VectorDB has comprehensive unit tests: 53 CLI tests + 15 benchmark tests = 68 total
 - VectorDB rules checker has 12 unit tests for complete validation coverage
 - cluster_collector.py now has parsers for /proc/vmstat, /proc/mounts, /proc/cgroups
-- 29 new unit tests for cluster_collector parsers
+- 29 unit tests for cluster_collector parsers (from 06-01)
+- SSHClusterCollector implemented with parallel collection and localhost optimization
+- 33 new unit tests for SSHClusterCollector and _is_localhost (from 06-02)
+- Total cluster_collector tests: 62
 
 ## Session Continuity
 
 ### Last Session
 - **Date:** 2026-01-24
-- **Accomplished:** Completed 06-01-PLAN.md (/proc Parsers for HOST-02)
-- **Next:** Continue Phase 6 with 06-02
+- **Accomplished:** Completed 06-02-PLAN.md (SSHClusterCollector Implementation)
+- **Next:** Continue Phase 6 with 06-03 (wiring SSHClusterCollector into benchmarks)
 
 ### Context for Next Session
 - Phase 6 IN PROGRESS: SSH-Based Host Collection
@@ -183,11 +192,17 @@ None currently.
     - parse_proc_vmstat, parse_proc_mounts, parse_proc_cgroups functions added
     - collect_local_system_info updated to include vmstat, mounts, cgroups
     - 29 unit tests added to tests/unit/test_cluster_collector.py
-  - 06-02: Pending (SSH collection implementation)
-  - 06-03: Pending
+  - 06-02: SSHClusterCollector Implementation COMPLETE
+    - _is_localhost helper for localhost detection
+    - SSH_COLLECTOR_SCRIPT for remote execution
+    - SSHClusterCollector implementing ClusterCollectorInterface
+    - Parallel collection via ThreadPoolExecutor
+    - 33 new unit tests for SSHClusterCollector
+  - 06-03: Pending (integration with benchmarks)
 - Available for downstream use:
-  - All /proc parsers ready for SSH-based collection
+  - All /proc parsers ready for collection
   - collect_local_system_info returns comprehensive system info
+  - SSHClusterCollector ready for non-MPI benchmarks
 - Note: vectordb and kvcache not yet wired into cli_parser.py
 - Note: 2 pre-existing test failures in test_rules_calculations.py (unrelated to Phase 6)
 - No blockers
