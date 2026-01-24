@@ -9,15 +9,15 @@
 ## Current Position
 
 **Phase:** 3 of 10 - KV Cache Benchmark Integration
-**Plan:** 03-02 of 5 (COMPLETE)
+**Plan:** 03-03 of 5 (COMPLETE)
 **Status:** In Progress
-**Last activity:** 2026-01-24 - Completed 03-02-PLAN.md
+**Last activity:** 2026-01-24 - Completed 03-03-PLAN.md
 
 **Progress:**
 ```
 Phase 1:  [##########] 100% (5/5 plans) COMPLETE
 Phase 2:  [##########] 100% (5/5 plans) COMPLETE
-Phase 3:  [####------] 40% (2/5 plans)
+Phase 3:  [######----] 60% (3/5 plans)
 Phase 4:  [----------] 0%
 Phase 5:  [----------] 0%
 Phase 6:  [----------] 0%
@@ -25,7 +25,7 @@ Phase 7:  [----------] 0%
 Phase 8:  [----------] 0%
 Phase 9:  [----------] 0%
 Phase 10: [----------] 0%
-Overall:  [####------] 44% (12/27 plans complete)
+Overall:  [#####-----] 48% (13/27 plans complete)
 ```
 
 ## Performance Metrics
@@ -34,8 +34,8 @@ Overall:  [####------] 44% (12/27 plans complete)
 |--------|-------|
 | Phases completed | 2/10 |
 | Requirements delivered | 5/21 (PKG-01, PKG-02, PKG-03, CLI integration, Fail-fast validation) |
-| Plans executed | 12 |
-| Avg tasks per plan | 2.3 |
+| Plans executed | 13 |
+| Avg tasks per plan | 2.4 |
 
 ## Accumulated Context
 
@@ -81,6 +81,9 @@ Overall:  [####------] 44% (12/27 plans complete)
 | MPI wrapper pattern for KV cache | Follow DLIOBenchmark pattern for MPI command wrapping | 2026-01-24 |
 | num_processes defaults to len(hosts) | Sensible default - one process per host when not specified | 2026-01-24 |
 | Cluster collection for run only | Collect cluster information only for 'run' command, not 'datasize' | 2026-01-24 |
+| Model field consistency | Add 'model' field in addition to 'kvcache_model' for history compatibility | 2026-01-24 |
+| num_processes always in metadata | Include num_processes in metadata even when None for consistency | 2026-01-24 |
+| Conditional distributed fields | hosts and exec_type only appear in metadata when set | 2026-01-24 |
 
 ### Technical Patterns Established
 
@@ -108,6 +111,7 @@ Overall:  [####------] 44% (12/27 plans complete)
 - Validation hook pattern in base class
 - Distributed argument builder pattern (reuse common args)
 - MPI command wrapping pattern (generate_mpi_prefix_cmd)
+- Consistent metadata structure across benchmark types
 
 ### Open TODOs
 
@@ -134,13 +138,14 @@ None currently.
 - Fail-fast validation integrated into main.py before benchmark instantiation
 - KV cache CLI arguments now support distributed execution (run command only)
 - KVCacheBenchmark now wraps commands with MPI prefix when exec_type=MPI
+- KV cache metadata includes all required fields for history integration
 
 ## Session Continuity
 
 ### Last Session
 - **Date:** 2026-01-24
-- **Accomplished:** Completed 03-02-PLAN.md execution (MPI Execution Support)
-- **Next:** Execute 03-03-PLAN.md (Result collection and metrics)
+- **Accomplished:** Completed 03-03-PLAN.md execution (Metadata and History Integration)
+- **Next:** Execute 03-04-PLAN.md (Validation and error handling)
 
 ### Context for Next Session
 - Phase 3 IN PROGRESS: KV Cache Benchmark Integration
@@ -152,12 +157,16 @@ None currently.
     - KVCacheBenchmark._build_kvcache_command() now wraps with MPI prefix
     - Cluster information collected for 'run' command
     - 12 unit tests in tests/unit/test_benchmarks_kvcache.py
-  - 03-03: Result collection and metrics (NEXT)
-  - 03-04: Validation and error handling
+  - 03-03: Metadata and History Integration COMPLETE
+    - KVCacheBenchmark.metadata includes model, num_processes, hosts, exec_type
+    - 5 new metadata tests in tests/unit/test_benchmarks_kvcache.py
+    - Total: 17 benchmark tests, 38 CLI tests (55 total)
+  - 03-04: Validation and error handling (NEXT)
   - 03-05: Integration testing
 - Available for downstream use:
   - KV cache run command now accepts: --hosts, --exec-type, --num-processes, --mpi-bin, --oversubscribe, --allow-run-as-root, --mpi-params
   - KVCacheBenchmark generates MPI-wrapped commands when exec_type=MPI
+  - KVCacheBenchmark.metadata includes all required fields for history integration
   - num_processes defaults to len(hosts) when not specified
 - Note: kvcache not yet wired into cli_parser.py (out of scope)
 - No blockers
