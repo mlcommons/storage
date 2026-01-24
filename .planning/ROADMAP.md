@@ -205,6 +205,12 @@ Plans:
 4. All three new models have validation rules for CLOSED/OPEN submission categories
 5. User can generate data for all three models via `mlpstorage training datagen`
 
+**Plans:** 2 plans
+
+Plans:
+- [ ] 08-01-PLAN.md - Model constants and YAML configurations
+- [ ] 08-02-PLAN.md - Validation rules and unit tests
+
 ---
 
 ## Phase 9: DLIO Parquet Support
