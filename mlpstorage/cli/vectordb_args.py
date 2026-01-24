@@ -2,7 +2,7 @@
 VectorDB benchmark CLI argument builder.
 
 This module defines the CLI arguments for the VectorDB benchmark,
-including datagen and run-search commands.
+including datagen and run commands.
 """
 
 from mlpstorage.config import VECTOR_DTYPES, DISTRIBUTIONS, VECTORDB_DEFAULT_RUNTIME
@@ -30,13 +30,13 @@ def add_vectordb_arguments(parser):
         'datagen',
         help=HELP_MESSAGES['vdb_datagen']
     )
-    run_search = vectordb_subparsers.add_parser(
-        'run-search',
-        help=HELP_MESSAGES['vdb_run_search']
+    run_benchmark = vectordb_subparsers.add_parser(
+        'run',
+        help=HELP_MESSAGES['vdb_run']
     )
 
-    # Common arguments for both datagen and run-search
-    for _parser in [datagen, run_search]:
+    # Common arguments for both datagen and run
+    for _parser in [datagen, run_benchmark]:
         _parser.add_argument(
             '--host', '-s',
             type=str,
@@ -107,28 +107,28 @@ def add_vectordb_arguments(parser):
         help="Force recreate collection if it exists"
     )
 
-    # Run-search specific arguments
-    run_search.add_argument(
+    # Run specific arguments
+    run_benchmark.add_argument(
         '--num-query-processes',
         type=int,
         default=1,
         help=HELP_MESSAGES['num_query_processes']
     )
-    run_search.add_argument(
+    run_benchmark.add_argument(
         '--batch-size',
         type=int,
         default=1,
         help=HELP_MESSAGES['query_batch_size']
     )
-    run_search.add_argument(
+    run_benchmark.add_argument(
         '--report-count',
         type=int,
         default=100,
         help=HELP_MESSAGES['vdb_report_count']
     )
 
-    # End condition group for run-search
-    end_group = run_search.add_argument_group(
+    # End condition group for run
+    end_group = run_benchmark.add_argument_group(
         "Provide an end condition of runtime (in seconds) or total number of "
         "queries to execute. The default is to run for 60 seconds"
     )
@@ -145,5 +145,5 @@ def add_vectordb_arguments(parser):
     )
 
     # Add universal arguments to all subcommands
-    for _parser in [datagen, run_search]:
+    for _parser in [datagen, run_benchmark]:
         add_universal_arguments(_parser)
