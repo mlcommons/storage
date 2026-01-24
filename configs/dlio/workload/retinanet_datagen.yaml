@@ -1,0 +1,18 @@
+model:
+  name: retinanet
+  type: cnn
+
+framework: pytorch
+
+workflow:
+  generate_data: True
+  train: False
+  checkpoint: False
+
+dataset:
+  data_folder: data/retinanet/
+  format: jpeg
+  num_files_train: 1743042
+  num_samples_per_file: 1
+  record_length_bytes: 153600
+  record_length_bytes_stdev: 51200

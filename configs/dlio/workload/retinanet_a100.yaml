@@ -1,0 +1,32 @@
+model:
+  name: retinanet
+  type: cnn
+
+framework: pytorch
+
+workflow:
+  generate_data: False
+  train: True
+  checkpoint: False
+
+dataset:
+  data_folder: data/retinanet/
+  format: jpeg
+  num_files_train: 1743042
+  num_samples_per_file: 1
+  record_length_bytes: 153600
+  record_length_bytes_stdev: 51200
+
+reader:
+  data_loader: pytorch
+  batch_size: 16
+  read_threads: 8
+  file_shuffle: seed
+  sample_shuffle: seed
+
+train:
+  epochs: 5
+  computation_time: 0.210
+
+metric:
+  au: 0.85
