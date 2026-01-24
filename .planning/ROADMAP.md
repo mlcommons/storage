@@ -106,9 +106,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 04-01-PLAN.md - CLI command naming consistency (run-search to run)
-- [ ] 04-02-PLAN.md - Metadata enhancement for history integration
-- [ ] 04-03-PLAN.md - Unit tests for VectorDB CLI and benchmark
+- [x] 04-01-PLAN.md - CLI command naming consistency (run-search to run)
+- [x] 04-02-PLAN.md - Metadata enhancement for history integration
+- [x] 04-03-PLAN.md - Unit tests for VectorDB CLI and benchmark
 
 ---
 
@@ -227,7 +227,7 @@ Plans:
 | 1 | Package Management Foundation | Complete | PKG-01, PKG-02, PKG-03 |
 | 2 | Environment Validation and Fail-Fast | Complete | UX-01, UX-02, UX-03 |
 | 3 | KV Cache Benchmark Integration | Complete | BENCH-01, BENCH-02 |
-| 4 | VectorDB Benchmark Integration | In Progress | BENCH-03, BENCH-04 |
+| 4 | VectorDB Benchmark Integration | Complete | BENCH-03, BENCH-04 |
 | 5 | Benchmark Validation Pipeline Integration | Not Started | BENCH-05 |
 | 6 | SSH-Based Host Collection | Not Started | HOST-01, HOST-02, HOST-03 |
 | 7 | Time-Series Host Data Collection | Not Started | HOST-04, HOST-05 |
