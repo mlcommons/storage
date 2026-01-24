@@ -11,6 +11,7 @@ Tests cover:
 
 import json
 import os
+import time
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 from argparse import Namespace
@@ -435,8 +436,11 @@ class TestBenchmarkRun:
         with patch.object(benchmark, '_run', return_value=0):
             with patch.object(benchmark, '_collect_cluster_start'):
                 with patch.object(benchmark, '_collect_cluster_end'):
-                    with patch('time.time', side_effect=[100.0, 105.0]):
-                        benchmark.run()
+                    with patch.object(benchmark, '_start_timeseries_collection'):
+                        with patch.object(benchmark, '_stop_timeseries_collection'):
+                            with patch.object(benchmark, 'write_timeseries_data'):
+                                with patch('time.time', side_effect=[100.0, 105.0]):
+                                    benchmark.run()
 
         assert benchmark.runtime == 5.0
 
@@ -1002,3 +1006,339 @@ class TestBenchmarkClusterSnapshots:
 
         # Should not create cluster_snapshots
         assert not hasattr(benchmark, 'cluster_snapshots') or benchmark.cluster_snapshots is None
+
+
+# =============================================================================
+# Time-Series Collection Integration Tests
+# =============================================================================
+
+class TestTimeSeriesCollectionIntegration:
+    """Tests for time-series collection integration in Benchmark base."""
+
+    @pytest.fixture
+    def mock_logger(self):
+        """Create a mock logger."""
+        logger = MagicMock()
+        logger.debug = MagicMock()
+        logger.warning = MagicMock()
+        logger.status = MagicMock()
+        logger.verbose = MagicMock()
+        logger.verboser = MagicMock()
+        return logger
+
+    def _create_benchmark(self, tmp_path, mock_logger, **kwargs):
+        """Helper to create a benchmark with specific args."""
+        defaults = {
+            'debug': False,
+            'verbose': False,
+            'stream_log_level': 'INFO',
+            'results_dir': str(tmp_path),
+            'model': 'unet3d',
+            'command': 'run',
+            'num_processes': 8,
+            'what_if': False,
+            'hosts': None,
+            'skip_timeseries': False,
+            'timeseries_interval': 10.0,
+            'max_timeseries_samples': 100,
+        }
+        defaults.update(kwargs)
+        args = Namespace(**defaults)
+
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+            mock_gen.return_value = str(tmp_path / "output")
+            os.makedirs(tmp_path / "output", exist_ok=True)
+            benchmark = ConcreteBenchmark(args, logger=mock_logger, run_datetime='20260124_120000')
+
+        return benchmark
+
+    def test_should_collect_timeseries_default_true(self, tmp_path, mock_logger):
+        """Time-series collection should be enabled by default for run command."""
+        benchmark = self._create_benchmark(tmp_path, mock_logger, command='run')
+
+        assert benchmark._should_collect_timeseries() is True
+
+    def test_should_collect_timeseries_skip_flag(self, tmp_path, mock_logger):
+        """Time-series collection should be disabled when skip flag is set."""
+        benchmark = self._create_benchmark(tmp_path, mock_logger, skip_timeseries=True)
+
+        assert benchmark._should_collect_timeseries() is False
+
+    def test_should_collect_timeseries_datagen_disabled(self, tmp_path, mock_logger):
+        """Time-series collection should be disabled for datagen command."""
+        benchmark = self._create_benchmark(tmp_path, mock_logger, command='datagen')
+
+        assert benchmark._should_collect_timeseries() is False
+
+    def test_should_collect_timeseries_whatif_disabled(self, tmp_path, mock_logger):
+        """Time-series collection should be disabled in what-if mode."""
+        benchmark = self._create_benchmark(tmp_path, mock_logger, what_if=True, command='run')
+
+        assert benchmark._should_collect_timeseries() is False
+
+    def test_start_timeseries_creates_collector(self, tmp_path, mock_logger):
+        """_start_timeseries_collection should create a collector."""
+        benchmark = self._create_benchmark(
+            tmp_path, mock_logger,
+            command='run',
+            timeseries_interval=0.1,
+            max_timeseries_samples=10
+        )
+
+        benchmark._start_timeseries_collection()
+
+        assert benchmark._timeseries_collector is not None
+        assert benchmark._timeseries_collector.is_running
+
+        # Cleanup
+        benchmark._timeseries_collector.stop()
+
+    def test_start_timeseries_multihost_with_hosts(self, tmp_path, mock_logger):
+        """Should use MultiHostTimeSeriesCollector when hosts are provided."""
+        from mlpstorage.cluster_collector import MultiHostTimeSeriesCollector
+
+        benchmark = self._create_benchmark(
+            tmp_path, mock_logger,
+            command='run',
+            hosts=['localhost'],
+            timeseries_interval=0.1
+        )
+
+        benchmark._start_timeseries_collection()
+
+        assert isinstance(benchmark._timeseries_collector, MultiHostTimeSeriesCollector)
+
+        # Cleanup
+        benchmark._timeseries_collector.stop()
+
+    def test_start_timeseries_singlehost_without_hosts(self, tmp_path, mock_logger):
+        """Should use TimeSeriesCollector when no hosts provided."""
+        from mlpstorage.cluster_collector import TimeSeriesCollector
+
+        benchmark = self._create_benchmark(
+            tmp_path, mock_logger,
+            command='run',
+            hosts=None,
+            timeseries_interval=0.1
+        )
+
+        benchmark._start_timeseries_collection()
+
+        assert isinstance(benchmark._timeseries_collector, TimeSeriesCollector)
+
+        # Cleanup
+        benchmark._timeseries_collector.stop()
+
+    def test_stop_timeseries_creates_data(self, tmp_path, mock_logger):
+        """_stop_timeseries_collection should create TimeSeriesData."""
+        benchmark = self._create_benchmark(
+            tmp_path, mock_logger,
+            command='run',
+            hosts=None,
+            timeseries_interval=0.1
+        )
+
+        benchmark._start_timeseries_collection()
+        time.sleep(0.25)
+        benchmark._stop_timeseries_collection()
+
+        assert benchmark._timeseries_data is not None
+        assert benchmark._timeseries_data.num_samples >= 1
+
+    def test_stop_timeseries_multihost_creates_data(self, tmp_path, mock_logger):
+        """_stop_timeseries_collection should create TimeSeriesData for multi-host."""
+        benchmark = self._create_benchmark(
+            tmp_path, mock_logger,
+            command='run',
+            hosts=['localhost'],
+            timeseries_interval=0.1
+        )
+
+        benchmark._start_timeseries_collection()
+        time.sleep(0.25)
+        benchmark._stop_timeseries_collection()
+
+        assert benchmark._timeseries_data is not None
+        assert 'localhost' in benchmark._timeseries_data.hosts_collected
+
+    def test_write_timeseries_creates_file(self, tmp_path, mock_logger):
+        """write_timeseries_data should create JSON file."""
+        from mlpstorage.rules.models import TimeSeriesData, TimeSeriesSample
+
+        benchmark = self._create_benchmark(tmp_path, mock_logger)
+
+        # Setup output path
+        benchmark.run_result_output = str(tmp_path)
+        benchmark.timeseries_file_path = str(tmp_path / 'test_timeseries.json')
+
+        # Create test data
+        sample = TimeSeriesSample(
+            timestamp='2026-01-24T12:00:00Z',
+            hostname='testhost',
+            vmstat={'key': 123}
+        )
+        benchmark._timeseries_data = TimeSeriesData(
+            collection_interval_seconds=10.0,
+            start_time='2026-01-24T12:00:00Z',
+            end_time='2026-01-24T12:01:00Z',
+            num_samples=1,
+            samples_by_host={'testhost': [sample]},
+            collection_method='local',
+            hosts_requested=['testhost'],
+            hosts_collected=['testhost']
+        )
+
+        benchmark.write_timeseries_data()
+
+        assert os.path.exists(benchmark.timeseries_file_path)
+
+        # Verify content
+        with open(benchmark.timeseries_file_path) as f:
+            data = json.load(f)
+        assert data['num_samples'] == 1
+        assert 'testhost' in data['samples_by_host']
+
+    def test_timeseries_file_follows_naming_convention(self, tmp_path, mock_logger):
+        """Time-series file should follow {benchmark_type}_{datetime}_timeseries.json pattern (HOST-04)."""
+        benchmark = self._create_benchmark(tmp_path, mock_logger)
+        benchmark.run_result_output = str(tmp_path)
+
+        # Check filename follows pattern
+        assert benchmark.timeseries_filename.endswith('_timeseries.json')
+        assert benchmark.BENCHMARK_TYPE.value in benchmark.timeseries_filename
+        assert benchmark.run_datetime in benchmark.timeseries_filename
+
+    def test_metadata_includes_timeseries_reference(self, tmp_path, mock_logger):
+        """metadata property should include time-series data reference (HOST-04)."""
+        from mlpstorage.rules.models import TimeSeriesData, TimeSeriesSample
+
+        benchmark = self._create_benchmark(tmp_path, mock_logger)
+        benchmark.run_result_output = str(tmp_path)
+
+        sample = TimeSeriesSample(
+            timestamp='2026-01-24T12:00:00Z',
+            hostname='testhost'
+        )
+        benchmark._timeseries_data = TimeSeriesData(
+            collection_interval_seconds=10.0,
+            start_time='2026-01-24T12:00:00Z',
+            end_time='2026-01-24T12:01:00Z',
+            num_samples=5,
+            samples_by_host={'testhost': [sample]},
+            collection_method='local',
+            hosts_requested=['testhost'],
+            hosts_collected=['testhost']
+        )
+
+        metadata = benchmark.metadata
+
+        assert 'timeseries_data' in metadata
+        assert metadata['timeseries_data']['num_samples'] == 5
+        assert metadata['timeseries_data']['interval_seconds'] == 10.0
+        assert metadata['timeseries_data']['file'] == benchmark.timeseries_filename
+
+    def test_run_integrates_timeseries_collection(self, tmp_path, mock_logger):
+        """run() should start and stop time-series collection."""
+        benchmark = self._create_benchmark(
+            tmp_path, mock_logger,
+            command='run',
+            hosts=None,
+            timeseries_interval=0.1,
+            skip_timeseries=False
+        )
+
+        # Track calls
+        run_called = []
+        original_run = benchmark._run
+
+        def tracking_run():
+            run_called.append('run')
+            time.sleep(0.2)
+            return 0
+
+        benchmark._run = tracking_run
+
+        result = benchmark.run()
+
+        assert result == 0
+        assert 'run' in run_called
+        # Time-series collection should have been performed
+        assert benchmark._timeseries_data is not None
+
+    def test_timeseries_uses_background_thread(self, tmp_path, mock_logger):
+        """Time-series collection should use background thread (HOST-05 architecture)."""
+        benchmark = self._create_benchmark(
+            tmp_path, mock_logger,
+            command='run',
+            hosts=None,
+            timeseries_interval=0.1
+        )
+
+        benchmark._start_timeseries_collection()
+
+        # Verify collector uses threading
+        assert hasattr(benchmark._timeseries_collector, '_thread')
+        assert benchmark._timeseries_collector._thread.name == 'TimeSeriesCollector'
+
+        # Cleanup
+        benchmark._timeseries_collector.stop()
+
+    def test_timeseries_multihost_uses_correct_thread_name(self, tmp_path, mock_logger):
+        """MultiHostTimeSeriesCollector should have correct thread name."""
+        benchmark = self._create_benchmark(
+            tmp_path, mock_logger,
+            command='run',
+            hosts=['localhost'],
+            timeseries_interval=0.1
+        )
+
+        benchmark._start_timeseries_collection()
+
+        # Verify collector uses threading
+        assert hasattr(benchmark._timeseries_collector, '_thread')
+        assert benchmark._timeseries_collector._thread.name == 'MultiHostTimeSeriesCollector'
+
+        # Cleanup
+        benchmark._timeseries_collector.stop()
+
+    def test_timeseries_skipped_for_datagen_command(self, tmp_path, mock_logger):
+        """Time-series collection should be skipped for datagen command."""
+        benchmark = self._create_benchmark(
+            tmp_path, mock_logger,
+            command='datagen'
+        )
+
+        benchmark._start_timeseries_collection()
+
+        assert benchmark._timeseries_collector is None
+
+    def test_timeseries_skipped_for_configview_command(self, tmp_path, mock_logger):
+        """Time-series collection should be skipped for configview command."""
+        benchmark = self._create_benchmark(
+            tmp_path, mock_logger,
+            command='configview'
+        )
+
+        benchmark._start_timeseries_collection()
+
+        assert benchmark._timeseries_collector is None
+
+    def test_timeseries_stop_without_start_noop(self, tmp_path, mock_logger):
+        """_stop_timeseries_collection should be no-op if collector is None."""
+        benchmark = self._create_benchmark(tmp_path, mock_logger)
+        benchmark._timeseries_collector = None
+
+        # Should not raise
+        benchmark._stop_timeseries_collection()
+
+        assert benchmark._timeseries_data is None
+
+    def test_write_timeseries_without_data_noop(self, tmp_path, mock_logger):
+        """write_timeseries_data should be no-op if no data collected."""
+        benchmark = self._create_benchmark(tmp_path, mock_logger)
+        benchmark._timeseries_data = None
+
+        # Should not raise
+        benchmark.write_timeseries_data()
+
+        assert not os.path.exists(benchmark.timeseries_file_path)
