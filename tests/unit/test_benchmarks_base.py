@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch, PropertyMock
 from argparse import Namespace
 
 from mlpstorage.benchmarks.base import Benchmark
-from mlpstorage.config import BENCHMARK_TYPES, PARAM_VALIDATION
+from mlpstorage.config import BENCHMARK_TYPES, PARAM_VALIDATION, EXEC_TYPE
 
 
 class ConcreteBenchmark(Benchmark):
@@ -433,8 +433,10 @@ class TestBenchmarkRun:
     def test_tracks_runtime(self, benchmark):
         """Should track runtime."""
         with patch.object(benchmark, '_run', return_value=0):
-            with patch('time.time', side_effect=[100.0, 105.0]):
-                benchmark.run()
+            with patch.object(benchmark, '_collect_cluster_start'):
+                with patch.object(benchmark, '_collect_cluster_end'):
+                    with patch('time.time', side_effect=[100.0, 105.0]):
+                        benchmark.run()
 
         assert benchmark.runtime == 5.0
 
@@ -672,3 +674,331 @@ class TestBenchmarkValidation:
 
         with pytest.raises(ConfigurationError):
             benchmark.run()
+
+
+class TestBenchmarkCollectionSelection:
+    """Tests for benchmark collection method selection."""
+
+    @pytest.fixture
+    def mock_logger(self):
+        """Create a mock logger."""
+        logger = MagicMock()
+        logger.debug = MagicMock()
+        logger.warning = MagicMock()
+        logger.status = MagicMock()
+        logger.verbose = MagicMock()
+        logger.verboser = MagicMock()
+        return logger
+
+    def _create_benchmark_with_args(self, tmp_path, mock_logger, **kwargs):
+        """Helper to create a benchmark with specific args."""
+        defaults = {
+            'hosts': None,
+            'exec_type': None,
+            'command': 'run',
+            'debug': False,
+            'verbose': False,
+            'stream_log_level': 'INFO',
+            'results_dir': str(tmp_path),
+            'model': 'unet3d',
+            'num_processes': 8,
+            'what_if': True,  # Prevent actual execution
+        }
+        defaults.update(kwargs)
+        args = Namespace(**defaults)
+
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+            mock_gen.return_value = str(tmp_path / "output")
+            os.makedirs(tmp_path / "output", exist_ok=True)
+            benchmark = ConcreteBenchmark(args, logger=mock_logger, run_datetime='20260124_120000')
+
+        return benchmark
+
+    def test_should_use_ssh_collection_no_hosts(self, tmp_path, mock_logger):
+        """Test that SSH collection is not used when no hosts specified."""
+        benchmark = self._create_benchmark_with_args(tmp_path, mock_logger, hosts=None)
+        assert benchmark._should_use_ssh_collection() is False
+
+    def test_should_use_ssh_collection_empty_hosts(self, tmp_path, mock_logger):
+        """Test that SSH collection is not used when hosts list is empty."""
+        benchmark = self._create_benchmark_with_args(tmp_path, mock_logger, hosts=[])
+        assert benchmark._should_use_ssh_collection() is False
+
+    def test_selects_ssh_collection_with_hosts_no_exec_type(self, tmp_path, mock_logger):
+        """Test that SSH collection is used when hosts specified but no exec_type."""
+        benchmark = self._create_benchmark_with_args(
+            tmp_path, mock_logger,
+            hosts=['node1', 'node2'],
+            exec_type=None
+        )
+        assert benchmark._should_use_ssh_collection() is True
+
+    def test_selects_ssh_collection_docker_exec_type(self, tmp_path, mock_logger):
+        """Test that SSH collection is used for EXEC_TYPE.DOCKER (non-MPI)."""
+        benchmark = self._create_benchmark_with_args(
+            tmp_path, mock_logger,
+            hosts=['node1', 'node2'],
+            exec_type=EXEC_TYPE.DOCKER
+        )
+        assert benchmark._should_use_ssh_collection() is True
+
+    def test_should_not_use_ssh_collection_mpi_exec_type(self, tmp_path, mock_logger):
+        """Test that SSH collection is not used when exec_type is MPI."""
+        benchmark = self._create_benchmark_with_args(
+            tmp_path, mock_logger,
+            hosts=['node1', 'node2'],
+            exec_type=EXEC_TYPE.MPI
+        )
+        assert benchmark._should_use_ssh_collection() is False
+
+    def test_should_not_use_ssh_collection_for_datagen(self, tmp_path, mock_logger):
+        """Test that SSH collection is skipped for datagen command."""
+        benchmark = self._create_benchmark_with_args(
+            tmp_path, mock_logger,
+            hosts=['node1', 'node2'],
+            command='datagen'
+        )
+        assert benchmark._should_use_ssh_collection() is False
+
+    def test_should_not_use_ssh_collection_for_configview(self, tmp_path, mock_logger):
+        """Test that SSH collection is skipped for configview command."""
+        benchmark = self._create_benchmark_with_args(
+            tmp_path, mock_logger,
+            hosts=['node1', 'node2'],
+            command='configview'
+        )
+        assert benchmark._should_use_ssh_collection() is False
+
+    def test_should_not_use_ssh_collection_when_disabled(self, tmp_path, mock_logger):
+        """Test that SSH collection is skipped when explicitly disabled."""
+        benchmark = self._create_benchmark_with_args(
+            tmp_path, mock_logger,
+            hosts=['node1', 'node2'],
+            skip_cluster_collection=True
+        )
+        assert benchmark._should_use_ssh_collection() is False
+
+    def test_should_collect_cluster_info_no_hosts(self, tmp_path, mock_logger):
+        """Test that MPI collection returns False when no hosts specified."""
+        benchmark = self._create_benchmark_with_args(tmp_path, mock_logger, hosts=None)
+        assert benchmark._should_collect_cluster_info() is False
+
+    def test_should_collect_cluster_info_with_hosts_mpi(self, tmp_path, mock_logger):
+        """Test that _should_collect_cluster_info is True with hosts and MPI exec_type."""
+        benchmark = self._create_benchmark_with_args(
+            tmp_path, mock_logger,
+            hosts=['node1', 'node2'],
+            exec_type=EXEC_TYPE.MPI
+        )
+        # _should_collect_cluster_info checks for hosts and command
+        # exec_type check is in _collect_cluster_information
+        assert benchmark._should_collect_cluster_info() is True
+
+
+class TestBenchmarkClusterSnapshots:
+    """Tests for cluster snapshot functionality."""
+
+    @pytest.fixture
+    def mock_logger(self):
+        """Create a mock logger."""
+        logger = MagicMock()
+        logger.debug = MagicMock()
+        logger.warning = MagicMock()
+        logger.status = MagicMock()
+        logger.verbose = MagicMock()
+        logger.verboser = MagicMock()
+        return logger
+
+    @patch('mlpstorage.benchmarks.base.SSHClusterCollector')
+    def test_collect_cluster_start_uses_ssh(self, mock_ssh_collector_class, tmp_path, mock_logger):
+        """Test that _collect_cluster_start uses SSH when appropriate."""
+        from mlpstorage.rules.models import ClusterInformation
+
+        # Setup mock collector
+        mock_collector = MagicMock()
+        mock_collector.is_available.return_value = True
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.data = {'localhost': {'hostname': 'localhost', 'meminfo': {}}}
+        mock_result.timestamp = '2026-01-24T12:00:00Z'
+        mock_result.errors = []
+        mock_collector.collect.return_value = mock_result
+        mock_ssh_collector_class.return_value = mock_collector
+
+        args = Namespace(
+            hosts=['localhost'],
+            exec_type=None,  # Non-MPI
+            command='run',
+            debug=False,
+            verbose=False,
+            stream_log_level='INFO',
+            results_dir=str(tmp_path),
+            model='unet3d',
+            num_processes=8,
+            what_if=True,
+            ssh_username=None,
+            cluster_collection_timeout=60,
+        )
+
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+            mock_gen.return_value = str(tmp_path / "output")
+            os.makedirs(tmp_path / "output", exist_ok=True)
+            with patch.object(ClusterInformation, 'from_mpi_collection') as mock_from_mpi:
+                mock_cluster_info = MagicMock()
+                mock_cluster_info.num_hosts = 1
+                mock_cluster_info.total_memory_bytes = 16 * 1024**3
+                mock_from_mpi.return_value = mock_cluster_info
+
+                benchmark = ConcreteBenchmark(args, logger=mock_logger, run_datetime='20260124_120000')
+                benchmark._collect_cluster_start()
+
+                mock_ssh_collector_class.assert_called_once()
+                mock_collector.collect.assert_called_once()
+                assert hasattr(benchmark, '_cluster_info_start')
+                assert benchmark._collection_method == 'ssh'
+
+    @patch('mlpstorage.benchmarks.base.SSHClusterCollector')
+    def test_collect_cluster_end_creates_snapshots(self, mock_ssh_collector_class, tmp_path, mock_logger):
+        """Test that _collect_cluster_end creates ClusterSnapshots."""
+        from mlpstorage.rules.models import ClusterInformation, ClusterSnapshots
+
+        # Setup mock collector
+        mock_collector = MagicMock()
+        mock_collector.is_available.return_value = True
+        mock_result = MagicMock()
+        mock_result.success = True
+        mock_result.data = {'localhost': {'hostname': 'localhost', 'meminfo': {}}}
+        mock_result.timestamp = '2026-01-24T12:00:00Z'
+        mock_result.errors = []
+        mock_collector.collect.return_value = mock_result
+        mock_ssh_collector_class.return_value = mock_collector
+
+        args = Namespace(
+            hosts=['localhost'],
+            exec_type=None,  # Non-MPI
+            command='run',
+            debug=False,
+            verbose=False,
+            stream_log_level='INFO',
+            results_dir=str(tmp_path),
+            model='unet3d',
+            num_processes=8,
+            what_if=True,
+            ssh_username=None,
+            cluster_collection_timeout=60,
+        )
+
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+            mock_gen.return_value = str(tmp_path / "output")
+            os.makedirs(tmp_path / "output", exist_ok=True)
+            with patch.object(ClusterInformation, 'from_mpi_collection') as mock_from_mpi:
+                mock_cluster_info = MagicMock()
+                mock_cluster_info.num_hosts = 1
+                mock_cluster_info.total_memory_bytes = 16 * 1024**3
+                mock_from_mpi.return_value = mock_cluster_info
+
+                benchmark = ConcreteBenchmark(args, logger=mock_logger, run_datetime='20260124_120000')
+
+                # Simulate start collection
+                benchmark._collect_cluster_start()
+                assert hasattr(benchmark, '_cluster_info_start')
+
+                # Simulate end collection
+                benchmark._collect_cluster_end()
+
+                # Verify ClusterSnapshots was created
+                assert hasattr(benchmark, 'cluster_snapshots')
+                assert benchmark.cluster_snapshots is not None
+                assert benchmark.cluster_snapshots.start is not None
+                assert benchmark.cluster_snapshots.collection_method == 'ssh'
+
+    def test_run_calls_start_and_end_collection(self, tmp_path, mock_logger):
+        """Test that run() calls _collect_cluster_start and _collect_cluster_end."""
+        call_order = []
+
+        class TrackingBenchmark(ConcreteBenchmark):
+            def _collect_cluster_start(self):
+                call_order.append('start_collection')
+
+            def _collect_cluster_end(self):
+                call_order.append('end_collection')
+
+            def _run(self):
+                call_order.append('run')
+                return 0
+
+        args = Namespace(
+            debug=False,
+            verbose=False,
+            stream_log_level='INFO',
+            results_dir=str(tmp_path),
+            model='unet3d',
+            command='run',
+            num_processes=8,
+            what_if=True,
+        )
+
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+            mock_gen.return_value = str(tmp_path / "output")
+            os.makedirs(tmp_path / "output", exist_ok=True)
+            benchmark = TrackingBenchmark(args, logger=mock_logger, run_datetime='20260124_120000')
+
+        benchmark.run()
+
+        # Verify order: start_collection -> run -> end_collection
+        assert call_order == ['start_collection', 'run', 'end_collection']
+
+    def test_metadata_includes_cluster_snapshots(self, tmp_path, mock_logger):
+        """Test that metadata property includes cluster_snapshots when available."""
+        from mlpstorage.rules.models import ClusterSnapshots
+
+        args = Namespace(
+            debug=False,
+            verbose=False,
+            stream_log_level='INFO',
+            results_dir=str(tmp_path),
+            model='unet3d',
+            command='run',
+            num_processes=8,
+            what_if=True,
+        )
+
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+            mock_gen.return_value = str(tmp_path / "output")
+            os.makedirs(tmp_path / "output", exist_ok=True)
+            benchmark = ConcreteBenchmark(args, logger=mock_logger, run_datetime='20260124_120000')
+
+        # Mock ClusterSnapshots
+        mock_start = MagicMock()
+        mock_start.as_dict.return_value = {'total_memory_bytes': 16 * 1024**3}
+        mock_snapshots = ClusterSnapshots(start=mock_start, collection_method='ssh')
+        benchmark.cluster_snapshots = mock_snapshots
+
+        metadata = benchmark.metadata
+        assert 'cluster_snapshots' in metadata
+        assert metadata['cluster_snapshots']['collection_method'] == 'ssh'
+
+    def test_skips_end_collection_without_start(self, tmp_path, mock_logger):
+        """Test that _collect_cluster_end does nothing if start collection was skipped."""
+        args = Namespace(
+            debug=False,
+            verbose=False,
+            stream_log_level='INFO',
+            results_dir=str(tmp_path),
+            model='unet3d',
+            command='run',
+            num_processes=8,
+            what_if=True,
+            hosts=None,  # No hosts = no collection
+        )
+
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+            mock_gen.return_value = str(tmp_path / "output")
+            os.makedirs(tmp_path / "output", exist_ok=True)
+            benchmark = ConcreteBenchmark(args, logger=mock_logger, run_datetime='20260124_120000')
+
+        # Call end collection without start collection
+        benchmark._collect_cluster_end()
+
+        # Should not create cluster_snapshots
+        assert not hasattr(benchmark, 'cluster_snapshots') or benchmark.cluster_snapshots is None
