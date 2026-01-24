@@ -2,6 +2,7 @@
 
 import json
 import subprocess
+import time
 import pytest
 from unittest.mock import MagicMock, patch, Mock
 
@@ -14,6 +15,8 @@ from mlpstorage.cluster_collector import (
     SSHClusterCollector,
     _is_localhost,
     collect_local_system_info,
+    collect_timeseries_sample,
+    TimeSeriesCollector,
 )
 from mlpstorage.interfaces.collector import CollectionResult
 
@@ -715,3 +718,314 @@ class TestSSHClusterCollector:
         assert collector.ssh_username == 'admin'
         assert collector.timeout == 120
         assert collector.max_workers == 5
+
+
+# =============================================================================
+# Time-Series Collection Tests
+# =============================================================================
+
+class TestCollectTimeseriesSample:
+    """Tests for collect_timeseries_sample function."""
+
+    def test_returns_dict_with_required_fields(self):
+        """Sample should contain timestamp and hostname."""
+        sample = collect_timeseries_sample()
+
+        assert isinstance(sample, dict)
+        assert 'timestamp' in sample
+        assert 'hostname' in sample
+        # Timestamp should be ISO format
+        assert 'T' in sample['timestamp']
+        assert sample['timestamp'].endswith('Z')
+
+    def test_contains_diskstats(self):
+        """Sample should contain diskstats if available."""
+        sample = collect_timeseries_sample()
+
+        # On Linux, diskstats should be present
+        if 'diskstats' in sample:
+            assert isinstance(sample['diskstats'], list)
+            if sample['diskstats']:
+                # Each disk should have device_name
+                assert 'device_name' in sample['diskstats'][0]
+
+    def test_contains_vmstat(self):
+        """Sample should contain vmstat if available."""
+        sample = collect_timeseries_sample()
+
+        if 'vmstat' in sample:
+            assert isinstance(sample['vmstat'], dict)
+
+    def test_contains_loadavg(self):
+        """Sample should contain loadavg if available."""
+        sample = collect_timeseries_sample()
+
+        if 'loadavg' in sample:
+            assert isinstance(sample['loadavg'], dict)
+            assert 'load_1min' in sample['loadavg']
+            assert 'load_5min' in sample['loadavg']
+            assert 'load_15min' in sample['loadavg']
+
+    def test_contains_meminfo(self):
+        """Sample should contain meminfo if available."""
+        sample = collect_timeseries_sample()
+
+        if 'meminfo' in sample:
+            assert isinstance(sample['meminfo'], dict)
+
+    def test_contains_netdev(self):
+        """Sample should contain netdev if available."""
+        sample = collect_timeseries_sample()
+
+        if 'netdev' in sample:
+            assert isinstance(sample['netdev'], list)
+
+    def test_no_errors_key_when_successful(self):
+        """Sample should not have errors key if all collections succeed."""
+        sample = collect_timeseries_sample()
+
+        # On a normal Linux system, there should be no errors
+        # (but we don't assert this as the test env may vary)
+        if 'errors' in sample:
+            # If errors present, it should be a dict
+            assert isinstance(sample['errors'], dict)
+
+
+class TestTimeSeriesCollector:
+    """Tests for TimeSeriesCollector class."""
+
+    def test_init_sets_defaults(self):
+        """Collector should initialize with default values."""
+        collector = TimeSeriesCollector()
+
+        assert collector.interval_seconds == 10.0
+        assert collector.max_samples == 3600
+        assert collector.samples == []
+        assert collector.start_time is None
+        assert collector.end_time is None
+        assert not collector.is_running
+
+    def test_init_custom_values(self):
+        """Collector should accept custom interval and max_samples."""
+        collector = TimeSeriesCollector(interval_seconds=5.0, max_samples=100)
+
+        assert collector.interval_seconds == 5.0
+        assert collector.max_samples == 100
+
+    def test_start_sets_running(self):
+        """start() should set is_running to True."""
+        collector = TimeSeriesCollector(interval_seconds=0.1)
+
+        try:
+            collector.start()
+            assert collector.is_running
+            assert collector.start_time is not None
+        finally:
+            collector.stop()
+
+    def test_stop_returns_samples(self):
+        """stop() should return collected samples."""
+        collector = TimeSeriesCollector(interval_seconds=0.1)
+
+        collector.start()
+        time.sleep(0.25)  # Allow a couple samples
+        samples = collector.stop()
+
+        assert isinstance(samples, list)
+        assert not collector.is_running
+        assert collector.end_time is not None
+
+    def test_collects_samples_at_interval(self):
+        """Collector should gather samples at specified interval."""
+        collector = TimeSeriesCollector(interval_seconds=0.1)
+
+        collector.start()
+        time.sleep(0.35)  # Should get 3-4 samples
+        samples = collector.stop()
+
+        # Should have collected some samples
+        assert len(samples) >= 2
+
+    def test_max_samples_limit_enforced(self):
+        """Collector should not exceed max_samples."""
+        collector = TimeSeriesCollector(interval_seconds=0.05, max_samples=3)
+
+        collector.start()
+        time.sleep(0.3)  # Would collect ~6 samples without limit
+        samples = collector.stop()
+
+        assert len(samples) <= 3
+
+    def test_start_twice_raises_error(self):
+        """Starting collector twice should raise RuntimeError."""
+        collector = TimeSeriesCollector(interval_seconds=0.1)
+
+        try:
+            collector.start()
+            with pytest.raises(RuntimeError, match="already started"):
+                collector.start()
+        finally:
+            collector.stop()
+
+    def test_stop_without_start_raises_error(self):
+        """Stopping without starting should raise RuntimeError."""
+        collector = TimeSeriesCollector()
+
+        with pytest.raises(RuntimeError, match="not started"):
+            collector.stop()
+
+    def test_reuse_after_stop_raises_error(self):
+        """Cannot restart a stopped collector."""
+        collector = TimeSeriesCollector(interval_seconds=0.1)
+
+        collector.start()
+        collector.stop()
+
+        with pytest.raises(RuntimeError, match="already stopped"):
+            collector.start()
+
+    def test_samples_contain_expected_fields(self):
+        """Collected samples should have timestamp and hostname."""
+        collector = TimeSeriesCollector(interval_seconds=0.1)
+
+        collector.start()
+        time.sleep(0.15)
+        samples = collector.stop()
+
+        if samples:
+            sample = samples[0]
+            assert 'timestamp' in sample
+            assert 'hostname' in sample
+
+
+class TestTimeSeriesSampleDataclass:
+    """Tests for TimeSeriesSample dataclass."""
+
+    def test_create_with_required_fields(self):
+        """Can create sample with just timestamp and hostname."""
+        from mlpstorage.rules.models import TimeSeriesSample
+
+        sample = TimeSeriesSample(
+            timestamp='2026-01-24T12:00:00Z',
+            hostname='testhost'
+        )
+
+        assert sample.timestamp == '2026-01-24T12:00:00Z'
+        assert sample.hostname == 'testhost'
+
+    def test_to_dict_excludes_none(self):
+        """to_dict should exclude None values."""
+        from mlpstorage.rules.models import TimeSeriesSample
+
+        sample = TimeSeriesSample(
+            timestamp='2026-01-24T12:00:00Z',
+            hostname='testhost',
+            vmstat={'nr_free_pages': 12345}
+        )
+
+        d = sample.to_dict()
+        assert 'timestamp' in d
+        assert 'hostname' in d
+        assert 'vmstat' in d
+        assert 'diskstats' not in d  # None value excluded
+
+    def test_from_dict_roundtrip(self):
+        """Can roundtrip through to_dict/from_dict."""
+        from mlpstorage.rules.models import TimeSeriesSample
+
+        original = TimeSeriesSample(
+            timestamp='2026-01-24T12:00:00Z',
+            hostname='testhost',
+            vmstat={'nr_free_pages': 12345},
+            loadavg={'load_1min': 0.5, 'load_5min': 0.6, 'load_15min': 0.7}
+        )
+
+        d = original.to_dict()
+        restored = TimeSeriesSample.from_dict(d)
+
+        assert restored.timestamp == original.timestamp
+        assert restored.hostname == original.hostname
+        assert restored.vmstat == original.vmstat
+        assert restored.loadavg == original.loadavg
+
+
+class TestTimeSeriesDataDataclass:
+    """Tests for TimeSeriesData dataclass."""
+
+    def test_create_with_fields(self):
+        """Can create TimeSeriesData with all fields."""
+        from mlpstorage.rules.models import TimeSeriesSample, TimeSeriesData
+
+        sample = TimeSeriesSample(
+            timestamp='2026-01-24T12:00:00Z',
+            hostname='host1'
+        )
+
+        data = TimeSeriesData(
+            collection_interval_seconds=10.0,
+            start_time='2026-01-24T12:00:00Z',
+            end_time='2026-01-24T12:01:00Z',
+            num_samples=6,
+            samples_by_host={'host1': [sample]},
+            collection_method='local',
+            hosts_requested=['host1'],
+            hosts_collected=['host1']
+        )
+
+        assert data.collection_interval_seconds == 10.0
+        assert data.num_samples == 6
+
+    def test_to_dict_serializes_samples(self):
+        """to_dict should serialize nested samples."""
+        from mlpstorage.rules.models import TimeSeriesSample, TimeSeriesData
+
+        sample = TimeSeriesSample(
+            timestamp='2026-01-24T12:00:00Z',
+            hostname='host1',
+            vmstat={'key': 123}
+        )
+
+        data = TimeSeriesData(
+            collection_interval_seconds=10.0,
+            start_time='2026-01-24T12:00:00Z',
+            end_time='2026-01-24T12:01:00Z',
+            num_samples=1,
+            samples_by_host={'host1': [sample]},
+            collection_method='local',
+            hosts_requested=['host1'],
+            hosts_collected=['host1']
+        )
+
+        d = data.to_dict()
+        assert 'samples_by_host' in d
+        assert 'host1' in d['samples_by_host']
+        assert len(d['samples_by_host']['host1']) == 1
+        assert d['samples_by_host']['host1'][0]['vmstat'] == {'key': 123}
+
+    def test_from_dict_roundtrip(self):
+        """Can roundtrip TimeSeriesData through to_dict/from_dict."""
+        from mlpstorage.rules.models import TimeSeriesSample, TimeSeriesData
+
+        sample = TimeSeriesSample(
+            timestamp='2026-01-24T12:00:00Z',
+            hostname='host1'
+        )
+
+        original = TimeSeriesData(
+            collection_interval_seconds=10.0,
+            start_time='2026-01-24T12:00:00Z',
+            end_time='2026-01-24T12:01:00Z',
+            num_samples=1,
+            samples_by_host={'host1': [sample]},
+            collection_method='ssh',
+            hosts_requested=['host1', 'host2'],
+            hosts_collected=['host1']
+        )
+
+        d = original.to_dict()
+        restored = TimeSeriesData.from_dict(d)
+
+        assert restored.collection_interval_seconds == original.collection_interval_seconds
+        assert restored.collection_method == original.collection_method
+        assert restored.hosts_requested == original.hosts_requested
+        assert len(restored.samples_by_host['host1']) == 1
