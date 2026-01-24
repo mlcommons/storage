@@ -7,8 +7,17 @@ validation of benchmark runs using the appropriate rules checkers.
 
 from mlpstorage.config import BENCHMARK_TYPES, PARAM_VALIDATION
 from mlpstorage.rules.models import BenchmarkRun
-from mlpstorage.rules.run_checkers import TrainingRunRulesChecker, CheckpointingRunRulesChecker
-from mlpstorage.rules.submission_checkers import TrainingSubmissionRulesChecker, CheckpointSubmissionRulesChecker
+from mlpstorage.rules.run_checkers import (
+    TrainingRunRulesChecker,
+    CheckpointingRunRulesChecker,
+    KVCacheRunRulesChecker,
+    VectorDBRunRulesChecker,
+)
+from mlpstorage.rules.submission_checkers import (
+    MultiRunRulesChecker,
+    TrainingSubmissionRulesChecker,
+    CheckpointSubmissionRulesChecker,
+)
 
 
 class BenchmarkVerifier:
@@ -85,6 +94,10 @@ class BenchmarkVerifier:
                 self.rules_checker = TrainingRunRulesChecker(benchmark_run, logger=self.logger)
             elif benchmark_run.benchmark_type == BENCHMARK_TYPES.checkpointing:
                 self.rules_checker = CheckpointingRunRulesChecker(benchmark_run, logger=self.logger)
+            elif benchmark_run.benchmark_type == BENCHMARK_TYPES.kv_cache:
+                self.rules_checker = KVCacheRunRulesChecker(benchmark_run, logger=self.logger)
+            elif benchmark_run.benchmark_type == BENCHMARK_TYPES.vector_database:
+                self.rules_checker = VectorDBRunRulesChecker(benchmark_run, logger=self.logger)
             else:
                 raise ValueError(f"Unsupported benchmark type: {benchmark_run.benchmark_type}")
 
@@ -99,6 +112,12 @@ class BenchmarkVerifier:
                 self.rules_checker = TrainingSubmissionRulesChecker(self.benchmark_runs, logger=self.logger)
             elif benchmark_type == BENCHMARK_TYPES.checkpointing:
                 self.rules_checker = CheckpointSubmissionRulesChecker(self.benchmark_runs, logger=self.logger)
+            elif benchmark_type == BENCHMARK_TYPES.kv_cache:
+                # KV Cache preview - use base multi-run checker
+                self.rules_checker = MultiRunRulesChecker(self.benchmark_runs, logger=self.logger)
+            elif benchmark_type == BENCHMARK_TYPES.vector_database:
+                # VectorDB preview - use base multi-run checker
+                self.rules_checker = MultiRunRulesChecker(self.benchmark_runs, logger=self.logger)
             else:
                 raise ValueError(f"Unsupported benchmark type for multi-run: {benchmark_type}")
 
