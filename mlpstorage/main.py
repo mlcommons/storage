@@ -38,6 +38,7 @@ from mlpstorage.lockfile import (
     LockfileGenerationError,
     GenerationOptions,
 )
+from mlpstorage.validation_helpers import validate_benchmark_environment
 
 logger = setup_logging("MLPerfStorage")
 signal_received = False
@@ -163,6 +164,14 @@ def run_benchmark(args, run_datetime):
             logger.error(f"Lockfile not found: {args.verify_lockfile}")
             logger.error("Generate a lockfile with: mlpstorage lockfile generate")
             return EXIT_CODE.FAILURE
+
+    # Fail-fast environment validation (unless skipped)
+    # This validates dependencies, SSH connectivity, paths, etc. BEFORE benchmark instantiation
+    skip_validation = getattr(args, 'skip_validation', False)
+    if not skip_validation:
+        validate_benchmark_environment(args, logger=logger)
+    else:
+        logger.warning("Skipping environment validation (--skip-validation flag)")
 
     program_switch_dict = dict(
         training=TrainingBenchmark,

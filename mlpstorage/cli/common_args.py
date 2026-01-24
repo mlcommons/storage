@@ -218,12 +218,17 @@ def add_universal_arguments(parser):
         help="View the configuration that would execute and the associated command."
     )
 
-    validation_args = parser.add_argument_group("Package Validation")
+    validation_args = parser.add_argument_group("Validation")
     validation_args.add_argument(
         "--verify-lockfile",
         type=str,
         metavar="PATH",
         help="Validate installed packages against lockfile before benchmark execution",
+    )
+    validation_args.add_argument(
+        "--skip-validation",
+        action="store_true",
+        help="Skip environment validation (MPI, SSH, DLIO checks). Useful for debugging.",
     )
 
 

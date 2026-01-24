@@ -35,6 +35,11 @@ def validate_pre_run(args, logger=None) -> None:
     """
     Validate configuration before running a benchmark.
 
+    .. deprecated::
+        Use :func:`validate_benchmark_environment` instead. This function
+        remains for backward compatibility but is no longer the recommended
+        entry point for pre-run validation.
+
     Performs comprehensive validation of:
     - Required parameters
     - File system paths
