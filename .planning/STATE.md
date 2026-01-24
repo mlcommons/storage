@@ -4,19 +4,19 @@
 
 **Core Value:** Orchestrate multiple benchmark types (training, checkpointing, kv-cache, vectordb) across distributed systems and produce verified, rules-compliant results.
 
-**Current Focus:** Phase 2 - Environment Validation and Fail-Fast
+**Current Focus:** Phase 2 Complete - Ready for Phase 3
 
 ## Current Position
 
 **Phase:** 2 of 10 - Environment Validation and Fail-Fast
-**Plan:** 02-04 of 5
-**Status:** In progress
-**Last activity:** 2026-01-24 - Completed 02-04-PLAN.md
+**Plan:** 02-05 of 5 (COMPLETE)
+**Status:** Phase 2 Complete
+**Last activity:** 2026-01-24 - Completed 02-05-PLAN.md
 
 **Progress:**
 ```
 Phase 1:  [##########] 100% (5/5 plans) COMPLETE
-Phase 2:  [########--] 80% (4/5 plans)
+Phase 2:  [##########] 100% (5/5 plans) COMPLETE
 Phase 3:  [----------] 0%
 Phase 4:  [----------] 0%
 Phase 5:  [----------] 0%
@@ -25,17 +25,17 @@ Phase 7:  [----------] 0%
 Phase 8:  [----------] 0%
 Phase 9:  [----------] 0%
 Phase 10: [----------] 0%
-Overall:  [###-------] 33% (9/27 plans complete)
+Overall:  [####------] 37% (10/27 plans complete)
 ```
 
 ## Performance Metrics
 
 | Metric | Value |
 |--------|-------|
-| Phases completed | 1/10 |
-| Requirements delivered | 4/21 (PKG-01, PKG-02, PKG-03, CLI integration) |
-| Plans executed | 9 |
-| Avg tasks per plan | 2.2 |
+| Phases completed | 2/10 |
+| Requirements delivered | 5/21 (PKG-01, PKG-02, PKG-03, CLI integration, Fail-fast validation) |
+| Plans executed | 10 |
+| Avg tasks per plan | 2.3 |
 
 ## Accumulated Context
 
@@ -72,6 +72,9 @@ Overall:  [###-------] 33% (9/27 plans complete)
 | Collect-all-then-report validation | Collect ALL issues before raising, so users see complete picture | 2026-01-24 |
 | First error preserves exception type | Raise first collected error to preserve specific exception type | 2026-01-24 |
 | Helper functions for conditional checks | _requires_mpi, _is_distributed_run, _requires_dlio for testable logic | 2026-01-24 |
+| Single validation entry point | validate_benchmark_environment replaces validate_pre_run | 2026-01-24 |
+| Benchmark validation hook | _validate_environment() in base class for benchmark-specific validation | 2026-01-24 |
+| Skip validation flag | --skip-validation for debugging when validation is blocking | 2026-01-24 |
 
 ### Technical Patterns Established
 
@@ -96,15 +99,12 @@ Overall:  [###-------] 33% (9/27 plans complete)
 - BatchMode SSH for non-interactive connectivity validation
 - Collect-all-then-report validation pattern
 - Union type for heterogeneous error collection
+- Validation hook pattern in base class
 
 ### Open TODOs
 
 - [x] Complete Phase 1: Package Management Foundation
-- [x] Complete 02-01: Environment Detection Module
-- [x] Complete 02-02: Executable Checking Module
-- [x] Complete 02-03: SSH Validation and Issue Collection
-- [x] Complete 02-04: Pre-Run Validation Orchestration
-- [ ] Complete 02-05: Integration Tests
+- [x] Complete Phase 2: Environment Validation and Fail-Fast
 - [ ] Review external KV cache code in `kv_cache_benchmark/`
 - [ ] Review VectorDB scripts from external branch
 - [ ] Verify DLIO parquet support requirements
@@ -122,16 +122,17 @@ None currently.
 - Environment module now provides OS-aware install hints
 - Dependency checking now uses environment module for OS-specific error messages
 - validate_benchmark_environment now collects all issues before reporting
+- Fail-fast validation integrated into main.py before benchmark instantiation
 
 ## Session Continuity
 
 ### Last Session
 - **Date:** 2026-01-24
-- **Accomplished:** Completed 02-04-PLAN.md execution (Pre-Run Validation Orchestration)
-- **Next:** Execute 02-05-PLAN.md (Integration Tests)
+- **Accomplished:** Completed 02-05-PLAN.md execution (Fail-Fast Validation Integration)
+- **Next:** Execute Phase 3 plans (Configuration System Improvements)
 
 ### Context for Next Session
-- Phase 2 in progress: Environment Validation and Fail-Fast
+- Phase 2 COMPLETE: Environment Validation and Fail-Fast
   - 02-01: Environment detection module COMPLETE
     - `mlpstorage/environment/os_detect.py` - OSInfo dataclass, detect_os()
     - `mlpstorage/environment/install_hints.py` - INSTALL_INSTRUCTIONS, get_install_instruction()
@@ -147,7 +148,11 @@ None currently.
     - Collects ALL issues before reporting (fail-fast pattern)
     - Helper functions: _requires_mpi, _is_distributed_run, _requires_dlio
     - Checks MPI for distributed, DLIO for training/checkpointing, SSH for remote hosts
-  - 02-05: Next up - Integration tests
+  - 02-05: Fail-fast validation integration COMPLETE
+    - validate_benchmark_environment called in main.py before benchmark instantiation
+    - _validate_environment() hook in Benchmark base class
+    - --skip-validation flag added for debugging
+    - validate_pre_run marked as deprecated
 - Available for downstream use:
   - `from mlpstorage.environment import detect_os, get_install_instruction, OSInfo`
   - `from mlpstorage.environment import ValidationIssue, validate_ssh_connectivity, collect_validation_issues`
