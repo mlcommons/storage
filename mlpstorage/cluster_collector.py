@@ -606,6 +606,9 @@ def collect_local_system_info() -> Dict[str, Any]:
         - loadavg: Dict with load average info from /proc/loadavg
         - uptime: float from /proc/uptime
         - os_release: Dict from /etc/os-release
+        - vmstat: Dict from /proc/vmstat
+        - mounts: List[Dict] from /proc/mounts
+        - cgroups: List[Dict] from /proc/cgroups
         - collection_timestamp: ISO format timestamp
         - errors: Dict of any errors encountered during collection
     """
@@ -687,6 +690,32 @@ def collect_local_system_info() -> Dict[str, Any]:
     except Exception as e:
         result['errors']['os_release'] = str(e)
         result['os_release'] = {}
+
+    # Collect /proc/vmstat
+    try:
+        with open('/proc/vmstat', 'r') as f:
+            result['vmstat'] = parse_proc_vmstat(f.read())
+    except Exception as e:
+        result['errors']['vmstat'] = str(e)
+        result['vmstat'] = {}
+
+    # Collect /proc/mounts (filesystems)
+    try:
+        with open('/proc/mounts', 'r') as f:
+            mounts = parse_proc_mounts(f.read())
+            result['mounts'] = [m.to_dict() for m in mounts]
+    except Exception as e:
+        result['errors']['mounts'] = str(e)
+        result['mounts'] = []
+
+    # Collect /proc/cgroups
+    try:
+        with open('/proc/cgroups', 'r') as f:
+            cgroups = parse_proc_cgroups(f.read())
+            result['cgroups'] = [c.to_dict() for c in cgroups]
+    except Exception as e:
+        result['errors']['cgroups'] = str(e)
+        result['cgroups'] = []
 
     # Remove errors dict if empty
     if not result['errors']:
