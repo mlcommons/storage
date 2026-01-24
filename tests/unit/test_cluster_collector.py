@@ -1,6 +1,9 @@
 """Unit tests for cluster_collector module."""
 
+import json
+import subprocess
 import pytest
+from unittest.mock import MagicMock, patch, Mock
 
 from mlpstorage.cluster_collector import (
     parse_proc_vmstat,
@@ -8,7 +11,11 @@ from mlpstorage.cluster_collector import (
     parse_proc_cgroups,
     MountInfo,
     CgroupInfo,
+    SSHClusterCollector,
+    _is_localhost,
+    collect_local_system_info,
 )
+from mlpstorage.interfaces.collector import CollectionResult
 
 
 class TestParseProcVmstat:
@@ -347,3 +354,364 @@ class TestCollectLocalSystemInfo:
             assert 'hierarchy' in cgroup
             assert 'num_cgroups' in cgroup
             assert 'enabled' in cgroup
+
+
+class TestIsLocalhost:
+    """Tests for _is_localhost helper function."""
+
+    def test_localhost_string(self):
+        """Test that 'localhost' is detected."""
+        assert _is_localhost('localhost') is True
+
+    def test_localhost_ipv4(self):
+        """Test that 127.0.0.1 is detected."""
+        assert _is_localhost('127.0.0.1') is True
+
+    def test_localhost_ipv6(self):
+        """Test that ::1 is detected."""
+        assert _is_localhost('::1') is True
+
+    def test_localhost_case_insensitive(self):
+        """Test case insensitivity."""
+        assert _is_localhost('LOCALHOST') is True
+        assert _is_localhost('LocalHost') is True
+
+    def test_remote_host(self):
+        """Test that remote host is not localhost."""
+        assert _is_localhost('node1.example.com') is False
+        assert _is_localhost('192.168.1.100') is False
+
+    @patch('socket.gethostname')
+    def test_matches_local_hostname(self, mock_gethostname):
+        """Test that local hostname is detected as localhost."""
+        mock_gethostname.return_value = 'myhost'
+        assert _is_localhost('myhost') is True
+        assert _is_localhost('MYHOST') is True
+
+    @patch('socket.gethostname')
+    @patch('socket.getfqdn')
+    def test_matches_local_fqdn(self, mock_getfqdn, mock_gethostname):
+        """Test that local FQDN is detected as localhost."""
+        mock_gethostname.return_value = 'myhost'
+        mock_getfqdn.return_value = 'myhost.example.com'
+        assert _is_localhost('myhost.example.com') is True
+        assert _is_localhost('MYHOST.EXAMPLE.COM') is True
+
+
+class TestSSHClusterCollector:
+    """Tests for SSHClusterCollector class."""
+
+    @pytest.fixture
+    def mock_logger(self):
+        """Create a mock logger."""
+        return MagicMock()
+
+    @pytest.fixture
+    def collector(self, mock_logger):
+        """Create a collector instance."""
+        return SSHClusterCollector(
+            hosts=['node1', 'node2:4', 'localhost'],
+            logger=mock_logger
+        )
+
+    def test_get_unique_hosts(self, collector):
+        """Test that unique hosts are extracted correctly."""
+        unique = collector._get_unique_hosts()
+        assert unique == ['node1', 'node2', 'localhost']
+
+    def test_get_unique_hosts_removes_duplicates(self, mock_logger):
+        """Test that duplicate hosts are removed."""
+        collector = SSHClusterCollector(
+            hosts=['node1', 'node1:4', 'node2'],
+            logger=mock_logger
+        )
+        unique = collector._get_unique_hosts()
+        assert unique == ['node1', 'node2']
+
+    def test_get_unique_hosts_handles_empty_strings(self, mock_logger):
+        """Test that empty strings and whitespace are handled."""
+        collector = SSHClusterCollector(
+            hosts=['node1', '', '  ', 'node2'],
+            logger=mock_logger
+        )
+        unique = collector._get_unique_hosts()
+        assert unique == ['node1', 'node2']
+
+    def test_build_ssh_command_basic(self, collector):
+        """Test basic SSH command construction."""
+        cmd = collector._build_ssh_command('node1', 'echo test')
+        assert 'ssh' in cmd
+        assert '-o' in cmd
+        assert 'BatchMode=yes' in cmd
+        assert 'node1' in cmd
+        assert 'echo test' in cmd
+
+    def test_build_ssh_command_with_username(self, mock_logger):
+        """Test SSH command with username."""
+        collector = SSHClusterCollector(
+            hosts=['node1'],
+            logger=mock_logger,
+            ssh_username='testuser'
+        )
+        cmd = collector._build_ssh_command('node1', 'echo test')
+        assert '-l' in cmd
+        assert 'testuser' in cmd
+
+    def test_build_ssh_command_has_connect_timeout(self, collector):
+        """Test SSH command includes connect timeout."""
+        cmd = collector._build_ssh_command('node1', 'echo test')
+        # Find the ConnectTimeout option
+        connect_timeout_found = False
+        for item in cmd:
+            if 'ConnectTimeout' in item:
+                connect_timeout_found = True
+                break
+        assert connect_timeout_found
+
+    def test_build_ssh_command_has_strict_host_key(self, collector):
+        """Test SSH command includes StrictHostKeyChecking option."""
+        cmd = collector._build_ssh_command('node1', 'echo test')
+        assert 'StrictHostKeyChecking=accept-new' in cmd
+
+    def test_is_available_with_ssh(self, collector):
+        """Test is_available when SSH exists."""
+        with patch('shutil.which', return_value='/usr/bin/ssh'):
+            assert collector.is_available() is True
+
+    def test_is_available_without_ssh(self, collector):
+        """Test is_available when SSH is missing."""
+        with patch('shutil.which', return_value=None):
+            assert collector.is_available() is False
+
+    def test_get_collection_method(self, collector):
+        """Test get_collection_method returns 'ssh'."""
+        assert collector.get_collection_method() == 'ssh'
+
+    def test_collect_local(self, collector):
+        """Test collect_local returns local system info."""
+        result = collector.collect_local()
+        assert isinstance(result, CollectionResult)
+        assert result.success is True
+        assert result.collection_method == 'local'
+        assert len(result.data) == 1
+
+    @patch('mlpstorage.cluster_collector.collect_local_system_info')
+    def test_collect_from_localhost_uses_direct_collection(self, mock_local, collector):
+        """Test that localhost uses direct collection, not SSH."""
+        mock_local.return_value = {'hostname': 'localhost', 'meminfo': {}}
+        result = collector._collect_from_single_host('localhost')
+        mock_local.assert_called_once()
+        assert result['hostname'] == 'localhost'
+
+    @patch('mlpstorage.cluster_collector.collect_local_system_info')
+    def test_collect_from_127_uses_direct_collection(self, mock_local, collector):
+        """Test that 127.0.0.1 uses direct collection, not SSH."""
+        mock_local.return_value = {'hostname': 'localhost', 'meminfo': {}}
+        result = collector._collect_from_single_host('127.0.0.1')
+        mock_local.assert_called_once()
+
+    @patch('subprocess.run')
+    def test_collect_from_remote_host(self, mock_run, collector):
+        """Test collecting from a remote host via SSH."""
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout=json.dumps({
+                'hostname': 'node1',
+                'meminfo': 'MemTotal:       16384000 kB\n',
+                'cpuinfo': '',
+                'diskstats': '',
+                'netdev': '',
+                'version': 'Linux version 5.4.0',
+                'loadavg': '0.1 0.2 0.3 1/100 12345',
+                'uptime': '12345.67',
+                'vmstat': 'nr_free_pages 12345\n',
+                'mounts': '/dev/sda1 / ext4 rw 0 1\n',
+                'cgroups': '#subsys_name\thierarchy\tnum_cgroups\tenabled\ncpu\t0\t1\t1\n',
+                'os_release_raw': 'NAME="Ubuntu"\n',
+                'collection_timestamp': '2026-01-24T12:00:00Z'
+            }),
+            stderr=''
+        )
+
+        result = collector._collect_from_single_host('node1')
+        mock_run.assert_called_once()
+        assert result['hostname'] == 'node1'
+        assert 'meminfo' in result
+
+    @patch('subprocess.run')
+    def test_collect_parses_meminfo(self, mock_run, collector):
+        """Test that collected meminfo is properly parsed."""
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout=json.dumps({
+                'hostname': 'node1',
+                'meminfo': 'MemTotal:       16384000 kB\nMemFree:        8192000 kB\n',
+                'cpuinfo': '',
+                'diskstats': '',
+                'netdev': '',
+                'version': '',
+                'loadavg': '0.1 0.2 0.3 1/100 12345',
+                'uptime': '12345.67',
+                'vmstat': '',
+                'mounts': '',
+                'cgroups': '',
+                'os_release_raw': '',
+                'collection_timestamp': '2026-01-24T12:00:00Z'
+            }),
+            stderr=''
+        )
+
+        result = collector._collect_from_single_host('node1')
+        assert 'meminfo' in result
+        assert result['meminfo'].get('MemTotal') == 16384000
+        assert result['meminfo'].get('MemFree') == 8192000
+
+    @patch('subprocess.run')
+    def test_collect_handles_ssh_failure(self, mock_run, collector):
+        """Test handling of SSH connection failure."""
+        mock_run.return_value = Mock(
+            returncode=255,
+            stdout='',
+            stderr='Connection refused'
+        )
+
+        result = collector._collect_from_single_host('node1')
+        assert 'error' in result
+        assert 'Connection refused' in result['error']
+
+    @patch('subprocess.run')
+    def test_collect_handles_ssh_timeout(self, mock_run, collector):
+        """Test handling of SSH timeout."""
+        mock_run.side_effect = subprocess.TimeoutExpired('ssh', 60)
+
+        result = collector._collect_from_single_host('node1')
+        assert 'error' in result
+        assert 'Timeout' in result['error']
+
+    @patch('subprocess.run')
+    def test_collect_handles_json_parse_error(self, mock_run, collector):
+        """Test handling of invalid JSON from remote host."""
+        mock_run.return_value = Mock(
+            returncode=0,
+            stdout='not valid json',
+            stderr=''
+        )
+
+        result = collector._collect_from_single_host('node1')
+        assert 'error' in result
+        assert 'JSON parse error' in result['error']
+
+    @patch('subprocess.run')
+    def test_collect_handles_generic_exception(self, mock_run, collector):
+        """Test handling of generic exceptions during SSH."""
+        mock_run.side_effect = OSError("Network unreachable")
+
+        result = collector._collect_from_single_host('node1')
+        assert 'error' in result
+        assert 'Network unreachable' in result['error']
+
+    @patch('mlpstorage.cluster_collector.SSHClusterCollector._collect_from_single_host')
+    def test_collect_parallel_execution(self, mock_collect_single, mock_logger):
+        """Test that collect uses parallel execution."""
+        collector = SSHClusterCollector(
+            hosts=['node1', 'node2', 'node3'],
+            logger=mock_logger,
+            max_workers=3
+        )
+        mock_collect_single.return_value = {'hostname': 'test', 'meminfo': {}}
+
+        result = collector.collect([], 60)
+
+        # Should collect from all 3 hosts
+        assert mock_collect_single.call_count == 3
+        assert isinstance(result, CollectionResult)
+        assert result.collection_method == 'ssh'
+        assert len(result.data) == 3
+
+    @patch('mlpstorage.cluster_collector.SSHClusterCollector._collect_from_single_host')
+    def test_collect_returns_success_when_all_succeed(self, mock_collect_single, mock_logger):
+        """Test collect returns success when all hosts succeed."""
+        collector = SSHClusterCollector(
+            hosts=['node1', 'node2'],
+            logger=mock_logger
+        )
+        mock_collect_single.return_value = {'hostname': 'test', 'meminfo': {}}
+
+        result = collector.collect([], 60)
+
+        assert result.success is True
+        assert len(result.errors) == 0
+
+    @patch('mlpstorage.cluster_collector.SSHClusterCollector._collect_from_single_host')
+    def test_collect_returns_success_with_partial_failure(self, mock_collect_single, mock_logger):
+        """Test collect returns success if majority of hosts succeed."""
+        collector = SSHClusterCollector(
+            hosts=['node1', 'node2', 'node3'],
+            logger=mock_logger
+        )
+        # First call succeeds, second succeeds, third fails
+        mock_collect_single.side_effect = [
+            {'hostname': 'node1', 'meminfo': {}},
+            {'hostname': 'node2', 'meminfo': {}},
+            {'hostname': 'node3', 'error': 'Connection refused'},
+        ]
+
+        result = collector.collect([], 60)
+
+        # Success because more hosts succeeded than failed
+        assert result.success is True
+        assert len(result.errors) == 1
+        assert len(result.data) == 3
+
+    @patch('mlpstorage.cluster_collector.SSHClusterCollector._collect_from_single_host')
+    def test_collect_returns_error_list(self, mock_collect_single, mock_logger):
+        """Test collect includes errors in result."""
+        collector = SSHClusterCollector(
+            hosts=['node1'],
+            logger=mock_logger
+        )
+        mock_collect_single.return_value = {'hostname': 'node1', 'error': 'Test error'}
+
+        result = collector.collect([], 60)
+
+        assert len(result.errors) == 1
+        assert 'node1' in result.errors[0]
+        assert 'Test error' in result.errors[0]
+
+    def test_collect_local_returns_collection_result(self, collector):
+        """Test collect_local returns proper CollectionResult."""
+        result = collector.collect_local()
+
+        assert isinstance(result, CollectionResult)
+        assert result.success is True
+        assert result.collection_method == 'local'
+        assert result.errors == []
+        assert result.timestamp is not None
+
+    def test_collector_init_defaults(self, mock_logger):
+        """Test collector initializes with default values."""
+        collector = SSHClusterCollector(
+            hosts=['node1'],
+            logger=mock_logger
+        )
+
+        assert collector.hosts == ['node1']
+        assert collector.logger == mock_logger
+        assert collector.ssh_username is None
+        assert collector.timeout == 60
+        assert collector.max_workers == 10
+
+    def test_collector_init_custom_values(self, mock_logger):
+        """Test collector initializes with custom values."""
+        collector = SSHClusterCollector(
+            hosts=['node1', 'node2'],
+            logger=mock_logger,
+            ssh_username='admin',
+            timeout_seconds=120,
+            max_workers=5
+        )
+
+        assert collector.hosts == ['node1', 'node2']
+        assert collector.ssh_username == 'admin'
+        assert collector.timeout == 120
+        assert collector.max_workers == 5
