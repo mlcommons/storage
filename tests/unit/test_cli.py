@@ -308,10 +308,10 @@ class TestAddVectordbArguments:
         args = parser.parse_args(['datagen'])
         assert args.command == 'datagen'
 
-    def test_run_search_subcommand_exists(self, parser):
-        """VectorDB should have run-search subcommand."""
-        args = parser.parse_args(['run-search'])
-        assert args.command == 'run-search'
+    def test_run_subcommand_exists(self, parser):
+        """VectorDB should have run subcommand."""
+        args = parser.parse_args(['run'])
+        assert args.command == 'run'
 
     def test_datagen_dimension_argument(self, parser):
         """Datagen should accept --dimension argument."""
@@ -323,9 +323,9 @@ class TestAddVectordbArguments:
         args = parser.parse_args(['datagen', '--num-vectors', '100000'])
         assert args.num_vectors == 100000
 
-    def test_run_search_batch_size_argument(self, parser):
-        """Run-search should accept --batch-size argument."""
-        args = parser.parse_args(['run-search', '--batch-size', '32'])
+    def test_run_batch_size_argument(self, parser):
+        """Run should accept --batch-size argument."""
+        args = parser.parse_args(['run', '--batch-size', '32'])
         assert args.batch_size == 32
 
 
