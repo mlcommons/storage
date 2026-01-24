@@ -4,14 +4,14 @@
 
 **Core Value:** Orchestrate multiple benchmark types (training, checkpointing, kv-cache, vectordb) across distributed systems and produce verified, rules-compliant results.
 
-**Current Focus:** Phase 6 COMPLETE - SSH-Based Host Collection
+**Current Focus:** Phase 7 IN PROGRESS - Time-Series Host Data Collection
 
 ## Current Position
 
-**Phase:** 6 of 10 - SSH-Based Host Collection
-**Plan:** 06-03 of 3 (COMPLETE)
-**Status:** Phase complete
-**Last activity:** 2026-01-24 - Completed 06-03-PLAN.md (Benchmark Base Integration)
+**Phase:** 7 of 10 - Time-Series Host Data Collection
+**Plan:** 07-01 of 3 (COMPLETE)
+**Status:** In progress
+**Last activity:** 2026-01-24 - Completed 07-01-PLAN.md (Core Time-Series Infrastructure)
 
 **Progress:**
 ```
@@ -21,11 +21,11 @@ Phase 3:  [##########] 100% (3/3 plans) COMPLETE
 Phase 4:  [##########] 100% (3/3 plans) COMPLETE
 Phase 5:  [##########] 100% (3/3 plans) COMPLETE
 Phase 6:  [##########] 100% (3/3 plans) COMPLETE
-Phase 7:  [----------] 0%
+Phase 7:  [###-------] 33% (1/3 plans)
 Phase 8:  [----------] 0%
 Phase 9:  [----------] 0%
 Phase 10: [----------] 0%
-Overall:  [########--] 85% (22/26 plans complete)
+Overall:  [########--] 88% (23/26 plans complete)
 ```
 
 ## Performance Metrics
@@ -34,7 +34,7 @@ Overall:  [########--] 85% (22/26 plans complete)
 |--------|-------|
 | Phases completed | 6/10 |
 | Requirements delivered | 11/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02, BENCH-03, BENCH-04, BENCH-05, HOST-03) |
-| Plans executed | 22 |
+| Plans executed | 23 |
 | Avg tasks per plan | 2.5 |
 
 ## Accumulated Context
@@ -100,6 +100,9 @@ Overall:  [########--] 85% (22/26 plans complete)
 | SSH for non-MPI benchmarks | Use SSH collection when exec_type is not MPI | 2026-01-24 |
 | Start/end cluster snapshots | ClusterSnapshots dataclass for HOST-03 requirement | 2026-01-24 |
 | Backward-compatible cluster_information | Set cluster_information from start snapshot for compatibility | 2026-01-24 |
+| threading.Event for graceful shutdown | Use Event.wait(timeout) instead of sleep for quick stop response | 2026-01-24 |
+| max_samples limit for time-series | Default 3600 samples to prevent memory exhaustion | 2026-01-24 |
+| Check stopped before started in TimeSeriesCollector | Provides more accurate error messages when restarting | 2026-01-24 |
 
 ### Technical Patterns Established
 
@@ -142,6 +145,8 @@ Overall:  [########--] 85% (22/26 plans complete)
 - Localhost detection and optimization pattern
 - Collection method selection based on exec_type
 - Start/end cluster snapshots for state comparison
+- Background thread with Event-based graceful shutdown
+- Time-series sample collection with dynamic /proc metrics
 
 ### Open TODOs
 
@@ -151,6 +156,7 @@ Overall:  [########--] 85% (22/26 plans complete)
 - [x] Complete Phase 4: VectorDB Benchmark Integration
 - [x] Complete Phase 5: Benchmark Validation Pipeline Integration
 - [x] Complete Phase 6: SSH-Based Host Collection
+- [ ] Complete Phase 7: Time-Series Host Data Collection (1/3 plans done)
 - [ ] Review external KV cache code in `kv_cache_benchmark/`
 - [ ] Review VectorDB scripts from external branch
 - [ ] Verify DLIO parquet support requirements
@@ -184,42 +190,37 @@ None currently.
 - SSH collection integrated into Benchmark base class with start/end snapshots (06-03)
 - ClusterSnapshots dataclass for HOST-03 requirement (start/end state)
 - 15 new tests for collection selection and cluster snapshots (from 06-03)
-- Total cluster_collector tests: 62, Total benchmark_base tests: 54
+- TimeSeriesSample and TimeSeriesData dataclasses added (07-01)
+- collect_timeseries_sample() and TimeSeriesCollector class added (07-01)
+- 23 new unit tests for time-series collection (07-01)
+- Total cluster_collector tests: 85 (62 + 23 new)
 
 ## Session Continuity
 
 ### Last Session
 - **Date:** 2026-01-24
-- **Accomplished:** Completed 06-03-PLAN.md (Benchmark Base Integration)
-- **Next:** Ready for Phase 7
+- **Accomplished:** Completed 07-01-PLAN.md (Core Time-Series Infrastructure)
+- **Next:** 07-02-PLAN.md (Benchmark Integration)
 
 ### Context for Next Session
-- Phase 6 COMPLETE: SSH-Based Host Collection
-  - 06-01: /proc Parsers for HOST-02 COMPLETE
-    - MountInfo and CgroupInfo dataclasses added
-    - parse_proc_vmstat, parse_proc_mounts, parse_proc_cgroups functions added
-    - collect_local_system_info updated to include vmstat, mounts, cgroups
-    - 29 unit tests added to tests/unit/test_cluster_collector.py
-  - 06-02: SSHClusterCollector Implementation COMPLETE
-    - _is_localhost helper for localhost detection
-    - SSH_COLLECTOR_SCRIPT for remote execution
-    - SSHClusterCollector implementing ClusterCollectorInterface
-    - Parallel collection via ThreadPoolExecutor
-    - 33 new unit tests for SSHClusterCollector
-  - 06-03: Benchmark Base Integration COMPLETE
-    - ClusterSnapshots dataclass in models.py
-    - SSH collection integrated into Benchmark base class
-    - _should_use_ssh_collection, _collect_via_ssh, _collect_cluster_start, _collect_cluster_end methods
-    - run() calls start/end collection (HOST-03)
-    - 15 new unit tests for collection selection
+- Phase 7 IN PROGRESS: Time-Series Host Data Collection
+  - 07-01: Core Time-Series Infrastructure COMPLETE
+    - TimeSeriesSample dataclass with timestamp, hostname, and dynamic metrics
+    - TimeSeriesData dataclass for aggregated samples by host
+    - collect_timeseries_sample() function for /proc metric collection
+    - TimeSeriesCollector class with background thread and start()/stop() lifecycle
+    - 23 new unit tests for time-series collection
+    - Total: 85 tests in test_cluster_collector.py
+  - 07-02: Benchmark Integration (NEXT)
+  - 07-03: Multi-host Time-Series Collection
 - Available for downstream use:
-  - Non-MPI benchmarks automatically use SSH collection
-  - ClusterSnapshots captures start/end state
-  - Metadata includes cluster_snapshots
+  - TimeSeriesCollector can collect samples at configurable intervals
+  - Samples include diskstats, vmstat, loadavg, meminfo, netdev
+  - max_samples limit prevents memory exhaustion
 - Note: vectordb and kvcache not yet wired into cli_parser.py
-- Note: 2 pre-existing test failures in test_rules_calculations.py (unrelated to Phase 6)
+- Note: 2 pre-existing test failures in test_rules_calculations.py (unrelated to Phase 7)
 - No blockers
-- Ready to proceed with Phase 7
+- Ready to proceed with 07-02
 
 ---
 
