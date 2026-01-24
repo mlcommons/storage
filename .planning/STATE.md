@@ -9,15 +9,15 @@
 ## Current Position
 
 **Phase:** 3 of 10 - KV Cache Benchmark Integration
-**Plan:** 03-01 of 5 (COMPLETE)
+**Plan:** 03-02 of 5 (COMPLETE)
 **Status:** In Progress
-**Last activity:** 2026-01-24 - Completed 03-01-PLAN.md
+**Last activity:** 2026-01-24 - Completed 03-02-PLAN.md
 
 **Progress:**
 ```
 Phase 1:  [##########] 100% (5/5 plans) COMPLETE
 Phase 2:  [##########] 100% (5/5 plans) COMPLETE
-Phase 3:  [##--------] 20% (1/5 plans)
+Phase 3:  [####------] 40% (2/5 plans)
 Phase 4:  [----------] 0%
 Phase 5:  [----------] 0%
 Phase 6:  [----------] 0%
@@ -25,7 +25,7 @@ Phase 7:  [----------] 0%
 Phase 8:  [----------] 0%
 Phase 9:  [----------] 0%
 Phase 10: [----------] 0%
-Overall:  [####------] 41% (11/27 plans complete)
+Overall:  [####------] 44% (12/27 plans complete)
 ```
 
 ## Performance Metrics
@@ -34,7 +34,7 @@ Overall:  [####------] 41% (11/27 plans complete)
 |--------|-------|
 | Phases completed | 2/10 |
 | Requirements delivered | 5/21 (PKG-01, PKG-02, PKG-03, CLI integration, Fail-fast validation) |
-| Plans executed | 11 |
+| Plans executed | 12 |
 | Avg tasks per plan | 2.3 |
 
 ## Accumulated Context
@@ -78,6 +78,9 @@ Overall:  [####------] 41% (11/27 plans complete)
 | Distributed args for run only | KV cache run command gets --hosts, --exec-type, --num-processes; datasize does not | 2026-01-24 |
 | Reuse common CLI args | KV cache uses add_host_arguments, add_mpi_arguments from common_args | 2026-01-24 |
 | EXEC_TYPE.MPI default | KV cache --exec-type defaults to MPI like training/checkpointing | 2026-01-24 |
+| MPI wrapper pattern for KV cache | Follow DLIOBenchmark pattern for MPI command wrapping | 2026-01-24 |
+| num_processes defaults to len(hosts) | Sensible default - one process per host when not specified | 2026-01-24 |
+| Cluster collection for run only | Collect cluster information only for 'run' command, not 'datasize' | 2026-01-24 |
 
 ### Technical Patterns Established
 
@@ -104,6 +107,7 @@ Overall:  [####------] 41% (11/27 plans complete)
 - Union type for heterogeneous error collection
 - Validation hook pattern in base class
 - Distributed argument builder pattern (reuse common args)
+- MPI command wrapping pattern (generate_mpi_prefix_cmd)
 
 ### Open TODOs
 
@@ -129,13 +133,14 @@ None currently.
 - validate_benchmark_environment now collects all issues before reporting
 - Fail-fast validation integrated into main.py before benchmark instantiation
 - KV cache CLI arguments now support distributed execution (run command only)
+- KVCacheBenchmark now wraps commands with MPI prefix when exec_type=MPI
 
 ## Session Continuity
 
 ### Last Session
 - **Date:** 2026-01-24
-- **Accomplished:** Completed 03-01-PLAN.md execution (KV Cache Distributed CLI Arguments)
-- **Next:** Execute 03-02-PLAN.md (Multi-host orchestration)
+- **Accomplished:** Completed 03-02-PLAN.md execution (MPI Execution Support)
+- **Next:** Execute 03-03-PLAN.md (Result collection and metrics)
 
 ### Context for Next Session
 - Phase 3 IN PROGRESS: KV Cache Benchmark Integration
@@ -143,15 +148,18 @@ None currently.
     - Added --hosts, --exec-type, --num-processes, MPI args to run command
     - 38 unit tests in tests/unit/test_cli_kvcache.py
     - Datasize command correctly lacks distributed args
-  - 03-02: Multi-host orchestration (NEXT)
-  - 03-03: Result collection and metrics
+  - 03-02: Multi-host orchestration COMPLETE
+    - KVCacheBenchmark._build_kvcache_command() now wraps with MPI prefix
+    - Cluster information collected for 'run' command
+    - 12 unit tests in tests/unit/test_benchmarks_kvcache.py
+  - 03-03: Result collection and metrics (NEXT)
   - 03-04: Validation and error handling
   - 03-05: Integration testing
 - Available for downstream use:
   - KV cache run command now accepts: --hosts, --exec-type, --num-processes, --mpi-bin, --oversubscribe, --allow-run-as-root, --mpi-params
-  - Default --exec-type is MPI
-  - Default --hosts is ['127.0.0.1']
-- Note: kvcache not yet wired into cli_parser.py (out of scope for 03-01)
+  - KVCacheBenchmark generates MPI-wrapped commands when exec_type=MPI
+  - num_processes defaults to len(hosts) when not specified
+- Note: kvcache not yet wired into cli_parser.py (out of scope)
 - No blockers
 
 ---
