@@ -10,10 +10,13 @@ from mlpstorage.config import (
     KVCACHE_PERFORMANCE_PROFILES,
     KVCACHE_GENERATION_MODES,
     KVCACHE_DEFAULT_DURATION,
+    EXEC_TYPE,
 )
 from mlpstorage.cli.common_args import (
     HELP_MESSAGES,
     add_universal_arguments,
+    add_host_arguments,
+    add_mpi_arguments,
 )
 
 
@@ -87,6 +90,9 @@ def add_kvcache_arguments(parser):
     # Run-specific arguments
     _add_kvcache_run_arguments(run_benchmark)
     _add_kvcache_optional_features(run_benchmark)
+
+    # Add distributed execution arguments to run command only
+    _add_kvcache_distributed_arguments(run_benchmark)
 
 
 def _add_kvcache_model_arguments(parser):
@@ -212,3 +218,30 @@ def _add_kvcache_optional_features(parser):
         default='qos',
         help=KVCACHE_HELP_MESSAGES['autoscaler_mode']
     )
+
+
+def _add_kvcache_distributed_arguments(parser):
+    """Add distributed execution arguments for multi-host benchmarking.
+
+    Args:
+        parser: Argparse parser to add arguments to.
+    """
+    distributed_group = parser.add_argument_group("Distributed Execution")
+    distributed_group.add_argument(
+        '--exec-type', '-et',
+        type=EXEC_TYPE,
+        choices=list(EXEC_TYPE),
+        default=EXEC_TYPE.MPI,
+        help=HELP_MESSAGES['exec_type']
+    )
+    distributed_group.add_argument(
+        '--num-processes', '-np',
+        type=int,
+        help="Number of MPI processes (ranks) to spawn for distributed execution."
+    )
+
+    # Add host arguments from common_args
+    add_host_arguments(parser)
+
+    # Add MPI arguments from common_args
+    add_mpi_arguments(parser)
