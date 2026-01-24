@@ -48,7 +48,10 @@ HYDRA_OUTPUT_SUBDIR = "dlio_config"
 COSMOFLOW = "cosmoflow"
 RESNET = "resnet50"
 UNET = "unet3d"
-MODELS = [COSMOFLOW, RESNET, UNET]
+DLRM = "dlrm"
+RETINANET = "retinanet"
+FLUX = "flux"
+MODELS = [COSMOFLOW, RESNET, UNET, DLRM, RETINANET, FLUX]
 
 H100 = "h100"
 A100 = "a100"
