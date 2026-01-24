@@ -81,9 +81,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 03-01-PLAN.md - Add distributed execution CLI arguments
-- [ ] 03-02-PLAN.md - MPI command wrapping in KVCacheBenchmark
-- [ ] 03-03-PLAN.md - Metadata verification and history integration
+- [x] 03-01-PLAN.md - Add distributed execution CLI arguments
+- [x] 03-02-PLAN.md - MPI command wrapping in KVCacheBenchmark
+- [x] 03-03-PLAN.md - Metadata verification and history integration
 
 ---
 
@@ -219,7 +219,7 @@ Plans:
 |-------|------|--------|--------------|
 | 1 | Package Management Foundation | Complete | PKG-01, PKG-02, PKG-03 |
 | 2 | Environment Validation and Fail-Fast | Complete | UX-01, UX-02, UX-03 |
-| 3 | KV Cache Benchmark Integration | Planned | BENCH-01, BENCH-02 |
+| 3 | KV Cache Benchmark Integration | Complete | BENCH-01, BENCH-02 |
 | 4 | VectorDB Benchmark Integration | Not Started | BENCH-03, BENCH-04 |
 | 5 | Benchmark Validation Pipeline Integration | Not Started | BENCH-05 |
 | 6 | SSH-Based Host Collection | Not Started | HOST-01, HOST-02, HOST-03 |
