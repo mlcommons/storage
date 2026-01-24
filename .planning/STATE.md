@@ -9,14 +9,14 @@
 ## Current Position
 
 **Phase:** 2 of 10 - Environment Validation and Fail-Fast
-**Plan:** 02-03 of 5
+**Plan:** 02-04 of 5
 **Status:** In progress
-**Last activity:** 2026-01-24 - Completed 02-03-PLAN.md
+**Last activity:** 2026-01-24 - Completed 02-04-PLAN.md
 
 **Progress:**
 ```
 Phase 1:  [##########] 100% (5/5 plans) COMPLETE
-Phase 2:  [######----] 60% (3/5 plans)
+Phase 2:  [########--] 80% (4/5 plans)
 Phase 3:  [----------] 0%
 Phase 4:  [----------] 0%
 Phase 5:  [----------] 0%
@@ -25,7 +25,7 @@ Phase 7:  [----------] 0%
 Phase 8:  [----------] 0%
 Phase 9:  [----------] 0%
 Phase 10: [----------] 0%
-Overall:  [###-------] 30% (8/27 plans complete)
+Overall:  [###-------] 33% (9/27 plans complete)
 ```
 
 ## Performance Metrics
@@ -34,8 +34,8 @@ Overall:  [###-------] 30% (8/27 plans complete)
 |--------|-------|
 | Phases completed | 1/10 |
 | Requirements delivered | 4/21 (PKG-01, PKG-02, PKG-03, CLI integration) |
-| Plans executed | 8 |
-| Avg tasks per plan | 2.3 |
+| Plans executed | 9 |
+| Avg tasks per plan | 2.2 |
 
 ## Accumulated Context
 
@@ -69,6 +69,9 @@ Overall:  [###-------] 30% (8/27 plans complete)
 | ValidationIssue as Exception | Make ValidationIssue inherit from Exception to allow raising directly | 2026-01-24 |
 | Localhost skip in SSH checks | Skip SSH checks for localhost/127.0.0.1 (auto-success) | 2026-01-24 |
 | BatchMode SSH | Use SSH BatchMode to avoid password prompts in automated checks | 2026-01-24 |
+| Collect-all-then-report validation | Collect ALL issues before raising, so users see complete picture | 2026-01-24 |
+| First error preserves exception type | Raise first collected error to preserve specific exception type | 2026-01-24 |
+| Helper functions for conditional checks | _requires_mpi, _is_distributed_run, _requires_dlio for testable logic | 2026-01-24 |
 
 ### Technical Patterns Established
 
@@ -91,6 +94,8 @@ Overall:  [###-------] 30% (8/27 plans complete)
 - OS-aware error messaging with copy-pasteable commands
 - Exception-inheriting dataclass for structured errors
 - BatchMode SSH for non-interactive connectivity validation
+- Collect-all-then-report validation pattern
+- Union type for heterogeneous error collection
 
 ### Open TODOs
 
@@ -98,7 +103,7 @@ Overall:  [###-------] 30% (8/27 plans complete)
 - [x] Complete 02-01: Environment Detection Module
 - [x] Complete 02-02: Executable Checking Module
 - [x] Complete 02-03: SSH Validation and Issue Collection
-- [ ] Complete 02-04: Pre-Run Validation Orchestration
+- [x] Complete 02-04: Pre-Run Validation Orchestration
 - [ ] Complete 02-05: Integration Tests
 - [ ] Review external KV cache code in `kv_cache_benchmark/`
 - [ ] Review VectorDB scripts from external branch
@@ -116,13 +121,14 @@ None currently.
 - MPI collection works, SSH collection needs to be added
 - Environment module now provides OS-aware install hints
 - Dependency checking now uses environment module for OS-specific error messages
+- validate_benchmark_environment now collects all issues before reporting
 
 ## Session Continuity
 
 ### Last Session
 - **Date:** 2026-01-24
-- **Accomplished:** Completed 02-03-PLAN.md execution (SSH Validation and Issue Collection)
-- **Next:** Execute 02-04-PLAN.md (Pre-Run Validation Orchestration)
+- **Accomplished:** Completed 02-04-PLAN.md execution (Pre-Run Validation Orchestration)
+- **Next:** Execute 02-05-PLAN.md (Integration Tests)
 
 ### Context for Next Session
 - Phase 2 in progress: Environment Validation and Fail-Fast
@@ -136,12 +142,17 @@ None currently.
     - `mlpstorage/environment/validators.py` - ValidationIssue, validate_ssh_connectivity, collect_validation_issues
     - ValidationIssue is both a dataclass and an Exception (can be raised directly)
     - SSH validation checks binary first, uses BatchMode, skips localhost
-  - 02-04: Next up - Pre-run validation orchestration
-  - 02-05: Integration tests
+  - 02-04: Pre-run validation orchestration COMPLETE
+    - `mlpstorage/validation_helpers.py` - validate_benchmark_environment()
+    - Collects ALL issues before reporting (fail-fast pattern)
+    - Helper functions: _requires_mpi, _is_distributed_run, _requires_dlio
+    - Checks MPI for distributed, DLIO for training/checkpointing, SSH for remote hosts
+  - 02-05: Next up - Integration tests
 - Available for downstream use:
   - `from mlpstorage.environment import detect_os, get_install_instruction, OSInfo`
   - `from mlpstorage.environment import ValidationIssue, validate_ssh_connectivity, collect_validation_issues`
   - `from mlpstorage.dependency_check import check_mpi_with_hints, check_dlio_with_hints, check_ssh_available`
+  - `from mlpstorage.validation_helpers import validate_benchmark_environment`
   - Supports Ubuntu, Debian, RHEL, CentOS, Fedora, Arch, macOS, Windows
 - No blockers
 
