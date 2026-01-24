@@ -17,6 +17,7 @@ from mlpstorage.cluster_collector import (
     collect_local_system_info,
     collect_timeseries_sample,
     TimeSeriesCollector,
+    MultiHostTimeSeriesCollector,
 )
 from mlpstorage.interfaces.collector import CollectionResult
 
@@ -1029,3 +1030,183 @@ class TestTimeSeriesDataDataclass:
         assert restored.collection_method == original.collection_method
         assert restored.hosts_requested == original.hosts_requested
         assert len(restored.samples_by_host['host1']) == 1
+
+
+# =============================================================================
+# Multi-Host Time-Series Collection Tests
+# =============================================================================
+
+class TestMultiHostTimeSeriesCollector:
+    """Tests for MultiHostTimeSeriesCollector class."""
+
+    def test_init_sets_defaults(self):
+        """Collector should initialize with default values."""
+        collector = MultiHostTimeSeriesCollector(hosts=['localhost'])
+
+        assert collector.interval_seconds == 10.0
+        assert collector.max_samples == 3600
+        assert 'localhost' in collector.hosts
+        assert not collector.is_running
+
+    def test_init_custom_values(self):
+        """Collector should accept custom parameters."""
+        collector = MultiHostTimeSeriesCollector(
+            hosts=['host1', 'host2'],
+            interval_seconds=5.0,
+            max_samples=100,
+            ssh_timeout=15
+        )
+
+        assert collector.interval_seconds == 5.0
+        assert collector.max_samples == 100
+        assert len(collector.hosts) == 2
+
+    def test_deduplicates_hosts(self):
+        """Collector should remove duplicate hosts."""
+        collector = MultiHostTimeSeriesCollector(
+            hosts=['host1', 'host1', 'host2', 'host2:2']
+        )
+
+        assert len(collector.hosts) == 2
+        assert 'host1' in collector.hosts
+        assert 'host2' in collector.hosts
+
+    def test_removes_slot_counts(self):
+        """Collector should strip slot counts from hosts."""
+        collector = MultiHostTimeSeriesCollector(
+            hosts=['host1:4', 'host2:8']
+        )
+
+        assert 'host1' in collector.hosts
+        assert 'host2' in collector.hosts
+        assert 'host1:4' not in collector.hosts
+
+    def test_start_sets_running(self):
+        """start() should set is_running to True."""
+        collector = MultiHostTimeSeriesCollector(
+            hosts=['localhost'],
+            interval_seconds=0.1
+        )
+
+        try:
+            collector.start()
+            assert collector.is_running
+            assert collector.start_time is not None
+        finally:
+            collector.stop()
+
+    def test_stop_returns_samples_by_host(self):
+        """stop() should return dict organized by host."""
+        collector = MultiHostTimeSeriesCollector(
+            hosts=['localhost'],
+            interval_seconds=0.1
+        )
+
+        collector.start()
+        time.sleep(0.25)
+        samples_by_host = collector.stop()
+
+        assert isinstance(samples_by_host, dict)
+        assert not collector.is_running
+        assert collector.end_time is not None
+
+    def test_collects_from_localhost(self):
+        """Should collect samples from localhost."""
+        collector = MultiHostTimeSeriesCollector(
+            hosts=['localhost'],
+            interval_seconds=0.1
+        )
+
+        collector.start()
+        time.sleep(0.25)
+        samples_by_host = collector.stop()
+
+        # Should have localhost data
+        assert 'localhost' in samples_by_host
+        assert len(samples_by_host['localhost']) >= 1
+
+    def test_samples_have_expected_structure(self):
+        """Collected samples should have timestamp and hostname."""
+        collector = MultiHostTimeSeriesCollector(
+            hosts=['localhost'],
+            interval_seconds=0.1
+        )
+
+        collector.start()
+        time.sleep(0.15)
+        samples_by_host = collector.stop()
+
+        if samples_by_host.get('localhost'):
+            sample = samples_by_host['localhost'][0]
+            assert 'timestamp' in sample
+            assert 'hostname' in sample
+
+    def test_max_samples_per_host_enforced(self):
+        """Should not exceed max_samples per host."""
+        collector = MultiHostTimeSeriesCollector(
+            hosts=['localhost'],
+            interval_seconds=0.05,
+            max_samples=3
+        )
+
+        collector.start()
+        time.sleep(0.3)  # Would collect ~6 without limit
+        samples_by_host = collector.stop()
+
+        assert len(samples_by_host.get('localhost', [])) <= 3
+
+    def test_start_twice_raises_error(self):
+        """Starting twice should raise RuntimeError."""
+        collector = MultiHostTimeSeriesCollector(
+            hosts=['localhost'],
+            interval_seconds=0.1
+        )
+
+        try:
+            collector.start()
+            with pytest.raises(RuntimeError, match="already started"):
+                collector.start()
+        finally:
+            collector.stop()
+
+    def test_stop_without_start_raises_error(self):
+        """Stopping without starting should raise RuntimeError."""
+        collector = MultiHostTimeSeriesCollector(hosts=['localhost'])
+
+        with pytest.raises(RuntimeError, match="not started"):
+            collector.stop()
+
+    def test_get_hosts_with_data(self):
+        """get_hosts_with_data should return hosts that have samples."""
+        collector = MultiHostTimeSeriesCollector(
+            hosts=['localhost'],
+            interval_seconds=0.1
+        )
+
+        collector.start()
+        time.sleep(0.15)
+        collector.stop()
+
+        hosts_with_data = collector.get_hosts_with_data()
+        assert 'localhost' in hosts_with_data
+
+    def test_handles_unreachable_host_gracefully(self):
+        """Should continue collecting even if one host fails."""
+        collector = MultiHostTimeSeriesCollector(
+            hosts=['localhost', 'nonexistent-host-12345.invalid'],
+            interval_seconds=0.2,
+            ssh_timeout=1  # Short timeout for test
+        )
+
+        collector.start()
+        time.sleep(0.5)
+        samples_by_host = collector.stop()
+
+        # localhost should still have data
+        assert len(samples_by_host.get('localhost', [])) >= 1
+
+        # Unreachable host should have error samples
+        bad_host_samples = samples_by_host.get('nonexistent-host-12345.invalid', [])
+        if bad_host_samples:
+            # If we got samples, they should have errors
+            assert any('errors' in s for s in bad_host_samples)
