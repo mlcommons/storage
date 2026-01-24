@@ -4,20 +4,20 @@
 
 **Core Value:** Orchestrate multiple benchmark types (training, checkpointing, kv-cache, vectordb) across distributed systems and produce verified, rules-compliant results.
 
-**Current Focus:** Phase 2 Complete - Ready for Phase 3
+**Current Focus:** Phase 3 In Progress - KV Cache Benchmark Integration
 
 ## Current Position
 
-**Phase:** 2 of 10 - Environment Validation and Fail-Fast
-**Plan:** 02-05 of 5 (COMPLETE)
-**Status:** Phase 2 Complete
-**Last activity:** 2026-01-24 - Completed 02-05-PLAN.md
+**Phase:** 3 of 10 - KV Cache Benchmark Integration
+**Plan:** 03-01 of 5 (COMPLETE)
+**Status:** In Progress
+**Last activity:** 2026-01-24 - Completed 03-01-PLAN.md
 
 **Progress:**
 ```
 Phase 1:  [##########] 100% (5/5 plans) COMPLETE
 Phase 2:  [##########] 100% (5/5 plans) COMPLETE
-Phase 3:  [----------] 0%
+Phase 3:  [##--------] 20% (1/5 plans)
 Phase 4:  [----------] 0%
 Phase 5:  [----------] 0%
 Phase 6:  [----------] 0%
@@ -25,7 +25,7 @@ Phase 7:  [----------] 0%
 Phase 8:  [----------] 0%
 Phase 9:  [----------] 0%
 Phase 10: [----------] 0%
-Overall:  [####------] 37% (10/27 plans complete)
+Overall:  [####------] 41% (11/27 plans complete)
 ```
 
 ## Performance Metrics
@@ -34,7 +34,7 @@ Overall:  [####------] 37% (10/27 plans complete)
 |--------|-------|
 | Phases completed | 2/10 |
 | Requirements delivered | 5/21 (PKG-01, PKG-02, PKG-03, CLI integration, Fail-fast validation) |
-| Plans executed | 10 |
+| Plans executed | 11 |
 | Avg tasks per plan | 2.3 |
 
 ## Accumulated Context
@@ -75,6 +75,9 @@ Overall:  [####------] 37% (10/27 plans complete)
 | Single validation entry point | validate_benchmark_environment replaces validate_pre_run | 2026-01-24 |
 | Benchmark validation hook | _validate_environment() in base class for benchmark-specific validation | 2026-01-24 |
 | Skip validation flag | --skip-validation for debugging when validation is blocking | 2026-01-24 |
+| Distributed args for run only | KV cache run command gets --hosts, --exec-type, --num-processes; datasize does not | 2026-01-24 |
+| Reuse common CLI args | KV cache uses add_host_arguments, add_mpi_arguments from common_args | 2026-01-24 |
+| EXEC_TYPE.MPI default | KV cache --exec-type defaults to MPI like training/checkpointing | 2026-01-24 |
 
 ### Technical Patterns Established
 
@@ -100,6 +103,7 @@ Overall:  [####------] 37% (10/27 plans complete)
 - Collect-all-then-report validation pattern
 - Union type for heterogeneous error collection
 - Validation hook pattern in base class
+- Distributed argument builder pattern (reuse common args)
 
 ### Open TODOs
 
@@ -108,6 +112,7 @@ Overall:  [####------] 37% (10/27 plans complete)
 - [ ] Review external KV cache code in `kv_cache_benchmark/`
 - [ ] Review VectorDB scripts from external branch
 - [ ] Verify DLIO parquet support requirements
+- [ ] Wire kvcache into cli_parser.py (noticed during 03-01)
 
 ### Active Blockers
 
@@ -123,42 +128,30 @@ None currently.
 - Dependency checking now uses environment module for OS-specific error messages
 - validate_benchmark_environment now collects all issues before reporting
 - Fail-fast validation integrated into main.py before benchmark instantiation
+- KV cache CLI arguments now support distributed execution (run command only)
 
 ## Session Continuity
 
 ### Last Session
 - **Date:** 2026-01-24
-- **Accomplished:** Completed 02-05-PLAN.md execution (Fail-Fast Validation Integration)
-- **Next:** Execute Phase 3 plans (Configuration System Improvements)
+- **Accomplished:** Completed 03-01-PLAN.md execution (KV Cache Distributed CLI Arguments)
+- **Next:** Execute 03-02-PLAN.md (Multi-host orchestration)
 
 ### Context for Next Session
-- Phase 2 COMPLETE: Environment Validation and Fail-Fast
-  - 02-01: Environment detection module COMPLETE
-    - `mlpstorage/environment/os_detect.py` - OSInfo dataclass, detect_os()
-    - `mlpstorage/environment/install_hints.py` - INSTALL_INSTRUCTIONS, get_install_instruction()
-  - 02-02: Executable checking with OS-aware hints COMPLETE
-    - `check_mpi_with_hints()`, `check_dlio_with_hints()`, `check_ssh_available()`
-    - Error templates: DEPENDENCY_MPI_MISSING, DEPENDENCY_DLIO_MISSING, DEPENDENCY_SSH_MISSING
-  - 02-03: SSH validation and issue collection COMPLETE
-    - `mlpstorage/environment/validators.py` - ValidationIssue, validate_ssh_connectivity, collect_validation_issues
-    - ValidationIssue is both a dataclass and an Exception (can be raised directly)
-    - SSH validation checks binary first, uses BatchMode, skips localhost
-  - 02-04: Pre-run validation orchestration COMPLETE
-    - `mlpstorage/validation_helpers.py` - validate_benchmark_environment()
-    - Collects ALL issues before reporting (fail-fast pattern)
-    - Helper functions: _requires_mpi, _is_distributed_run, _requires_dlio
-    - Checks MPI for distributed, DLIO for training/checkpointing, SSH for remote hosts
-  - 02-05: Fail-fast validation integration COMPLETE
-    - validate_benchmark_environment called in main.py before benchmark instantiation
-    - _validate_environment() hook in Benchmark base class
-    - --skip-validation flag added for debugging
-    - validate_pre_run marked as deprecated
+- Phase 3 IN PROGRESS: KV Cache Benchmark Integration
+  - 03-01: KV Cache Distributed CLI Arguments COMPLETE
+    - Added --hosts, --exec-type, --num-processes, MPI args to run command
+    - 38 unit tests in tests/unit/test_cli_kvcache.py
+    - Datasize command correctly lacks distributed args
+  - 03-02: Multi-host orchestration (NEXT)
+  - 03-03: Result collection and metrics
+  - 03-04: Validation and error handling
+  - 03-05: Integration testing
 - Available for downstream use:
-  - `from mlpstorage.environment import detect_os, get_install_instruction, OSInfo`
-  - `from mlpstorage.environment import ValidationIssue, validate_ssh_connectivity, collect_validation_issues`
-  - `from mlpstorage.dependency_check import check_mpi_with_hints, check_dlio_with_hints, check_ssh_available`
-  - `from mlpstorage.validation_helpers import validate_benchmark_environment`
-  - Supports Ubuntu, Debian, RHEL, CentOS, Fedora, Arch, macOS, Windows
+  - KV cache run command now accepts: --hosts, --exec-type, --num-processes, --mpi-bin, --oversubscribe, --allow-run-as-root, --mpi-params
+  - Default --exec-type is MPI
+  - Default --hosts is ['127.0.0.1']
+- Note: kvcache not yet wired into cli_parser.py (out of scope for 03-01)
 - No blockers
 
 ---
