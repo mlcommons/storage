@@ -1,0 +1,16 @@
+model:
+  name: dlrm
+
+framework: pytorch
+
+workflow:
+  generate_data: True
+  train: False
+  checkpoint: False
+
+dataset:
+  data_folder: data/dlrm/
+  format: npz
+  num_files_train: 65536
+  num_samples_per_file: 1
+  record_length_bytes: 512
