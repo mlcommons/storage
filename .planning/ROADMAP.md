@@ -156,9 +156,9 @@ Plans:
 **Plans:** 3 plans
 
 Plans:
-- [ ] 06-01-PLAN.md - New /proc parsers (vmstat, mounts, cgroups)
-- [ ] 06-02-PLAN.md - SSHClusterCollector implementation
-- [ ] 06-03-PLAN.md - Benchmark integration with start/end snapshots
+- [x] 06-01-PLAN.md - New /proc parsers (vmstat, mounts, cgroups)
+- [x] 06-02-PLAN.md - SSHClusterCollector implementation
+- [x] 06-03-PLAN.md - Benchmark integration with start/end snapshots
 
 ---
 
@@ -243,7 +243,7 @@ Plans:
 | 3 | KV Cache Benchmark Integration | Complete | BENCH-01, BENCH-02 |
 | 4 | VectorDB Benchmark Integration | Complete | BENCH-03, BENCH-04 |
 | 5 | Benchmark Validation Pipeline Integration | Complete | BENCH-05 |
-| 6 | SSH-Based Host Collection | Planned | HOST-01, HOST-02, HOST-03 |
+| 6 | SSH-Based Host Collection | Complete | HOST-01, HOST-02, HOST-03 |
 | 7 | Time-Series Host Data Collection | Not Started | HOST-04, HOST-05 |
 | 8 | New Training Models | Not Started | TRAIN-01, TRAIN-02, TRAIN-03 |
 | 9 | DLIO Parquet Support | Not Started | TRAIN-04 |
