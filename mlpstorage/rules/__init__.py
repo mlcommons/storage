@@ -53,6 +53,7 @@ from mlpstorage.rules.run_checkers import (
     TrainingRunRulesChecker,
     CheckpointingRunRulesChecker,
     KVCacheRunRulesChecker,
+    VectorDBRunRulesChecker,
 )
 
 # Submission checkers
@@ -96,6 +97,7 @@ __all__ = [
     'TrainingRunRulesChecker',
     'CheckpointingRunRulesChecker',
     'KVCacheRunRulesChecker',
+    'VectorDBRunRulesChecker',
     # Submission Checkers
     'MultiRunRulesChecker',
     'TrainingSubmissionRulesChecker',
