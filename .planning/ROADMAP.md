@@ -26,11 +26,11 @@ This roadmap delivers MLPerf Storage v3.0 with fully integrated KV cache and Vec
 **Plans:** 5 plans
 
 Plans:
-- [ ] 01-01-PLAN.md - Lockfile module structure and data models
-- [ ] 01-02-PLAN.md - CPU-only pyproject.toml configuration
-- [ ] 01-03-PLAN.md - Lockfile generation with uv pip compile
-- [ ] 01-04-PLAN.md - Runtime version validation
-- [ ] 01-05-PLAN.md - CLI integration and benchmark hookup
+- [x] 01-01-PLAN.md - Lockfile module structure and data models
+- [x] 01-02-PLAN.md - CPU-only pyproject.toml configuration
+- [x] 01-03-PLAN.md - Lockfile generation with uv pip compile
+- [x] 01-04-PLAN.md - Runtime version validation
+- [x] 01-05-PLAN.md - CLI integration and benchmark hookup
 
 ---
 
@@ -50,6 +50,15 @@ Plans:
 2. User running benchmark without DLIO sees error with `pip install` command to resolve
 3. User with missing host tools (SSH, etc.) sees specific error before benchmark starts, not cryptic failure mid-run
 4. All validation occurs before any benchmark execution begins (fail-fast pattern)
+
+**Plans:** 5 plans
+
+Plans:
+- [ ] 02-01-PLAN.md - OS detection module and install hints
+- [ ] 02-02-PLAN.md - Enhanced dependency checking with OS-aware errors
+- [ ] 02-03-PLAN.md - SSH connectivity validation and issue collection
+- [ ] 02-04-PLAN.md - Comprehensive fail-fast environment validator
+- [ ] 02-05-PLAN.md - Integration into benchmark execution path
 
 ---
 
@@ -201,8 +210,8 @@ Plans:
 
 | Phase | Name | Status | Requirements |
 |-------|------|--------|--------------|
-| 1 | Package Management Foundation | ✓ Complete | PKG-01, PKG-02, PKG-03 |
-| 2 | Environment Validation and Fail-Fast | Not Started | UX-01, UX-02, UX-03 |
+| 1 | Package Management Foundation | Complete | PKG-01, PKG-02, PKG-03 |
+| 2 | Environment Validation and Fail-Fast | Planned | UX-01, UX-02, UX-03 |
 | 3 | KV Cache Benchmark Integration | Not Started | BENCH-01, BENCH-02 |
 | 4 | VectorDB Benchmark Integration | Not Started | BENCH-03, BENCH-04 |
 | 5 | Benchmark Validation Pipeline Integration | Not Started | BENCH-05 |
