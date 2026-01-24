@@ -283,6 +283,17 @@ class ClosedRequirementsFormatter:
         'allowed_params': [],
     }
 
+    VECTORDB_REQUIREMENTS = {
+        'title': 'VectorDB Benchmark Requirements (Preview)',
+        'requirements': [
+            'Minimum runtime of 30 seconds',
+            'Valid collection configuration',
+            'Database host and port accessible',
+            'Note: VectorDB is in preview and not yet accepted for CLOSED submissions',
+        ],
+        'allowed_params': [],
+    }
+
     @classmethod
     def get_requirements(cls, benchmark_type: str) -> Optional[Dict]:
         """Get requirements for a benchmark type."""
@@ -290,6 +301,7 @@ class ClosedRequirementsFormatter:
             'training': cls.TRAINING_REQUIREMENTS,
             'checkpointing': cls.CHECKPOINTING_REQUIREMENTS,
             'kv_cache': cls.KVCACHE_REQUIREMENTS,
+            'vector_database': cls.VECTORDB_REQUIREMENTS,
         }
         return requirements_map.get(benchmark_type)
 
