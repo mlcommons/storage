@@ -12,6 +12,7 @@ import shutil
 import socket
 import subprocess
 import tempfile
+import threading
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, asdict
@@ -1713,3 +1714,221 @@ class SSHClusterCollector(ClusterCollectorInterface):
             String identifier 'ssh'.
         """
         return 'ssh'
+
+
+# =============================================================================
+# Time-Series Collection
+# =============================================================================
+
+def collect_timeseries_sample() -> Dict[str, Any]:
+    """Collect time-varying system metrics for time-series analysis.
+
+    Collects only dynamic metrics that change during benchmark execution:
+    - diskstats: I/O statistics per device
+    - vmstat: Virtual memory statistics
+    - loadavg: System load averages
+    - meminfo: Memory usage
+    - netdev: Network interface statistics
+
+    Static information (cpuinfo, os_release) is excluded as it doesn't
+    change between samples.
+
+    Returns:
+        Dictionary containing timestamp, hostname, and metric data.
+        Individual metric keys may be missing if collection fails.
+    """
+    sample = {
+        'timestamp': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime()),
+        'hostname': socket.gethostname(),
+        'errors': {},
+    }
+
+    # Collect /proc/diskstats
+    try:
+        with open('/proc/diskstats', 'r') as f:
+            disks = parse_proc_diskstats(f.read())
+            sample['diskstats'] = [d.to_dict() for d in disks]
+    except Exception as e:
+        sample['errors']['diskstats'] = str(e)
+
+    # Collect /proc/vmstat
+    try:
+        with open('/proc/vmstat', 'r') as f:
+            sample['vmstat'] = parse_proc_vmstat(f.read())
+    except Exception as e:
+        sample['errors']['vmstat'] = str(e)
+
+    # Collect /proc/loadavg
+    try:
+        with open('/proc/loadavg', 'r') as f:
+            load_1, load_5, load_15, running, total = parse_proc_loadavg(f.read())
+            sample['loadavg'] = {
+                'load_1min': load_1,
+                'load_5min': load_5,
+                'load_15min': load_15,
+                'running_processes': running,
+                'total_processes': total,
+            }
+    except Exception as e:
+        sample['errors']['loadavg'] = str(e)
+
+    # Collect /proc/meminfo
+    try:
+        with open('/proc/meminfo', 'r') as f:
+            sample['meminfo'] = parse_proc_meminfo(f.read())
+    except Exception as e:
+        sample['errors']['meminfo'] = str(e)
+
+    # Collect /proc/net/dev
+    try:
+        with open('/proc/net/dev', 'r') as f:
+            interfaces = parse_proc_net_dev(f.read())
+            sample['netdev'] = [n.to_dict() for n in interfaces]
+    except Exception as e:
+        sample['errors']['netdev'] = str(e)
+
+    # Remove errors dict if empty
+    if not sample['errors']:
+        del sample['errors']
+
+    return sample
+
+
+class TimeSeriesCollector:
+    """Collects time-series system metrics in a background thread.
+
+    Uses a non-daemon thread with Event signaling for graceful shutdown.
+    Samples are collected at regular intervals and stored in memory.
+
+    Usage:
+        collector = TimeSeriesCollector(interval_seconds=10.0)
+        collector.start()
+        # ... run benchmark ...
+        samples = collector.stop()
+
+    Attributes:
+        interval_seconds: Time between samples in seconds.
+        max_samples: Maximum number of samples to keep (prevents memory issues).
+    """
+
+    def __init__(
+        self,
+        interval_seconds: float = 10.0,
+        max_samples: int = 3600,
+        logger=None
+    ):
+        """Initialize the time-series collector.
+
+        Args:
+            interval_seconds: Time between samples (default: 10 seconds).
+            max_samples: Maximum samples to keep (default: 3600 = 10 hours at 10s).
+            logger: Optional logger instance for debug output.
+        """
+        self.interval_seconds = interval_seconds
+        self.max_samples = max_samples
+        self.logger = logger
+
+        self._stop_event = threading.Event()
+        self._samples: List[Dict[str, Any]] = []
+        self._start_time: Optional[str] = None
+        self._end_time: Optional[str] = None
+        self._thread = threading.Thread(
+            target=self._collection_loop,
+            daemon=False,  # Non-daemon for graceful shutdown
+            name="TimeSeriesCollector"
+        )
+        self._started = False
+        self._stopped = False
+
+    def _collection_loop(self):
+        """Run periodic collection until stop signal."""
+        while not self._stop_event.is_set():
+            try:
+                sample = collect_timeseries_sample()
+
+                # Enforce max_samples limit
+                if len(self._samples) < self.max_samples:
+                    self._samples.append(sample)
+                elif self.logger:
+                    # Only log once when we hit the limit
+                    if len(self._samples) == self.max_samples:
+                        self.logger.warning(
+                            f'TimeSeriesCollector reached max_samples limit ({self.max_samples}). '
+                            f'Further samples will be dropped.'
+                        )
+
+            except Exception as e:
+                if self.logger:
+                    self.logger.debug(f'TimeSeriesCollector sample error: {e}')
+
+            # Use wait(timeout) instead of sleep() for quick response to stop signal
+            self._stop_event.wait(timeout=self.interval_seconds)
+
+    def start(self) -> None:
+        """Start background collection.
+
+        Raises:
+            RuntimeError: If collector was already started or stopped.
+        """
+        if self._started:
+            raise RuntimeError('TimeSeriesCollector already started')
+        if self._stopped:
+            raise RuntimeError('TimeSeriesCollector already stopped; create a new instance')
+
+        self._start_time = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+        self._started = True
+        self._thread.start()
+
+        if self.logger:
+            self.logger.debug(
+                f'TimeSeriesCollector started (interval={self.interval_seconds}s, '
+                f'max_samples={self.max_samples})'
+            )
+
+    def stop(self) -> List[Dict[str, Any]]:
+        """Stop collection and return all samples.
+
+        Returns:
+            List of sample dictionaries collected during the run.
+
+        Raises:
+            RuntimeError: If collector was not started.
+        """
+        if not self._started:
+            raise RuntimeError('TimeSeriesCollector not started')
+        if self._stopped:
+            return self._samples
+
+        self._stop_event.set()
+        # Wait for thread with timeout slightly longer than interval
+        self._thread.join(timeout=self.interval_seconds + 5)
+
+        self._end_time = time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())
+        self._stopped = True
+
+        if self.logger:
+            self.logger.debug(
+                f'TimeSeriesCollector stopped ({len(self._samples)} samples collected)'
+            )
+
+        return self._samples
+
+    @property
+    def samples(self) -> List[Dict[str, Any]]:
+        """Get collected samples (may be incomplete if still running)."""
+        return self._samples
+
+    @property
+    def start_time(self) -> Optional[str]:
+        """Get collection start time (ISO format)."""
+        return self._start_time
+
+    @property
+    def end_time(self) -> Optional[str]:
+        """Get collection end time (ISO format)."""
+        return self._end_time
+
+    @property
+    def is_running(self) -> bool:
+        """Check if collector is currently running."""
+        return self._started and not self._stopped
