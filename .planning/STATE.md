@@ -4,14 +4,14 @@
 
 **Core Value:** Orchestrate multiple benchmark types (training, checkpointing, kv-cache, vectordb) across distributed systems and produce verified, rules-compliant results.
 
-**Current Focus:** Phase 7 IN PROGRESS - Time-Series Host Data Collection
+**Current Focus:** Phase 7 COMPLETE - Time-Series Host Data Collection
 
 ## Current Position
 
 **Phase:** 7 of 10 - Time-Series Host Data Collection
-**Plan:** 07-02 of 3 (COMPLETE)
-**Status:** In progress
-**Last activity:** 2026-01-24 - Completed 07-02-PLAN.md (Multi-Host Time-Series Collection)
+**Plan:** 07-03 of 3 (COMPLETE)
+**Status:** Phase complete
+**Last activity:** 2026-01-24 - Completed 07-03-PLAN.md (Benchmark Integration)
 
 **Progress:**
 ```
@@ -21,20 +21,20 @@ Phase 3:  [##########] 100% (3/3 plans) COMPLETE
 Phase 4:  [##########] 100% (3/3 plans) COMPLETE
 Phase 5:  [##########] 100% (3/3 plans) COMPLETE
 Phase 6:  [##########] 100% (3/3 plans) COMPLETE
-Phase 7:  [######----] 66% (2/3 plans)
+Phase 7:  [##########] 100% (3/3 plans) COMPLETE
 Phase 8:  [----------] 0%
 Phase 9:  [----------] 0%
 Phase 10: [----------] 0%
-Overall:  [#########-] 92% (24/26 plans complete)
+Overall:  [##########] 96% (25/26 plans complete)
 ```
 
 ## Performance Metrics
 
 | Metric | Value |
 |--------|-------|
-| Phases completed | 6/10 |
-| Requirements delivered | 11/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02, BENCH-03, BENCH-04, BENCH-05, HOST-03) |
-| Plans executed | 24 |
+| Phases completed | 7/10 |
+| Requirements delivered | 13/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02, BENCH-03, BENCH-04, BENCH-05, HOST-03, HOST-04, HOST-05) |
+| Plans executed | 25 |
 | Avg tasks per plan | 2.5 |
 
 ## Accumulated Context
@@ -106,6 +106,10 @@ Overall:  [#########-] 92% (24/26 plans complete)
 | Parallel SSH for multi-host time-series | ThreadPoolExecutor for simultaneous collection from all hosts | 2026-01-24 |
 | Localhost direct collection for time-series | Use _is_localhost to skip SSH for local hosts | 2026-01-24 |
 | Graceful host failure handling | Continue collection even when some hosts fail | 2026-01-24 |
+| Default 10-second time-series interval | Balances data granularity with collection overhead | 2026-01-24 |
+| Time-series only for run command | datagen/configview don't execute benchmarks, no time-series needed | 2026-01-24 |
+| Skip time-series in what-if mode | No actual execution happens, no point collecting metrics | 2026-01-24 |
+| try/finally for time-series cleanup | Ensures collector stops and data written even if _run() fails | 2026-01-24 |
 
 ### Technical Patterns Established
 
@@ -150,6 +154,9 @@ Overall:  [#########-] 92% (24/26 plans complete)
 - Start/end cluster snapshots for state comparison
 - Background thread with Event-based graceful shutdown
 - Time-series sample collection with dynamic /proc metrics
+- Time-series CLI arguments pattern (add_timeseries_arguments)
+- Benchmark.run() lifecycle integration with try/finally
+- JSON file output with naming convention pattern
 
 ### Open TODOs
 
@@ -159,7 +166,7 @@ Overall:  [#########-] 92% (24/26 plans complete)
 - [x] Complete Phase 4: VectorDB Benchmark Integration
 - [x] Complete Phase 5: Benchmark Validation Pipeline Integration
 - [x] Complete Phase 6: SSH-Based Host Collection
-- [ ] Complete Phase 7: Time-Series Host Data Collection (2/3 plans done)
+- [x] Complete Phase 7: Time-Series Host Data Collection
 - [ ] Review external KV cache code in `kv_cache_benchmark/`
 - [ ] Review VectorDB scripts from external branch
 - [ ] Verify DLIO parquet support requirements
@@ -199,17 +206,24 @@ None currently.
 - MultiHostTimeSeriesCollector for parallel multi-host collection (07-02)
 - TIMESERIES_SSH_SCRIPT for lightweight remote collection (07-02)
 - 13 new unit tests for multi-host time-series collection (07-02)
-- Total cluster_collector tests: 98 (85 + 13 new)
+- Time-series CLI arguments: --timeseries-interval, --skip-timeseries, --max-timeseries-samples (07-03)
+- Time-series integrated into Benchmark.run() with try/finally (07-03)
+- Time-series JSON output with {benchmark_type}_{datetime}_timeseries.json naming (07-03)
+- Metadata includes timeseries_data reference (07-03)
+- 19 new unit tests for time-series benchmark integration (07-03)
+- Total cluster_collector tests: 98
+- Total benchmark_base tests: 73
+- HOST-04 and HOST-05 requirements COMPLETE
 
 ## Session Continuity
 
 ### Last Session
 - **Date:** 2026-01-24
-- **Accomplished:** Completed 07-02-PLAN.md (Multi-Host Time-Series Collection)
-- **Next:** 07-03-PLAN.md (Benchmark Integration)
+- **Accomplished:** Completed 07-03-PLAN.md (Benchmark Integration) and Phase 7
+- **Next:** Phase 8 or continue to remaining phases
 
 ### Context for Next Session
-- Phase 7 IN PROGRESS: Time-Series Host Data Collection
+- Phase 7 COMPLETE: Time-Series Host Data Collection
   - 07-01: Core Time-Series Infrastructure COMPLETE
     - TimeSeriesSample dataclass with timestamp, hostname, and dynamic metrics
     - TimeSeriesData dataclass for aggregated samples by host
@@ -223,17 +237,21 @@ None currently.
     - Graceful failure handling (collection continues when hosts fail)
     - Samples organized by hostname
     - 13 new unit tests for multi-host collection
-    - Total: 98 tests in test_cluster_collector.py
-  - 07-03: Benchmark Integration (NEXT)
-- Available for downstream use:
-  - MultiHostTimeSeriesCollector can collect from multiple hosts in parallel
-  - TimeSeriesCollector can collect samples at configurable intervals
-  - Samples include diskstats, vmstat, loadavg, meminfo, netdev
-  - max_samples limit prevents memory exhaustion
+  - 07-03: Benchmark Integration COMPLETE
+    - CLI arguments: --timeseries-interval, --skip-timeseries, --max-timeseries-samples
+    - Arguments wired into all benchmark run parsers
+    - Benchmark.run() integrates time-series lifecycle with try/finally
+    - Time-series JSON file output to results directory
+    - Metadata includes timeseries_data reference
+    - 19 new unit tests for benchmark integration
+- Requirements delivered in Phase 7:
+  - HOST-04: Time-series data files with proper naming convention
+  - HOST-05: Background collection with minimal performance impact
+- 171 tests pass (98 cluster_collector + 73 benchmark_base)
 - Note: vectordb and kvcache not yet wired into cli_parser.py
 - Note: 2 pre-existing test failures in test_rules_calculations.py (unrelated to Phase 7)
 - No blockers
-- Ready to proceed with 07-03
+- Ready to proceed with Phase 8
 
 ---
 
