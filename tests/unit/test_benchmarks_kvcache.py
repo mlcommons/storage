@@ -369,3 +369,156 @@ class TestKVCacheNumProcessesStorage:
             benchmark = KVCacheBenchmark(basic_args, run_datetime="20250115_120000")
 
         assert benchmark.num_processes is None
+
+
+class TestKVCacheMetadata:
+    """Test metadata structure for history integration."""
+
+    @pytest.fixture
+    def base_args(self, tmp_path):
+        """Create base args for KV cache benchmark metadata tests."""
+        return Namespace(
+            debug=False,
+            verbose=False,
+            what_if=False,
+            stream_log_level='INFO',
+            results_dir=str(tmp_path),
+            model='llama3.1-8b',
+            command='run',
+            num_users=100,
+            duration=60,
+            gpu_mem_gb=16.0,
+            cpu_mem_gb=32.0,
+            cache_dir=None,
+            generation_mode='realistic',
+            performance_profile='latency',
+            kvcache_bin_path=None,
+            disable_multi_turn=False,
+            disable_prefix_caching=False,
+            enable_rag=False,
+            enable_autoscaling=False,
+            seed=None,
+            exec_type=None,
+            hosts=None,
+            num_processes=None,
+            mpi_bin='mpirun',
+            oversubscribe=False,
+            allow_run_as_root=False,
+            mpi_params=None,
+        )
+
+    @pytest.fixture
+    def mock_logger(self):
+        """Create a mock logger for testing."""
+        logger = MagicMock()
+        logger.status = MagicMock()
+        logger.info = MagicMock()
+        logger.debug = MagicMock()
+        logger.warning = MagicMock()
+        logger.verboser = MagicMock()
+        logger.verbose = MagicMock()
+        return logger
+
+    def test_metadata_has_required_fields(self, base_args, mock_logger, tmp_path):
+        """Verify metadata includes fields required by history module."""
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen, \
+             patch('mlpstorage.benchmarks.kvcache.KVCacheBenchmark._collect_cluster_information') as mock_cluster:
+            output_dir = str(tmp_path / "output")
+            mock_gen.return_value = output_dir
+            mock_cluster.return_value = None
+            os.makedirs(output_dir, exist_ok=True)
+
+            from mlpstorage.benchmarks.kvcache import KVCacheBenchmark
+            bm = KVCacheBenchmark(base_args, logger=mock_logger, run_datetime="20250124_120000")
+            meta = bm.metadata
+
+        # Required by history module
+        assert 'benchmark_type' in meta
+        assert 'model' in meta
+        assert 'command' in meta
+        assert 'run_datetime' in meta
+        assert 'result_dir' in meta
+
+    def test_metadata_includes_kvcache_specific_fields(self, base_args, mock_logger, tmp_path):
+        """Verify KV cache specific metadata fields."""
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen, \
+             patch('mlpstorage.benchmarks.kvcache.KVCacheBenchmark._collect_cluster_information') as mock_cluster:
+            output_dir = str(tmp_path / "output")
+            mock_gen.return_value = output_dir
+            mock_cluster.return_value = None
+            os.makedirs(output_dir, exist_ok=True)
+
+            from mlpstorage.benchmarks.kvcache import KVCacheBenchmark
+            bm = KVCacheBenchmark(base_args, logger=mock_logger, run_datetime="20250124_120000")
+            meta = bm.metadata
+
+        assert 'kvcache_model' in meta
+        assert 'num_users' in meta
+        assert 'duration' in meta
+        assert 'gpu_mem_gb' in meta
+        assert 'cpu_mem_gb' in meta
+        assert 'generation_mode' in meta
+        assert 'performance_profile' in meta
+
+    def test_metadata_includes_distributed_info(self, base_args, mock_logger, tmp_path):
+        """Verify metadata includes distributed execution info."""
+        base_args.exec_type = EXEC_TYPE.MPI
+        base_args.hosts = ['host1', 'host2']
+        base_args.num_processes = 4
+
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen, \
+             patch('mlpstorage.benchmarks.kvcache.KVCacheBenchmark._collect_cluster_information') as mock_cluster:
+            output_dir = str(tmp_path / "output")
+            mock_gen.return_value = output_dir
+            mock_cluster.return_value = None
+            os.makedirs(output_dir, exist_ok=True)
+
+            from mlpstorage.benchmarks.kvcache import KVCacheBenchmark
+            bm = KVCacheBenchmark(base_args, logger=mock_logger, run_datetime="20250124_120000")
+            meta = bm.metadata
+
+        assert 'num_processes' in meta
+        assert meta['num_processes'] == 4
+        assert 'hosts' in meta
+        assert meta['hosts'] == ['host1', 'host2']
+        assert 'exec_type' in meta
+
+    def test_metadata_model_consistency(self, base_args, mock_logger, tmp_path):
+        """Verify 'model' field matches 'kvcache_model' for history compatibility."""
+        base_args.model = 'llama3.1-70b-instruct'
+
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen, \
+             patch('mlpstorage.benchmarks.kvcache.KVCacheBenchmark._collect_cluster_information') as mock_cluster:
+            output_dir = str(tmp_path / "output")
+            mock_gen.return_value = output_dir
+            mock_cluster.return_value = None
+            os.makedirs(output_dir, exist_ok=True)
+
+            from mlpstorage.benchmarks.kvcache import KVCacheBenchmark
+            bm = KVCacheBenchmark(base_args, logger=mock_logger, run_datetime="20250124_120000")
+            meta = bm.metadata
+
+        assert meta['model'] == 'llama3.1-70b-instruct'
+        assert meta['kvcache_model'] == 'llama3.1-70b-instruct'
+
+    def test_metadata_without_distributed_info(self, base_args, mock_logger, tmp_path):
+        """Verify metadata works correctly without distributed execution info."""
+        # exec_type, hosts, num_processes are None by default in base_args
+
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen, \
+             patch('mlpstorage.benchmarks.kvcache.KVCacheBenchmark._collect_cluster_information') as mock_cluster:
+            output_dir = str(tmp_path / "output")
+            mock_gen.return_value = output_dir
+            mock_cluster.return_value = None
+            os.makedirs(output_dir, exist_ok=True)
+
+            from mlpstorage.benchmarks.kvcache import KVCacheBenchmark
+            bm = KVCacheBenchmark(base_args, logger=mock_logger, run_datetime="20250124_120000")
+            meta = bm.metadata
+
+        # num_processes should be included but can be None
+        assert 'num_processes' in meta
+        assert meta['num_processes'] is None
+        # hosts and exec_type should not be in metadata when not set
+        assert 'hosts' not in meta
+        assert 'exec_type' not in meta
