@@ -544,3 +544,131 @@ class TestBenchmarkIntegration:
         # Write metadata
         benchmark.write_metadata()
         assert os.path.exists(benchmark.metadata_file_path)
+
+
+class TestBenchmarkValidation:
+    """Tests for benchmark validation integration."""
+
+    @pytest.fixture
+    def basic_args(self, tmp_path):
+        """Create basic args for benchmark."""
+        return Namespace(
+            debug=False,
+            verbose=False,
+            what_if=False,
+            stream_log_level='INFO',
+            results_dir=str(tmp_path),
+            model='unet3d',
+            command='run',
+            num_processes=8,
+            accelerator_type='h100'
+        )
+
+    def test_validate_environment_called_on_run(self, basic_args, tmp_path):
+        """Should call _validate_environment before _run when run() is called."""
+        basic_args.results_dir = str(tmp_path)
+        call_order = []
+
+        class TrackingBenchmark(Benchmark):
+            BENCHMARK_TYPE = BENCHMARK_TYPES.training
+
+            def _validate_environment(self):
+                call_order.append('validate')
+
+            def _run(self):
+                call_order.append('run')
+                return 0
+
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+            mock_gen.return_value = str(tmp_path / "output")
+            os.makedirs(tmp_path / "output", exist_ok=True)
+            benchmark = TrackingBenchmark(basic_args)
+
+        benchmark.run()
+
+        assert call_order == ['validate', 'run'], "validate should be called before run"
+
+    def test_validate_environment_can_be_overridden(self, basic_args, tmp_path):
+        """Should allow subclasses to override _validate_environment."""
+        basic_args.results_dir = str(tmp_path)
+        validation_called = []
+
+        class CustomValidationBenchmark(Benchmark):
+            BENCHMARK_TYPE = BENCHMARK_TYPES.training
+
+            def _validate_environment(self):
+                validation_called.append('custom_validation')
+
+            def _run(self):
+                return 0
+
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+            mock_gen.return_value = str(tmp_path / "output")
+            os.makedirs(tmp_path / "output", exist_ok=True)
+            benchmark = CustomValidationBenchmark(basic_args)
+
+        benchmark.run()
+
+        assert 'custom_validation' in validation_called
+
+    def test_validation_error_prevents_run(self, basic_args, tmp_path):
+        """Should propagate validation errors and prevent _run from executing."""
+        from mlpstorage.errors import DependencyError
+
+        basic_args.results_dir = str(tmp_path)
+        run_called = []
+
+        class FailingValidationBenchmark(Benchmark):
+            BENCHMARK_TYPE = BENCHMARK_TYPES.training
+
+            def _validate_environment(self):
+                raise DependencyError("Test dependency error")
+
+            def _run(self):
+                run_called.append('run')
+                return 0
+
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+            mock_gen.return_value = str(tmp_path / "output")
+            os.makedirs(tmp_path / "output", exist_ok=True)
+            benchmark = FailingValidationBenchmark(basic_args)
+
+        with pytest.raises(DependencyError):
+            benchmark.run()
+
+        assert run_called == [], "_run should NOT be called when validation fails"
+
+    def test_base_validate_environment_is_noop(self, basic_args, tmp_path):
+        """Base class _validate_environment should be a no-op (pass)."""
+        basic_args.results_dir = str(tmp_path)
+
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+            mock_gen.return_value = str(tmp_path / "output")
+            os.makedirs(tmp_path / "output", exist_ok=True)
+            benchmark = ConcreteBenchmark(basic_args)
+
+        # Should not raise any exception
+        benchmark._validate_environment()
+
+    def test_validation_error_preserves_type(self, basic_args, tmp_path):
+        """Should preserve the specific error type from validation."""
+        from mlpstorage.errors import ConfigurationError
+
+        basic_args.results_dir = str(tmp_path)
+
+        class ConfigErrorBenchmark(Benchmark):
+            BENCHMARK_TYPE = BENCHMARK_TYPES.training
+
+            def _validate_environment(self):
+                raise ConfigurationError("Invalid configuration")
+
+            def _run(self):
+                return 0
+
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+            mock_gen.return_value = str(tmp_path / "output")
+            os.makedirs(tmp_path / "output", exist_ok=True)
+            benchmark = ConfigErrorBenchmark(basic_args)
+
+        with pytest.raises(ConfigurationError):
+            benchmark.run()
