@@ -1,5 +1,6 @@
 import os
 import sys
+from typing import Dict, Any
 
 from mlpstorage.benchmarks.base import Benchmark
 from mlpstorage.config import CONFIGS_ROOT_DIR, BENCHMARK_TYPES
@@ -16,7 +17,7 @@ class VectorDBBenchmark(Benchmark):
         super().__init__(args)
         self.command_method_map = {
             "datagen": self.execute_datagen,
-            "run-search": self.execute_run
+            "run": self.execute_run,
         }
 
         self.command = args.command
@@ -107,4 +108,43 @@ class VectorDBBenchmark(Benchmark):
         cmd = self.build_command("vdbbench", additional_params)
         self.logger.verbose(f'Execuging benchmark run.')
         self._execute_command(cmd, output_file_prefix=f"{self.BENCHMARK_TYPE.value}_{self.args.command}")
+
+    @property
+    def metadata(self) -> Dict[str, Any]:
+        """Generate metadata for the VectorDB benchmark run.
+
+        Returns:
+            Dictionary containing benchmark metadata compatible with
+            history module and reporting tools.
+        """
+        base_metadata = super().metadata
+
+        # Use config_name as 'model' equivalent for history compatibility
+        # VectorDB doesn't have ML models, but config_name serves same purpose
+        base_metadata.update({
+            'vectordb_config': self.config_name,
+            'model': self.config_name,  # For history module compatibility
+            'host': getattr(self.args, 'host', '127.0.0.1'),
+            'port': getattr(self.args, 'port', 19530),
+            'collection': getattr(self.args, 'collection', None),
+        })
+
+        # Add command-specific parameters
+        if self.command == 'datagen':
+            base_metadata.update({
+                'dimension': getattr(self.args, 'dimension', None),
+                'num_vectors': getattr(self.args, 'num_vectors', None),
+                'num_shards': getattr(self.args, 'num_shards', None),
+                'vector_dtype': getattr(self.args, 'vector_dtype', None),
+                'distribution': getattr(self.args, 'distribution', None),
+            })
+        elif self.command == 'run-search':
+            base_metadata.update({
+                'num_query_processes': getattr(self.args, 'num_query_processes', None),
+                'batch_size': getattr(self.args, 'batch_size', None),
+                'runtime': getattr(self.args, 'runtime', None),
+                'queries': getattr(self.args, 'queries', None),
+            })
+
+        return base_metadata
 
