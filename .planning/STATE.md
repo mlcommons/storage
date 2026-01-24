@@ -9,14 +9,14 @@
 ## Current Position
 
 **Phase:** 2 of 10 - Environment Validation and Fail-Fast
-**Plan:** 02-01 of 5
+**Plan:** 02-02 of 5
 **Status:** In progress
-**Last activity:** 2026-01-24 - Completed 02-01-PLAN.md
+**Last activity:** 2026-01-24 - Completed 02-02-PLAN.md
 
 **Progress:**
 ```
 Phase 1:  [##########] 100% (5/5 plans) COMPLETE
-Phase 2:  [##--------] 20% (1/5 plans)
+Phase 2:  [####------] 40% (2/5 plans)
 Phase 3:  [----------] 0%
 Phase 4:  [----------] 0%
 Phase 5:  [----------] 0%
@@ -25,7 +25,7 @@ Phase 7:  [----------] 0%
 Phase 8:  [----------] 0%
 Phase 9:  [----------] 0%
 Phase 10: [----------] 0%
-Overall:  [##--------] 22% (6/27 plans complete)
+Overall:  [###-------] 26% (7/27 plans complete)
 ```
 
 ## Performance Metrics
@@ -34,7 +34,7 @@ Overall:  [##--------] 22% (6/27 plans complete)
 |--------|-------|
 | Phases completed | 1/10 |
 | Requirements delivered | 4/21 (PKG-01, PKG-02, PKG-03, CLI integration) |
-| Plans executed | 6 |
+| Plans executed | 7 |
 | Avg tasks per plan | 2.3 |
 
 ## Accumulated Context
@@ -64,6 +64,8 @@ Overall:  [##--------] 22% (6/27 plans complete)
 | OSInfo dataclass with optional distro | Simple, type-safe OS info with None for non-Linux distro fields | 2026-01-24 |
 | distro package with fallback | Try distro package first, fall back to platform.freedesktop_os_release (3.10+) | 2026-01-24 |
 | Tuple key lookup for install hints | Use (dependency, system, distro) tuples with specificity-based fallback | 2026-01-24 |
+| Separate enhanced functions for hints | Add new *_with_hints functions alongside legacy functions for backward compatibility | 2026-01-24 |
+| Multi-line error templates | Use multi-line templates with clear sections for readability and copy-pasteability | 2026-01-24 |
 
 ### Technical Patterns Established
 
@@ -83,12 +85,13 @@ Overall:  [##--------] 22% (6/27 plans complete)
 - Fail-fast validation before execution
 - OS detection with distro fallback pattern
 - Specificity-based lookup for OS-specific instructions
+- OS-aware error messaging with copy-pasteable commands
 
 ### Open TODOs
 
 - [x] Complete Phase 1: Package Management Foundation
 - [x] Complete 02-01: Environment Detection Module
-- [ ] Complete 02-02: Executable Checking Module
+- [x] Complete 02-02: Executable Checking Module
 - [ ] Complete 02-03: Pre-Run Validation
 - [ ] Complete 02-04: SSH Connectivity Validation
 - [ ] Complete 02-05: Integration Tests
@@ -107,25 +110,29 @@ None currently.
 - VectorDBBenchmark class exists as stub, needs implementation
 - MPI collection works, SSH collection needs to be added
 - Environment module now provides OS-aware install hints
+- Dependency checking now uses environment module for OS-specific error messages
 
 ## Session Continuity
 
 ### Last Session
 - **Date:** 2026-01-24
-- **Accomplished:** Completed 02-01-PLAN.md execution (Environment Detection Module)
-- **Next:** Execute 02-02-PLAN.md (Executable Checking Module)
+- **Accomplished:** Completed 02-02-PLAN.md execution (Executable Checking Module)
+- **Next:** Execute 02-03-PLAN.md (Pre-Run Validation)
 
 ### Context for Next Session
 - Phase 2 in progress: Environment Validation and Fail-Fast
   - 02-01: Environment detection module COMPLETE
     - `mlpstorage/environment/os_detect.py` - OSInfo dataclass, detect_os()
     - `mlpstorage/environment/install_hints.py` - INSTALL_INSTRUCTIONS, get_install_instruction()
-  - 02-02: Next up - executable checking with OS-aware hints
-  - 02-03: Pre-run validation orchestration
+  - 02-02: Executable checking with OS-aware hints COMPLETE
+    - `check_mpi_with_hints()`, `check_dlio_with_hints()`, `check_ssh_available()`
+    - Error templates: DEPENDENCY_MPI_MISSING, DEPENDENCY_DLIO_MISSING, DEPENDENCY_SSH_MISSING
+  - 02-03: Next up - Pre-run validation orchestration
   - 02-04: SSH connectivity checking
   - 02-05: Integration tests
 - Available for downstream use:
   - `from mlpstorage.environment import detect_os, get_install_instruction, OSInfo`
+  - `from mlpstorage.dependency_check import check_mpi_with_hints, check_dlio_with_hints, check_ssh_available`
   - Supports Ubuntu, Debian, RHEL, CentOS, Fedora, Arch, macOS, Windows
 - No blockers
 
