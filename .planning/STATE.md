@@ -4,14 +4,14 @@
 
 **Core Value:** Orchestrate multiple benchmark types (training, checkpointing, kv-cache, vectordb) across distributed systems and produce verified, rules-compliant results.
 
-**Current Focus:** Phase 8 COMPLETE - New Training Models
+**Current Focus:** Phase 9 In Progress - DLIO Parquet Support
 
 ## Current Position
 
-**Phase:** 8 of 10 - New Training Models
-**Plan:** 08-02 of 2 (COMPLETE)
-**Status:** Phase complete
-**Last activity:** 2026-01-24 - Completed 08-02-PLAN.md (Validation Rules for New Training Models)
+**Phase:** 9 of 10 - DLIO Parquet Support
+**Plan:** 09-01 of 2 (COMPLETE)
+**Status:** In progress
+**Last activity:** 2026-01-25 - Completed 09-01-PLAN.md (DLIO Parquet Format Implementation)
 
 **Progress:**
 ```
@@ -23,9 +23,9 @@ Phase 5:  [##########] 100% (3/3 plans) COMPLETE
 Phase 6:  [##########] 100% (3/3 plans) COMPLETE
 Phase 7:  [##########] 100% (3/3 plans) COMPLETE
 Phase 8:  [##########] 100% (2/2 plans) COMPLETE
-Phase 9:  [----------] 0%
+Phase 9:  [#####-----] 50% (1/2 plans)
 Phase 10: [----------] 0%
-Overall:  [##########] 96% (27/28 plans complete)
+Overall:  [##########] 97% (28/29 plans complete)
 ```
 
 ## Performance Metrics
@@ -34,7 +34,7 @@ Overall:  [##########] 96% (27/28 plans complete)
 |--------|-------|
 | Phases completed | 8/10 |
 | Requirements delivered | 14/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02, BENCH-03, BENCH-04, BENCH-05, HOST-03, HOST-04, HOST-05, TRAIN-01) |
-| Plans executed | 27 |
+| Plans executed | 28 |
 | Avg tasks per plan | 2.5 |
 
 ## Accumulated Context
@@ -115,6 +115,10 @@ Overall:  [##########] 96% (27/28 plans complete)
 | PyTorch framework for new models | DLRM, RetinaNet, Flux all use pytorch framework | 2026-01-24 |
 | Explicit odirect supported models list | Use explicit list for odirect supported models instead of negation | 2026-01-24 |
 | Import MODELS from config for validation | Single source of truth for valid model names in TrainingRunRulesChecker | 2026-01-24 |
+| Local fork for DLIO parquet support | Clone DLIO to local dlio_parquet_fork/ directory for modification | 2026-01-25 |
+| Snappy default parquet compression | Use snappy as default for parquet (most common, best speed/size balance) | 2026-01-25 |
+| Follow CSVReader pattern for ParquetReader | CSV and Parquet have similar tabular structure | 2026-01-25 |
+| Follow CSVGenerator pattern for ParquetGenerator | Maintains consistency with existing DLIO patterns | 2026-01-25 |
 
 ### Technical Patterns Established
 
@@ -164,6 +168,9 @@ Overall:  [##########] 96% (27/28 plans complete)
 - JSON file output with naming convention pattern
 - Model constant with YAML configuration triplet (h100, a100, datagen)
 - check_model_recognized pattern for model validation in run checkers
+- DLIO FormatReader implementation pattern (ParquetReader)
+- DLIO DataGenerator implementation pattern (ParquetGenerator)
+- DLIO factory registration pattern for new formats
 
 ### Open TODOs
 
@@ -175,9 +182,10 @@ Overall:  [##########] 96% (27/28 plans complete)
 - [x] Complete Phase 6: SSH-Based Host Collection
 - [x] Complete Phase 7: Time-Series Host Data Collection
 - [x] Complete Phase 8: New Training Models
+- [ ] Complete Phase 9: DLIO Parquet Support (1/2 plans done)
 - [ ] Review external KV cache code in `kv_cache_benchmark/`
 - [ ] Review VectorDB scripts from external branch
-- [ ] Verify DLIO parquet support requirements
+- [x] Verify DLIO parquet support requirements (Plan 09-01 COMPLETE)
 - [ ] Wire kvcache into cli_parser.py (noticed during 03-01)
 - [ ] Wire vectordb into cli_parser.py
 
@@ -222,36 +230,38 @@ None currently.
 - Total cluster_collector tests: 98
 - Total benchmark_base tests: 73
 - HOST-04 and HOST-05 requirements COMPLETE
+- DLIO parquet fork created in dlio_parquet_fork/ with parquet-support branch
+- ParquetReader and ParquetGenerator implemented using PyArrow
+- PARQUET added to FormatType enum, SNAPPY added to Compression enum
+- User must push fork to remote and update pyproject.toml after verification
 
 ## Session Continuity
 
 ### Last Session
-- **Date:** 2026-01-24
-- **Accomplished:** Completed 08-02-PLAN.md (Validation Rules for New Training Models) and Phase 8
-- **Next:** Phase 9 or continue to remaining phases
+- **Date:** 2026-01-25
+- **Accomplished:** Completed 09-01-PLAN.md (DLIO Parquet Format Implementation)
+- **Next:** Continue with 09-02-PLAN.md or remaining plans
 
 ### Context for Next Session
-- Phase 8 COMPLETE: New Training Models
-  - 08-01: New Training Model Configurations COMPLETE
-    - Added DLRM, RETINANET, FLUX model constants to config.py
-    - Updated MODELS list to include all 6 training models
-    - Created 9 YAML configuration files (3 models x 3 configs: h100, a100, datagen)
-    - DLRM: npz format, 65536 files, 8192 batch size, AU 0.70
-    - RetinaNet: jpeg format, 1.7M files, model.type=cnn, AU 0.85
-    - Flux: jpeg format, 1.1M files, high computation_time, AU 0.80
-  - 08-02: Validation Rules for New Training Models COMPLETE
-    - Added check_model_recognized() validation method to TrainingRunRulesChecker
-    - Updated check_odirect_supported_model() to use explicit supported models list
-    - Added 11 unit tests for new model validation
-    - Tests cover model recognition, odirect restriction, no checkpoint requirement
-- Requirements delivered in Phase 8:
-  - TRAIN-01: New training models (DLRM, RetinaNet, Flux) with configurations and validation
-- 39 test_rules_checkers.py tests pass (11 new for Phase 8 Plan 02)
+- Phase 9 In Progress: DLIO Parquet Support
+  - 09-01: DLIO Parquet Format Implementation COMPLETE
+    - Created local DLIO fork in dlio_parquet_fork/
+    - Added PARQUET to FormatType enum in enumerations.py
+    - Added SNAPPY to Compression enum for default parquet compression
+    - Created ParquetReader class following CSVReader pattern
+    - Created ParquetGenerator class following CSVGenerator pattern
+    - Registered parquet format in ReaderFactory and GeneratorFactory
+    - All changes committed locally on parquet-support branch (commit a444119)
+  - 09-02: Parquet workload YAML configurations - PENDING
+- User setup required after Phase 9 completion:
+  - Fork argonne-lcf/dlio_benchmark to personal GitHub
+  - Push parquet-support branch to fork
+  - Update pyproject.toml with fork URL
 - Note: vectordb and kvcache not yet wired into cli_parser.py
-- Note: Pre-existing test failures in test_rules_calculations.py and test_reporting.py (unrelated to Phase 8)
+- Note: Pre-existing test failures in test_rules_calculations.py and test_reporting.py (unrelated to Phase 9)
 - No blockers
-- Ready to proceed with Phase 9
+- Ready to proceed with 09-02
 
 ---
 
-*State updated: 2026-01-24*
+*State updated: 2026-01-25*
