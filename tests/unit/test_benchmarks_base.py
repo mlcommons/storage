@@ -433,14 +433,39 @@ class TestBenchmarkRun:
 
     def test_tracks_runtime(self, benchmark):
         """Should track runtime."""
+        # Patch time.time specifically in the base module where runtime tracking happens.
+        # Use a counter to provide specific values: start=100.0, end=105.0
+        call_count = [0]
+
+        def mock_time():
+            call_count[0] += 1
+            if call_count[0] == 1:
+                return 100.0  # start_time
+            elif call_count[0] == 2:
+                return 105.0  # end time
+            # Fallback for any additional calls
+            return 105.0 + call_count[0]
+
+        import mlpstorage.benchmarks.base as base_module
+        original_time = base_module.time
+
+        class MockTime:
+            @staticmethod
+            def time():
+                return mock_time()
+
         with patch.object(benchmark, '_run', return_value=0):
             with patch.object(benchmark, '_collect_cluster_start'):
                 with patch.object(benchmark, '_collect_cluster_end'):
                     with patch.object(benchmark, '_start_timeseries_collection'):
                         with patch.object(benchmark, '_stop_timeseries_collection'):
                             with patch.object(benchmark, 'write_timeseries_data'):
-                                with patch('time.time', side_effect=[100.0, 105.0]):
+                                # Patch the time module in base
+                                base_module.time = MockTime
+                                try:
                                     benchmark.run()
+                                finally:
+                                    base_module.time = original_time
 
         assert benchmark.runtime == 5.0
 

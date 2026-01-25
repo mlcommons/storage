@@ -39,6 +39,7 @@ from mlpstorage.lockfile import (
     GenerationOptions,
 )
 from mlpstorage.validation_helpers import validate_benchmark_environment
+from mlpstorage.progress import progress_context
 
 logger = setup_logging("MLPerfStorage")
 signal_received = False
@@ -72,25 +73,30 @@ def handle_lockfile_command(args) -> int:
     """
     if args.lockfile_command == "generate":
         try:
-            if args.generate_all:
-                # Generate both base and full lockfiles
-                logger.info("Generating lockfiles...")
-                results = generate_lockfiles_for_project(args.pyproject)
-                for name, path in results.items():
-                    logger.status(f"Generated {name} lockfile: {path}")
-                return EXIT_CODE.SUCCESS
-            else:
-                # Generate single lockfile
-                options = GenerationOptions(
-                    output_path=args.output,
-                    extras=args.extras,
-                    generate_hashes=args.hashes,
-                    python_version=args.python_version or "",
-                )
-                logger.info(f"Generating lockfile: {args.output}")
-                _, path = generate_lockfile(args.pyproject, options)
-                logger.status(f"Generated lockfile: {path}")
-                return EXIT_CODE.SUCCESS
+            with progress_context(
+                "Generating lockfile...",
+                total=None,
+                logger=logger
+            ) as (update, set_desc):
+                if args.generate_all:
+                    # Generate both base and full lockfiles
+                    set_desc("Generating lockfiles...")
+                    results = generate_lockfiles_for_project(args.pyproject)
+                    for name, path in results.items():
+                        logger.status(f"Generated {name} lockfile: {path}")
+                    return EXIT_CODE.SUCCESS
+                else:
+                    # Generate single lockfile
+                    options = GenerationOptions(
+                        output_path=args.output,
+                        extras=args.extras,
+                        generate_hashes=args.hashes,
+                        python_version=args.python_version or "",
+                    )
+                    set_desc(f"Generating lockfile: {args.output}")
+                    _, path = generate_lockfile(args.pyproject, options)
+                    logger.status(f"Generated lockfile: {path}")
+                    return EXIT_CODE.SUCCESS
         except LockfileGenerationError as e:
             logger.error(f"Lockfile generation failed: {e}")
             if e.stderr:
@@ -101,26 +107,31 @@ def handle_lockfile_command(args) -> int:
             return EXIT_CODE.FAILURE
 
     elif args.lockfile_command == "verify":
-        try:
-            skip = set(args.skip_packages) if args.skip_packages else None
-            result = validate_lockfile(
-                args.lockfile,
-                skip_packages=skip,
-                fail_on_missing=not args.allow_missing,
-            )
+        with progress_context(
+            "Verifying lockfile...",
+            total=None,
+            logger=logger
+        ) as (update, set_desc):
+            try:
+                skip = set(args.skip_packages) if args.skip_packages else None
+                result = validate_lockfile(
+                    args.lockfile,
+                    skip_packages=skip,
+                    fail_on_missing=not args.allow_missing,
+                )
 
-            # Print report
-            report = format_validation_report(result)
-            if result.valid:
-                logger.status(report)
-                return EXIT_CODE.SUCCESS
-            else:
-                logger.error(report)
+                # Print report
+                report = format_validation_report(result)
+                if result.valid:
+                    logger.status(report)
+                    return EXIT_CODE.SUCCESS
+                else:
+                    logger.error(report)
+                    return EXIT_CODE.FAILURE
+            except FileNotFoundError:
+                logger.error(f"Lockfile not found: {args.lockfile}")
+                logger.info("Generate a lockfile with: mlpstorage lockfile generate")
                 return EXIT_CODE.FAILURE
-        except FileNotFoundError:
-            logger.error(f"Lockfile not found: {args.lockfile}")
-            logger.info("Generate a lockfile with: mlpstorage lockfile generate")
-            return EXIT_CODE.FAILURE
 
     return EXIT_CODE.FAILURE
 
@@ -144,32 +155,42 @@ def run_benchmark(args, run_datetime):
 
     # Validate lockfile if requested
     if hasattr(args, 'verify_lockfile') and args.verify_lockfile:
-        logger.info(f"Validating packages against lockfile: {args.verify_lockfile}")
-        try:
-            result = validate_lockfile(args.verify_lockfile, fail_on_missing=False)
-            if not result.valid:
-                report = format_validation_report(result)
-                logger.error("Package version mismatch detected:")
-                logger.error(report)
-                logger.error("")
-                logger.error("To fix, run one of:")
-                logger.error(f"  pip install -r {args.verify_lockfile}")
-                logger.error("  uv pip sync " + args.verify_lockfile)
-                logger.error("")
-                logger.error("Or run without lockfile validation:")
-                logger.error(f"  {' '.join(sys.argv).replace('--verify-lockfile ' + args.verify_lockfile, '').strip()}")
+        with progress_context(
+            "Validating packages against lockfile...",
+            total=None,
+            logger=logger
+        ) as (update, set_desc):
+            try:
+                result = validate_lockfile(args.verify_lockfile, fail_on_missing=False)
+                if not result.valid:
+                    report = format_validation_report(result)
+                    logger.error("Package version mismatch detected:")
+                    logger.error(report)
+                    logger.error("")
+                    logger.error("To fix, run one of:")
+                    logger.error(f"  pip install -r {args.verify_lockfile}")
+                    logger.error("  uv pip sync " + args.verify_lockfile)
+                    logger.error("")
+                    logger.error("Or run without lockfile validation:")
+                    logger.error(f"  {' '.join(sys.argv).replace('--verify-lockfile ' + args.verify_lockfile, '').strip()}")
+                    return EXIT_CODE.FAILURE
+                logger.status(f"Package validation passed ({result.matched} packages verified)")
+            except FileNotFoundError:
+                logger.error(f"Lockfile not found: {args.verify_lockfile}")
+                logger.error("Generate a lockfile with: mlpstorage lockfile generate")
                 return EXIT_CODE.FAILURE
-            logger.status(f"Package validation passed ({result.matched} packages verified)")
-        except FileNotFoundError:
-            logger.error(f"Lockfile not found: {args.verify_lockfile}")
-            logger.error("Generate a lockfile with: mlpstorage lockfile generate")
-            return EXIT_CODE.FAILURE
 
     # Fail-fast environment validation (unless skipped)
     # This validates dependencies, SSH connectivity, paths, etc. BEFORE benchmark instantiation
     skip_validation = getattr(args, 'skip_validation', False)
     if not skip_validation:
-        validate_benchmark_environment(args, logger=logger)
+        with progress_context(
+            "Validating environment...",
+            total=None,
+            logger=logger
+        ) as (update, set_desc):
+            # Errors from validation will propagate after progress cleanup
+            validate_benchmark_environment(args, logger=logger)
     else:
         logger.warning("Skipping environment validation (--skip-validation flag)")
 
