@@ -4,14 +4,14 @@
 
 **Core Value:** Orchestrate multiple benchmark types (training, checkpointing, kv-cache, vectordb) across distributed systems and produce verified, rules-compliant results.
 
-**Current Focus:** Phase 9 COMPLETE - DLIO Parquet Support
+**Current Focus:** Phase 10 - Progress Indication and UX
 
 ## Current Position
 
-**Phase:** 9 of 10 - DLIO Parquet Support
-**Plan:** 09-02 of 2 (COMPLETE)
-**Status:** Phase complete
-**Last activity:** 2026-01-25 - Completed 09-02-PLAN.md (Parquet Workload Configuration and Validation)
+**Phase:** 10 of 10 - Progress Indication and UX
+**Plan:** 10-01 of 3 (COMPLETE)
+**Status:** In progress
+**Last activity:** 2026-01-25 - Completed 10-01-PLAN.md (Progress Indication Foundation)
 
 **Progress:**
 ```
@@ -24,8 +24,8 @@ Phase 6:  [##########] 100% (3/3 plans) COMPLETE
 Phase 7:  [##########] 100% (3/3 plans) COMPLETE
 Phase 8:  [##########] 100% (2/2 plans) COMPLETE
 Phase 9:  [##########] 100% (2/2 plans) COMPLETE
-Phase 10: [----------] 0%
-Overall:  [##########] 97% (29/30 plans complete)
+Phase 10: [###-------] 33% (1/3 plans complete)
+Overall:  [##########] 94% (30/32 plans complete)
 ```
 
 ## Performance Metrics
@@ -34,7 +34,7 @@ Overall:  [##########] 97% (29/30 plans complete)
 |--------|-------|
 | Phases completed | 9/10 |
 | Requirements delivered | 15/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02, BENCH-03, BENCH-04, BENCH-05, HOST-03, HOST-04, HOST-05, TRAIN-01, TRAIN-04) |
-| Plans executed | 29 |
+| Plans executed | 30 |
 | Avg tasks per plan | 2.5 |
 
 ## Accumulated Context
@@ -121,6 +121,9 @@ Overall:  [##########] 97% (29/30 plans complete)
 | Follow CSVGenerator pattern for ParquetGenerator | Maintains consistency with existing DLIO patterns | 2026-01-25 |
 | Separate data folder for parquet | Use data/dlrm_parquet/ to distinguish from npz-based data/dlrm/ | 2026-01-25 |
 | Parquet is OPEN category | dataset.format changes result in OPEN (not CLOSED) per OPEN_ALLOWED_PARAMS | 2026-01-25 |
+| Rich explicit dependency | Add rich>=13.0 as explicit dependency for direct usage | 2026-01-25 |
+| No-op fallback pattern | Yield no-op functions in non-interactive mode for consistent API | 2026-01-25 |
+| Logger status fallback | Use logger.status() for progress messages in non-interactive mode | 2026-01-25 |
 
 ### Technical Patterns Established
 
@@ -173,6 +176,9 @@ Overall:  [##########] 97% (29/30 plans complete)
 - DLIO FormatReader implementation pattern (ParquetReader)
 - DLIO DataGenerator implementation pattern (ParquetGenerator)
 - DLIO factory registration pattern for new formats
+- Context manager pattern for progress indication
+- TTY detection pattern using Console.is_terminal
+- No-op fallback pattern for non-interactive environments
 
 ### Open TODOs
 
@@ -242,37 +248,35 @@ None currently.
 - End-to-end parquet datagen verified: 18 .parquet files created and readable with PyArrow
 - TRAIN-04 requirement satisfied (parquet datagen creates valid files)
 - Total YAML config files: 25
+- Progress module (mlpstorage/progress.py) provides TTY-aware progress utilities
+- 20 unit tests for progress module (test_progress.py)
+- Rich v14.2.0 available, now explicit dependency (>= 13.0)
 
 ## Session Continuity
 
 ### Last Session
 - **Date:** 2026-01-25
-- **Accomplished:** Completed 09-02-PLAN.md (Parquet Workload Configuration and Validation)
-- **Next:** Phase 10 (Progress Indication and UX)
+- **Accomplished:** Completed 10-01-PLAN.md (Progress Indication Foundation)
+- **Next:** 10-02-PLAN.md (Benchmark Progress Integration)
 
 ### Context for Next Session
-- Phase 9 COMPLETE: DLIO Parquet Support
-  - 09-01: DLIO Parquet Format Implementation COMPLETE
-    - Created local DLIO fork in dlio_parquet_fork/
-    - Added PARQUET to FormatType enum in enumerations.py
-    - Added SNAPPY to Compression enum for default parquet compression
-    - Created ParquetReader class following CSVReader pattern
-    - Created ParquetGenerator class following CSVGenerator pattern
-    - Registered parquet format in ReaderFactory and GeneratorFactory
-    - All changes committed locally on parquet-support branch (commit a444119)
-  - 09-02: Parquet Workload Configuration and Validation COMPLETE
-    - Created DLRM parquet config files (h100, a100, datagen)
-    - Added 5 parquet validation tests
-    - End-to-end verification: parquet datagen creates valid files
-    - TRAIN-04 requirement satisfied
-- User setup required after Phase 9:
+- Phase 10 IN PROGRESS: Progress Indication and UX
+  - 10-01: Progress Indication Foundation COMPLETE
+    - Added rich>=13.0 as explicit dependency in pyproject.toml
+    - Created mlpstorage/progress.py with TTY-aware progress utilities
+    - is_interactive_terminal(): TTY detection using Console.is_terminal
+    - progress_context(): Determinate/indeterminate progress with Rich
+    - create_stage_progress(): Multi-stage operations progress
+    - 20 unit tests added (test_progress.py)
+    - All 802 unit tests pass
+- User setup required from Phase 9:
   - Fork argonne-lcf/dlio_benchmark to personal GitHub
   - Push parquet-support branch to fork
   - Update pyproject.toml with fork URL
 - Note: vectordb and kvcache not yet wired into cli_parser.py
-- Note: Pre-existing test failures in test_rules_calculations.py and test_reporting.py (unrelated to Phase 9)
+- Note: Pre-existing test failures in test_rules_calculations.py and test_reporting.py (unrelated)
 - No blockers
-- Ready for Phase 10
+- Ready for 10-02
 
 ---
 
