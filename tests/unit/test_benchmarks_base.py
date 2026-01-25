@@ -1367,3 +1367,246 @@ class TestTimeSeriesCollectionIntegration:
         benchmark.write_timeseries_data()
 
         assert not os.path.exists(benchmark.timeseries_file_path)
+
+
+# =============================================================================
+# Progress Integration Tests
+# =============================================================================
+
+class TestBenchmarkProgress:
+    """Tests for progress indication integration in Benchmark base."""
+
+    @pytest.fixture
+    def mock_logger(self):
+        """Create a mock logger."""
+        logger = MagicMock()
+        logger.debug = MagicMock()
+        logger.warning = MagicMock()
+        logger.status = MagicMock()
+        logger.verbose = MagicMock()
+        logger.verboser = MagicMock()
+        return logger
+
+    def _create_benchmark(self, tmp_path, mock_logger, **kwargs):
+        """Helper to create a benchmark with specific args."""
+        defaults = {
+            'debug': False,
+            'verbose': False,
+            'stream_log_level': 'INFO',
+            'results_dir': str(tmp_path),
+            'model': 'unet3d',
+            'command': 'run',
+            'num_processes': 8,
+            'what_if': True,
+            'hosts': None,
+            'skip_timeseries': True,  # Disable for faster tests
+        }
+        defaults.update(kwargs)
+        args = Namespace(**defaults)
+
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+            mock_gen.return_value = str(tmp_path / "output")
+            os.makedirs(tmp_path / "output", exist_ok=True)
+            benchmark = ConcreteBenchmark(args, logger=mock_logger, run_datetime='20260125_120000')
+
+        return benchmark
+
+    @patch('mlpstorage.benchmarks.base.create_stage_progress')
+    def test_run_shows_stage_progress(self, mock_stage_progress, tmp_path, mock_logger):
+        """run() should use create_stage_progress with expected stages."""
+        benchmark = self._create_benchmark(tmp_path, mock_logger)
+
+        # Set up mock context manager
+        mock_advance = MagicMock()
+        mock_cm = MagicMock()
+        mock_cm.__enter__ = MagicMock(return_value=mock_advance)
+        mock_cm.__exit__ = MagicMock(return_value=False)
+        mock_stage_progress.return_value = mock_cm
+
+        benchmark.run()
+
+        # Verify create_stage_progress was called with expected stages
+        mock_stage_progress.assert_called_once()
+        call_args = mock_stage_progress.call_args
+        stages = call_args[0][0]  # First positional argument
+        assert len(stages) == 4
+        assert "Validating environment..." in stages
+        assert "Collecting cluster info..." in stages
+        assert "Running benchmark..." in stages
+        assert "Processing results..." in stages
+
+        # Verify advance_stage was called 4 times (once per stage)
+        assert mock_advance.call_count == 4
+
+    @patch('mlpstorage.progress.is_interactive_terminal', return_value=False)
+    def test_run_non_interactive_logs_stages(self, mock_is_interactive, tmp_path, mock_logger):
+        """run() should log stages in non-interactive mode via logger.status fallback."""
+        benchmark = self._create_benchmark(tmp_path, mock_logger)
+
+        benchmark.run()
+
+        # In non-interactive mode, create_stage_progress calls logger.status for each stage
+        # Verify at least one stage was logged via status()
+        status_calls = [call for call in mock_logger.status.call_args_list]
+        stage_logged = any('Stage' in str(call) for call in status_calls)
+        assert stage_logged, f"Expected stage log messages, got: {status_calls}"
+
+    @patch('mlpstorage.benchmarks.base.progress_context')
+    def test_cluster_collection_shows_spinner(self, mock_progress_context, tmp_path, mock_logger):
+        """_collect_cluster_start should use progress_context with spinner (total=None)."""
+        benchmark = self._create_benchmark(
+            tmp_path, mock_logger,
+            hosts=['host1', 'host2'],
+            skip_cluster_collection=False,
+            exec_type=None  # Use SSH collection
+        )
+
+        # Set up mock context manager
+        mock_update = MagicMock()
+        mock_set_desc = MagicMock()
+        mock_cm = MagicMock()
+        mock_cm.__enter__ = MagicMock(return_value=(mock_update, mock_set_desc))
+        mock_cm.__exit__ = MagicMock(return_value=False)
+        mock_progress_context.return_value = mock_cm
+
+        # Mock the SSH collection to avoid actual SSH calls
+        with patch.object(benchmark, '_collect_via_ssh', return_value=None):
+            benchmark._collect_cluster_start()
+
+        # Verify progress_context was called with total=None (spinner)
+        mock_progress_context.assert_called_once()
+        call_kwargs = mock_progress_context.call_args[1]
+        assert call_kwargs.get('total') is None
+
+    @patch('mlpstorage.benchmarks.base.progress_context')
+    def test_cluster_collection_updates_description_ssh(self, mock_progress_context, tmp_path, mock_logger):
+        """_collect_cluster_start should update description to show SSH collection method."""
+        benchmark = self._create_benchmark(
+            tmp_path, mock_logger,
+            hosts=['host1', 'host2'],
+            skip_cluster_collection=False,
+            exec_type=None  # Use SSH collection
+        )
+
+        # Set up mock context manager
+        mock_update = MagicMock()
+        mock_set_desc = MagicMock()
+        mock_cm = MagicMock()
+        mock_cm.__enter__ = MagicMock(return_value=(mock_update, mock_set_desc))
+        mock_cm.__exit__ = MagicMock(return_value=False)
+        mock_progress_context.return_value = mock_cm
+
+        # Mock the SSH collection to avoid actual SSH calls
+        with patch.object(benchmark, '_collect_via_ssh', return_value=None):
+            benchmark._collect_cluster_start()
+
+        # Verify set_desc was called with "Collecting via SSH..."
+        mock_set_desc.assert_called_with("Collecting via SSH...")
+
+    @patch('mlpstorage.benchmarks.base.progress_context')
+    def test_cluster_collection_updates_description_mpi(self, mock_progress_context, tmp_path, mock_logger):
+        """_collect_cluster_start should update description to show MPI collection method."""
+        benchmark = self._create_benchmark(
+            tmp_path, mock_logger,
+            hosts=['host1', 'host2'],
+            skip_cluster_collection=False,
+            exec_type=EXEC_TYPE.MPI  # Use MPI collection
+        )
+
+        # Set up mock context manager
+        mock_update = MagicMock()
+        mock_set_desc = MagicMock()
+        mock_cm = MagicMock()
+        mock_cm.__enter__ = MagicMock(return_value=(mock_update, mock_set_desc))
+        mock_cm.__exit__ = MagicMock(return_value=False)
+        mock_progress_context.return_value = mock_cm
+
+        # Mock the MPI collection to avoid actual MPI calls
+        with patch.object(benchmark, '_collect_cluster_information', return_value=None):
+            benchmark._collect_cluster_start()
+
+        # Verify set_desc was called with "Collecting via MPI..."
+        mock_set_desc.assert_called_with("Collecting via MPI...")
+
+    @patch('mlpstorage.benchmarks.base.create_stage_progress')
+    def test_run_progress_cleanup_on_exception(self, mock_stage_progress, tmp_path, mock_logger):
+        """Stage progress context should properly exit even when _run() raises exception."""
+        # Track whether __exit__ was called
+        exit_called = []
+
+        class ExceptionRaisingBenchmark(ConcreteBenchmark):
+            def _run(self):
+                raise RuntimeError("Test exception")
+
+        mock_advance = MagicMock()
+        mock_cm = MagicMock()
+        mock_cm.__enter__ = MagicMock(return_value=mock_advance)
+        mock_cm.__exit__ = MagicMock(side_effect=lambda *args: exit_called.append(True) or False)
+        mock_stage_progress.return_value = mock_cm
+
+        args = Namespace(
+            debug=False,
+            verbose=False,
+            stream_log_level='INFO',
+            results_dir=str(tmp_path),
+            model='unet3d',
+            command='run',
+            num_processes=8,
+            what_if=True,
+            hosts=None,
+            skip_timeseries=True,
+        )
+
+        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+            mock_gen.return_value = str(tmp_path / "output")
+            os.makedirs(tmp_path / "output", exist_ok=True)
+            benchmark = ExceptionRaisingBenchmark(args, logger=mock_logger, run_datetime='20260125_120000')
+
+        with pytest.raises(RuntimeError, match="Test exception"):
+            benchmark.run()
+
+        # Verify the context manager's __exit__ was called (cleanup happened)
+        assert len(exit_called) == 1
+
+    @patch('mlpstorage.benchmarks.base.progress_context')
+    def test_end_cluster_collection_shows_spinner(self, mock_progress_context, tmp_path, mock_logger):
+        """_collect_cluster_end should use progress_context with spinner."""
+        benchmark = self._create_benchmark(
+            tmp_path, mock_logger,
+            hosts=['host1'],
+            skip_cluster_collection=False,
+            exec_type=None  # Use SSH collection
+        )
+
+        # Set up mock context manager
+        mock_update = MagicMock()
+        mock_set_desc = MagicMock()
+        mock_cm = MagicMock()
+        mock_cm.__enter__ = MagicMock(return_value=(mock_update, mock_set_desc))
+        mock_cm.__exit__ = MagicMock(return_value=False)
+        mock_progress_context.return_value = mock_cm
+
+        # Simulate that start collection was done
+        benchmark._cluster_info_start = MagicMock()
+        benchmark._collection_method = 'ssh'
+
+        # Mock the SSH collection to avoid actual SSH calls
+        with patch.object(benchmark, '_collect_via_ssh', return_value=None):
+            benchmark._collect_cluster_end()
+
+        # Verify progress_context was called with total=None (spinner)
+        mock_progress_context.assert_called_once()
+        call_kwargs = mock_progress_context.call_args[1]
+        assert call_kwargs.get('total') is None
+
+    def test_cluster_collection_skipped_logs_debug(self, tmp_path, mock_logger):
+        """_collect_cluster_start should log debug when skipping collection."""
+        benchmark = self._create_benchmark(
+            tmp_path, mock_logger,
+            hosts=None  # No hosts = no collection
+        )
+
+        benchmark._collect_cluster_start()
+
+        # Should log debug message about skipping
+        mock_logger.debug.assert_any_call('Skipping start cluster collection (conditions not met)')
