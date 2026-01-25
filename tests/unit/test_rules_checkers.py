@@ -774,3 +774,85 @@ class TestTrainingSubmissionRulesChecker:
         assert 'unet3d' in checker.supported_models
         assert 'resnet50' in checker.supported_models
         assert 'cosmoflow' in checker.supported_models
+
+
+class TestTrainingParquetFormat:
+    """Tests for parquet format validation in training benchmarks."""
+
+    @pytest.fixture
+    def mock_logger(self):
+        """Create a mock logger."""
+        return MagicMock()
+
+    def create_benchmark_run(self, mock_logger, model="dlrm", format="parquet",
+                             override_parameters=None):
+        """Helper to create a BenchmarkRun for parquet format testing."""
+        host_memory = HostMemoryInfo.from_total_mem_int(137438953472)  # 128 GB
+        host_info = HostInfo(hostname="test-host", memory=host_memory)
+        cluster_info = ClusterInformation([host_info], mock_logger)
+
+        data = BenchmarkRunData(
+            benchmark_type=BENCHMARK_TYPES.training,
+            model=model,
+            command="run_benchmark",
+            run_datetime="20250125_120000",
+            num_processes=8,
+            parameters={
+                'dataset': {
+                    'num_files_train': 1000,
+                    'data_folder': f'data/{model}_parquet/',
+                    'format': format
+                },
+                'reader': {
+                    'batch_size': 16
+                },
+                'workflow': {}
+            },
+            override_parameters=override_parameters or {},
+            system_info=cluster_info
+        )
+        return BenchmarkRun.from_data(data, mock_logger)
+
+    def test_parquet_format_is_open_category(self, mock_logger):
+        """Parquet format override should result in OPEN submission category."""
+        benchmark_run = self.create_benchmark_run(
+            mock_logger,
+            override_parameters={'dataset.format': 'parquet'}
+        )
+        checker = TrainingRunRulesChecker(benchmark_run, logger=mock_logger)
+        issues = checker.check_allowed_params()
+
+        # dataset.format is in OPEN_ALLOWED_PARAMS, so override should be OPEN
+        assert len(issues) == 1
+        assert issues[0].validation == PARAM_VALIDATION.OPEN
+        assert 'dataset.format' in issues[0].message
+
+    def test_dataset_format_in_open_allowed_params(self, mock_logger):
+        """Verify dataset.format is in OPEN_ALLOWED_PARAMS."""
+        assert 'dataset.format' in TrainingRunRulesChecker.OPEN_ALLOWED_PARAMS
+
+    def test_parquet_format_not_in_closed_allowed_params(self, mock_logger):
+        """Verify dataset.format is NOT in CLOSED_ALLOWED_PARAMS."""
+        assert 'dataset.format' not in TrainingRunRulesChecker.CLOSED_ALLOWED_PARAMS
+
+    def test_dlrm_with_parquet_format_model_recognized(self, mock_logger):
+        """DLRM model with parquet format should be recognized."""
+        benchmark_run = self.create_benchmark_run(mock_logger, model='dlrm')
+        checker = TrainingRunRulesChecker(benchmark_run, logger=mock_logger)
+
+        issue = checker.check_model_recognized()
+        assert issue is None, "DLRM model should be recognized regardless of format"
+
+    def test_multiple_format_values_are_open(self, mock_logger):
+        """Any dataset.format override (not just parquet) should be OPEN category."""
+        for format_value in ['parquet', 'csv', 'custom_format']:
+            benchmark_run = self.create_benchmark_run(
+                mock_logger,
+                override_parameters={'dataset.format': format_value}
+            )
+            checker = TrainingRunRulesChecker(benchmark_run, logger=mock_logger)
+            issues = checker.check_allowed_params()
+
+            assert len(issues) == 1
+            assert issues[0].validation == PARAM_VALIDATION.OPEN, \
+                f"dataset.format={format_value} should be OPEN category"
