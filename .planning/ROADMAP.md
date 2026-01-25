@@ -231,8 +231,8 @@ Plans:
 **Plans:** 2 plans
 
 Plans:
-- [ ] 09-01-PLAN.md - DLIO fork with parquet format extension
-- [ ] 09-02-PLAN.md - mlpstorage parquet configurations and validation
+- [x] 09-01-PLAN.md - DLIO fork with parquet format extension
+- [x] 09-02-PLAN.md - mlpstorage parquet configurations and validation
 
 ---
 
@@ -265,7 +265,7 @@ Plans:
 | 6 | SSH-Based Host Collection | Complete | HOST-01, HOST-02, HOST-03 |
 | 7 | Time-Series Host Data Collection | Complete | HOST-04, HOST-05 |
 | 8 | New Training Models | Complete | TRAIN-01, TRAIN-02, TRAIN-03 |
-| 9 | DLIO Parquet Support | Not Started | TRAIN-04 |
+| 9 | DLIO Parquet Support | Complete | TRAIN-04 |
 | 10 | Progress Indication | Not Started | UX-04 |
 
 ---

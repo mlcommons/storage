@@ -21,7 +21,7 @@
 - [x] **TRAIN-01**: Add dlrm model configuration
 - [x] **TRAIN-02**: Add retinanet model configuration
 - [x] **TRAIN-03**: Add flux model configuration
-- [ ] **TRAIN-04**: Update DLIO to support parquet for data loaders, readers, data generation
+- [x] **TRAIN-04**: Update DLIO to support parquet for data loaders, readers, data generation
 
 ### Host Collection
 
@@ -81,8 +81,8 @@
 | TRAIN-01 | Phase 8 | Complete |
 | TRAIN-02 | Phase 8 | Complete |
 | TRAIN-03 | Phase 8 | Complete |
-| TRAIN-04 | Phase 9 | Pending |
+| TRAIN-04 | Phase 9 | Complete |
 | UX-04 | Phase 10 | Pending |
 
 ---
-*Last updated: 2026-01-24*
+*Last updated: 2026-01-25*
