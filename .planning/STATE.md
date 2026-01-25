@@ -9,9 +9,9 @@
 ## Current Position
 
 **Phase:** 10 of 10 - Progress Indication and UX
-**Plan:** 10-01 of 3 (COMPLETE)
+**Plan:** 10-02 of 3 (COMPLETE)
 **Status:** In progress
-**Last activity:** 2026-01-25 - Completed 10-01-PLAN.md (Progress Indication Foundation)
+**Last activity:** 2026-01-25 - Completed 10-02-PLAN.md (Benchmark Progress Integration)
 
 **Progress:**
 ```
@@ -24,8 +24,8 @@ Phase 6:  [##########] 100% (3/3 plans) COMPLETE
 Phase 7:  [##########] 100% (3/3 plans) COMPLETE
 Phase 8:  [##########] 100% (2/2 plans) COMPLETE
 Phase 9:  [##########] 100% (2/2 plans) COMPLETE
-Phase 10: [###-------] 33% (1/3 plans complete)
-Overall:  [##########] 94% (30/32 plans complete)
+Phase 10: [######----] 67% (2/3 plans complete)
+Overall:  [##########] 97% (31/32 plans complete)
 ```
 
 ## Performance Metrics
@@ -34,7 +34,7 @@ Overall:  [##########] 94% (30/32 plans complete)
 |--------|-------|
 | Phases completed | 9/10 |
 | Requirements delivered | 15/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02, BENCH-03, BENCH-04, BENCH-05, HOST-03, HOST-04, HOST-05, TRAIN-01, TRAIN-04) |
-| Plans executed | 30 |
+| Plans executed | 31 |
 | Avg tasks per plan | 2.5 |
 
 ## Accumulated Context
@@ -124,6 +124,9 @@ Overall:  [##########] 94% (30/32 plans complete)
 | Rich explicit dependency | Add rich>=13.0 as explicit dependency for direct usage | 2026-01-25 |
 | No-op fallback pattern | Yield no-op functions in non-interactive mode for consistent API | 2026-01-25 |
 | Logger status fallback | Use logger.status() for progress messages in non-interactive mode | 2026-01-25 |
+| Stage progress in run() | Wrap run() operations in 4-stage progress for visibility | 2026-01-25 |
+| Spinners for cluster collection | Use progress_context with total=None for indeterminate operations | 2026-01-25 |
+| DLIO output unmodified | DLIO benchmark output flows through directly without wrapping | 2026-01-25 |
 
 ### Technical Patterns Established
 
@@ -179,6 +182,8 @@ Overall:  [##########] 94% (30/32 plans complete)
 - Context manager pattern for progress indication
 - TTY detection pattern using Console.is_terminal
 - No-op fallback pattern for non-interactive environments
+- Stage progress wrapping in benchmark run() method
+- Spinner context for indeterminate cluster collection operations
 
 ### Open TODOs
 
@@ -237,7 +242,7 @@ None currently.
 - Metadata includes timeseries_data reference (07-03)
 - 19 new unit tests for time-series benchmark integration (07-03)
 - Total cluster_collector tests: 98
-- Total benchmark_base tests: 73
+- Total benchmark_base tests: 81
 - HOST-04 and HOST-05 requirements COMPLETE
 - DLIO parquet fork created in dlio_parquet_fork/ with parquet-support branch
 - ParquetReader and ParquetGenerator implemented using PyArrow
@@ -251,24 +256,28 @@ None currently.
 - Progress module (mlpstorage/progress.py) provides TTY-aware progress utilities
 - 20 unit tests for progress module (test_progress.py)
 - Rich v14.2.0 available, now explicit dependency (>= 13.0)
+- Stage indicators integrated into Benchmark.run() with 4 stages
+- Cluster collection methods show spinners with host count and method
+- 8 new progress integration tests in test_benchmarks_base.py
 
 ## Session Continuity
 
 ### Last Session
 - **Date:** 2026-01-25
-- **Accomplished:** Completed 10-01-PLAN.md (Progress Indication Foundation)
-- **Next:** 10-02-PLAN.md (Benchmark Progress Integration)
+- **Accomplished:** Completed 10-02-PLAN.md (Benchmark Progress Integration)
+- **Next:** 10-03-PLAN.md (Progress for Data Generation and Validation)
 
 ### Context for Next Session
 - Phase 10 IN PROGRESS: Progress Indication and UX
   - 10-01: Progress Indication Foundation COMPLETE
     - Added rich>=13.0 as explicit dependency in pyproject.toml
     - Created mlpstorage/progress.py with TTY-aware progress utilities
-    - is_interactive_terminal(): TTY detection using Console.is_terminal
-    - progress_context(): Determinate/indeterminate progress with Rich
-    - create_stage_progress(): Multi-stage operations progress
     - 20 unit tests added (test_progress.py)
-    - All 802 unit tests pass
+  - 10-02: Benchmark Progress Integration COMPLETE
+    - Integrated create_stage_progress into Benchmark.run() with 4 stages
+    - Added spinners to _collect_cluster_start() and _collect_cluster_end()
+    - 8 new progress integration tests added
+    - All 810 unit tests pass
 - User setup required from Phase 9:
   - Fork argonne-lcf/dlio_benchmark to personal GitHub
   - Push parquet-support branch to fork
@@ -276,7 +285,7 @@ None currently.
 - Note: vectordb and kvcache not yet wired into cli_parser.py
 - Note: Pre-existing test failures in test_rules_calculations.py and test_reporting.py (unrelated)
 - No blockers
-- Ready for 10-02
+- Ready for 10-03
 
 ---
 
