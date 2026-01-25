@@ -60,6 +60,7 @@ from mlpstorage.cluster_collector import (
     TimeSeriesCollector,
     MultiHostTimeSeriesCollector,
 )
+from mlpstorage.progress import create_stage_progress
 
 if TYPE_CHECKING:
     import logging
@@ -843,7 +844,7 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         """Execute the benchmark and track runtime.
 
         Wraps _run() with timing measurement, cluster collection, and
-        time-series collection.
+        time-series collection. Shows stage indicators during execution.
 
         Collects cluster information at start and end of benchmark
         (HOST-03 requirement).
@@ -854,29 +855,38 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         Returns:
             Exit code from _run().
         """
-        self._validate_environment()
+        stages = [
+            "Validating environment...",
+            "Collecting cluster info...",
+            "Running benchmark...",
+            "Processing results...",
+        ]
 
-        # Collect cluster info at start (HOST-03)
-        self._collect_cluster_start()
+        with create_stage_progress(stages, logger=self.logger) as advance_stage:
+            # Stage 1: Validation
+            self._validate_environment()
+            advance_stage()
 
-        # Start time-series collection (HOST-04, HOST-05)
-        # Uses background thread for minimal performance impact
-        self._start_timeseries_collection()
+            # Stage 2: Cluster collection
+            self._collect_cluster_start()
+            self._start_timeseries_collection()
+            advance_stage()
 
-        start_time = time.time()
-        try:
-            result = self._run()
-        finally:
-            self.runtime = time.time() - start_time
+            # Stage 3: Benchmark execution
+            # Note: Stage progress remains visible showing elapsed time
+            # during this phase. DLIO output flows through directly.
+            start_time = time.time()
+            try:
+                result = self._run()
+            finally:
+                self.runtime = time.time() - start_time
+                advance_stage()
 
-            # Stop time-series collection
-            self._stop_timeseries_collection()
-
-            # Collect cluster info at end (HOST-03)
-            self._collect_cluster_end()
-
-            # Write time-series data to file
-            self.write_timeseries_data()
+                # Stage 4: Cleanup/Processing
+                self._stop_timeseries_collection()
+                self._collect_cluster_end()
+                self.write_timeseries_data()
+                advance_stage()
 
         return result
 
