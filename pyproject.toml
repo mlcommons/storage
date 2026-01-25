@@ -16,6 +16,7 @@ dependencies = [
     "pyarrow",
     "pyyaml>=6.0",
     "packaging>=21.0",  # For PEP 440 version parsing in lockfile validation
+    "rich>=13.0",  # Progress indication (UX-04)
 ]
 
 [project.optional-dependencies]
