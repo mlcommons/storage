@@ -228,6 +228,12 @@ Plans:
 3. Data generation for parquet produces valid files readable by DLIO
 4. Configuration files support parquet format specification alongside existing formats
 
+**Plans:** 2 plans
+
+Plans:
+- [ ] 09-01-PLAN.md - DLIO fork with parquet format extension
+- [ ] 09-02-PLAN.md - mlpstorage parquet configurations and validation
+
 ---
 
 ## Phase 10: Progress Indication
