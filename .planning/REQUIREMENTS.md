@@ -36,7 +36,7 @@
 - [x] **UX-01**: Detect missing commands/packages with actionable error messages
 - [x] **UX-02**: Suggest installation steps for missing dependencies
 - [x] **UX-03**: Validate environment before benchmark execution (fail-fast)
-- [ ] **UX-04**: Clear progress indication during long operations
+- [x] **UX-04**: Clear progress indication during long operations
 
 ---
 
@@ -82,7 +82,7 @@
 | TRAIN-02 | Phase 8 | Complete |
 | TRAIN-03 | Phase 8 | Complete |
 | TRAIN-04 | Phase 9 | Complete |
-| UX-04 | Phase 10 | Pending |
+| UX-04 | Phase 10 | Complete |
 
 ---
 *Last updated: 2026-01-25*
