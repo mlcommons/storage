@@ -4,14 +4,14 @@
 
 **Core Value:** Orchestrate multiple benchmark types (training, checkpointing, kv-cache, vectordb) across distributed systems and produce verified, rules-compliant results.
 
-**Current Focus:** Phase 9 In Progress - DLIO Parquet Support
+**Current Focus:** Phase 9 COMPLETE - DLIO Parquet Support
 
 ## Current Position
 
 **Phase:** 9 of 10 - DLIO Parquet Support
-**Plan:** 09-01 of 2 (COMPLETE)
-**Status:** In progress
-**Last activity:** 2026-01-25 - Completed 09-01-PLAN.md (DLIO Parquet Format Implementation)
+**Plan:** 09-02 of 2 (COMPLETE)
+**Status:** Phase complete
+**Last activity:** 2026-01-25 - Completed 09-02-PLAN.md (Parquet Workload Configuration and Validation)
 
 **Progress:**
 ```
@@ -23,18 +23,18 @@ Phase 5:  [##########] 100% (3/3 plans) COMPLETE
 Phase 6:  [##########] 100% (3/3 plans) COMPLETE
 Phase 7:  [##########] 100% (3/3 plans) COMPLETE
 Phase 8:  [##########] 100% (2/2 plans) COMPLETE
-Phase 9:  [#####-----] 50% (1/2 plans)
+Phase 9:  [##########] 100% (2/2 plans) COMPLETE
 Phase 10: [----------] 0%
-Overall:  [##########] 97% (28/29 plans complete)
+Overall:  [##########] 97% (29/30 plans complete)
 ```
 
 ## Performance Metrics
 
 | Metric | Value |
 |--------|-------|
-| Phases completed | 8/10 |
-| Requirements delivered | 14/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02, BENCH-03, BENCH-04, BENCH-05, HOST-03, HOST-04, HOST-05, TRAIN-01) |
-| Plans executed | 28 |
+| Phases completed | 9/10 |
+| Requirements delivered | 15/21 (PKG-01, PKG-02, PKG-03, UX-01, UX-02, UX-03, BENCH-01, BENCH-02, BENCH-03, BENCH-04, BENCH-05, HOST-03, HOST-04, HOST-05, TRAIN-01, TRAIN-04) |
+| Plans executed | 29 |
 | Avg tasks per plan | 2.5 |
 
 ## Accumulated Context
@@ -119,6 +119,8 @@ Overall:  [##########] 97% (28/29 plans complete)
 | Snappy default parquet compression | Use snappy as default for parquet (most common, best speed/size balance) | 2026-01-25 |
 | Follow CSVReader pattern for ParquetReader | CSV and Parquet have similar tabular structure | 2026-01-25 |
 | Follow CSVGenerator pattern for ParquetGenerator | Maintains consistency with existing DLIO patterns | 2026-01-25 |
+| Separate data folder for parquet | Use data/dlrm_parquet/ to distinguish from npz-based data/dlrm/ | 2026-01-25 |
+| Parquet is OPEN category | dataset.format changes result in OPEN (not CLOSED) per OPEN_ALLOWED_PARAMS | 2026-01-25 |
 
 ### Technical Patterns Established
 
@@ -182,12 +184,13 @@ Overall:  [##########] 97% (28/29 plans complete)
 - [x] Complete Phase 6: SSH-Based Host Collection
 - [x] Complete Phase 7: Time-Series Host Data Collection
 - [x] Complete Phase 8: New Training Models
-- [ ] Complete Phase 9: DLIO Parquet Support (1/2 plans done)
+- [x] Complete Phase 9: DLIO Parquet Support
+- [ ] Complete Phase 10: Progress Indication and UX
 - [ ] Review external KV cache code in `kv_cache_benchmark/`
 - [ ] Review VectorDB scripts from external branch
-- [x] Verify DLIO parquet support requirements (Plan 09-01 COMPLETE)
 - [ ] Wire kvcache into cli_parser.py (noticed during 03-01)
 - [ ] Wire vectordb into cli_parser.py
+- [ ] User: Push DLIO fork to remote and update pyproject.toml
 
 ### Active Blockers
 
@@ -234,16 +237,21 @@ None currently.
 - ParquetReader and ParquetGenerator implemented using PyArrow
 - PARQUET added to FormatType enum, SNAPPY added to Compression enum
 - User must push fork to remote and update pyproject.toml after verification
+- DLRM parquet configuration files added (dlrm_parquet_h100.yaml, dlrm_parquet_a100.yaml, dlrm_parquet_datagen.yaml)
+- 5 new parquet validation tests in test_rules_checkers.py (44 total tests in file)
+- End-to-end parquet datagen verified: 18 .parquet files created and readable with PyArrow
+- TRAIN-04 requirement satisfied (parquet datagen creates valid files)
+- Total YAML config files: 25
 
 ## Session Continuity
 
 ### Last Session
 - **Date:** 2026-01-25
-- **Accomplished:** Completed 09-01-PLAN.md (DLIO Parquet Format Implementation)
-- **Next:** Continue with 09-02-PLAN.md or remaining plans
+- **Accomplished:** Completed 09-02-PLAN.md (Parquet Workload Configuration and Validation)
+- **Next:** Phase 10 (Progress Indication and UX)
 
 ### Context for Next Session
-- Phase 9 In Progress: DLIO Parquet Support
+- Phase 9 COMPLETE: DLIO Parquet Support
   - 09-01: DLIO Parquet Format Implementation COMPLETE
     - Created local DLIO fork in dlio_parquet_fork/
     - Added PARQUET to FormatType enum in enumerations.py
@@ -252,15 +260,19 @@ None currently.
     - Created ParquetGenerator class following CSVGenerator pattern
     - Registered parquet format in ReaderFactory and GeneratorFactory
     - All changes committed locally on parquet-support branch (commit a444119)
-  - 09-02: Parquet workload YAML configurations - PENDING
-- User setup required after Phase 9 completion:
+  - 09-02: Parquet Workload Configuration and Validation COMPLETE
+    - Created DLRM parquet config files (h100, a100, datagen)
+    - Added 5 parquet validation tests
+    - End-to-end verification: parquet datagen creates valid files
+    - TRAIN-04 requirement satisfied
+- User setup required after Phase 9:
   - Fork argonne-lcf/dlio_benchmark to personal GitHub
   - Push parquet-support branch to fork
   - Update pyproject.toml with fork URL
 - Note: vectordb and kvcache not yet wired into cli_parser.py
 - Note: Pre-existing test failures in test_rules_calculations.py and test_reporting.py (unrelated to Phase 9)
 - No blockers
-- Ready to proceed with 09-02
+- Ready for Phase 10
 
 ---
 
