@@ -9,9 +9,9 @@
 ## Current Position
 
 **Phase:** 11 of 11 - Comprehensive Parquet Support
-**Plan:** 3 of 3
+**Plan:** 1 of 3 complete
 **Status:** In progress
-**Last activity:** 2026-02-02 - Completed 11-03-PLAN.md
+**Last activity:** 2026-02-02 - Completed 11-01-PLAN.md (Parquet Config and Enum Extensions)
 
 **Progress:**
 ```
@@ -25,7 +25,7 @@ Phase 7:  [##########] 100% (3/3 plans) COMPLETE
 Phase 8:  [##########] 100% (2/2 plans) COMPLETE
 Phase 9:  [##########] 100% (2/2 plans) COMPLETE
 Phase 10: [##########] 100% (3/3 plans) COMPLETE
-Phase 11: [###-------] 33% (1/3 plans)
+Phase 11: [###-------] 33% (1/3 plans) - 11-01 complete
 Overall:  [##########] 97% (33/34 plans complete)
 ```
 
@@ -123,6 +123,8 @@ Overall:  [##########] 97% (33/34 plans complete)
 | Separate data folder for parquet | Use data/dlrm_parquet/ to distinguish from npz-based data/dlrm/ | 2026-01-25 |
 | Parquet is OPEN category | dataset.format changes result in OPEN (not CLOSED) per OPEN_ALLOWED_PARAMS | 2026-01-25 |
 | Rich explicit dependency | Add rich>=13.0 as explicit dependency for direct usage | 2026-01-25 |
+| parquet_columns as ClassVar | Mutable default list matches existing DLIO pattern | 2026-02-02 |
+| OmegaConf.to_container for parquet columns | Hydra returns DictConfig, need plain Python lists | 2026-02-02 |
 | No-op fallback pattern | Yield no-op functions in non-interactive mode for consistent API | 2026-01-25 |
 | Logger status fallback | Use logger.status() for progress messages in non-interactive mode | 2026-01-25 |
 | Stage progress in run() | Wrap run() operations in 4-stage progress for visibility | 2026-01-25 |
@@ -253,6 +255,9 @@ None currently.
 - 5 new parquet validation tests in test_rules_checkers.py (44 total tests in file)
 - End-to-end parquet datagen verified: 18 .parquet files created and readable with PyArrow
 - TRAIN-04 requirement satisfied (parquet datagen creates valid files)
+- Compression enum extended with LZ4 and ZSTD values (11-01)
+- ConfigArguments extended with 4 parquet fields: columns, row_group_size, read_mode, partition_by (11-01)
+- LoadConfig parses dataset.parquet nested YAML section (11-01)
 - Total YAML config files: 25
 - Progress module (mlpstorage/progress.py) provides TTY-aware progress utilities
 - 20 unit tests for progress module (test_progress.py)
@@ -265,8 +270,8 @@ None currently.
 
 ### Last Session
 - **Date:** 2026-02-02
-- **Accomplished:** Completed 11-03 (Update DLIO fork dependency)
-- **Next:** Continue Phase 11 remaining plans
+- **Accomplished:** Completed 11-01 (Parquet Config and Enum Extensions)
+- **Next:** Execute 11-02 and 11-03 plans
 
 ### Context for Next Session
 - **MILESTONE COMPLETE:** All 10 phases executed and verified
