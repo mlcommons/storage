@@ -21,7 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dlio = [
-    "dlio-benchmark @ git+https://github.com/argonne-lcf/dlio_benchmark.git@mlperf_storage_v2.0",
+    "dlio-benchmark @ git+https://github.com/wvaske/dlio_benchmark.git@parquet-support",
 ]
 test = [
     "pytest>=7.0",
@@ -32,7 +32,7 @@ test = [
 # Note: DLIO depends on PyTorch. The [tool.uv] configuration ensures
 # CPU-only PyTorch wheels are used to avoid GPU dependencies.
 full = [
-    "dlio-benchmark @ git+https://github.com/argonne-lcf/dlio_benchmark.git@mlperf_storage_v2.0",
+    "dlio-benchmark @ git+https://github.com/wvaske/dlio_benchmark.git@parquet-support",
 ]
 
 [project.urls]
