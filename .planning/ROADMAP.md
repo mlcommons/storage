@@ -276,12 +276,12 @@ Plans:
 3. pyproject.toml references wvaske/dlio_benchmark fork with parquet-support branch
 4. End-to-end parquet benchmark runs successfully with the fork
 
-**Plans:** 3 plans
+**Plans:** 3 plans (planned)
 
 Plans:
-- [ ] 11-01-PLAN.md -- DLIO config and compression enum extensions
-- [ ] 11-02-PLAN.md -- ParquetReader and ParquetGenerator rewrite
-- [ ] 11-03-PLAN.md -- pyproject.toml fork reference update
+- [x] 11-01-PLAN.md -- DLIO config and compression enum extensions
+- [x] 11-02-PLAN.md -- ParquetReader and ParquetGenerator rewrite
+- [x] 11-03-PLAN.md -- pyproject.toml fork reference update
 
 ---
 
@@ -299,7 +299,7 @@ Plans:
 | 8 | New Training Models | Complete | TRAIN-01, TRAIN-02, TRAIN-03 |
 | 9 | DLIO Parquet Support | Complete | TRAIN-04 |
 | 10 | Progress Indication | Complete | UX-04 |
-| 11 | Comprehensive Parquet Support | Not Started | TRAIN-05, TRAIN-06 |
+| 11 | Comprehensive Parquet Support | Complete | TRAIN-05, TRAIN-06 |
 
 ---
 

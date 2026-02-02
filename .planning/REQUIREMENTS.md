@@ -22,6 +22,8 @@
 - [x] **TRAIN-02**: Add retinanet model configuration
 - [x] **TRAIN-03**: Add flux model configuration
 - [x] **TRAIN-04**: Update DLIO to support parquet for data loaders, readers, data generation
+- [x] **TRAIN-05**: Production-ready parquet reader with memory-efficient I/O
+- [x] **TRAIN-06**: Update pyproject.toml to reference DLIO fork
 
 ### Host Collection
 
@@ -83,6 +85,8 @@
 | TRAIN-03 | Phase 8 | Complete |
 | TRAIN-04 | Phase 9 | Complete |
 | UX-04 | Phase 10 | Complete |
+| TRAIN-05 | Phase 11 | Complete |
+| TRAIN-06 | Phase 11 | Complete |
 
 ---
 *Last updated: 2026-01-25*
