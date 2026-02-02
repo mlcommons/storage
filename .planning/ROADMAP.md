@@ -260,6 +260,31 @@ Plans:
 
 ---
 
+## Phase 11: Comprehensive Parquet Support
+
+**Goal:** Parquet support in DLIO fork is production-ready with memory-efficient I/O and mlpstorage integration.
+
+**Dependencies:** Phase 9 (basic parquet support)
+
+**Requirements:**
+- TRAIN-05: Production-ready parquet reader with memory-efficient I/O
+- TRAIN-06: Update pyproject.toml to reference DLIO fork
+
+**Success Criteria:**
+1. ParquetReader uses memory-efficient column-by-column reading instead of full table load
+2. ParquetGenerator supports additional compression options (LZ4, ZSTD, BROTLI)
+3. pyproject.toml references wvaske/dlio_benchmark fork with parquet-support branch
+4. End-to-end parquet benchmark runs successfully with the fork
+
+**Plans:** 3 plans
+
+Plans:
+- [ ] 11-01-PLAN.md -- DLIO config and compression enum extensions
+- [ ] 11-02-PLAN.md -- ParquetReader and ParquetGenerator rewrite
+- [ ] 11-03-PLAN.md -- pyproject.toml fork reference update
+
+---
+
 ## Progress
 
 | Phase | Name | Status | Requirements |
@@ -274,6 +299,7 @@ Plans:
 | 8 | New Training Models | Complete | TRAIN-01, TRAIN-02, TRAIN-03 |
 | 9 | DLIO Parquet Support | Complete | TRAIN-04 |
 | 10 | Progress Indication | Complete | UX-04 |
+| 11 | Comprehensive Parquet Support | Not Started | TRAIN-05, TRAIN-06 |
 
 ---
 
