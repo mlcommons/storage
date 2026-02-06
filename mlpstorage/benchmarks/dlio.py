@@ -144,7 +144,7 @@ class TrainingBenchmark(DLIOBenchmark):
         if self.args.command not in ("datagen", "datasize"):
             self.verify_benchmark()
 
-        if self.args.command != "datasize":
+        if self.args.command != "datasize" and self.args.data_dir:
             # The datasize command uses --data-dir and needs to generate a command that also calls --data-dir
             # The add_datadir_param would convert --data-dir to --dataset.data_folder which is invalid to
             # mlpstorage.

@@ -60,6 +60,11 @@ cd storage
 pip3 install -e .
 ```
 
+Install optional S3 libraries if necessary:
+```bash
+pip3 install s3torchconnector
+```
+
 The working directory structure is as follows
 
 ```
@@ -575,3 +580,60 @@ In addition to what can be changed in the CLOSED category, the following paramet
 ## Submission Rules
 
 MLPerf™ Storage Benchmark submission rules are described in this [doc](https://github.com/mlcommons/storage/blob/main/Submission_guidelines.md). If you have questions, please contact [Storage WG chairs](https://mlcommons.org/en/groups/research-storage/).
+
+## S3 DLIO Benchmark
+**WIP readme**
+Required information:
+- Endpoint URL
+  - Must start with `http://` or `https://`
+  - May include a port number
+  - Example: `http://s3.ml.perf:1337
+- AWS Access Key ID and Secret Access Key
+- Bucket
+Optional information:
+- Region string
+  - Default: `us-east-1`
+- Virtual-hosted buckets
+  - If your object store only supports path style bucket addressing, you must set `s3_force_path_style` to `True`
+  - Default: `False`
+
+The `mlpstorage training datagen` and `mlpstorage training run` commands currently work.
+The `--data-dir`/`-dd` argument acts as a object key prefix. Specify `""` to pass in an empty string if you do not want to use a prefix.
+Using a prefix may be helpful if storing different datasets or checkpoints in the same bucket.
+
+Currently the easiest way to configure S3 is by using the `--param` argument.
+Use the following values with the `--param` argument:
+```
+storage.storage_type=s3 storage.storage_options.endpoint_url="${AWS_ENDPOINT_URL}" storage.storage_options.access_key_id="${AWS_ACCESS_KEY_ID}" storage.storage_options.secret_access_key="${AWS_SECRET_ACCESS_KEY}" storage.storage_root=my-bucket
+```
+
+Currently the new parameters have not been allow listed in mlpstorage. For the time being you must use the `-aip` argument to run the `CLOSED` category.
+
+Complete example:
+```bash
+export  AWS_ENDPOINT_URL=http://s3.ml.perf:1337 \
+        AWS_ACCESS_KEY_ID=123456789 \
+        AWS_SECRET_ACCESS_KEY="123/abc" \
+        S3_BUCKET=my-bucket \
+        DATA_DIR="my-run-123/"
+
+s3_params="storage.storage_type=s3 storage.storage_options.endpoint_url=${AWS_ENDPOINT_URL} storage.storage_options.access_key_id=${AWS_ACCESS_KEY_ID} storage.storage_options.secret_access_key=${AWS_SECRET_ACCESS_KEY} storage.storage_root=${S3_BUCKET}"
+
+# Generate Data
+mlpstorage training datagen --model unet3d -np 8 -dd "${DATA_DIR}" --param dataset.num_files_train=100 $s3_params
+
+# Run the benchmark
+mlpstorage training run --model unet3d --client-host-memory-in-gb 32 --num-accelerators 1 --accelerator-type h100 --results-dir results -dd "${DATA_DIR}" --closed -aip --param dataset.num_files_train=100 $s3_params 
+```
+
+### Optional Parameters
+- storage.s3_force_path_style
+- storage.region
+- reader.read_threads
+
+
+### Known Limitations
+- Training data and checkpoints are stored in the same bucket.
+- `mlpstorage checkpointing` does not work
+- https endpoints must use a certificate issued by a certificate authority that is trusted by the OS certificate store.
+  - Note: a self-signed certificate may be used if trusted by the OS certificate store.
