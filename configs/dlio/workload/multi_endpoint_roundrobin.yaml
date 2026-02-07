@@ -1,0 +1,58 @@
+# Multi-Endpoint Configuration with s3dlio Native Load Balancing
+# Use this for simple round-robin distribution across endpoints
+
+model: 
+  name: resnet50_multi_endpoint
+  type: cnn
+
+framework: pytorch
+
+workflow:
+  generate_data: False
+  train: True
+  checkpoint: True
+
+dataset: 
+  data_folder: /tmp/dlio-zerocopy-test
+  format: npz
+  num_files_train: 10
+  num_samples_per_file: 2
+  record_length_bytes: 301500
+
+storage:
+  storage_type: s3dlio
+  storage_root: s3://training-bucket/data/
+  
+  # Multi-endpoint support - s3dlio will load balance
+  endpoint_uris:
+    - http://s3-endpoint1.local:9000
+    - http://s3-endpoint2.local:9000
+    - http://s3-endpoint3.local:9000
+    - http://s3-endpoint4.local:9000
+  
+  load_balance_strategy: round_robin  # Options: round_robin, random
+  
+  storage_options:
+    access_key_id: minioadmin
+    secret_access_key: minioadmin
+    region: us-east-1
+
+reader: 
+  data_loader: pytorch
+  batch_size: 8
+  read_threads: 4
+  file_shuffle: seed
+  sample_shuffle: seed
+
+train:
+  epochs: 5
+  computation_time: 0.01
+
+checkpoint:
+  checkpoint_folder: s3://checkpoint-bucket/checkpoints/  # Can use different bucket!
+  checkpoint_after_epoch: 2
+  epochs_between_checkpoints: 1
+  # Checkpoints will also use s3dlio with same multi-endpoint config
+
+metric:
+  au: 0.90

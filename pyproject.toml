@@ -12,9 +12,16 @@ authors = [
 ]
 requires-python = ">=3.10.0"
 dependencies = [
-    "dlio-benchmark @ git+https://github.com/argonne-lcf/dlio_benchmark.git@mlperf_storage_v2.0",
+    "dlio-benchmark @ git+https://github.com/argonne-lcf/dlio_benchmark.git@main",
     "psutil>=5.9",
-    "pyarrow"
+    "pyarrow",
+    "s3dlio"
+]
+
+[project.optional-dependencies]
+# Use local s3dlio for development
+dev = [
+    "s3dlio @ file:///${PROJECT_ROOT}/../s3dlio"
 ]
 
 [project.urls]

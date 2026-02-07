@@ -1,0 +1,70 @@
+# MPI-Based Multi-Endpoint Distribution
+# Use this for HPC/distributed training with deterministic endpoint assignment
+# Requires running under mpirun/srun
+
+model: 
+  name: resnet50_mpi_endpoints
+  type: cnn
+
+framework: pytorch
+
+workflow:
+  generate_data: False
+  train: True
+  checkpoint: True
+
+dataset: 
+  data_folder: /tmp/dlio-zerocopy-test
+  format: npz
+  num_files_train: 10
+  num_samples_per_file: 2
+  record_length_bytes: 301500
+
+storage:
+  storage_type: s3dlio
+  storage_root: s3://training-bucket/data/
+  
+  # Multi-endpoint with MPI-based distribution
+  endpoint_uris:
+    - http://s3-node1.cluster:9000  # NUMA node 0
+    - http://s3-node2.cluster:9000  # NUMA node 1
+    - http://s3-node3.cluster:9000  # NUMA node 2
+    - http://s3-node4.cluster:9000  # NUMA node 3
+  
+  # MPI rank-based assignment (overrides load_balance_strategy)
+  # Rank 0-3 → endpoint[0], Rank 4-7 → endpoint[1], etc.
+  use_mpi_endpoint_distribution: true
+  
+  storage_options:
+    access_key_id: minioadmin
+    secret_access_key: minioadmin
+    region: us-east-1
+
+reader: 
+  data_loader: pytorch
+  batch_size: 8
+  read_threads: 4
+  file_shuffle: seed
+  sample_shuffle: seed
+
+train:
+  epochs: 5
+  computation_time: 0.01
+
+checkpoint:
+  # Separate storage for checkpoints - different bucket and single endpoint
+  checkpoint_folder: s3://checkpoint-bucket/model-checkpoints/
+  checkpoint_after_epoch: 2
+  epochs_between_checkpoints: 1
+
+metric:
+  au: 0.90
+
+# How to run:
+#   mpirun -np 16 dlio_benchmark --config multi_endpoint_mpi.yaml
+#
+# With 4 endpoints and 16 ranks:
+#   Ranks 0-3   → http://s3-node1.cluster:9000
+#   Ranks 4-7   → http://s3-node2.cluster:9000
+#   Ranks 8-11  → http://s3-node3.cluster:9000
+#   Ranks 12-15 → http://s3-node4.cluster:9000
