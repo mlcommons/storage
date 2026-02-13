@@ -1,7 +1,7 @@
 #!/bin/bash
 # KV Cache Storage Benchmark - Multi-Tier Performance Comparison
-# Kingston Digital, 2025
-# Apache 2.0 license
+# Hazem Awadallah, Kingston Digital, 2025
+# Assisted by Github Copilot
 # This script runs a comprehensive comparison of cache tier configurations for LLM inference workloads.
 # It automatically detects your hardware (GPU, RAM, storage) and runs 9 different test scenarios to show
 # you exactly where your data ends up and how fast it moves between tiers.
@@ -378,7 +378,7 @@ if should_run 'capacity-autoscale'; then
         --num-users "$capacity_start_users" \
         --duration "$autoscale_duration" \
         --gpu-mem-gb 0 \
-        --cpu-mem-gb 4 \
+        --cpu-mem-gb 0 \
         --enable-autoscaling \
         --autoscaler-mode capacity \
         --generation-mode none \
@@ -396,49 +396,35 @@ else
 fi
 
 # ==============================================================================
-# OFFICIAL MLPERF SUBMISSION WORKLOAD (DISCOVERY-VALIDATED)
+# OFFICIAL MLPERF SUBMISSION WORKLOAD
 # ==============================================================================
-# These invocations have been validated through extensive discovery testing:
-# - 1,411 Fast system tests (14,000 MB/s NVMe)
-# - 268 Slow system tests (3,000 MB/s storage)
+# This is a special workload that runs only the two required scenarios for an
+# official MLPerf v3.0 storage submission. It uses fixed, long durations and
+# specific user counts to ensure results are standardized and comparable.
 #
-# KEY FINDINGS FROM DISCOVERY TESTING:
-# - Storage Throughput metric is UNRELIABLE at cpu_mem=0GB (only 1.1x differentiation)
-# - Decode Bytes Read shows 2.62x differentiation at cpu_mem=0GB (100% win rate)
-# - Wall-Clock Throughput shows 2.43x differentiation at cpu_mem=0GB (100% win rate)
-# - Storage Throughput works at cpu_mem=4GB (2.2x differentiation, 97% win rate)
-# - High variance (CV 50-125%) requires multiple trials
-#
-# This workload runs TWO configurations:
-# 1. Maximum Storage Stress (cpu_mem=0GB) - Use Decode Bytes Read as primary metric
-# 2. Storage Throughput Test (cpu_mem=4GB) - Use Storage Throughput as primary metric
+# NOTE: These parameters are intentionally stressful. They use a high user count
+# with a small CPU memory budget to force near-constant NVMe access. The goal is
+# to saturate the storage device and measure its performance under extreme load.
+# Expect very high latencies; this is not a test of user experience, but a
+# benchmark of the underlying storage hardware's breaking point. See the
+# analysis in `report_analysis.md` for context on why this occurs.
 # ==============================================================================
 if should_run 'mlperf_submission'; then
     echo "============================================================================"
-    echo "RUNNING OFFICIAL MLPERF SUBMISSION WORKLOAD (DISCOVERY-VALIDATED)"
+    echo "RUNNING OFFICIAL MLPERF SUBMISSION WORKLOAD"
     echo "============================================================================"
     echo ""
-    echo "NOTE: Discovery testing validated these configurations across 1,679 tests."
-    echo "      See mlperfv3_results_and_metrics_discovery.md for full analysis."
-    echo ""
 
-    # -------------------------------------------------------------------------
-    # Test 1: Maximum Storage Stress (cpu_mem=0GB)
-    # Primary Metrics: Decode Bytes Read (2.62x), Wall-Clock Throughput (2.43x)
-    # WARNING: Do NOT use Storage Throughput at cpu_mem=0GB (only 1.1x differentiation)
-    # -------------------------------------------------------------------------
-    echo "[MLPerf 1/4] Maximum Storage Stress: llama3.1-8b, cpu_mem=0GB, 200 users..."
-    echo "             PRIMARY METRICS: Decode Bytes Read, Wall-Clock Throughput"
-    echo "             WARNING: Storage Throughput unreliable at cpu_mem=0GB"
+    echo "[MLPerf 1/2] Standard Submission: llama3.1-8b with 150 users..."
     python3 kv-cache.py \
         --config config.yaml \
         --model llama3.1-8b \
-        --num-users 200 \
-        --duration 300 \
+        --num-users 150 \
+        --duration 600 \
         --gpu-mem-gb 0 \
         --cpu-mem-gb 0 \
-        --max-concurrent-allocs 16 \
-        --generation-mode none \
+        --generation-mode realistic \
+        --performance-profile throughput \
         --cache-dir "$cache_dir" \
         --seed 42 \
         --output mlperf_v3_stress_8b.json \
@@ -477,12 +463,12 @@ if should_run 'mlperf_submission'; then
     python3 kv-cache.py \
         --config config.yaml \
         --model llama3.1-70b-instruct \
-        --num-users 70 \
-        --duration 300 \
+        --num-users 40 \
+        --duration 600 \
         --gpu-mem-gb 0 \
         --cpu-mem-gb 0 \
-        --max-concurrent-allocs 4 \
-        --generation-mode none \
+        --generation-mode realistic \
+        --performance-profile throughput \
         --cache-dir "$cache_dir" \
         --seed 42 \
         --output mlperf_v3_stress_70b.json \
@@ -544,7 +530,7 @@ if should_run 'gpu-only'; then
             --num-users $users_baseline \
             --duration "$tier_duration" \
             --gpu-mem-gb $gpu_mem_gb \
-            --cpu-mem-gb 4 \
+            --cpu-mem-gb 0 \
             --generation-mode realistic \
             "${rag_args[@]}" \
             --seed 42 \
@@ -614,7 +600,7 @@ if should_run 'storage-only'; then
         --num-users $users_baseline \
         --duration "$tier_duration" \
         --gpu-mem-gb 0 \
-        --cpu-mem-gb 4 \
+        --cpu-mem-gb 0 \
         --generation-mode realistic \
         --cache-dir $cache_dir \
         "${rag_args[@]}" \
@@ -785,7 +771,7 @@ if should_run 'storage-saturation'; then
         --num-users $users_high \
         --duration "$saturation_duration" \
         --gpu-mem-gb 0 \
-        --cpu-mem-gb 4 \
+        --cpu-mem-gb 0 \
         --generation-mode realistic \
         --cache-dir $cache_dir \
         "${rag_args[@]}" \
@@ -942,25 +928,15 @@ print("COMPREHENSIVE BENCHMARK ANALYSIS")
 print("="*100)
 
 # Scenario catalog ties each results JSON to a friendly description.
-# Updated to reflect discovery-validated MLPerf invocations (Jan 2026)
 scenarios = [
-    # MLPerf Stress Tests (cpu_mem=0GB) - Use Decode Bytes Read / Wall-Clock Throughput
-    ("mlperf_stress_8b", "mlperf_v3_stress_8b.json", "MLPerf: Storage Stress (8B, cpu_mem=0GB)", "Maximum storage stress test. PRIMARY METRICS: Decode Bytes Read (2.62x), Wall-Clock Throughput (2.43x). WARNING: Storage Throughput unreliable at cpu_mem=0GB."),
-    ("mlperf_stress_70b", "mlperf_v3_stress_70b.json", "MLPerf: Storage Stress (70B, cpu_mem=0GB)", "Large model storage stress (~10x I/O per token). PRIMARY METRICS: Decode Bytes Read, Wall-Clock Throughput."),
-    # MLPerf Throughput Tests (cpu_mem=4GB) - Use Storage Throughput
-    ("mlperf_throughput_8b", "mlperf_v3_throughput_8b.json", "MLPerf: Storage Throughput (8B, cpu_mem=4GB)", "Storage throughput benchmark. PRIMARY METRIC: Storage Throughput (2.2x differentiation, 97% win rate)."),
-    ("mlperf_throughput_70b", "mlperf_v3_throughput_70b.json", "MLPerf: Storage Throughput (70B, cpu_mem=4GB)", "Large model throughput test. PRIMARY METRIC: Storage Throughput."),
-    # Legacy MLPerf filenames (for backwards compatibility)
-    ("mlperf_submission_8b", "mlperf_v3_storage_submission_8b.json", "MLPerf: Legacy Submission (8B)", "Legacy format. Consider using new discovery-validated invocations."),
-    ("mlperf_submission_70b", "mlperf_v3_storage_submission_70b.json", "MLPerf: Legacy Submission (70B)", "Legacy format. Consider using new discovery-validated invocations."),
-    # Tier tests
+    ("mlperf_submission_8b", "mlperf_v3_storage_submission_8b.json", "MLPerf: Standard Submission (8B)", "Official MLPerf v3.0 storage submission with llama3.1-8b."),
+    ("mlperf_submission_70b", "mlperf_v3_storage_submission_70b.json", "MLPerf: Large Model Submission (70B)", "Official MLPerf v3.0 storage submission with llama3.1-70b."),
     ("gpu-only", "results_tier_gpu_only.json", "Tier: GPU Only", "All KV cache pinned in GPU VRAM for a latency baseline."),
     ("cpu-only", "results_tier_cpu_only.json", "Tier: CPU Only", "Cache entirely in system RAM (typical production baseline)."),
     ("storage-only", "results_tier_storage_only.json", "Tier: Storage Only", "Forces every lookup to NVMe/SSD to expose disk behaviour."),
     ("gpu-cpu", "results_tier_gpu_cpu.json", "Tier: GPU + CPU", "Two-tier hot/warm cache without backing storage."),
     ("cpu-storage", "results_tier_cpu_storage.json", "Tier: CPU + Storage", "RAM backed by NVMe spillover for larger working sets."),
     ("gpu-cpu-storage", "results_tier_gpu_cpu_storage.json", "Tier: GPU + CPU + Storage", "Full three-tier hierarchy (VRAM + RAM + NVMe)."),
-    # Stress tests
     ("storage-saturation", "results_stress_storage_saturation.json", "Stress: Storage Saturation", "High-concurrency workload with constrained RAM to find NVMe limits."),
     ("production", "results_realistic_production.json", "Stress: Realistic Production", "Balanced configuration intended to mimic steady-state inference load."),
     ("autoscale", "results_autoscaling_discovery.json", "Stress: Autoscaling Discovery", "Adaptive user ramp designed to discover sustainable concurrency."),
@@ -969,14 +945,8 @@ scenarios = [
 selected_env = os.getenv("KVCACHE_SELECTED_WORKLOADS", "")
 selected_keys = {item.strip() for item in selected_env.split(",") if item.strip()} if selected_env else set()
 
-# If mlperf_submission is selected, add all MLPerf sub-scenarios to the list to be processed.
+# If mlperf_submission is selected, add its sub-scenarios to the list to be processed.
 if "mlperf_submission" in selected_keys:
-    # New discovery-validated scenarios
-    selected_keys.add("mlperf_stress_8b")
-    selected_keys.add("mlperf_stress_70b")
-    selected_keys.add("mlperf_throughput_8b")
-    selected_keys.add("mlperf_throughput_70b")
-    # Legacy scenarios (for backwards compatibility)
     selected_keys.add("mlperf_submission_8b")
     selected_keys.add("mlperf_submission_70b")
 
