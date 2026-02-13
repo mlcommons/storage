@@ -34,56 +34,33 @@ This is not a simple "pass/fail" test. It's a diagnostic tool.
 
 ## 2. Recommended Benchmark Invocations
 
-Here are the specific commands to run for a thorough analysis of your system, **validated through extensive discovery testing** (1,411 Fast system tests, 268 Slow system tests). These examples assume you are testing the `llama3.1-8b` model and have a cache directory at `/mnt/nvme`.
+Here are the specific commands to run for a thorough analysis of your system. These examples assume you are testing the `llama3.1-8b` model and have a cache directory at `/mnt/nvme`.
 
-> **Discovery Test Finding:** llama3.1-8b and mistral-7b showed the best storage tier differentiation (2.31x ratio). The 70b model is recommended for maximum per-request storage stress.
+### Step 1: Isolate and Test Storage Performance
 
-### Step 1: Isolate and Test Storage Performance (Maximum Stress)
-
-This command uses **zero CPU RAM** to force all I/O to your NVMe drive. Discovery testing showed this configuration achieves **2.62x differentiation** in I/O volume metrics between fast and slow storage.
+This command uses a minimal CPU RAM budget (0.5 GB) to force all I/O to your NVMe drive. It establishes the performance baseline for your storage. Using a fixed `--seed` ensures that the "random" workload is identical every time, making results comparable.
 
 ```bash
-# Test 1: Storage-Only Maximum Stress Workload
+# Test 1: Storage-Only Workload
 python3 kv-cache.py \
     --model llama3.1-8b \
-    --num-users 200 \
-    --duration 300 \
+    --num-users 50 \
+    --duration 180 \
     --gpu-mem-gb 0 \
-    --cpu-mem-gb 0 \
-    --max-concurrent-allocs 16 \
-    --generation-mode none \
+    --cpu-mem-gb 0.5 \
+    --generation-mode realistic \
     --cache-dir /mnt/nvme \
     --seed 42 \
-    --output results_storage_stress.json
+    --output results_storage_only.json
 ```
-**What to look for:** Check **Decode Bytes Read** and **Wall-Clock Throughput** (100% win rate in discovery testing). **⚠️ Do NOT use Storage Throughput** as your primary metric at cpu_mem=0GB—discovery testing showed it only differentiates storage tiers by 1.1x due to I/O time normalization effects.
+**What to look for:** Check the **NVMe Throughput** in the `STORAGE PERFORMANCE ASSESSMENT` section of the output. For this saturation test, high latency is expected and acceptable; the key metric is the sustained **tokens/sec** your drive can handle. This value represents your storage's performance ceiling. Compare it across different drives to find the best one for your workload.
 
-### Step 2: Test Storage Throughput (Traditional Metric)
-
-To use **Storage Throughput (tok/s)** as your primary metric, set cpu_mem=4GB. Discovery testing showed **2.2x differentiation** at this setting.
-
-```bash
-# Test 2: Storage Throughput Test
-python3 kv-cache.py \
-    --model llama3.1-8b \
-    --num-users 100 \
-    --duration 300 \
-    --gpu-mem-gb 0 \
-    --cpu-mem-gb 4 \
-    --max-concurrent-allocs 0 \
-    --generation-mode none \
-    --cache-dir /mnt/nvme \
-    --seed 42 \
-    --output results_storage_throughput.json
-```
-**What to look for:** The **Storage Throughput** metric in the summary. This configuration provides the traditional tok/s benchmark metric with reliable differentiation.
-
-### Step 3: Realistic Multi-Tier Configuration
+### Step 2: Test a Realistic Multi-Tier Configuration
 
 This command simulates a production environment with a full three-tier hierarchy. It uses a larger, more realistic CPU memory budget and enables the GPU if available.
 
 ```bash
-# Test 3: Full Three-Tier Realistic Workload
+# Test 2: Full Three-Tier Realistic Workload
 # (Set --gpu-mem-gb to your available VRAM, or 0 if none)
 python3 kv-cache.py \
     --model llama3.1-8b \
@@ -98,12 +75,12 @@ python3 kv-cache.py \
 ```
 **What to look for:** Compare the `end_to_end_latency_ms` from this test to the storage-only test. You should see a dramatic improvement. Also, check the `cache_hit_rate` and tier distribution (`gpu_entries`, `cpu_entries`, `nvme_entries`) to see how effectively your system is using the faster tiers.
 
-### Step 4: Discover Your System's Maximum User Load (QoS Mode)
+### Step 3: Discover Your System's Maximum User Load (QoS Mode)
 
 This command enables the default **Quality of Service (QoS)** autoscaler. It finds the optimal number of concurrent users your hardware can support *while maintaining acceptable latency*. It starts with a low user count and adds more users until the system's storage latency indicates it is becoming saturated.
 
 ```bash
-# Test 4: Autoscaling Discovery (QoS Mode)
+# Test 3: Autoscaling Discovery (QoS Mode)
 # (Set --gpu-mem-gb to your available VRAM, or 0 if none)
 python3 kv-cache.py \
     --model llama3.1-8b \
@@ -120,12 +97,12 @@ python3 kv-cache.py \
 ```
 **What to look for:** The output JSON will contain an `autoscaling_stats` section. The last entry in this list will show the final, stable user count your system settled on. This is your evidence-based maximum user load for a latency-sensitive production environment.
 
-### Step 5: Discover Your System's Peak Throughput (Capacity Mode)
+### Step 4: Discover Your System's Peak Throughput (Capacity Mode)
 
 This command uses the new **Capacity** autoscaler. Its goal is different: it ignores latency and aggressively adds users to find the absolute maximum I/O throughput (in tokens/sec) your storage hardware can sustain. This is the best way to measure the raw power of your drive.
 
 ```bash
-# Test 5: Autoscaling Discovery (Capacity Mode)
+# Test 4: Autoscaling Discovery (Capacity Mode)
 python3 kv-cache.py \
     --model llama3.1-70b-instruct \
     --num-users 10 \
@@ -140,18 +117,6 @@ python3 kv-cache.py \
     --output results_autoscaling_capacity.json
 ```
 **What to look for:** In the `autoscaling_stats` section, look for the `reason` field. The test finishes when it detects that throughput has stopped increasing. The final log will state `Peak capacity found`. The `peak_throughput` value associated with that step is the maximum performance of your storage device. Note the use of `--generation-mode none` to ensure the storage is the only bottleneck.
-
-### Trial Recommendations (Discovery-Validated)
-
-> **Discovery Finding:** Variance is high (CV 50-125% depending on configuration). Single runs cannot reliably differentiate storage tiers.
-
-| User Count | Variance (CV) | Minimum Trials |
-|------------|---------------|----------------|
-| 10 users | ~52% | 3 |
-| 50-100 users | ~115-125% | 3-5 |
-| 200 users | ~110-120% | 3-5 |
-
-For publication-quality results, run **5+ trials** and report the **median** rather than mean.
 
 ---
 
@@ -661,7 +626,7 @@ python3 kv-cache.py \
     --num-users 10 \
     --duration 120 \
     --gpu-mem-gb 24 \
-    --cpu-mem-gb 4 \
+    --cpu-mem-gb 0 \
     --generation-mode deterministic \
     --seed 42 \
     --output validation_kv_cache_gpu_only.json
@@ -742,213 +707,69 @@ To run this validation, you will need:
 
 For submitting official results to the MLPerf v3.0 benchmark, it is critical to use a standardized, repeatable methodology that isolates the component being tested. When evaluating a storage device's capability for KV cache offloading, the goal is to measure the performance of the storage subsystem under a consistent and saturating load, even on systems without a high-end GPU.
 
-### Discovery Test Validation Summary
-
-*Analysis Date: 2026-01-09 | Datasets: 1,411 Fast system tests, 268 Slow system tests*
-
-Before finalizing these submission guidelines, extensive discovery testing was performed comparing a Fast bare-metal system (14,000 MB/s NVMe) against a Slow virtualized system (3,000 MB/s storage). Key findings that informed the recommendations below:
-
-| Finding | Details | Impact on Recommendations |
-|---------|---------|---------------------------|
-| **Storage tier differentiation** | 2.1x-2.6x ratio achieved across all metrics | Benchmark successfully differentiates storage tiers |
-| **Metric selection depends on cpu_mem** | Storage Throughput shows only 1.1x at cpu_mem=0GB but 2.2x at cpu_mem=4GB | Different metrics recommended for different configurations |
-| **Best differentiation models** | llama3.1-8b and mistral-7b show 2.31x ratio | Recommended for standard submissions |
-| **High variance observed** | CV 50-125% depending on configuration | Multiple trials required (minimum 3-5) |
-| **100% win rate metrics** | Decode Bytes Read and Wall-Clock Throughput at cpu_mem=0GB | Most reliable for storage stress testing |
-
 ### Recommended Invocations for Storage Submission
 
-Based on discovery testing, two complementary approaches are recommended depending on your benchmarking goal:
+Two primary scenarios should be submitted to give a comprehensive view of storage performance: a standard test with a medium-sized model (Llama 3.1 8B) and a high-stress test with a large model (Llama 3.1 70B).
 
----
+#### Standard Submission: `llama3.1-8b`
 
-#### Option 1: Maximum Storage Stress (cpu_mem=0GB)
-
-**Use when:** You want to stress test NVMe and measure I/O volume differentiation.
-
-**Primary Metrics:** Decode Bytes Read (2.62x differentiation, 100% win rate), Wall-Clock Throughput (2.43x differentiation, 100% win rate)
-
-**⚠️ Important:** Do NOT use Storage Throughput as your primary metric at cpu_mem=0GB—it shows only 1.1x differentiation due to I/O time normalization effects. See "Understanding Metric Behavior" below.
-
-##### Standard Submission: `llama3.1-8b` (Maximum Storage Stress)
+This workload provides a baseline for storage performance under typical conditions. **Note:** We set `cpu-mem-gb 0` to disable the caching tier entirely, forcing every token to hit the NVMe drive. This ensures the benchmark measures the storage hardware, not the OS file cache.
 
 ```bash
-# MLPerf v3.0: Maximum Storage Stress Test (8B Model)
-# Run 3-5 trials for statistical significance
-for trial in 1 2 3 4 5; do
-    python3 kv-cache.py \
-        --model llama3.1-8b \
-        --num-users 200 \
-        --duration 300 \
-        --gpu-mem-gb 0 \
-        --cpu-mem-gb 0 \
-        --max-concurrent-allocs 16 \
-        --generation-mode none \
-        --seed 42 \
-        --output mlperf_v3_stress_8b_trial${trial}.json
-done
-```
-
-##### Large Model Submission: `llama3.1-70b-instruct` (Maximum Per-Request Stress)
-
-The 70B model generates ~10x more storage I/O per token, ideal for high-bandwidth storage systems:
-
-```bash
-# MLPerf v3.0: Maximum Storage Stress Test (70B Model)
-for trial in 1 2 3; do
-    python3 kv-cache.py \
-        --model llama3.1-70b-instruct \
-        --num-users 70 \
-        --duration 300 \
-        --gpu-mem-gb 0 \
-        --cpu-mem-gb 0 \
-        --max-concurrent-allocs 4 \
-        --generation-mode none \
-        --seed 42 \
-        --output mlperf_v3_stress_70b_trial${trial}.json
-done
-```
-
----
-
-#### Option 2: Storage Throughput Focus (cpu_mem=4GB)
-
-**Use when:** You want Storage Throughput (tok/s) as your primary metric—the traditional benchmark metric.
-
-**Primary Metric:** Storage Throughput (2.2x differentiation, 97% win rate at cpu_mem=4GB)
-
-##### Standard Submission: `llama3.1-8b` (Storage Throughput)
-
-```bash
-# MLPerf v3.0: Storage Throughput Test (8B Model)
-# Run 3-5 trials for statistical significance
-for trial in 1 2 3 4 5; do
-    python3 kv-cache.py \
-        --model llama3.1-8b \
-        --num-users 100 \
-        --duration 300 \
-        --gpu-mem-gb 0 \
-        --cpu-mem-gb 4 \
-        --max-concurrent-allocs 0 \
-        --generation-mode none \
-        --seed 42 \
-        --output mlperf_v3_throughput_8b_trial${trial}.json
-done
-```
-
-##### Large Model Submission: `llama3.1-70b-instruct` (Storage Throughput)
-
-```bash
-# MLPerf v3.0: Storage Throughput Test (70B Model)
-for trial in 1 2 3; do
-    python3 kv-cache.py \
-        --model llama3.1-70b-instruct \
-        --num-users 50 \
-        --duration 300 \
-        --gpu-mem-gb 0 \
-        --cpu-mem-gb 4 \
-        --max-concurrent-allocs 4 \
-        --generation-mode none \
-        --seed 42 \
-        --output mlperf_v3_throughput_70b_trial${trial}.json
-done
-```
-
----
-
-#### Option 3: Realistic Production Simulation
-
-**Use when:** You want to simulate realistic inference timing including GPU backpressure.
-
-```bash
-# MLPerf v3.0: Realistic Production Workload
-python3 kv-cache.py \
+# MLPerf v3.0 Recommended Invocation: Storage Saturation Test (8B Model)
+python3 kv-cache-waterfall-lru.py \
     --model llama3.1-8b \
-    --num-users 50 \
-    --duration 300 \
+    --num-users 150 \
+    --duration 600 \
     --gpu-mem-gb 0 \
-    --cpu-mem-gb 4 \
-    --max-concurrent-allocs 4 \
+    --cpu-mem-gb 0 \
     --generation-mode realistic \
+    --performance-profile throughput \
     --seed 42 \
-    --output mlperf_v3_realistic_8b.json
+    --output mlperf_v3_storage_submission_8b.json
 ```
 
----
+#### Large Model Submission: `llama3.1-70b-instruct`
 
-### Understanding Metric Behavior by cpu_mem Setting
+This workload tests the storage's ability to handle a much heavier load, as the KV cache for a 70B model is significantly larger. The user count is reduced to reflect the increased memory pressure per user.
 
-Discovery testing revealed a critical insight: **the choice of primary metric depends on your cpu_mem setting**.
+```bash
+# MLPerf v3.0 Recommended Invocation: Storage Saturation Test (70B Model)
+python3 kv-cache-waterfall-lru.py \
+    --model llama3.1-70b-instruct \
+    --num-users 40 \
+    --duration 600 \
+    --gpu-mem-gb 0 \
+    --cpu-mem-gb 0 \
+    --generation-mode realistic \
+    --performance-profile throughput \
+    --seed 42 \
+    --output mlperf_v3_storage_submission_70b.json
+```
 
-#### Why Storage Throughput is Misleading at cpu_mem=0GB
+**Why `cpu-mem-gb 0`?**
+In previous versions, a small CPU budget (e.g., 2GB) was allowed. However, analysis showed that operating system file caching (Page Cache) could absorb write bursts within this budget, artificially lowering latency metrics. Setting both GPU and CPU memory to 0 forces the "Waterfall" logic to bypass all caching layers and write directly to the NVMe backend, providing the most rigorous and honest assessment of storage I/O performance.
 
-At cpu_mem=0GB, both fast and slow systems are 100% I/O-bound—every token requires NVMe access. This creates a normalization effect:
-
-| System | Decode Bytes Read | Total I/O Time | Storage Throughput |
-|--------|-------------------|----------------|-------------------|
-| Fast | 1,195 GB | ~8,000 s | 9.53 tok/s |
-| Slow | 447 GB | ~7,100 s | 8.50 tok/s |
-| **Ratio** | **2.62x** | **1.13x** | **1.12x** |
-
-The Fast system reads **2.62x more bytes** but accumulates **more I/O time** (because more operations). These effects cancel out in Storage Throughput, hiding the true performance difference.
-
-#### Recommended Metrics by Configuration
-
-| cpu_mem | Primary Metric | Differentiation | Win Rate | Notes |
-|---------|----------------|-----------------|----------|-------|
-| **0 GB** | Decode Bytes Read | **2.62x** | **100%** | Measures total storage work done |
-| **0 GB** | Wall-Clock Throughput | **2.43x** | **100%** | Measures real-world tokens/sec |
-| **0 GB** | Storage Throughput | 1.12x | 62% | **NOT RECOMMENDED** (misleading) |
-| **4 GB** | Storage Throughput | **2.23x** | **97%** | Traditional metric works at this setting |
-| **4 GB** | Decode Bytes Read | 2.06x | 100% | Also valid secondary metric |
-
-### Key Parameters Explained
-
-*   `--num-users`: Discovery testing showed differentiation remains stable (~2.1x-2.2x) across 10-200 users. Higher counts (150-200) maximize aggregate throughput. The 70B model uses fewer users due to larger per-user memory footprint.
-*   `--duration 300`: A 5-minute duration provides stable metrics. For official submissions, 10 minutes (600s) recommended.
-*   `--gpu-mem-gb 0`: **Critical for storage-focused testing.** Ensures no GPU memory allocation, isolating storage performance.
-*   `--cpu-mem-gb`: Choose based on your metric goal:
-    - **0 GB**: Maximum storage stress, use Decode Bytes Read or Wall-Clock Throughput
-    - **4 GB**: Traditional benchmarking, use Storage Throughput
-*   `--max-concurrent-allocs`: Controls allocation parallelism. Discovery showed optimal values are 0 (unlimited) for throughput metrics, 16 for stress testing.
-*   `--generation-mode`:
-    - **none**: Pure I/O benchmark, no token generation delay. Best for storage characterization.
-    - **realistic**: Adds 30ms/token GPU simulation. Required for production workload simulation.
-*   `--seed 42`: **Mandatory for valid submission.** Ensures identical pseudo-random workload across test runs and systems.
-
-### Trial Requirements Due to Variance
-
-Discovery testing revealed significant variance (CV 50-125% depending on configuration):
-
-| Concurrency | Typical CV | Minimum Trials | Recommended Trials |
-|-------------|------------|----------------|-------------------|
-| Low (10 users) | ~52% | 3 | 5 |
-| Medium (50-100 users) | ~115-125% | 3 | 5+ |
-| High (200 users) | ~110-120% | 3 | 5+ |
-
-**For publication-quality results:**
-- Run minimum **3 trials** per configuration
-- Run **5+ trials** for statistical robustness
-- Report **median** rather than mean to reduce outlier impact
-- Report **P95** and **P99** alongside mean for latency metrics
+**Key Parameters Explained:**
+*   `--num-users 150`: A high, fixed user count is used to ensure the storage device is placed under significant and continuous load.
+*   `--duration 600`: A 10-minute duration ensures the benchmark reaches a stable, steady-state performance level, which is a standard requirement for MLPerf results.
+*   `--gpu-mem-gb 0`: **This is the critical parameter for a storage-focused test.** It ensures the benchmark does not allocate any GPU memory, making it suitable for systems without a GPU or for isolating storage performance.
+*   `--cpu-mem-gb 2`: This small memory budget is intentionally chosen to be insufficient for the user load, forcing the system to bypass this faster tier and offload almost all KV cache data directly to the NVMe storage.
+*   `--generation-mode realistic`: This is essential for a valid submission. It adds a 30ms emulated sleep for each token generated, accurately simulating the backpressure from a real GPU's computation time. Without this, the benchmark would incorrectly measure storage performance in an unrealistic, I/O-only scenario.
+*   `--performance-profile throughput`: This new parameter is crucial for official submissions. It instructs the benchmark to use **throughput (tokens/second) as the sole pass/fail metric**, ignoring latency. This is because the high user count and low memory budget are *designed* to cause high latency to saturate the storage. This profile ensures the benchmark correctly evaluates the storage device's ability to sustain a high data rate under stress, which is the true goal of this test.
+*   `--seed 42`: **This parameter is mandatory for a valid submission.** It ensures that the pseudo-random workload (user request timings, context lengths, etc.) is identical across all test runs and systems. This removes workload variance as a factor and guarantees a true "apples-to-apples" comparison of hardware performance. The final report will include the seed used.
 
 ### Interpreting Throughput: System vs. Storage (Read Amplification)
 
-When you run the benchmark, the summary report presents multiple throughput and I/O metrics that can differ significantly. Understanding these differences—validated by discovery testing—is key to correctly interpreting the results.
+When you run the benchmark with the `throughput` profile, the summary report presents two different throughput numbers that can differ significantly. Understanding this difference is key to correctly interpreting the results.
 
-#### Key Metrics Explained
+1.  **System Throughput (`total_tokens_per_sec`):** This is the "Overall Performance" metric. It represents the end-to-end throughput of the entire system from the user's perspective: the number of new tokens generated per second across all users. It is a measure of the system's generative capacity.
 
-1.  **Wall-Clock Throughput (`total_tokens_per_sec`):** The end-to-end throughput from the user's perspective: tokens generated per second across all users. Discovery testing showed **2.1x-2.4x differentiation** between storage tiers. This metric is reliable at all cpu_mem settings.
-
-2.  **Storage Throughput (`nvme_throughput`):** Tokens processed per unit of NVMe I/O time. **⚠️ Warning:** Discovery testing showed this metric is **unreliable at cpu_mem=0GB** (only 1.1x differentiation) but works well at **cpu_mem=4GB** (2.2x differentiation).
-
-3.  **Decode Bytes Read (GB):** Total bytes read from NVMe during decode phase. Discovery testing showed this is the **most reliable differentiation metric** at cpu_mem=0GB (**2.62x ratio, 100% win rate**).
-
-4.  **Prefill Bytes Written (GB):** Total bytes written to NVMe during prefill phase. Shows **2.15x differentiation** at cpu_mem=0GB.
+2.  **Storage Throughput (`nvme_throughput`):** This is the "Storage Performance Assessment" metric. It represents the raw I/O performance of the NVMe tier, measuring how many tokens' worth of KV cache data are read from or written to the storage device per second.
 
 #### Why Are They So Different? The Concept of Read Amplification
 
-Storage metrics are often an order of magnitude higher than System Throughput due to **Read Amplification**—a fundamental characteristic of LLM inference.
+The Storage Throughput is often an order of magnitude higher than the System Throughput. This is not a bug; it is a fundamental characteristic of LLM inference called **Read Amplification**.
 
 During the "decode" phase, to generate a single new token, the model must read the *entire KV cache for all preceding tokens in the conversation*.
 
@@ -957,18 +778,6 @@ During the "decode" phase, to generate a single new token, the model must read t
     *   **Storage Tokens Read:** 1000
 
 This creates a massive amplification effect where a small amount of user-facing work (generating one token) triggers a large amount of backend I/O (reading the entire history). This is precisely the behavior this benchmark is designed to measure, as it is the primary source of stress on the storage subsystem in a real-world KV cache offloading scenario.
-
-#### Discovery Validation: I/O Volume as Primary Metric
-
-Discovery testing confirmed that **I/O volume metrics (Decode Bytes Read, Prefill Bytes Written)** are more reliable than time-normalized metrics for comparing storage systems:
-
-| Metric | cpu_mem=0GB Ratio | cpu_mem=4GB Ratio | Win Rate |
-|--------|-------------------|-------------------|----------|
-| Decode Bytes Read | **2.62x** | 2.06x | **100%** |
-| Wall-Clock Throughput | **2.43x** | 1.79x | **100%** |
-| Storage Throughput | 1.12x | **2.23x** | 62% / 97% |
-
-**Recommendation:** When comparing storage systems under maximum stress (cpu_mem=0GB), use **Decode Bytes Read** or **Wall-Clock Throughput** as your primary metric. Reserve Storage Throughput for cpu_mem≥4GB configurations.
 
 #### Code Snippets
 
@@ -1123,49 +932,26 @@ This table clearly illustrates the memory pressure. If you are running the `llam
 
 ## 9. Smoke Test: Quick Validation Suite
 
-This section provides a collection of key benchmark invocations that can be used as a "smoke test" to quickly validate different aspects of your system's performance. **These tests have been validated through discovery testing** (1,411 Fast system tests, 268 Slow system tests). For all commands, it is assumed the cache directory is `/mnt/nvme`.
+This section provides a collection of key benchmark invocations that can be used as a "smoke test" to quickly validate different aspects of your system's performance. Each test is designed to isolate a specific component or behavior. For all commands, it is assumed the cache directory is `/mnt/nvme`.
 
-### Test 1: Maximum Storage Stress (Discovery-Validated)
+### Test 1: Storage-Only Saturation
 
-**Purpose:** Establishes the baseline performance of your storage device by forcing **all I/O to NVMe** (cpu_mem=0GB). This configuration showed the strongest storage tier differentiation in discovery testing.
-
-**Primary Metrics:** Decode Bytes Read (2.62x differentiation), Wall-Clock Throughput (2.43x differentiation)
+**Purpose:** Establishes the baseline performance of your storage device by forcing all I/O to it. This is the best way to measure your drive's raw throughput.
 
 ```bash
 python3 kv-cache.py \
     --model llama3.1-8b \
-    --num-users 200 \
+    --num-users 50 \
     --duration 180 \
     --gpu-mem-gb 0 \
     --cpu-mem-gb 0 \
-    --max-concurrent-allocs 16 \
-    --generation-mode none \
+    --generation-mode realistic \
     --cache-dir /mnt/nvme \
     --seed 42 \
-    --output results_storage_stress.json
+    --output results_storage_only.json
 ```
 
-**⚠️ Important:** At cpu_mem=0GB, do NOT use Storage Throughput as your primary metric—use Decode Bytes Read or Wall-Clock Throughput instead (see Section 7 for details).
-
-### Test 2: Storage Throughput Benchmark (Traditional Metric)
-
-**Purpose:** Use this configuration when you want **Storage Throughput (tok/s)** as your primary metric. Discovery testing showed this metric works reliably at cpu_mem=4GB (2.2x differentiation).
-
-```bash
-python3 kv-cache.py \
-    --model llama3.1-8b \
-    --num-users 100 \
-    --duration 180 \
-    --gpu-mem-gb 0 \
-    --cpu-mem-gb 4 \
-    --max-concurrent-allocs 0 \
-    --generation-mode none \
-    --cache-dir /mnt/nvme \
-    --seed 42 \
-    --output results_storage_throughput.json
-```
-
-### Test 3: Realistic Three-Tier Workload
+### Test 2: Realistic Three-Tier Workload
 
 **Purpose:** Simulates a balanced, production-level environment using GPU, CPU, and NVMe tiers. Use this to measure end-to-end latency in a typical setup.
 
@@ -1182,7 +968,7 @@ python3 kv-cache.py \
     --output results_realistic_production.json
 ```
 
-### Test 4: Autoscaling for Max Users (QoS Mode)
+### Test 3: Autoscaling for Max Users (QoS Mode)
 
 **Purpose:** **This is the key command for sizing your production environment.** It automatically discovers the maximum number of concurrent users your system can support while maintaining a low-latency user experience (Quality of Service).
 
@@ -1201,7 +987,7 @@ python3 kv-cache.py \
     --output results_autoscaling_qos.json
 ```
 
-### Test 5: Autoscaling for Peak Throughput (Capacity Mode)
+### Test 4: Autoscaling for Peak Throughput (Capacity Mode)
 
 **Purpose:** Ignores latency to find the absolute maximum I/O throughput (tokens/sec) your storage hardware can sustain. This is the ultimate test of your drive's raw power.
 
@@ -1211,7 +997,7 @@ python3 kv-cache.py \
     --num-users 10 \
     --duration 180 \
     --gpu-mem-gb 0 \
-    --cpu-mem-gb 4 \
+    --cpu-mem-gb 0 \
     --enable-autoscaling \
     --autoscaler-mode capacity \
     --generation-mode none \
@@ -1416,372 +1202,3 @@ with self.memory_lock:
 To align with MLPerf requirements, we added a specific counter for `nvme_tokens_processed`.
 *   **Why:** Previously, we tracked raw bytes. However, MLPerf metrics are often in "Tokens per Second."
 *   **How:** The system now tracks the exact number of tokens associated with every read, write, and demotion operation that touches the NVMe drive. This allows us to report a precise "Storage Throughput (tok/s)" metric that accounts for the massive read amplification inherent in LLM inference.
----
-
-# CHANGES-01-09-2026: ShareGPT Integration, Unit Testing, and Excel Export
-
-**Date:** January 9, 2026
-**Subject:** Feature enhancements to support realistic workload replay, automated testing, and streamlined results analysis.
-
-This update consolidates the ShareGPT replay functionality into the main benchmark script, adds a comprehensive unit test suite, and introduces optional Excel export capabilities. These changes improve usability for both development validation and production benchmarking without introducing any regressions to the core simulation logic.
-
-## 1. ShareGPT Dataset Integration
-
-The original repository maintained two separate scripts: `kv-cache.py` for synthetic workloads and `kv-cache_sharegpt_replay.py` for real conversation replay. This created maintenance overhead and confused users about which script to use. We merged the ShareGPT functionality directly into `kv-cache.py`.
-
-**What Changed:**
-*   **New Class: `ShareGPTDatasetLoader`** (~150 lines) parses ShareGPT JSON files and uses tiktoken to calculate exact token counts for each conversation turn.
-*   **New Arguments:** The main script now accepts `--dataset-path`, `--max-conversations`, `--request-rate`, and `--max-requests` for controlling replay behavior.
-*   **Backward Compatibility:** When no dataset path is provided, the benchmark falls back to its original synthetic workload generation. Existing invocations work unchanged.
-
-**Why This Matters:**
-Real human conversations exhibit dramatically different patterns than synthetic workloads. In our validation testing, ShareGPT conversations averaged 133 tokens per context versus 2,676 tokens for synthetic generation—a 20x difference. This affects cache hit rates (85-97% vs 50-70%), throughput measurements, and the validity of capacity planning exercises.
-
-**Sample Invocation:**
-```bash
-python3 kv-cache.py \
-    --model llama3.1-8b \
-    --dataset-path ShareGPT_V3_unfiltered_cleaned_split.json \
-    --max-conversations 500 \
-    --num-users 50 \
-    --duration 300 \
-    --gpu-mem-gb 0 \
-    --cpu-mem-gb 4 \
-    --generation-mode realistic \
-    --cache-dir /mnt/nvme \
-    --seed 42 \
-    --output results_sharegpt.json
-```
-
-## 2. Understanding the Three Throughput Metrics
-
-The benchmark reports three different "tokens per second" metrics. Each measures something fundamentally different. Understanding these distinctions is critical for interpreting results correctly.
-
-### Metric 1: Wall-Clock Throughput (`avg_throughput_tokens_per_sec`)
-
-**What it measures:** The rate at which **output tokens** are generated, as seen by end users.
-
-**Formula:**
-```
-wall_clock_throughput = total_tokens_generated / elapsed_wall_time
-```
-
-**Code Location:** `_calculate_stats()` method
-```python
-summary = {
-    'avg_throughput_tokens_per_sec': self.results['total_tokens_generated'] / duration,
-}
-```
-
-**What `total_tokens_generated` contains:** The sum of `request.generate_tokens` for all completed requests. This is the number of **new output tokens** the LLM produced—NOT the KV cache data.
-
-```python
-# In process_requests(), after each request completes:
-with self.results_lock:
-    self.results['total_tokens_generated'] += request.generate_tokens  # Output tokens only
-```
-
-**Use this metric to answer:** "How many tokens per second is my inference system delivering to users?"
-
----
-
-### Metric 2: Storage I/O Throughput (`storage_throughput_tokens_per_sec`)
-
-**What it measures:** An **efficiency ratio**—how many output tokens are produced per second of cumulative storage I/O time.
-
-**Formula:**
-```
-storage_io_throughput = total_tokens_generated / total_storage_io_latency
-```
-
-**Code Location:** `_calculate_stats()` method
-```python
-'storage_throughput_tokens_per_sec': self.results['total_tokens_generated'] / self.results['total_storage_io_latency']
-```
-
-**What `total_storage_io_latency` contains:** The **cumulative** time spent in storage operations across ALL threads. This can exceed wall-clock time because multiple threads perform I/O in parallel.
-
-```python
-# In process_requests(), storage_latency accumulates ALL cache operations for this request:
-storage_latency = 0.0
-_, read_lat = self.cache.access_cache(...)    # Read from cache
-storage_latency += read_lat
-_, _, write_lat = self.cache.allocate_cache(...)  # Write to cache
-storage_latency += write_lat
-
-# Then recorded:
-with self.results_lock:
-    self.results['total_storage_io_latency'] += storage_latency
-```
-
-**Important:** This metric uses the same numerator (output tokens) as wall-clock throughput. It does NOT measure storage bandwidth.
-
-**Use this metric to answer:** "How efficiently does each second of I/O work translate into user-facing output?"
-
-**Interpretation:**
-- `storage_io_throughput < wall_clock_throughput` → Storage is a bottleneck (cumulative I/O time exceeds wall time)
-- `storage_io_throughput > wall_clock_throughput` → Other factors (GPU simulation, queueing) dominate latency
-
----
-
-### Metric 3: Storage Assessment Throughput (`nvme_tokens_processed / duration`)
-
-**What it measures:** The actual **storage bandwidth**—how much KV cache data flows through the NVMe tier.
-
-**Formula:**
-```
-nvme_throughput = nvme_tokens_processed / elapsed_wall_time
-```
-
-**Code Location:** `_evaluate_storage_performance()` method
-```python
-if self.performance_profile == 'throughput':
-    nvme_tokens = self.stats.get('nvme_tokens_processed', 0)
-    throughput = nvme_tokens / duration if duration > 0 else 0
-```
-
-**What `nvme_tokens_processed` contains:** The number of tokens' worth of KV cache data that was **read from or written to NVMe**. This is incremented in three places:
-
-```python
-# 1. When data is WRITTEN directly to NVMe (in allocate_cache):
-if allocated_tier == 'nvme':
-    self.stats['nvme_tokens_processed'] += num_tokens
-
-# 2. When data is READ from NVMe (in access_cache):
-if location == 'nvme':
-    num_tokens = entry_size / self.model_config.kv_cache_size_per_token
-    self.stats['nvme_tokens_processed'] += num_tokens
-
-# 3. When data is EVICTED/DEMOTED to NVMe (in _demote_entry):
-if to_tier == 'nvme':
-    tokens = int(size / bytes_per_token)
-    self.stats['nvme_tokens_processed'] += tokens
-```
-
-**Use this metric to answer:** "How much KV cache data is my NVMe drive handling per second?"
-
-**Why this can be much higher than wall-clock throughput:** Due to **read amplification**. During decode, generating 1 output token requires reading the entire KV cache (potentially thousands of tokens) from storage.
-
----
-
-### Summary Comparison
-
-| Metric | Numerator | Denominator | What It Measures |
-|--------|-----------|-------------|------------------|
-| **Wall-clock** | Output tokens | Wall time | User-facing generation rate |
-| **Storage I/O** | Output tokens | Cumulative I/O time | I/O efficiency ratio |
-| **NVMe Assessment** | KV cache tokens (R+W) | Wall time | Storage bandwidth |
-
-### Real-World Example
-
-From a benchmark run with 70 users on Llama 3.1 70B:
-
-```
-Total Tokens Generated: 56,108 (output tokens)
-Duration: 120 seconds
-Total Storage I/O Latency: 603 seconds (cumulative across threads)
-NVMe Tokens Processed: 597,991 (KV cache data tokens)
-```
-
-| Metric | Calculation | Result |
-|--------|-------------|--------|
-| **Wall-clock** | 56,108 / 120 | **467 tok/s** |
-| **Storage I/O** | 56,108 / 603 | **93 tok/s** |
-| **NVMe Assessment** | 597,991 / 120 | **4,983 tok/s** |
-
-**Interpretation:**
-- The system delivers **467 output tokens/second** to users
-- Storage is a bottleneck (93 < 467), meaning I/O time dominates
-- The NVMe drive is handling **4,983 tokens/second** of KV cache I/O (10.6× read amplification)
-
----
-
-### The ShareGPT Bug Explained
-
-The Storage Assessment uses `nvme_tokens_processed`, which is **NVMe-specific**. In ShareGPT replay mode with small context sizes (~300 tokens average), all data fits in GPU+CPU memory. No data reaches NVMe, so:
-
-```
-nvme_tokens_processed = 0
-nvme_throughput = 0 / 120 = 0.00 tok/s → FAIL
-```
-
-Meanwhile, wall-clock and storage I/O throughput show healthy values because they use `total_tokens_generated` (output tokens), which is always incremented regardless of which cache tier is used.
-
-
-
-## 3. Unit Test Suite
-
-We added a comprehensive pytest-based test suite (`test_kv_cache.py`) that validates core functionality without running full benchmarks. This enables rapid development iteration and CI/CD integration.
-
-**Coverage:**
-The test suite includes 12 test classes covering:
-*   `TestModelConfig`: Validates KV cache size calculations for all 5 model configurations
-*   `TestInferenceRequest`: Tests cache key generation and latency tracking
-*   `TestQoSProfiles`: Verifies priority levels and SLA targets
-*   `TestKVCacheGenerator`: Confirms deterministic generation and precomputed buffer optimization
-*   `TestCPUMemoryBackend`: Tests write/read/delete/clear operations
-*   `TestNVMeBackend`: Validates file I/O and metadata tracking
-*   `TestGPUMemoryBackend`: CUDA tensor operations (auto-skipped without GPU)
-*   `TestConversationManager`: Multi-turn tracking and LRU eviction
-*   `TestUserSimulator`: Mixed user generation
-*   `TestMultiTierCache`: CPU-only mode allocation and access
-*   `TestMultiTierCacheWithGPU`: Full three-tier hierarchy (auto-skipped without GPU)
-*   `TestXLSXExport`: CSV/Excel export validation
-
-**Running Tests:**
-```bash
-# Full test suite with verbose output
-pytest test_kv_cache.py -v
-
-# Run specific test class
-pytest test_kv_cache.py -k "TestModelConfig" -v
-
-# Skip GPU tests explicitly
-pytest test_kv_cache.py -v -m "not skipif"
-```
-
-**Expected Runtime:** 3-5 seconds without GPU, 5-10 seconds with GPU.
-
-## 4. Excel Export Capability
-
-For users who analyze results in spreadsheets, we added optional Excel/CSV export via the `--xlsx-output` argument.
-
-**Dependencies:**
-*   `pandas` (required for export)
-*   `openpyxl` (optional; enables `.xlsx` format; without it, falls back to `.csv`)
-
-**Graceful Fallback:**
-*   If pandas is not installed, the export is skipped with a warning
-*   If openpyxl is not installed, the benchmark writes CSV instead of XLSX
-*   The benchmark never fails due to missing optional dependencies
-
-**Output Columns:**
-The export includes all key parameters and metrics in a single row:
-| Model | Num Users | Duration | GPU Mem | CPU Mem | Total Requests | Total Tokens | Avg Throughput | Storage Throughput | Cache Hit Rate | E2E P95 | Storage IO P95 |
-
-**Sample Invocation:**
-```bash
-python3 kv-cache.py \
-    --model llama3.1-8b \
-    --num-users 50 \
-    --duration 120 \
-    --gpu-mem-gb 0 \
-    --cpu-mem-gb 4 \
-    --seed 42 \
-    --output results.json \
-    --xlsx-output results.xlsx
-```
-
-## 5. Regression Analysis: No Core Logic Changes
-
-A detailed diff analysis between the original `kv-cache.py` and the enhanced version confirms that the core simulation logic remains identical:
-
-| Component | Status |
-|-----------|--------|
-| `MultiTierCache` class | Unchanged |
-| `allocate_cache()` eviction logic | Unchanged |
-| `access_cache()` read logic | Unchanged |
-| `KVCacheGenerator` precomputed buffer | Unchanged |
-| `GPUMemoryBackend`, `CPUMemoryBackend`, `NVMeBackend` | Unchanged |
-| `UserSimulator` | Unchanged |
-| QoS handling | Unchanged |
-| Autoscaling | Unchanged |
-| RAG workload | Unchanged |
-| Prefix caching | Unchanged |
-
-**What Was Added (Not Modified):**
-1. `ShareGPTDatasetLoader` class (new code, doesn't affect simulation)
-2. `storage_throughput_tokens_per_sec` metric (additional output, no behavior change)
-3. `--max-requests` argument (optional early termination, backward compatible)
-4. `--request-rate` argument (optional rate limiting, backward compatible)
-5. `--xlsx-output` argument (optional export, backward compatible)
-6. `export_results_to_xlsx()` function (new code, called after benchmark completes)
-
-Existing benchmark invocations produce identical results. The seed-based reproducibility guarantee is maintained.
-
-## 6. Updated Requirements
-
-The `requirements.txt` file now documents all dependencies:
-
-```
-# Core (required)
-numpy>=1.20.0
-
-# GPU support (optional)
-torch>=2.0.0
-
-# ShareGPT replay (optional)
-tiktoken>=0.5.0
-
-# Excel export (optional)
-pandas>=2.0.0
-openpyxl>=3.1.0
-
-# Unit testing (optional)
-pytest>=7.0.0
-```
-
-## 7. Recommended Invocations: ShareGPT Workloads
-
-### ShareGPT Storage Validation (8B Model)
-```bash
-python3 kv-cache.py \
-    --model llama3.1-8b \
-    --dataset-path ShareGPT_V3_unfiltered_cleaned_split.json \
-    --max-conversations 1000 \
-    --num-users 100 \
-    --duration 300 \
-    --gpu-mem-gb 0 \
-    --cpu-mem-gb 4 \
-    --generation-mode realistic \
-    --cache-dir /mnt/nvme \
-    --seed 42 \
-    --output results_sharegpt_8b.json \
-    --xlsx-output results_sharegpt_8b.xlsx
-```
-
-### ShareGPT High-Stress (70B Model)
-```bash
-python3 kv-cache.py \
-    --model llama3.1-70b-instruct \
-    --dataset-path ShareGPT_V3_unfiltered_cleaned_split.json \
-    --max-conversations 500 \
-    --request-rate 5.0 \
-    --num-users 50 \
-    --duration 600 \
-    --gpu-mem-gb 0 \
-    --cpu-mem-gb 8 \
-    --generation-mode none \
-    --cache-dir /mnt/nvme \
-    --seed 42 \
-    --output results_sharegpt_70b.json
-```
-
-### ShareGPT Fixed Request Count
-```bash
-python3 kv-cache.py \
-    --model llama3.1-8b \
-    --dataset-path ShareGPT_V3_unfiltered_cleaned_split.json \
-    --max-requests 10000 \
-    --num-users 75 \
-    --gpu-mem-gb 0 \
-    --cpu-mem-gb 4 \
-    --generation-mode realistic \
-    --cache-dir /mnt/nvme \
-    --seed 42 \
-    --output results_sharegpt_fixed.json
-```
-
----
-
-## Summary of January 9, 2026 Changes
-
-| Feature | Description | Impact |
-|---------|-------------|--------|
-| ShareGPT Integration | Merged `kv-cache_sharegpt_replay.py` into main script | Real workload validation |
-| Storage Throughput Metric | Added `storage_throughput_tokens_per_sec` | Fair tier comparisons |
-| Unit Test Suite | 12 pytest test classes, ~80 tests | Development velocity |
-| Excel Export | `--xlsx-output` with CSV fallback | Easier analysis |
-| Elapsed Time Tracking | Added to summary output | Debugging support |
-
-No regressions were introduced. All existing invocations and seed-based reproducibility remain intact.
