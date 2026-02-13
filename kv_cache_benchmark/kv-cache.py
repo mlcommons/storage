@@ -62,27 +62,8 @@ try:
 except ImportError:
     CUPY_AVAILABLE = False
 
-try:
-    import tiktoken
-    TIKTOKEN_AVAILABLE = True
-except ImportError:
-    TIKTOKEN_AVAILABLE = False
 
-# Optional pandas/openpyxl for XLSX output
-try:
-    import pandas as pd
-    PANDAS_AVAILABLE = True
-except ImportError:
-    PANDAS_AVAILABLE = False
-
-try:
-    import openpyxl
-    OPENPYXL_AVAILABLE = True
-except ImportError:
-    OPENPYXL_AVAILABLE = False
-
-
-# ============================================================================
+# ============================================================================ 
 # CORE DATA MODELS
 # Defines the basic data structures used throughout the benchmark.
 # ============================================================================ 
@@ -1868,7 +1849,6 @@ class MultiTierCache:
             'read_write_ratio': self.stats['total_read_bytes'] / max(self.stats['total_write_bytes'], 1),
             'read_iops': self.stats['read_operations'],
             'write_iops': self.stats['write_operations'],
-            'nvme_tokens_processed': self.stats['nvme_tokens_processed'],
         }
 
         # Add latency percentiles for each tier.
@@ -2379,169 +2359,10 @@ class UserSimulator:
         return users
 
 
-# ============================================================================
-# SHAREGPT DATASET LOADER
-# Loads ShareGPT conversation data for realistic workload generation.
-# ============================================================================
-
-class ShareGPTDatasetLoader:
-    """
-    Loads ShareGPT conversation data and provides realistic request patterns.
-    ShareGPT format has conversations with 'from' (human/gpt) and 'value' (text content).
-    """
-
-    def __init__(self, dataset_path: str, max_conversations: int = 1000, seed: Optional[int] = None):
-        """
-        Initialize the ShareGPT dataset loader.
-
-        Args:
-            dataset_path: Path to the ShareGPT JSON file
-            max_conversations: Maximum number of conversations to load
-            seed: Random seed for reproducibility
-        """
-        self.dataset_path = dataset_path
-        self.max_conversations = max_conversations
-        self.conversations = []
-        self.token_stats = {}
-
-        if seed:
-            random.seed(seed)
-            np.random.seed(seed)
-
-        self._load_dataset()
-
-    def _load_dataset(self):
-        """Load and process the ShareGPT dataset."""
-        if not os.path.exists(self.dataset_path):
-            print(f"[ShareGPT] Warning: Dataset not found at {self.dataset_path}")
-            return
-
-        try:
-            # Try to initialize tokenizer for accurate token counting
-            tokenizer = None
-            if TIKTOKEN_AVAILABLE:
-                try:
-                    tokenizer = tiktoken.get_encoding("cl100k_base")  # GPT-4 tokenizer
-                except Exception:
-                    pass
-
-            if tokenizer is None:
-                print("[ShareGPT] Tiktoken not available, using approximate token counting")
-
-            with open(self.dataset_path, 'r', encoding='utf-8') as f:
-                data = json.load(f)
-
-            # Process conversations
-            for conv_idx, conversation in enumerate(data[:self.max_conversations]):
-                if 'conversations' not in conversation:
-                    continue
-
-                conv_data = []
-                turns = conversation['conversations']
-
-                for i in range(0, len(turns) - 1, 2):  # Process pairs of human-gpt turns
-                    if i + 1 >= len(turns):
-                        break
-
-                    human_turn = turns[i]
-                    gpt_turn = turns[i + 1]
-
-                    if human_turn.get('from') != 'human' or gpt_turn.get('from') != 'gpt':
-                        continue
-
-                    # Calculate tokens
-                    context_text = human_turn.get('value', '')
-                    generation_text = gpt_turn.get('value', '')
-
-                    if tokenizer:
-                        context_tokens = len(tokenizer.encode(context_text))
-                        generation_tokens = len(tokenizer.encode(generation_text))
-                    else:
-                        # Approximate: 4 characters per token on average
-                        context_tokens = max(1, len(context_text) // 4)
-                        generation_tokens = max(1, len(generation_text) // 4)
-
-                    # Limit extreme values for stability
-                    context_tokens = min(context_tokens, 16384)  # Cap at 16K context
-                    generation_tokens = min(generation_tokens, 2048)  # Cap at 2K generation
-
-                    conv_data.append({
-                        'context_tokens': context_tokens,
-                        'generation_tokens': generation_tokens,
-                        'turn_number': i // 2 + 1
-                    })
-
-                if conv_data:
-                    self.conversations.append({
-                        'id': conversation.get('id', f'conv_{conv_idx}'),
-                        'turns': conv_data
-                    })
-
-            # Calculate statistics
-            if self.conversations:
-                all_context_tokens = []
-                all_generation_tokens = []
-
-                for conv in self.conversations:
-                    for turn in conv['turns']:
-                        all_context_tokens.append(turn['context_tokens'])
-                        all_generation_tokens.append(turn['generation_tokens'])
-
-                self.token_stats = {
-                    'context_mean': np.mean(all_context_tokens),
-                    'context_std': np.std(all_context_tokens),
-                    'context_min': np.min(all_context_tokens),
-                    'context_max': np.max(all_context_tokens),
-                    'context_p50': np.percentile(all_context_tokens, 50),
-                    'context_p95': np.percentile(all_context_tokens, 95),
-                    'generation_mean': np.mean(all_generation_tokens),
-                    'generation_std': np.std(all_generation_tokens),
-                    'generation_min': np.min(all_generation_tokens),
-                    'generation_max': np.max(all_generation_tokens),
-                    'generation_p50': np.percentile(all_generation_tokens, 50),
-                    'generation_p95': np.percentile(all_generation_tokens, 95),
-                    'total_conversations': len(self.conversations),
-                    'total_turns': sum(len(c['turns']) for c in self.conversations)
-                }
-
-                print(f"[ShareGPT] Loaded {len(self.conversations)} conversations with {self.token_stats['total_turns']} turns")
-                print(f"[ShareGPT] Context tokens: mean={self.token_stats['context_mean']:.1f}, p50={self.token_stats['context_p50']:.1f}, p95={self.token_stats['context_p95']:.1f}")
-                print(f"[ShareGPT] Generation tokens: mean={self.token_stats['generation_mean']:.1f}, p50={self.token_stats['generation_p50']:.1f}, p95={self.token_stats['generation_p95']:.1f}")
-
-        except Exception as e:
-            print(f"[ShareGPT] Error loading dataset: {e}")
-            self.conversations = []
-
-    def get_random_conversation(self) -> Optional[Dict]:
-        """Get a random conversation from the dataset."""
-        if not self.conversations:
-            return None
-        return random.choice(self.conversations)
-
-    def get_random_turn(self) -> Optional[Tuple[int, int]]:
-        """Get random context and generation token counts from the dataset."""
-        if not self.conversations:
-            return None
-
-        conv = self.get_random_conversation()
-        if conv and conv['turns']:
-            turn = random.choice(conv['turns'])
-            return turn['context_tokens'], turn['generation_tokens']
-        return None
-
-    def iterate_conversations(self, shuffle: bool = True):
-        """Iterate through all conversations, optionally shuffled."""
-        conversations = self.conversations.copy()
-        if shuffle:
-            random.shuffle(conversations)
-        for conv in conversations:
-            yield conv
-
-
-# ============================================================================
+# ============================================================================ 
 # INTEGRATED BENCHMARK ORCHESTRATOR
 # This class wires all the components together and runs the main benchmark loop.
-# ============================================================================
+# ============================================================================ 
 
 class IntegratedBenchmark:
     """The main orchestrator for the entire benchmark."""
@@ -2565,12 +2386,8 @@ class IntegratedBenchmark:
                  performance_profile: str = 'latency',
                  use_burst_trace: bool = False,
                  burst_trace_path: Optional[str] = None,
-                 dataset_path: Optional[str] = None,
-                 max_conversations: int = 500,
                  seed: Optional[int] = None,
-                 max_concurrent_allocs: int = 0,
-                 request_rate: float = 0,
-                 max_requests: int = 0):
+                 max_concurrent_allocs: int = 0):
 
         self.model_config = model_config
         self.num_users = num_users
@@ -2586,28 +2403,11 @@ class IntegratedBenchmark:
         self.performance_profile = performance_profile
         self.use_burst_trace = use_burst_trace
         self.burst_trace_path = burst_trace_path
-        self.dataset_path = dataset_path
-        self.max_conversations = max_conversations
         self.seed = seed
         self.max_concurrent_allocs = max_concurrent_allocs
-        self.request_rate = request_rate
-        self.max_requests = max_requests
         self.burst_requests: List[Tuple[int, int]] = []
-        self.sharegpt_loader: Optional[ShareGPTDatasetLoader] = None
-
-        # Load dataset if provided (takes priority over burst trace)
-        if self.dataset_path:
-            self.sharegpt_loader = ShareGPTDatasetLoader(
-                dataset_path=self.dataset_path,
-                max_conversations=self.max_conversations,
-                seed=self.seed
-            )
-            self.use_dataset = True
-        elif self.use_burst_trace:
+        if self.use_burst_trace:
             self._load_burst_trace()
-            self.use_dataset = False
-        else:
-            self.use_dataset = False
 
         # Initialize components
         self.cache = MultiTierCache(
@@ -2651,7 +2451,6 @@ class IntegratedBenchmark:
             'seed': self.seed,
         }
         self.results_lock = threading.Lock()
-        self.stop_event: Optional[threading.Event] = None  # Set during run()
         self.rag_ingest_done = threading.Event() if self.enable_rag else None
 
     def _ingest_rag_documents(self, num_docs: int, stop_event: Optional[threading.Event] = None):
@@ -2741,79 +2540,9 @@ class IntegratedBenchmark:
 
             priority_tuple = (-QOS_PROFILES[request.qos_level].priority, time.time())
             self.request_queue.put((priority_tuple, request))
-
+            
             request_index += 1
             time.sleep(0.01) # Simulate request arrival rate
-
-    def _generate_requests_from_dataset(self, stop_event: threading.Event):
-        """Generates InferenceRequest objects from the loaded ShareGPT dataset."""
-        if not self.sharegpt_loader or not self.sharegpt_loader.conversations:
-            print("Warning: ShareGPT dataset is empty or not loaded. Falling back to synthetic workload.")
-            # Fall back to synthetic generation
-            users = UserSimulator.generate_mixed_users(self.num_users)
-            self.generate_requests(users, stop_event)
-            return
-
-        conversation_iterator = iter(self.sharegpt_loader.iterate_conversations(shuffle=True))
-        current_conversation = None
-        turn_index = 0
-
-        while not stop_event.is_set():
-            # Get next conversation turn
-            if current_conversation is None or turn_index >= len(current_conversation['turns']):
-                try:
-                    current_conversation = next(conversation_iterator)
-                    turn_index = 0
-                except StopIteration:
-                    # Restart iteration when we run out of conversations
-                    conversation_iterator = iter(self.sharegpt_loader.iterate_conversations(shuffle=True))
-                    continue
-
-            turn = current_conversation['turns'][turn_index]
-            context_tokens = turn['context_tokens']
-            generate_tokens = turn['generation_tokens']
-
-            with self.counter_lock:
-                req_id = self.request_counter
-                self.request_counter += 1
-
-            # Assign QoS level based on request characteristics
-            rand = random.random()
-            if rand < 0.15:
-                qos_level, priority = QoSLevel.INTERACTIVE, 3
-            elif rand < 0.50:
-                qos_level, priority = QoSLevel.RESPONSIVE, 2
-            else:
-                qos_level, priority = QoSLevel.BATCH, 1
-
-            user_id = f"dataset_user_{req_id % self.num_users}"
-            conv_id = current_conversation['id']
-
-            # Determine inference phase
-            phase = InferencePhase.PREFILL if context_tokens >= 10000 else InferencePhase.PREFILL_DECODE
-
-            request = InferenceRequest(
-                user_id=user_id,
-                request_id=f"{user_id}_req_{req_id:04d}",
-                timestamp=datetime.now(),
-                context_tokens=context_tokens,
-                generate_tokens=generate_tokens,
-                priority=priority,
-                phase=phase,
-                qos_level=qos_level,
-                cache_key=f"{conv_id}_turn_{turn['turn_number']}",
-                conversation_id=conv_id if self.enable_multi_turn else None,
-                turn_number=turn['turn_number'] if self.enable_multi_turn else None
-            )
-
-            priority_tuple = (-QOS_PROFILES[request.qos_level].priority, time.time())
-            self.request_queue.put((priority_tuple, request))
-
-            turn_index += 1
-
-            # Control request arrival rate (0 = unlimited for storage saturation)
-            if self.request_rate > 0:
-                time.sleep(1.0 / self.request_rate)
 
     def generate_requests(self, users: List[UserProfile], stop_event: threading.Event):
         """Generate requests concurrently for each simulated user."""
@@ -3006,11 +2735,6 @@ class IntegratedBenchmark:
                 self.results['storage_latencies'].append(storage_latency)
                 self.results['generation_latencies'].append(generation_latency)
 
-                # Check if we've hit max_requests limit
-                if self.max_requests > 0 and self.results['requests_completed'] >= self.max_requests:
-                    if self.stop_event:
-                        self.stop_event.set()
-
             self.qos_monitor.record_request(request)
 
     def monitor_stats(self, stop_event: threading.Event):
@@ -3106,13 +2830,12 @@ class IntegratedBenchmark:
             print(f"    - Mode: {self.autoscaler.mode}")
         print(f"  - QoS Support: Enabled (Interactive/Responsive/Batch)")
         print(f"  - Trace-Driven (BurstGPT): {'Enabled' if self.use_burst_trace else 'Disabled'}")
-        print(f"  - ShareGPT Dataset: {'Enabled' if self.use_dataset else 'Disabled'}")
         if self.max_concurrent_allocs > 0:
             print(f"  - Max Concurrent Allocations: {self.max_concurrent_allocs} (bounds RAM usage)")
         print("=" * 80)
 
         users = []
-        if not self.use_burst_trace and not self.use_dataset:
+        if not self.use_burst_trace:
             users = UserSimulator.generate_mixed_users(self.num_users)
             context_lengths = [u.context_length for u in users]
             print(f"\nUser Context Length Distribution:")
@@ -3124,21 +2847,14 @@ class IntegratedBenchmark:
             print(f"\nQoS Distribution:")
             for level, count in qos_dist.items():
                 print(f"  {level.value}: {count} users")
-        elif self.use_dataset and self.sharegpt_loader:
-            print(f"\nShareGPT Dataset Statistics:")
-            print(f"  Conversations: {self.sharegpt_loader.token_stats.get('total_conversations', 0)}")
-            print(f"  Total Turns: {self.sharegpt_loader.token_stats.get('total_turns', 0)}")
 
         print(f"\nStarting benchmark...")
         print("-" * 80)
 
         stop_event = threading.Event()
-        self.stop_event = stop_event  # Store for max_requests check
 
         threads = []
-        if self.use_dataset:
-            gen_thread = threading.Thread(target=self._generate_requests_from_dataset, args=(stop_event,), daemon=True)
-        elif self.use_burst_trace:
+        if self.use_burst_trace:
             gen_thread = threading.Thread(target=self._generate_requests_from_trace, args=(stop_event,), daemon=True)
         else:
             gen_thread = threading.Thread(target=self.generate_requests, args=(users, stop_event), daemon=True)
@@ -3158,36 +2874,31 @@ class IntegratedBenchmark:
             threads.append(mon_thread)
             mon_thread.start()
 
-        # Wait for either the configured duration or an earlier stop signal (from max_requests or monitor).
-        benchmark_start = time.time()
+        # Wait for either the configured duration or an earlier stop signal from the monitor.
         stop_event.wait(timeout=self.duration)
-        actual_duration = time.time() - benchmark_start
 
         stop_event.set()
         for thread in threads:
             thread.join(timeout=2.0)
 
-        self._calculate_stats(actual_duration)
+        self._calculate_stats()
 
         if self.validator:
             self.results['validation'] = self.validator.validate_benchmark(self.results)
 
         return self.results
 
-    def _calculate_stats(self, actual_duration: float = None):
+    def _calculate_stats(self):
         """Calculate final statistics with all feature breakdowns"""
         if not self.results['end_to_end_latencies']:
             print("\nNo requests completed during benchmark!")
             return
 
-        # Use actual duration if provided (for max_requests mode), else configured duration
-        duration = actual_duration if actual_duration else self.duration
-
         e2e = np.array(self.results['end_to_end_latencies'])
         storage = np.array(self.results['storage_latencies'])
         generation = np.array(self.results['generation_latencies'])
 
-        cache_stats = self.cache.get_stats(duration)
+        cache_stats = self.cache.get_stats(self.duration)
         qos_metrics = self.qos_monitor.get_all_qos_metrics()
         prefix_stats = self.prefix_cache_manager.stats if self.prefix_cache_manager else {}
         autoscaling_stats = self.autoscaler.scaling_history if self.autoscaler else []
@@ -3208,11 +2919,8 @@ class IntegratedBenchmark:
         summary = {
             'total_requests': self.results['requests_completed'],
             'total_tokens': self.results['total_tokens_generated'],
-            'elapsed_time': duration,
-            'avg_throughput_tokens_per_sec': self.results['total_tokens_generated'] / duration,
-            'total_storage_io_time': self.results['total_storage_io_latency'],
-            'storage_throughput_tokens_per_sec': self.results['total_tokens_generated'] / self.results['total_storage_io_latency'] if self.results['total_storage_io_latency'] > 0 else 0,
-            'requests_per_second': self.results['requests_completed'] / duration,
+            'avg_throughput_tokens_per_sec': self.results['total_tokens_generated'] / self.duration,
+            'requests_per_second': self.results['requests_completed'] / self.duration,
             'end_to_end_latency_ms': {
                 'mean': np.mean(e2e) * 1000,
                 'p50': np.percentile(e2e, 50) * 1000,
@@ -3319,8 +3027,7 @@ class IntegratedBenchmark:
         print(f"\n### OVERALL PERFORMANCE ###")
         print(f"Requests Completed: {summary['total_requests']}")
         print(f"Total Tokens Generated: {summary['total_tokens']}")
-        print(f"Throughput (wall-clock): {summary['avg_throughput_tokens_per_sec']:.2f} tokens/sec")
-        print(f"Throughput (storage I/O): {summary['storage_throughput_tokens_per_sec']:.2f} tokens/sec")
+        print(f"Throughput: {summary['avg_throughput_tokens_per_sec']:.2f} tokens/sec")
         print(f"Requests/sec: {summary['requests_per_second']:.2f}")
 
         print(f"\n### END-TO-END LATENCY (Storage I/O + Token Generation) ###")
@@ -3461,26 +3168,12 @@ def main():
                         help='Path to the BurstGPT trace file.')
     parser.add_argument('--validation-trace', type=str, default=None,
                         help='Path to a real-world trace file for validation.')
-    parser.add_argument('--dataset-path', type=str, default=None,
-                        help='Path to ShareGPT dataset JSON file for realistic workload generation.')
-    parser.add_argument('--max-conversations', type=int, default=500,
-                        help='Maximum number of conversations to load from the ShareGPT dataset.')
     parser.add_argument('--output', type=str, default=f"benchmark_results_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json", help='Output file for results')
     parser.add_argument('--seed', type=int, default=None,
                         help='Seed for random number generators to ensure reproducibility.')
     parser.add_argument('--max-concurrent-allocs', type=int, default=0,
                         help='Limit concurrent allocations to bound RAM usage. 0 = unlimited. '
                              'Recommended: 8-16 for large models to prevent memory explosion.')
-    parser.add_argument('--request-rate', type=float, default=0,
-                        help='Target request arrival rate for ShareGPT replay (requests/sec). '
-                             '0 = unlimited (storage-saturating mode for MLPerf). '
-                             'Default: 0. Use 10 for realistic user arrival patterns.')
-    parser.add_argument('--max-requests', type=int, default=0,
-                        help='Stop after completing N requests (0 = use duration instead). '
-                             'Useful for fixed-workload comparisons with vLLM benchmarks.')
-    parser.add_argument('--xlsx-output', type=str, default=None,
-                        help='Optional: Output Excel file path for summary results with run parameters. '
-                             'Requires pandas and openpyxl. Falls back to CSV if openpyxl not available.')
 
     args = parser.parse_args()
 
@@ -3515,12 +3208,8 @@ def main():
         performance_profile=args.performance_profile,
         use_burst_trace=args.use_burst_trace,
         burst_trace_path=args.burst_trace_path,
-        dataset_path=args.dataset_path,
-        max_conversations=args.max_conversations,
         seed=args.seed,
-        max_concurrent_allocs=args.max_concurrent_allocs,
-        request_rate=args.request_rate,
-        max_requests=args.max_requests
+        max_concurrent_allocs=args.max_concurrent_allocs
     )
 
     results = benchmark.run()
@@ -3541,167 +3230,6 @@ def main():
         json.dump(results, f, indent=4, default=convert_numpy)
 
     print(f"\nResults saved to {args.output}")
-
-    # Export to XLSX if requested
-    if args.xlsx_output:
-        export_results_to_xlsx(results, args, args.xlsx_output)
-
-
-def export_results_to_xlsx(results: Dict, args, output_path: str):
-    """
-    Export benchmark results to an Excel file with run parameters embedded.
-    Falls back to CSV if openpyxl is not available.
-    
-    Args:
-        results: The benchmark results dictionary
-        args: The argparse namespace with all CLI parameters
-        output_path: Path for the output Excel/CSV file
-    """
-    if not PANDAS_AVAILABLE:
-        print(f"Warning: pandas not available, skipping XLSX export. Install with: pip install pandas")
-        return
-    
-    summary = results.get('summary', {})
-    if not summary:
-        print("Warning: No summary data available for XLSX export")
-        return
-    
-    # Helper to safely get nested keys
-    def get_nested(d, keys, default=None):
-        for key in keys:
-            if isinstance(d, dict):
-                d = d.get(key, default)
-            else:
-                return default
-        return d
-    
-    # Build run parameters row
-    run_params = {
-        'Timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
-        'Model': args.model,
-        'Num Users': args.num_users,
-        'Duration (s)': args.duration,
-        'GPU Memory (GB)': args.gpu_mem_gb,
-        'CPU Memory (GB)': args.cpu_mem_gb,
-        'Generation Mode': args.generation_mode,
-        'Performance Profile': args.performance_profile,
-        'Multi-turn': not args.disable_multi_turn,
-        'Prefix Caching': not args.disable_prefix_caching,
-        'RAG Enabled': args.enable_rag,
-        'Autoscaling': args.enable_autoscaling,
-        'Seed': args.seed,
-        'Max Concurrent Allocs': args.max_concurrent_allocs,
-        'Request Rate': args.request_rate,
-        'Max Requests': args.max_requests,
-        'Dataset Path': args.dataset_path or 'N/A',
-        'Cache Dir': args.cache_dir or 'temp',
-    }
-    
-    # Build metrics row
-    metrics = {
-        'Total Requests': summary.get('total_requests'),
-        'Total Tokens': summary.get('total_tokens'),
-        'Elapsed Time (s)': summary.get('elapsed_time'),
-        'Avg Throughput (tok/s)': summary.get('avg_throughput_tokens_per_sec'),
-        'Storage Throughput (tok/s)': summary.get('storage_throughput_tokens_per_sec'),
-        'Requests/sec': summary.get('requests_per_second'),
-        
-        # End to End Latency
-        'E2E Latency Mean (ms)': get_nested(summary, ['end_to_end_latency_ms', 'mean']),
-        'E2E Latency P50 (ms)': get_nested(summary, ['end_to_end_latency_ms', 'p50']),
-        'E2E Latency P95 (ms)': get_nested(summary, ['end_to_end_latency_ms', 'p95']),
-        'E2E Latency P99 (ms)': get_nested(summary, ['end_to_end_latency_ms', 'p99']),
-        
-        # Storage IO Latency
-        'Storage Latency Mean (ms)': get_nested(summary, ['storage_io_latency_ms', 'mean']),
-        'Storage Latency P50 (ms)': get_nested(summary, ['storage_io_latency_ms', 'p50']),
-        'Storage Latency P95 (ms)': get_nested(summary, ['storage_io_latency_ms', 'p95']),
-        'Storage Latency P99 (ms)': get_nested(summary, ['storage_io_latency_ms', 'p99']),
-        
-        # Generation Latency
-        'Gen Latency Mean (ms)': get_nested(summary, ['generation_latency_ms', 'mean']),
-        'Gen Latency P50 (ms)': get_nested(summary, ['generation_latency_ms', 'p50']),
-        'Gen Latency P95 (ms)': get_nested(summary, ['generation_latency_ms', 'p95']),
-        'Gen Latency P99 (ms)': get_nested(summary, ['generation_latency_ms', 'p99']),
-        
-        # Cache Stats
-        'Cache Hit Rate': get_nested(summary, ['cache_stats', 'cache_hit_rate']),
-        'Read/Write Ratio': get_nested(summary, ['cache_stats', 'read_write_ratio']),
-        'Total Read (GB)': get_nested(summary, ['cache_stats', 'total_read_gb']),
-        'Total Write (GB)': get_nested(summary, ['cache_stats', 'total_write_gb']),
-        'Prefill Bytes Written (GB)': get_nested(summary, ['cache_stats', 'prefill_bytes_written_gb']),
-        'Decode Bytes Read (GB)': get_nested(summary, ['cache_stats', 'decode_bytes_read_gb']),
-        
-        # Tier distribution
-        'GPU Entries': get_nested(summary, ['cache_stats', 'gpu_entries']),
-        'CPU Entries': get_nested(summary, ['cache_stats', 'cpu_entries']),
-        'NVMe Entries': get_nested(summary, ['cache_stats', 'nvme_entries']),
-        
-        # Multi-turn stats
-        'Multi-turn Hit Rate': get_nested(summary, ['multi_turn_stats', 'hit_rate']),
-    }
-    
-    # Combine into single row with all data
-    combined_row = {**run_params, **metrics}
-    
-    # Create DataFrame
-    df = pd.DataFrame([combined_row])
-    
-    # Determine output format
-    use_excel = OPENPYXL_AVAILABLE and output_path.endswith('.xlsx')
-    
-    try:
-        if use_excel:
-            # Create Excel with multiple sheets for better organization
-            with pd.ExcelWriter(output_path, engine='openpyxl') as writer:
-                # Sheet 1: Combined summary (single row for easy aggregation)
-                df.to_excel(writer, sheet_name='Summary', index=False)
-                
-                # Sheet 2: Run Parameters (vertical format for readability)
-                params_df = pd.DataFrame(list(run_params.items()), columns=['Parameter', 'Value'])
-                params_df.to_excel(writer, sheet_name='Run Parameters', index=False)
-                
-                # Sheet 3: Performance Metrics (vertical format)
-                metrics_df = pd.DataFrame(list(metrics.items()), columns=['Metric', 'Value'])
-                metrics_df.to_excel(writer, sheet_name='Performance Metrics', index=False)
-                
-                # Sheet 4: QoS Metrics if available
-                qos_metrics = summary.get('qos_metrics', {})
-                if qos_metrics:
-                    qos_rows = []
-                    for level, data in qos_metrics.items():
-                        if isinstance(data, dict) and not data.get('no_data'):
-                            qos_rows.append({
-                                'QoS Level': level,
-                                'Total Requests': data.get('total_requests'),
-                                'Latency P95 (ms)': get_nested(data, ['latency_ms', 'p95']),
-                                'Latency P99 (ms)': get_nested(data, ['latency_ms', 'p99']),
-                                'SLA Met': get_nested(data, ['sla', 'met']),
-                                'SLA Compliance': get_nested(data, ['sla', 'compliance']),
-                            })
-                    if qos_rows:
-                        qos_df = pd.DataFrame(qos_rows)
-                        qos_df.to_excel(writer, sheet_name='QoS Metrics', index=False)
-            
-            print(f"XLSX results saved to {output_path}")
-        else:
-            # Fall back to CSV
-            csv_path = output_path.replace('.xlsx', '.csv') if output_path.endswith('.xlsx') else output_path
-            if not csv_path.endswith('.csv'):
-                csv_path += '.csv'
-            df.to_csv(csv_path, index=False)
-            print(f"CSV results saved to {csv_path} (openpyxl not available for XLSX)")
-            
-    except Exception as e:
-        print(f"Error saving XLSX/CSV: {e}")
-        # Last resort: try CSV
-        try:
-            csv_path = output_path.replace('.xlsx', '.csv')
-            df.to_csv(csv_path, index=False)
-            print(f"Fallback CSV saved to {csv_path}")
-        except Exception as e2:
-            print(f"Failed to save results: {e2}")
-
 
 if __name__ == "__main__":
     main()
