@@ -65,3 +65,7 @@ mlperf.history
 # OS
 .DS_Store
 Thumbs.db
+
+# Test artifacts
+hydra_log/
+minio_test/
