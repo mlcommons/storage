@@ -1,0 +1,50 @@
+model: 
+  name: unet3d
+  type: cnn
+  model_size: 499153191
+
+framework: pytorch
+
+workflow:
+  generate_data: True
+  train: True
+  checkpoint: False
+
+dataset: 
+  data_folder: s3://s3pytorchconnector
+  format: npz
+  num_files_train: 168
+  num_samples_per_file: 1
+  record_length_bytes: 146600628
+  record_length_bytes_stdev: 0
+  record_length_bytes_resize: 2097152
+
+storage:
+  storage_type: s3
+  storage_root: s3pytorchconnector
+  storage_options:
+    access_key_id: access-key
+    secret_access_key: secret-key
+    endpoint_url: http://localhost:9020
+    region: us-east-1
+    s3_force_path_style: False
+    s3_max_attempts: 5
+
+reader: 
+  data_loader: pytorch
+  batch_size: 7
+  read_threads: 4
+  file_shuffle: seed
+  sample_shuffle: seed
+
+train:
+  epochs: 5
+  computation_time: 0.636
+
+checkpoint:
+  checkpoint_folder: checkpoints/unet3d
+  checkpoint_after_epoch: 5
+  epochs_between_checkpoints: 2
+
+metric:
+  au: 0.90

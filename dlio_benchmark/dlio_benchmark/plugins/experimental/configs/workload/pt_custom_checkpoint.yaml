@@ -1,0 +1,33 @@
+model: pt_custom_checkpoint
+
+framework: pytorch
+
+workflow:
+  generate_data: True
+  train: True
+  checkpoint: True
+
+dataset: 
+  data_folder: data/unet3d/
+  format: npz
+  num_files_train: 16
+  num_samples_per_file: 1
+  record_length: 4096
+  
+reader: 
+  data_loader: pytorch
+  batch_size: 1
+  read_threads: 1
+  file_shuffle: seed
+  sample_shuffle: seed
+
+train:
+  epochs: 5
+  computation_time: 1.3604
+
+checkpoint:
+  checkpoint_folder: checkpoints/unet3d
+  checkpoint_after_epoch: 1
+  epochs_between_checkpoints: 1
+  model_size: 4096
+  checkpoint_mechanism_classname: dlio_benchmark.plugins.experimental.src.checkpoint.pytorch_checkpointing.CustomPyTorchCheckpointing

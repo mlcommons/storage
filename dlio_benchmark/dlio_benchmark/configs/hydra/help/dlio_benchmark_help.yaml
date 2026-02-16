@@ -1,0 +1,50 @@
+# App name, override to match the name your app is known by
+app_name: dlio_benchmark
+
+# Help header, customize to describe your app to your users
+header: =========================== ${hydra.help.app_name} ===========================
+
+footer: |-
+  Please submit questions/bugs to 
+    https://github.com/argonne-lcf/dlio_benchmark/issues
+
+            Copyright (c) 2021 UChicago Argonne, LLC
+
+# Basic Hydra flags:
+#   $FLAGS_HELP
+#
+# Config groups, choose one of:
+#   $APP_CONFIG_GROUPS: All config groups that does not start with hydra/.
+#   $HYDRA_CONFIG_GROUPS: All the Hydra config groups (starts with hydra/)
+#
+# Configuration generated with overrides:
+#   $CONFIG : Generated config
+#
+template: |-
+
+  ${hydra.help.header}
+
+  DLIO - an IO benchmark for deep learning applications. 
+
+  Running the benchmark: dlio_benchmark workload=unet3d
+
+  One can select the workload configuration using "workload={WORKLOAD}". 
+  The corresponding YAML file is ./configs/workload/{WORKLOAD}.yaml folder. 
+  Available choise for $APP_CONFIG_GROUPS
+  One can override everything in the command line, for example:
+  dlio_benchmark workload.framework=tensorflow
+
+  One can also create a custom YAML file for a specific workload. 
+  An example of a YAML file is as follows. 
+
+  -------
+  $CONFIG
+  -------
+  A complete list of config options in the YAML file can be found: 
+  https://argonne-lcf.github.io/dlio_benchmark/config.html
+
+  By default all the output files will be saved in hydra.run.dir. 
+  This can be changed in ./configs/config.yaml.
+
+  ${hydra.help.footer}
+  --

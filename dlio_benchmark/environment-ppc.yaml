@@ -1,0 +1,9 @@
+name: null
+
+channels:
+  - https://public.dhe.ibm.com/ibmdl/export/pub/software/server/ibm-ai/conda/
+  - defaults
+
+dependencies:
+  - tensorflow=2.1.3 
+  - pytorch=1.3.1

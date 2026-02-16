@@ -1,0 +1,114 @@
+hydra:
+  run:
+    dir: ./hydra_log/${workload.model}/${now:%Y-%m-%d}-${now:%H-%M-%S}
+  sweep:
+    dir: multirun/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    subdir: ${hydra.job.num}
+  launcher:
+    _target_: hydra._internal.core_plugins.basic_launcher.BasicLauncher
+  sweeper:
+    _target_: hydra._internal.core_plugins.basic_sweeper.BasicSweeper
+    max_batch_size: null
+    params: null
+  help:
+    app_name: dlio_benchmark
+    header: =========================== ${hydra.help.app_name} ===========================
+    footer: "Please submit questions/bugs to \n  https://github.com/argonne-lcf/dlio_benchmark/issues\n\
+      \n          Copyright (c) 2021 UChicago Argonne, LLC"
+    template: "\n${hydra.help.header}\n\nDLIO - an IO benchmark for deep learning\
+      \ applications. \n\nRunning the benchmark: python dlio_benchmark/main.py workload=unet3d\n\
+      \nOne can select the workload configuration using \"workload={WORKLOAD}\". \n\
+      The corresponding YAML file is ./configs/workload/{WORKLOAD}.yaml folder. \n\
+      Available choise for $APP_CONFIG_GROUPS\nOne can override everything in the\
+      \ command line, for example:\npython dlio_benchmark/main.py workload.framework=tensorflow\n\
+      \nOne can also create a custom YAML file for a specific workload. \nAn example\
+      \ of a YAML file is as follows. \n\n-------\n$CONFIG\n-------\nA complete list\
+      \ of config options in the YAML file can be found: \nhttps://argonne-lcf.github.io/dlio_benchmark/config.html\n\
+      \nBy default all the output files will be saved in hydra.run.dir. \nThis can\
+      \ be changed in ./configs/config.yaml.\n\n${hydra.help.footer}\n--"
+  hydra_help:
+    template: 'Hydra (${hydra.runtime.version})
+
+      See https://hydra.cc for more info.
+
+
+      == Flags ==
+
+      $FLAGS_HELP
+
+
+      == Configuration groups ==
+
+      Compose your configuration from those groups (For example, append hydra/job_logging=disabled
+      to command line)
+
+
+      $HYDRA_CONFIG_GROUPS
+
+
+      Use ''--cfg hydra'' to Show the Hydra config.
+
+      '
+    hydra_help: ???
+  hydra_logging:
+    version: 1
+    root:
+      level: ERROR
+    disable_existing_loggers: true
+  job_logging:
+    version: 1
+    root:
+      level: ERROR
+    disable_existing_loggers: true
+  env: {}
+  mode: RUN
+  searchpath: []
+  callbacks: {}
+  output_subdir: .hydra
+  overrides:
+    hydra:
+    - hydra.mode=RUN
+    task:
+    - workload=unet3d
+    - ++workload.train.epochs=2
+  job:
+    name: dlio_benchmark
+    chdir: null
+    override_dirname: ++workload.train.epochs=2,workload=unet3d
+    id: ???
+    num: ???
+    config_name: config
+    env_set: {}
+    env_copy: []
+    config:
+      override_dirname:
+        kv_sep: '='
+        item_sep: ','
+        exclude_keys: []
+  runtime:
+    version: 1.2.0
+    version_base: '1.2'
+    cwd: /root/workspace/dlio_benchmark
+    config_sources:
+    - path: hydra.conf
+      schema: pkg
+      provider: hydra
+    - path: /root/workspace/dlio_benchmark/configs
+      schema: file
+      provider: main
+    - path: ''
+      schema: structured
+      provider: schema
+    output_dir: /root/workspace/dlio_benchmark/hydra_log/unet3d/2023-03-31-14-50-35
+    choices:
+      workload: unet3d
+      hydra/env: default
+      hydra/callbacks: null
+      hydra/job_logging: disabled
+      hydra/hydra_logging: disabled
+      hydra/hydra_help: default
+      hydra/help: dlio_benchmark_help.yaml
+      hydra/sweeper: basic
+      hydra/launcher: basic
+      hydra/output: default
+  verbose: false

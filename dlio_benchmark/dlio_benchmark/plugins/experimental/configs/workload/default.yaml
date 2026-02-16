@@ -1,0 +1,37 @@
+model: plugin_exp_default
+
+framework: pytorch
+
+workflow:
+  generate_data: False
+  train: True
+  evaluation: True
+  profiling: False
+
+dataset: 
+  data_folder: data/plugin_exp_default
+  format: npz
+  num_files_train: 64
+  num_files_eval: 8
+  num_samples_per_file: 1
+  record_length: 4096
+  num_subfolders_train: 2
+  num_subfolders_eval: 2
+  
+reader: 
+  data_loader: pytorch
+  batch_size: 4
+  batch_size_eval: 1
+
+train:
+  epochs: 10
+  computation_time: 1.00
+
+
+evaluation: 
+  eval_time: 0.5
+  epochs_between_evals: 1
+
+profiling: 
+  profiler: iostat
+  

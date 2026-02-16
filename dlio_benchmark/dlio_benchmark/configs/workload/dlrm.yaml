@@ -1,0 +1,25 @@
+model: 
+  name: dlrm
+
+framework: pytorch
+
+workflow:
+  generate_data: False
+  train: True
+
+dataset:
+  data_folder: data/dlrm
+  format: indexed_binary
+  num_files_train: 1
+  num_files_eval: 1
+  num_samples_per_file: 1024
+  record_length_bytes: 671088640
+
+reader:
+  data_loader: pytorch
+  batch_size: 1
+  sample_shuffle: random
+
+train:
+  epochs: 1
+  computation_time: 0.064296

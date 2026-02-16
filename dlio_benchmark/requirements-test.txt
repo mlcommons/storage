@@ -1,0 +1,21 @@
+--extra-index-url https://download.pytorch.org/whl/cpu
+--extra-index-url https://developer.download.nvidia.com/compute/redist
+
+Pillow>=9.3.0
+PyYAML~=6.0.0
+hydra-core==1.3.2
+mpi4py>=3.1.4
+numpy>=1.23.5
+nvidia-dali-cuda110>=1.34.0
+omegaconf~=2.2.0
+pandas>=1.5.1
+psutil>=5.9.8
+pydftracer>=2.0.2
+dftracer>=2.0.1
+pytest
+pytest-xdist
+tensorflow>=2.13.1
+tensorflow_io>=0.33.0
+torch>=2.2.0
+torchaudio
+torchvision

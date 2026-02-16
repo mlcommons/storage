@@ -1,0 +1,788 @@
+drwxrwxr-x 5 eval eval 4096 Feb 14 13:52 .venv/
+(tests) eval@loki-node3:~/Documents/Code/Tests/tests$ python ./scripts/benchmark_datagen_v2.py 
+
+################################################################################
+# Data Generation Benchmark V2 - Finding Optimal Approach
+################################################################################
+Testing 100 objects per size
+Object sizes: [1, 8, 16, 32] MB
+dgen_py version: 0.2.0
+
+V1 Approaches (baseline):
+  1. No Copy - fill_chunk() reuse bytearray (fastest, requires immediate consumption)
+  2. With Copy - fill_chunk() + bytes() copy (safer for queues, has overhead)
+  3. Large Split - 32MB chunks split (only for <32MB objects)
+  4. BytesView Single Producer - get_chunk() + bytes(), ONE producer
+  5. BytesView Multi Producer - get_chunk() + bytes(), FOUR producers
+
+V2 Approaches (NEW - testing fill_chunk buffer strategies):
+  6. fill_chunk() Single Buffer - Reuse ONE buffer (lowest memory: 1MB)
+  7. fill_chunk() Buffer Pool - Pool of 64 buffers (queue pattern: ~1GB for 16MB objects)
+
+================================================================================
+Testing 1MB objects (100 objects = 0.10 GB)
+================================================================================
+  → No Copy (reuse buffer): 1MB × 100 objects... 4.25 GB/s in 0.023s
+  → With Copy (bytes()): 1MB × 100 objects... 2.82 GB/s in 0.035s
+
+  📊 Copy overhead: 1.51x slower (4.25 → 2.82 GB/s, 33.6% loss)
+  → Large Split (32MB→32×1MB): 100 objects... 2.98 GB/s in 0.033s
+  📊 Large split vs no-copy: 0.70x (4.25 → 2.98 GB/s)
+  → BytesView Single Producer (Rayon parallel): 1MB × 100 objects... 1.58 GB/s in 0.062s
+  → BytesView 4 Producers (each Rayon parallel): 1MB × 100 objects... 1.09 GB/s in 0.090s
+
+  📊 Single producer is 1.45x FASTER (1.09 → 1.58 GB/s)
+      → Multiple producers add coordination overhead with max_threads=None
+  → fill_chunk() Single Buffer (reuse): 1MB × 100 objects... 4.23 GB/s in 0.023s (RAM: 1MB)
+  → fill_chunk() Buffer Pool (64 buffers): 1MB × 100 objects... 3.58 GB/s in 0.027s (RAM: 64MB)
+
+  🔥 KEY COMPARISON: fill_chunk() vs get_chunk()+bytes()
+     fill_chunk (single): 2.68x FASTER than get_chunk+bytes (1.58 → 4.23 GB/s)
+     fill_chunk (pool):   2.27x FASTER than get_chunk+bytes (1.58 → 3.58 GB/s)
+     fill_chunk matches no_copy: 1.00x (4.25 vs 4.23 GB/s) - SAME METHOD!
+
+  🏆 WINNER for 1MB: no_copy @ 4.25 GB/s
+
+================================================================================
+Testing 8MB objects (100 objects = 0.78 GB)
+================================================================================
+  → No Copy (reuse buffer): 8MB × 100 objects... 14.95 GB/s in 0.052s
+  → With Copy (bytes()): 8MB × 100 objects... 2.60 GB/s in 0.300s
+
+  📊 Copy overhead: 5.74x slower (14.95 → 2.60 GB/s, 82.6% loss)
+  → Large Split (32MB→4×8MB): 100 objects... 2.80 GB/s in 0.279s
+  📊 Large split vs no-copy: 0.19x (14.95 → 2.80 GB/s)
+  → BytesView Single Producer (Rayon parallel): 8MB × 100 objects... 1.53 GB/s in 0.511s
+  → BytesView 4 Producers (each Rayon parallel): 8MB × 100 objects... 0.65 GB/s in 1.198s
+
+  📊 Single producer is 2.34x FASTER (0.65 → 1.53 GB/s)
+      → Multiple producers add coordination overhead with max_threads=None
+  → fill_chunk() Single Buffer (reuse): 8MB × 100 objects... 14.99 GB/s in 0.052s (RAM: 8MB)
+  → fill_chunk() Buffer Pool (64 buffers): 8MB × 100 objects... 12.10 GB/s in 0.065s (RAM: 512MB)
+
+  🔥 KEY COMPARISON: fill_chunk() vs get_chunk()+bytes()
+     fill_chunk (single): 9.80x FASTER than get_chunk+bytes (1.53 → 14.99 GB/s)
+     fill_chunk (pool):   7.92x FASTER than get_chunk+bytes (1.53 → 12.10 GB/s)
+     fill_chunk matches no_copy: 1.00x (14.95 vs 14.99 GB/s) - SAME METHOD!
+
+  🏆 WINNER for 8MB: fill_single @ 14.99 GB/s
+
+================================================================================
+Testing 16MB objects (100 objects = 1.56 GB)
+================================================================================
+  → No Copy (reuse buffer): 16MB × 100 objects... 24.20 GB/s in 0.065s
+  → With Copy (bytes()): 16MB × 100 objects... 2.53 GB/s in 0.617s
+
+  📊 Copy overhead: 9.55x slower (24.20 → 2.53 GB/s, 89.5% loss)
+  → Large Split (32MB→2×16MB): 100 objects... 2.64 GB/s in 0.591s
+  📊 Large split vs no-copy: 0.11x (24.20 → 2.64 GB/s)
+  → BytesView Single Producer (Rayon parallel): 16MB × 100 objects... 1.55 GB/s in 1.007s
+  → BytesView 4 Producers (each Rayon parallel): 16MB × 100 objects... 0.65 GB/s in 2.419s
+
+  📊 Single producer is 2.40x FASTER (0.65 → 1.55 GB/s)
+      → Multiple producers add coordination overhead with max_threads=None
+  → fill_chunk() Single Buffer (reuse): 16MB × 100 objects... 24.82 GB/s in 0.063s (RAM: 16MB)
+  → fill_chunk() Buffer Pool (64 buffers): 16MB × 100 objects... 13.46 GB/s in 0.116s (RAM: 1024MB)
+
+  🔥 KEY COMPARISON: fill_chunk() vs get_chunk()+bytes()
+     fill_chunk (single): 16.00x FASTER than get_chunk+bytes (1.55 → 24.82 GB/s)
+     fill_chunk (pool):   8.67x FASTER than get_chunk+bytes (1.55 → 13.46 GB/s)
+     fill_chunk matches no_copy: 1.03x (24.20 vs 24.82 GB/s) - SAME METHOD!
+
+  🏆 WINNER for 16MB: fill_single @ 24.82 GB/s
+
+================================================================================
+Testing 32MB objects (100 objects = 3.12 GB)
+================================================================================
+  → No Copy (reuse buffer): 32MB × 100 objects... 34.14 GB/s in 0.092s
+  → With Copy (bytes()): 32MB × 100 objects... 0.79 GB/s in 3.939s
+
+  📊 Copy overhead: 43.04x slower (34.14 → 0.79 GB/s, 97.7% loss)
+  → BytesView Single Producer (Rayon parallel): 32MB × 100 objects... 1.16 GB/s in 2.696s
+  → BytesView 4 Producers (each Rayon parallel): 32MB × 100 objects... 0.66 GB/s in 4.754s
+
+  📊 Single producer is 1.76x FASTER (0.66 → 1.16 GB/s)
+      → Multiple producers add coordination overhead with max_threads=None
+  → fill_chunk() Single Buffer (reuse): 32MB × 100 objects... 32.90 GB/s in 0.095s (RAM: 32MB)
+  → fill_chunk() Buffer Pool (64 buffers): 32MB × 100 objects... 14.90 GB/s in 0.210s (RAM: 2048MB)
+
+  🔥 KEY COMPARISON: fill_chunk() vs get_chunk()+bytes()
+     fill_chunk (single): 28.38x FASTER than get_chunk+bytes (1.16 → 32.90 GB/s)
+     fill_chunk (pool):   12.85x FASTER than get_chunk+bytes (1.16 → 14.90 GB/s)
+     fill_chunk matches no_copy: 0.96x (34.14 vs 32.90 GB/s) - SAME METHOD!
+
+  🏆 WINNER for 32MB: no_copy @ 34.14 GB/s
+
+
+================================================================================
+SUMMARY - Best approach for each object size
+================================================================================
+   1 MB: no_copy         @   4.25 GB/s
+   8 MB: fill_single     @  14.99 GB/s
+  16 MB: fill_single     @  24.82 GB/s
+  32 MB: no_copy         @  34.14 GB/s
+
+================================================================================
+RECOMMENDATIONS FOR BENCHMARK_STANDALONE_5K_V7.PY
+================================================================================
+  ℹ️  Mixed results - check per-size recommendations above
+
+  📊 Average bytes() copy overhead: 75.8% slower
+    → CRITICAL overhead - MUST use no-copy approach
+
+================================================================================
+PRODUCER PARALLELISM ANALYSIS (Single vs Multi Producer)
+================================================================================
+   1 MB: Single producer 1.45x faster (1.09 → 1.58 GB/s, +45.0%)
+   8 MB: Single producer 2.34x faster (0.65 → 1.53 GB/s, +134.5%)
+  16 MB: Single producer 2.40x faster (0.65 → 1.55 GB/s, +140.2%)
+  32 MB: Single producer 1.76x faster (0.66 → 1.16 GB/s, +76.4%)
+
+  ✅ SINGLE producer wins for ALL sizes (avg +99.0%)
+     → RECOMMENDATION: Use 1 producer with max_threads=None
+     → Let dgen-py's Rayon pool handle ALL parallelism
+     → Avoids thread coordination overhead
+     → Simpler architecture, better performance
+
+================================================================================
+V2 CRITICAL FINDING: fill_chunk() BUFFER APPROACHES
+================================================================================
+Problem: get_chunk() + bytes() conversion creates bottleneck
+Solution: Use fill_chunk() with buffer reuse (no bytes() conversion)
+
+   1 MB: fill_chunk(single) 2.68x faster than get_chunk+bytes
+         (1.58 GB/s → 4.23 GB/s)
+         fill_chunk(pool)   2.27x faster than get_chunk+bytes
+         (1.58 GB/s → 3.58 GB/s)
+
+   8 MB: fill_chunk(single) 9.80x faster than get_chunk+bytes
+         (1.53 GB/s → 14.99 GB/s)
+         fill_chunk(pool)   7.92x faster than get_chunk+bytes
+         (1.53 GB/s → 12.10 GB/s)
+
+  16 MB: fill_chunk(single) 16.00x faster than get_chunk+bytes
+         (1.55 GB/s → 24.82 GB/s)
+         fill_chunk(pool)   8.67x faster than get_chunk+bytes
+         (1.55 GB/s → 13.46 GB/s)
+
+  32 MB: fill_chunk(single) 28.38x faster than get_chunk+bytes
+         (1.16 GB/s → 32.90 GB/s)
+         fill_chunk(pool)   12.85x faster than get_chunk+bytes
+         (1.16 GB/s → 14.90 GB/s)
+
+  🎯 RECOMMENDATION for benchmark_standalone_5k_v7.py:
+     ❌ REMOVE: get_chunk() + bytes() conversion (SLOW: ~1.55 GB/s)
+     ✅ USE: fill_chunk() with buffer pool (FAST: ~23-37 GB/s)
+     ✅ Memory: 64-buffer pool = 1GB for 16MB objects (acceptable)
+     ✅ Pattern: producer fills buffers → queue → consumer uploads → return to pool
+     ✅ Expected: PUT throughput 1.45 GB/s → 5-6 GB/s (closer to s3-cli 6.5 GB/s)
+
+================================================================================
+TARGET PUT PERFORMANCE ANALYSIS
+================================================================================
+Target PUT performance: 6.5 GB/s (s3-cli on FAST)
+
+Data generation throughput by size:
+  ❌  1 MB:   4.25 GB/s (0.7x target)
+  ✅  8 MB:  14.99 GB/s (2.3x target)
+  ✅ 16 MB:  24.82 GB/s (3.8x target)
+  ✅ 32 MB:  34.14 GB/s (5.3x target)
+
+================================================================================
+✓ Benchmark complete
+================================================================================
+
+(tests) eval@loki-node3:~/Documents/Code/Tests/tests$ python ./scripts/benchmark_libraries_v8.py --help
+usage: benchmark_libraries_v8.py [-h] [--target {minio,fast}] [--endpoint ENDPOINT] [--access-key ACCESS_KEY] [--secret-key SECRET_KEY] [--bucket BUCKET] [--num-objects NUM_OBJECTS] [--threads THREADS]
+                                 [--put-threads PUT_THREADS] [--get-threads GET_THREADS] [--object-size OBJECT_SIZE] [--libraries {s3torchconnectorclient,minio,s3dlio} [{s3torchconnectorclient,minio,s3dlio} ...]] [--quick]
+                                 [--list-targets]
+
+Standalone S3 library benchmark with asyncio producer/consumer pattern
+
+options:
+  -h, --help            show this help message and exit
+  --target {minio,fast}
+                        Predefined S3 target
+  --endpoint ENDPOINT   Custom S3 endpoint URL
+  --access-key ACCESS_KEY
+                        Access key
+  --secret-key SECRET_KEY
+                        Secret key
+  --bucket BUCKET       S3 bucket name
+  --num-objects NUM_OBJECTS
+                        Number of objects to upload/download (default: 5000)
+  --threads THREADS     Number of concurrent workers for both PUT and GET (default: 16). Overridden by --put-threads and --get-threads if specified.
+  --put-threads PUT_THREADS
+                        Number of concurrent upload workers (default: use --threads value)
+  --get-threads GET_THREADS
+                        Number of concurrent download workers (default: use --threads value)
+  --object-size OBJECT_SIZE
+                        Object size in MB (default: 16). Test 14MB vs 18MB to validate range GET behavior
+  --libraries {s3torchconnectorclient,minio,s3dlio} [{s3torchconnectorclient,minio,s3dlio} ...]
+                        Libraries to test
+  --quick               Skip delays (for quick testing/debugging)
+  --list-targets        List available S3 targets and exit
+
+Examples:
+  # Test against MinIO preset with default 5000 objects
+  python3 benchmark_standalone_5k_v4.py --target minio --threads 16
+
+  # Test against MinIO with 1000 objects (faster for testing)
+  python3 benchmark_standalone_5k_v4.py --target minio --num-objects 1000 --threads 16
+
+  # Test against FAST S3 preset with only s3dlio
+  python3 benchmark_standalone_5k_v4.py --target fast --threads 16 --libraries s3dlio
+
+  # List available targets
+  python3 benchmark_standalone_5k_v4.py --list-targets
+        
+(tests) eval@loki-node3:~/Documents/Code/Tests/tests$ python ./scripts/benchmark_libraries_v8.py --target fast --num-objects 3000
+======================================================================
+STANDALONE S3 LIBRARY BENCHMARK (Asyncio Producer/Consumer Pattern)
+======================================================================
+Target: Fast S3 Target
+Configuration: 3,000 objects × 16 MB
+Total size: 46.9 GB
+PUT tasks: 16 concurrent upload workers
+GET tasks: 16 concurrent download workers
+Data producer: 1 task with dgen-py Rayon parallelism (NOT in I/O timing)
+Concurrency model: asyncio (no GIL limit)
+Endpoint: http://10.9.0.21
+Libraries to test: s3torchconnectorclient, minio, s3dlio
+
+
+======================================================================
+Testing: s3torchconnectorclient
+======================================================================
+
+Verifying bucket 'bucket-s3torch'...
+  Bucket already exists: bucket-s3torch
+  Bucket is accessible
+
+🗑  Clearing all objects from bucket with prefix 's3tc_object_'...
+  Counting objects in bucket: s3://bucket-s3torch/
+  Found 3000 objects to delete
+  Deleting 3000 objects with s3-cli...
+  ✓ Deleted 3000 objects
+  Removed 3000 existing objects
+
+⏳ Pausing 30 seconds after bucket clear (allow storage to settle)...
+   30 seconds remaining...
+   20 seconds remaining...
+   10 seconds remaining...
+   5 seconds remaining...
+   4 seconds remaining...
+   3 seconds remaining...
+   2 seconds remaining...
+   1 seconds remaining...
+✓ Pause complete
+
+
+Starting producer task group to generate 3000 objects...
+  DEBUG: data type = bytearray, len = 16777216
+Phase 1: Uploading 3000 objects (46.9 GB)...
+  DEBUG: Uploading object 0 - data type = bytearray, len = 16777216
+  Progress: 500/3000 (16.7%)
+  Progress: 1000/3000 (33.3%)
+  Progress: 1500/3000 (50.0%)
+  Progress: 2000/3000 (66.7%)
+  Progress: 2500/3000 (83.3%)
+  Progress: 3000/3000 (100.0%)
+✓ PUT completed: 3000/3000 objects in 24.78s
+  Throughput: 1.89 GB/s
+
+⏳ Pausing 60 seconds between PUT and GET phases (prevent interference)...
+   60 seconds remaining...
+   50 seconds remaining...
+   40 seconds remaining...
+   30 seconds remaining...
+   20 seconds remaining...
+   10 seconds remaining...
+   5 seconds remaining...
+   4 seconds remaining...
+   3 seconds remaining...
+   2 seconds remaining...
+   1 seconds remaining...
+✓ Pause complete
+
+
+Phase 2: Downloading 3000 objects...
+  Progress: 500/3000 (16.7%)
+  Progress: 1000/3000 (33.3%)
+  Progress: 1500/3000 (50.0%)
+  Progress: 2000/3000 (66.7%)
+  Progress: 2500/3000 (83.3%)
+  Progress: 3000/3000 (100.0%)
+✓ GET completed: 3000/3000 objects in 19.62s
+  Throughput: 2.39 GB/s
+
+⏳ Pausing 60 seconds before next library (test isolation)...
+   60 seconds remaining...
+   50 seconds remaining...
+   40 seconds remaining...
+   30 seconds remaining...
+   20 seconds remaining...
+   10 seconds remaining...
+   5 seconds remaining...
+   4 seconds remaining...
+   3 seconds remaining...
+   2 seconds remaining...
+   1 seconds remaining...
+✓ Pause complete
+
+
+======================================================================
+Testing: minio
+======================================================================
+
+Verifying bucket 'bucket-minio'...
+  Bucket already exists: bucket-minio
+  Bucket is accessible
+
+🗑  Clearing all objects from bucket with prefix 'minio_object_'...
+  Counting objects in bucket: s3://bucket-minio/
+  Found 3000 objects to delete
+  Deleting 3000 objects with s3-cli...
+  ✓ Deleted 3000 objects
+  Removed 3000 existing objects
+
+⏳ Pausing 30 seconds after bucket clear (allow storage to settle)...
+   30 seconds remaining...
+   20 seconds remaining...
+   10 seconds remaining...
+   5 seconds remaining...
+   4 seconds remaining...
+   3 seconds remaining...
+   2 seconds remaining...
+   1 seconds remaining...
+✓ Pause complete
+
+
+Starting producer task group to generate 3000 objects...
+  DEBUG: data type = bytearray, len = 16777216
+Phase 1: Uploading 3000 objects (46.9 GB)...
+  DEBUG: Uploading object 0 - data type = bytearray, len = 16777216
+  Progress: 500/3000 (16.7%)
+  Progress: 1000/3000 (33.3%)
+  Progress: 1500/3000 (50.0%)
+  Progress: 2000/3000 (66.7%)
+  Progress: 2500/3000 (83.3%)
+  Progress: 3000/3000 (100.0%)
+✓ PUT completed: 3000/3000 objects in 59.25s
+  Throughput: 0.79 GB/s
+
+⏳ Pausing 60 seconds between PUT and GET phases (prevent interference)...
+   60 seconds remaining...
+   50 seconds remaining...
+   40 seconds remaining...
+   30 seconds remaining...
+   20 seconds remaining...
+   10 seconds remaining...
+   5 seconds remaining...
+   4 seconds remaining...
+   3 seconds remaining...
+   2 seconds remaining...
+   1 seconds remaining...
+✓ Pause complete
+
+
+Phase 2: Downloading 3000 objects...
+  Progress: 500/3000 (16.7%)
+  Progress: 1000/3000 (33.3%)
+  Progress: 1500/3000 (50.0%)
+  Progress: 2000/3000 (66.7%)
+  Progress: 2500/3000 (83.3%)
+  Progress: 3000/3000 (100.0%)
+✓ GET completed: 3000/3000 objects in 6.89s
+  Throughput: 6.81 GB/s
+
+⏳ Pausing 60 seconds before next library (test isolation)...
+   60 seconds remaining...
+   50 seconds remaining...
+   40 seconds remaining...
+   30 seconds remaining...
+   20 seconds remaining...
+   10 seconds remaining...
+   5 seconds remaining...
+   4 seconds remaining...
+   3 seconds remaining...
+   2 seconds remaining...
+   1 seconds remaining...
+✓ Pause complete
+
+
+======================================================================
+Testing: s3dlio
+======================================================================
+
+Verifying bucket 'bucket-s3dlio'...
+  Created/verified bucket: bucket-s3dlio
+
+🗑  Clearing all objects from bucket with prefix 's3dlio_object_'...
+  Counting objects in bucket: s3://bucket-s3dlio/
+  Found 3000 objects to delete
+  Deleting 3000 objects with s3-cli...
+  ✓ Deleted 3000 objects
+  Removed 3000 existing objects
+
+⏳ Pausing 30 seconds after bucket clear (allow storage to settle)...
+   30 seconds remaining...
+   20 seconds remaining...
+   10 seconds remaining...
+   5 seconds remaining...
+   4 seconds remaining...
+   3 seconds remaining...
+   2 seconds remaining...
+   1 seconds remaining...
+✓ Pause complete
+
+
+Starting producer task group to generate 3000 objects...
+  DEBUG: data type = bytearray, len = 16777216
+Phase 1: Uploading 3000 objects (46.9 GB)...
+  DEBUG: Uploading object 0 - data type = bytearray, len = 16777216
+  Progress: 500/3000 (16.7%)
+  Progress: 1000/3000 (33.3%)
+  Progress: 1500/3000 (50.0%)
+  Progress: 2000/3000 (66.7%)
+  Progress: 2500/3000 (83.3%)
+  Progress: 3000/3000 (100.0%)
+✓ PUT completed: 3000/3000 objects in 16.27s
+  Throughput: 2.88 GB/s
+
+⏳ Pausing 60 seconds between PUT and GET phases (prevent interference)...
+   60 seconds remaining...
+   50 seconds remaining...
+   40 seconds remaining...
+   30 seconds remaining...
+   20 seconds remaining...
+   10 seconds remaining...
+   5 seconds remaining...
+   4 seconds remaining...
+   3 seconds remaining...
+   2 seconds remaining...
+   1 seconds remaining...
+✓ Pause complete
+
+
+Phase 2: Downloading 3000 objects...
+  Progress: 500/3000 (16.7%)
+  Progress: 1000/3000 (33.3%)
+  Progress: 1500/3000 (50.0%)
+  Progress: 2000/3000 (66.7%)
+  Progress: 2500/3000 (83.3%)
+  Progress: 3000/3000 (100.0%)
+✓ GET completed: 3000/3000 objects in 6.63s
+  Throughput: 7.07 GB/s
+
+======================================================================
+BENCHMARK SUMMARY
+======================================================================
+Target: Fast S3 Target
+Configuration: 3000 objects × 16 MB = 46.9 GB
+PUT threads: 16 concurrent upload workers
+GET threads: 16 concurrent download workers
+Data generation: dgen_py (single producer, dgen-py max_threads=None, NOT in I/O timing)
+
+
+S3TORCHCONNECTORCLIENT
+----------------------------------------------------------------------
+PUT: 3,000 objects in 24.78s
+     Throughput: 1.89 GB/s
+GET: 3,000 objects in 19.62s
+     Throughput: 2.39 GB/s
+Total time: 44.40s
+
+MINIO
+----------------------------------------------------------------------
+PUT: 3,000 objects in 59.25s
+     Throughput: 0.79 GB/s
+GET: 3,000 objects in 6.89s
+     Throughput: 6.81 GB/s
+Total time: 66.13s
+
+S3DLIO
+----------------------------------------------------------------------
+PUT: 3,000 objects in 16.27s
+     Throughput: 2.88 GB/s
+GET: 3,000 objects in 6.63s
+     Throughput: 7.07 GB/s
+Total time: 22.90s
+(tests) eval@loki-node3:~/Documents/Code/Tests/tests$ 
+(tests) eval@loki-node3:~/Documents/Code/Tests/tests$ 
+(tests) eval@loki-node3:~/Documents/Code/Tests/tests$ 
+(tests) eval@loki-node3:~/Documents/Code/Tests/tests$ 
+(tests) eval@loki-node3:~/Documents/Code/Tests/tests$ 
+(tests) eval@loki-node3:~/Documents/Code/Tests/tests$ python ./scripts/benchmark_libraries_v8.py --target fast --num-objects 3000 --put-threads 32
+======================================================================
+STANDALONE S3 LIBRARY BENCHMARK (Asyncio Producer/Consumer Pattern)
+======================================================================
+Target: Fast S3 Target
+Configuration: 3,000 objects × 16 MB
+Total size: 46.9 GB
+PUT tasks: 32 concurrent upload workers
+GET tasks: 16 concurrent download workers
+Data producer: 1 task with dgen-py Rayon parallelism (NOT in I/O timing)
+Concurrency model: asyncio (no GIL limit)
+Endpoint: http://10.9.0.21
+Libraries to test: s3torchconnectorclient, minio, s3dlio
+
+
+======================================================================
+Testing: s3torchconnectorclient
+======================================================================
+
+Verifying bucket 'bucket-s3torch'...
+  Bucket already exists: bucket-s3torch
+  Bucket is accessible
+
+🗑  Clearing all objects from bucket with prefix 's3tc_object_'...
+  Counting objects in bucket: s3://bucket-s3torch/
+  Found 3000 objects to delete
+  Deleting 3000 objects with s3-cli...
+  ✓ Deleted 3000 objects
+  Removed 3000 existing objects
+
+⏳ Pausing 30 seconds after bucket clear (allow storage to settle)...
+   30 seconds remaining...
+   20 seconds remaining...
+   10 seconds remaining...
+   5 seconds remaining...
+   4 seconds remaining...
+   3 seconds remaining...
+   2 seconds remaining...
+   1 seconds remaining...
+✓ Pause complete
+
+
+Starting producer task group to generate 3000 objects...
+  DEBUG: data type = bytearray, len = 16777216
+Phase 1: Uploading 3000 objects (46.9 GB)...
+  DEBUG: Uploading object 0 - data type = bytearray, len = 16777216
+  Progress: 500/3000 (16.7%)
+  Progress: 1000/3000 (33.3%)
+  Progress: 1500/3000 (50.0%)
+  Progress: 2000/3000 (66.7%)
+  Progress: 2500/3000 (83.3%)
+  Progress: 3000/3000 (100.0%)
+✓ PUT completed: 3000/3000 objects in 20.35s
+  Throughput: 2.30 GB/s
+
+⏳ Pausing 60 seconds between PUT and GET phases (prevent interference)...
+   60 seconds remaining...
+   50 seconds remaining...
+   40 seconds remaining...
+   30 seconds remaining...
+   20 seconds remaining...
+   10 seconds remaining...
+   5 seconds remaining...
+   4 seconds remaining...
+   3 seconds remaining...
+   2 seconds remaining...
+   1 seconds remaining...
+✓ Pause complete
+
+
+Phase 2: Downloading 3000 objects...
+  Progress: 500/3000 (16.7%)
+  Progress: 1000/3000 (33.3%)
+  Progress: 1500/3000 (50.0%)
+  Progress: 2000/3000 (66.7%)
+  Progress: 2500/3000 (83.3%)
+  Progress: 3000/3000 (100.0%)
+✓ GET completed: 3000/3000 objects in 20.51s
+  Throughput: 2.29 GB/s
+
+⏳ Pausing 60 seconds before next library (test isolation)...
+   60 seconds remaining...
+   50 seconds remaining...
+   40 seconds remaining...
+   30 seconds remaining...
+   20 seconds remaining...
+   10 seconds remaining...
+   5 seconds remaining...
+   4 seconds remaining...
+   3 seconds remaining...
+   2 seconds remaining...
+   1 seconds remaining...
+✓ Pause complete
+
+
+======================================================================
+Testing: minio
+======================================================================
+
+Verifying bucket 'bucket-minio'...
+  Bucket already exists: bucket-minio
+  Bucket is accessible
+
+🗑  Clearing all objects from bucket with prefix 'minio_object_'...
+  Counting objects in bucket: s3://bucket-minio/
+  Found 3000 objects to delete
+  Deleting 3000 objects with s3-cli...
+  ✓ Deleted 3000 objects
+  Removed 3000 existing objects
+
+⏳ Pausing 30 seconds after bucket clear (allow storage to settle)...
+   30 seconds remaining...
+   20 seconds remaining...
+   10 seconds remaining...
+   5 seconds remaining...
+   4 seconds remaining...
+   3 seconds remaining...
+   2 seconds remaining...
+   1 seconds remaining...
+✓ Pause complete
+
+
+Starting producer task group to generate 3000 objects...
+  DEBUG: data type = bytearray, len = 16777216
+Phase 1: Uploading 3000 objects (46.9 GB)...
+  DEBUG: Uploading object 0 - data type = bytearray, len = 16777216
+  Progress: 500/3000 (16.7%)
+  Progress: 1000/3000 (33.3%)
+  Progress: 1500/3000 (50.0%)
+  Progress: 2000/3000 (66.7%)
+  Progress: 2500/3000 (83.3%)
+  Progress: 3000/3000 (100.0%)
+✓ PUT completed: 3000/3000 objects in 67.03s
+  Throughput: 0.70 GB/s
+
+⏳ Pausing 60 seconds between PUT and GET phases (prevent interference)...
+   60 seconds remaining...
+   50 seconds remaining...
+   40 seconds remaining...
+   30 seconds remaining...
+   20 seconds remaining...
+   10 seconds remaining...
+   5 seconds remaining...
+   4 seconds remaining...
+   3 seconds remaining...
+   2 seconds remaining...
+   1 seconds remaining...
+✓ Pause complete
+
+
+Phase 2: Downloading 3000 objects...
+  Progress: 500/3000 (16.7%)
+  Progress: 1000/3000 (33.3%)
+  Progress: 1500/3000 (50.0%)
+  Progress: 2000/3000 (66.7%)
+  Progress: 2500/3000 (83.3%)
+  Progress: 3000/3000 (100.0%)
+✓ GET completed: 3000/3000 objects in 6.93s
+  Throughput: 6.77 GB/s
+
+⏳ Pausing 60 seconds before next library (test isolation)...
+   60 seconds remaining...
+   50 seconds remaining...
+   40 seconds remaining...
+   30 seconds remaining...
+   20 seconds remaining...
+   10 seconds remaining...
+   5 seconds remaining...
+   4 seconds remaining...
+   3 seconds remaining...
+   2 seconds remaining...
+   1 seconds remaining...
+✓ Pause complete
+
+
+======================================================================
+Testing: s3dlio
+======================================================================
+
+Verifying bucket 'bucket-s3dlio'...
+  Created/verified bucket: bucket-s3dlio
+
+🗑  Clearing all objects from bucket with prefix 's3dlio_object_'...
+  Counting objects in bucket: s3://bucket-s3dlio/
+  Found 3000 objects to delete
+  Deleting 3000 objects with s3-cli...
+  ✓ Deleted 3000 objects
+  Removed 3000 existing objects
+
+⏳ Pausing 30 seconds after bucket clear (allow storage to settle)...
+   30 seconds remaining...
+   20 seconds remaining...
+   10 seconds remaining...
+   5 seconds remaining...
+   4 seconds remaining...
+   3 seconds remaining...
+   2 seconds remaining...
+   1 seconds remaining...
+✓ Pause complete
+
+
+Starting producer task group to generate 3000 objects...
+  DEBUG: data type = bytearray, len = 16777216
+Phase 1: Uploading 3000 objects (46.9 GB)...
+  DEBUG: Uploading object 0 - data type = bytearray, len = 16777216
+  Progress: 500/3000 (16.7%)
+  Progress: 1000/3000 (33.3%)
+  Progress: 1500/3000 (50.0%)
+  Progress: 2000/3000 (66.7%)
+  Progress: 2500/3000 (83.3%)
+  Progress: 3000/3000 (100.0%)
+✓ PUT completed: 3000/3000 objects in 16.27s
+  Throughput: 2.88 GB/s
+
+⏳ Pausing 60 seconds between PUT and GET phases (prevent interference)...
+   60 seconds remaining...
+   50 seconds remaining...
+   40 seconds remaining...
+   30 seconds remaining...
+   20 seconds remaining...
+   10 seconds remaining...
+   5 seconds remaining...
+   4 seconds remaining...
+   3 seconds remaining...
+   2 seconds remaining...
+   1 seconds remaining...
+✓ Pause complete
+
+
+Phase 2: Downloading 3000 objects...
+  Progress: 500/3000 (16.7%)
+  Progress: 1000/3000 (33.3%)
+  Progress: 1500/3000 (50.0%)
+  Progress: 2000/3000 (66.7%)
+  Progress: 2500/3000 (83.3%)
+  Progress: 3000/3000 (100.0%)
+✓ GET completed: 3000/3000 objects in 6.30s
+  Throughput: 7.44 GB/s
+
+======================================================================
+BENCHMARK SUMMARY
+======================================================================
+Target: Fast S3 Target
+Configuration: 3000 objects × 16 MB = 46.9 GB
+PUT threads: 32 concurrent upload workers
+GET threads: 16 concurrent download workers
+Data generation: dgen_py (single producer, dgen-py max_threads=None, NOT in I/O timing)
+
+
+S3TORCHCONNECTORCLIENT
+----------------------------------------------------------------------
+PUT: 3,000 objects in 20.35s
+     Throughput: 2.30 GB/s
+GET: 3,000 objects in 20.51s
+     Throughput: 2.29 GB/s
+Total time: 40.86s
+
+MINIO
+----------------------------------------------------------------------
+PUT: 3,000 objects in 67.03s
+     Throughput: 0.70 GB/s
+GET: 3,000 objects in 6.93s
+     Throughput: 6.77 GB/s
+Total time: 73.95s
+
+S3DLIO
+----------------------------------------------------------------------
+PUT: 3,000 objects in 16.27s
+     Throughput: 2.88 GB/s
+GET: 3,000 objects in 6.30s
+     Throughput: 7.44 GB/s
+Total time: 22.57s
+(tests) eval@loki-node3:~/Documents/Code/Tests/tests$ 
