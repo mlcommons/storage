@@ -1,0 +1,27 @@
+{
+    "num_accelerators": 2,
+    "hostname": "7a3725255f7c",
+    "metric": {
+        "train_au_percentage": [
+            99.2928248141294,
+            99.09869830355453,
+            98.97460802985262,
+            94.59671323956513
+        ],
+        "train_au_mean_percentage": 97.99071109677541,
+        "train_au_stdev_percentage": 1.9628047797077472,
+        "train_throughput_samples_per_second": [
+            5.1134572554679085,
+            5.085087117188613,
+            5.164541210948162,
+            5.01700988494845
+        ],
+        "train_throughput_mean_samples_per_second": 5.095023867138283,
+        "train_throughput_stdev_samples_per_second": 0.05328548421561324,
+        "train_io_mean_MB_per_second": 1139.7296277439752,
+        "train_io_stdev_MB_per_second": 11.919678233681973
+    },
+    "start": "2023-04-04T16:33:42.959919",
+    "end": "2023-04-04T16:35:55.155745",
+    "epochs": 4
+}

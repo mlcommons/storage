@@ -1,0 +1,43 @@
+# 8 node run with 4 GPUs per node and TPSIZE=4 and PPSIZE=8
+model:
+  name: megatron_deepspeed
+  type: megatron_deepspeed
+  optimization_groups: [1009254400, 865075200, 793600]
+  model_size: 30102
+  num_layers: 40
+  parallelism: 
+    pipeline: 8
+    tensor: 4
+    zero_stage: 1
+  layer_parameters: [52583936, 209715200]
+
+framework: pytorch
+
+workflow:
+  generate_data: False
+  train: True
+  checkpoint: True
+
+dataset: 
+  data_folder: dataset/megatron-deepspeed/
+  format: mmap_indexed_binary
+  num_files_train: 1
+  num_samples_per_file: 277203535
+  record_length_bytes: 2048
+  
+reader: 
+  data_loader: pytorch
+  batch_size: 16
+  read_threads: 1
+  file_shuffle: seed
+  sample_shuffle: seed
+
+train:
+  epochs: 3
+  computation_time: 2.44 # 2.44 sec per step
+  total_training_steps: 1000
+
+checkpoint:
+  checkpoint_folder: checkpoints/megatron-deepspeed
+  steps_between_checkpoints: 1000
+  type: all_ranks

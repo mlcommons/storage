@@ -1,0 +1,39 @@
+model: 
+  name: unet3d
+  type: cnn
+  model_size: 499153191
+
+framework: pytorch
+
+workflow:
+  generate_data: False
+  train: True
+  checkpoint: True
+
+dataset: 
+  data_folder: data/unet3d/
+  format: npz
+  num_files_train: 168
+  num_samples_per_file: 1
+  record_length_bytes: 146600628
+  record_length_bytes_stdev: 68341808
+  record_length_bytes_resize: 2097152
+  
+reader: 
+  data_loader: pytorch
+  batch_size: 7
+  read_threads: 4
+  file_shuffle: seed
+  sample_shuffle: seed
+
+train:
+  epochs: 5
+  computation_time: 0.323
+
+checkpoint:
+  checkpoint_folder: checkpoints/unet3d
+  checkpoint_after_epoch: 5
+  epochs_between_checkpoints: 2
+
+metric:
+  au: 0.90

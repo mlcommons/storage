@@ -1,0 +1,360 @@
+name: Build and Test
+
+on:
+  pull_request:
+    branches: [main, dev]
+  push:
+
+jobs:
+  build-and-test:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04]
+        gcc: [10]
+        python: ["3.9", "3.10", "3.11"]
+        venv: ["via-setup", "via-reqs"]
+    name: ${{ matrix.os }}-${{ matrix.gcc }}-${{ matrix.python }}-${{ matrix.venv }}
+    runs-on: ${{ matrix.os }}
+    env:
+      CC: gcc-${{ matrix.gcc }}
+      CXX: g++-${{ matrix.gcc }}
+      DFTRACER_BUILD_TYPE: "Debug"
+      DFTRACER_ENABLE: 1
+      DFTRACER_LOG_LEVEL: "INFO"
+      DLIO_EXEC: ${{ matrix.venv == 'via-setup' && 'dlio_benchmark' || 'python dlio_benchmark/main.py' }}
+      GOTCHA_DEBUG: 1
+      OMPI_ALLOW_RUN_AS_ROOT: 1
+      OMPI_ALLOW_RUN_AS_ROOT_CONFIRM: 1
+      PYTHON_VER: ${{ matrix.python }}
+      RDMAV_FORK_SAFE: "1"
+      VENV_PATH: "/home/runner/work/.venv/${{ matrix.venv }}"
+    steps:
+      - name: Clear disc
+        run: |
+          sudo rm -rf /usr/share/dotnet
+          sudo rm -rf /opt/ghc
+          sudo rm -rf "/usr/local/share/boost"
+          sudo rm -rf "$AGENT_TOOLSDIRECTORY"
+      - name: Push checkout
+        if: github.event_name == 'push'
+        uses: actions/checkout@v3
+      - name: PR checkout
+        if: github.event_name == 'pull_request'
+        uses: actions/checkout@v3
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+      - name: Set up Python ${{ matrix.python }}
+        uses: actions/setup-python@v3
+        with:
+          python-version: ${{ matrix.python }}
+      - name: Add current directory to PYTHONPATH
+        if: matrix.venv == 'via-reqs'
+        run: echo "PYTHONPATH=$(pwd):$PYTHONPATH" >> $GITHUB_ENV
+      - name: Cache install modules
+        id: cache-modules
+        uses: actions/cache@v3
+        with:
+          path: ${{ env.VENV_PATH }}
+          key: ${{ matrix.venv }}-gcc${{ matrix.gcc }}-python${{ matrix.python }}-${{ hashFiles('requirements.txt', 'setup.py') }}
+      - name: Install system dependencies
+        run: |
+          sudo apt update
+          sudo apt-get install -y $CC $CXX libc6 git
+          sudo apt-get install -y openmpi-bin openmpi-common libopenmpi-dev python3-dev
+      - name: Install DLIO via setup.py
+        if: matrix.venv == 'via-setup' && steps.cache-modules.outputs.cache-hit != 'true'
+        run: |
+          echo "venv: ${VENV_PATH} - gcc: $CC"
+          python -m venv ${VENV_PATH}
+          source ${VENV_PATH}/bin/activate
+          pip install --upgrade pip
+          pip install .[test]
+      - name: Install DLIO via requirements.txt
+        if: matrix.venv == 'via-reqs' && steps.cache-modules.outputs.cache-hit != 'true'
+        run: |
+          echo "venv: ${VENV_PATH} - gcc: $CC"
+          python -m venv ${VENV_PATH}
+          source ${VENV_PATH}/bin/activate
+          pip install --upgrade pip
+          pip install -r requirements-test.txt
+      - name: test_ai_logging
+        env:
+          DFTRACER_INC_METADATA: 1
+          DFTRACER_TRACE_COMPRESSION: 0
+        run: |
+          source ${VENV_PATH}/bin/activate
+          pytest tests/dlio_ai_logging_test.py -n 4 -v
+          rm -rf outputs
+      - name: test_dataset_dimension_gen_data
+        run: |
+          source ${VENV_PATH}/bin/activate
+          pytest tests/dlio_dataset_dimension_test.py -n 4 -v
+          rm -rf outputs
+      - name: test_checkpoint_epoch
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 2 pytest -k test_checkpoint_epoch[tensorflow-1024-optimizers0-2-layer_params0-0-True] -v
+          mpirun -np 2 pytest -k test_checkpoint_epoch[pytorch-1024-optimizers1-2-layer_params1-0-True] -v
+          mpirun -np 2 pytest -k test_checkpoint_epoch[tensorflow-1024-optimizers2-2-layer_params2-3-True] -v
+          mpirun -np 2 pytest -k test_checkpoint_epoch[pytorch-1024-optimizers3-2-layer_params3-3-True] -v
+          mpirun -np 2 pytest -k test_checkpoint_epoch[tensorflow-1024-optimizers4-1-layer_params4-0-True] -v
+          mpirun -np 2 pytest -k test_checkpoint_epoch[pytorch-1024-optimizers5-1-layer_params5-0-True] -v
+          mpirun -np 2 pytest -k test_checkpoint_epoch[tensorflow-1024-optimizers6-2-layer_params6-0-False] -v
+          mpirun -np 2 pytest -k test_checkpoint_epoch[pytorch-1024-optimizers7-2-layer_params7-0-False] -v
+          mpirun -np 2 pytest -k test_checkpoint_epoch[tensorflow-1024-optimizers8-2-layer_params8-3-False] -v
+          mpirun -np 2 pytest -k test_checkpoint_epoch[pytorch-1024-optimizers9-2-layer_params9-3-False] -v
+          mpirun -np 2 pytest -k test_checkpoint_epoch[tensorflow-1024-optimizers10-1-layer_params10-0-False] -v
+          mpirun -np 2 pytest -k test_checkpoint_epoch[pytorch-1024-optimizers11-1-layer_params11-0-False] -v
+          rm -rf data
+      - name: test_checkpoint_ksm_config
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 2 pytest -k test_checkpoint_ksm_config -v
+          rm -rf data
+      - name: test_checkpoint_step
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 2 pytest -k test_checkpoint_step -v
+      - name: test_gen_data
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 2 pytest -k test_gen_data[png-tensorflow] -v
+          mpirun -np 2 pytest -k test_gen_data[npz-tensorflow] -v
+          mpirun -np 2 pytest -k test_gen_data[jpeg-tensorflow] -v
+          mpirun -np 2 pytest -k test_gen_data[tfrecord-tensorflow] -v
+          mpirun -np 2 pytest -k test_gen_data[hdf5-tensorflow] -v
+          mpirun -np 2 pytest -k test_gen_data[indexed_binary-tensorflow] -v
+          mpirun -np 2 pytest -k test_gen_data[mmap_indexed_binary-tensorflow] -v
+          rm -rf data
+      - name: test_custom_storage_root_gen_data
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 2 pytest -k test_storage_root_gen_data[png-tensorflow] -v
+          mpirun -np 2 pytest -k test_storage_root_gen_data[npz-tensorflow] -v
+          mpirun -np 2 pytest -k test_storage_root_gen_data[jpeg-tensorflow] -v
+          mpirun -np 2 pytest -k test_storage_root_gen_data[tfrecord-tensorflow] -v
+          mpirun -np 2 pytest -k test_storage_root_gen_data[hdf5-tensorflow] -v
+          mpirun -np 2 pytest -k test_storage_root_gen_data[indexed_binary-tensorflow] -v
+          mpirun -np 2 pytest -k test_storage_root_gen_data[mmap_indexed_binary-tensorflow] -v
+          rm -rf data
+      - name: test_train
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 2 pytest -k test_train[png-tensorflow-tensorflow-True] -v
+          mpirun -np 2 pytest -k test_train[npz-tensorflow-tensorflow-True] -v
+          mpirun -np 2 pytest -k test_train[jpeg-tensorflow-tensorflow-True] -v
+          mpirun -np 2 pytest -k test_train[tfrecord-tensorflow-tensorflow-True] -v
+          mpirun -np 2 pytest -k test_train[hdf5-tensorflow-tensorflow-True] -v
+          mpirun -np 2 pytest -k test_train[csv-tensorflow-tensorflow-True] -v
+          mpirun -np 2 pytest -k test_train[png-pytorch-pytorch-True] -v
+          mpirun -np 2 pytest -k test_train[npz-pytorch-pytorch-True] -v
+          mpirun -np 2 pytest -k test_train[jpeg-pytorch-pytorch-True] -v
+          mpirun -np 2 pytest -k test_train[hdf5-pytorch-pytorch-True] -v
+          mpirun -np 2 pytest -k test_train[csv-pytorch-pytorch-True] -v
+          mpirun -np 2 pytest -k test_train[png-tensorflow-dali-True] -v
+          mpirun -np 2 pytest -k test_train[npz-tensorflow-dali-True] -v
+          mpirun -np 2 pytest -k test_train[jpeg-tensorflow-dali-True] -v
+          mpirun -np 2 pytest -k test_train[hdf5-tensorflow-dali-True] -v
+          mpirun -np 2 pytest -k test_train[csv-tensorflow-dali-True] -v
+          mpirun -np 2 pytest -k test_train[png-pytorch-dali-True] -v
+          mpirun -np 2 pytest -k test_train[npz-pytorch-dali-True] -v
+          mpirun -np 2 pytest -k test_train[jpeg-pytorch-dali-True] -v
+          mpirun -np 2 pytest -k test_train[hdf5-pytorch-dali-True] -v
+          mpirun -np 2 pytest -k test_train[csv-pytorch-dali-True] -v
+          mpirun -np 2 pytest -k test_train[indexed_binary-tensorflow-tensorflow-True] -v
+          mpirun -np 2 pytest -k test_train[indexed_binary-pytorch-pytorch-True] -v
+          mpirun -np 2 pytest -k test_train[indexed_binary-tensorflow-dali-True] -v
+          mpirun -np 2 pytest -k test_train[indexed_binary-pytorch-dali-True] -v
+          mpirun -np 2 pytest -k test_train[mmap_indexed_binary-tensorflow-tensorflow-True] -v
+          mpirun -np 2 pytest -k test_train[mmap_indexed_binary-pytorch-pytorch-True] -v
+          mpirun -np 2 pytest -k test_train[mmap_indexed_binary-tensorflow-dali-True] -v
+          mpirun -np 2 pytest -k test_train[mmap_indexed_binary-pytorch-dali-True] -v
+
+          mpirun -np 2 pytest -k test_train[png-tensorflow-tensorflow-False] -v
+          mpirun -np 2 pytest -k test_train[npz-tensorflow-tensorflow-False] -v
+          mpirun -np 2 pytest -k test_train[jpeg-tensorflow-tensorflow-False] -v
+          mpirun -np 2 pytest -k test_train[tfrecord-tensorflow-tensorflow-False] -v
+          mpirun -np 2 pytest -k test_train[hdf5-tensorflow-tensorflow-False] -v
+          mpirun -np 2 pytest -k test_train[csv-tensorflow-tensorflow-False] -v
+          mpirun -np 2 pytest -k test_train[png-pytorch-pytorch-False] -v
+          mpirun -np 2 pytest -k test_train[npz-pytorch-pytorch-False] -v
+          mpirun -np 2 pytest -k test_train[jpeg-pytorch-pytorch-False] -v
+          mpirun -np 2 pytest -k test_train[hdf5-pytorch-pytorch-False] -v
+          mpirun -np 2 pytest -k test_train[csv-pytorch-pytorch-False] -v
+          mpirun -np 2 pytest -k test_train[png-tensorflow-dali-False] -v
+          mpirun -np 2 pytest -k test_train[npz-tensorflow-dali-False] -v
+          mpirun -np 2 pytest -k test_train[jpeg-tensorflow-dali-False] -v
+          mpirun -np 2 pytest -k test_train[hdf5-tensorflow-dali-False] -v
+          mpirun -np 2 pytest -k test_train[csv-tensorflow-dali-False] -v
+          mpirun -np 2 pytest -k test_train[png-pytorch-dali-False] -v
+          mpirun -np 2 pytest -k test_train[npz-pytorch-dali-False] -v
+          mpirun -np 2 pytest -k test_train[jpeg-pytorch-dali-False] -v
+          mpirun -np 2 pytest -k test_train[hdf5-pytorch-dali-False] -v
+          mpirun -np 2 pytest -k test_train[csv-pytorch-dali-False] -v
+          mpirun -np 2 pytest -k test_train[indexed_binary-tensorflow-tensorflow-False] -v
+          mpirun -np 2 pytest -k test_train[indexed_binary-pytorch-pytorch-False] -v
+          mpirun -np 2 pytest -k test_train[indexed_binary-tensorflow-dali-False] -v
+          mpirun -np 2 pytest -k test_train[indexed_binary-pytorch-dali-False] -v
+          mpirun -np 2 pytest -k test_train[mmap_indexed_binary-tensorflow-tensorflow-False] -v
+          mpirun -np 2 pytest -k test_train[mmap_indexed_binary-pytorch-pytorch-False] -v
+          mpirun -np 2 pytest -k test_train[mmap_indexed_binary-tensorflow-dali-False] -v
+          mpirun -np 2 pytest -k test_train[mmap_indexed_binary-pytorch-dali-False] -v
+          rm -rf data
+      - name: test_custom_storage_root_train
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 2 pytest -k test_custom_storage_root_train[png-tensorflow] -v
+          mpirun -np 2 pytest -k test_custom_storage_root_train[npz-tensorflow] -v
+          mpirun -np 2 pytest -k test_custom_storage_root_train[jpeg-tensorflow] -v
+          mpirun -np 2 pytest -k test_custom_storage_root_train[tfrecord-tensorflow] -v
+          mpirun -np 2 pytest -k test_custom_storage_root_train[hdf5-tensorflow] -v
+          mpirun -np 2 pytest -k test_custom_storage_root_train[csv-tensorflow] -v
+          mpirun -np 2 pytest -k test_custom_storage_root_train[png-pytorch] -v
+          mpirun -np 2 pytest -k test_custom_storage_root_train[npz-pytorch] -v
+          mpirun -np 2 pytest -k test_custom_storage_root_train[jpeg-pytorch] -v
+          mpirun -np 2 pytest -k test_custom_storage_root_train[hdf5-pytorch] -v
+          mpirun -np 2 pytest -k test_custom_storage_root_train[csv-pytorch] -v
+          mpirun -np 2 pytest -k test_custom_storage_root_train[indexed_binary-tensorflow] -v
+          mpirun -np 2 pytest -k test_custom_storage_root_train[indexed_binary-pytorch] -v
+          mpirun -np 2 pytest -k test_custom_storage_root_train[mmap_indexed_binary-tensorflow] -v
+          mpirun -np 2 pytest -k test_custom_storage_root_train[mmap_indexed_binary-pytorch] -v
+          rm -rf data
+      - name: test_eval
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 2 pytest -k test_eval -v
+      - name: test_multi_threads
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 2 pytest -k test_multi_threads[tensorflow-0]  -v
+          mpirun -np 2 pytest -k test_multi_threads[tensorflow-1]  -v
+          mpirun -np 2 pytest -k test_multi_threads[tensorflow-2]  -v
+          mpirun -np 2 pytest -k test_multi_threads[pytorch-0]  -v
+          mpirun -np 2 pytest -k test_multi_threads[pytorch-1]  -v
+          mpirun -np 2 pytest -k test_multi_threads[pytorch-2]  -v
+          rm -rf data
+      - name: test-pytorch-multiprocessing-context
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 2 pytest -k test_pytorch_multiprocessing_context[0-None] -v
+          mpirun -np 2 pytest -k test_pytorch_multiprocessing_context[1-fork] -v
+          mpirun -np 2 pytest -k test_pytorch_multiprocessing_context[2-forkserver] -v
+          mpirun -np 2 pytest -k test_pytorch_multiprocessing_context[2-spawn] -v
+          rm -rf data
+      - name: test_subset
+        run: |
+          source ${VENV_PATH}/bin/activate
+          rm -rf output data checkpoints
+          mpirun -np 2 pytest -k test_subset -v
+          rm -rf data
+      - name: test-tf-loader-tfrecord
+        run: |
+          source ${VENV_PATH}/bin/activate
+          rm -rf output data checkpoints
+          mpirun -np 2 ${DLIO_EXEC} workload=resnet50_tf ++workload.dataset.num_files_train=64 ++workload.workflow.train=False ++workload.workflow.generate_data=True  ++workload.dataset.num_files_train=4 ++workload.dataset.num_samples_per_file=16
+          mpirun -np 2 ${DLIO_EXEC} workload=resnet50_tf ++workload.dataset.num_files_train=64 ++workload.workflow.train=True ++workload.workflow.generate_data=False  ++workload.dataset.num_files_train=4 ++workload.dataset.num_samples_per_file=16 ++workload.train.computation_time=0.01 ++workload.train.epochs=1
+          rm -rf data
+      - name: test-torch-loader-npz
+        run: |
+          source ${VENV_PATH}/bin/activate
+          rm -rf output data checkpoints
+          mpirun -np 2 ${DLIO_EXEC} workload=unet3d_a100 ++workload.train.computation_time=0.05 ++workload.evaluation.eval_time=0.01 ++workload.workflow.train=False ++workload.workflow.generate_data=True ++workload.dataset.num_files_train=8 ++workload.dataset.num_files_eval=8 ++workload.reader.read_threads=2 ++workload.dataset.record_length=4096 ++workload.dataset.record_length_stdev=0
+          mpirun -np 2 ${DLIO_EXEC} workload=unet3d_a100 ++workload.train.computation_time=0.05 ++workload.evaluation.eval_time=0.01 ++workload.train.epochs=1 ++workload.workflow.train=True ++workload.workflow.generate_data=False ++workload.dataset.num_files_train=8 ++workload.dataset.num_files_eval=8 ++workload.reader.read_threads=0  ++workload.dataset.record_length=4096 ++workload.dataset.record_length_stdev=0
+          mpirun -np 2 ${DLIO_EXEC} workload=unet3d_a100 ++workload.train.computation_time=0.05 ++workload.evaluation.eval_time=0.01 ++workload.train.epochs=1 ++workload.workflow.train=True ++workload.workflow.generate_data=False ++workload.dataset.num_files_train=8 ++workload.dataset.num_files_eval=8 ++workload.reader.read_threads=0  ++workload.dataset.record_length=4096 ++workload.dataset.record_length_stdev=0 ++workload.reader.odirect=True
+          rm -rf data
+      - name: test-tf-loader-npz
+        run: |
+          source ${VENV_PATH}/bin/activate
+          rm -rf output data checkpoints
+          mpirun -np 2 ${DLIO_EXEC} workload=unet3d_a100 ++workload.framework=tensorflow ++workload.data_reader.data_loader=tensorflow ++workload.train.computation_time=0.05 ++workload.evaluation.eval_time=0.01 ++workload.train.epochs=2 ++workload.workflow.train=False ++workload.workflow.generate_data=True ++workload.dataset.num_files_train=16 ++workload.dataset.num_files_eval=16 ++workload.reader.read_threads=2  ++workload.dataset.record_length=4096 ++workload.dataset.record_length_stdev=0
+          mpirun -np 2 ${DLIO_EXEC} workload=unet3d_a100 ++workload.framework=tensorflow ++workload.data_reader.data_loader=tensorflow ++workload.train.computation_time=0.05 ++workload.evaluation.eval_time=0.01 ++workload.train.epochs=2 ++workload.workflow.train=True ++workload.workflow.generate_data=False ++workload.dataset.num_files_train=16 ++workload.dataset.num_files_eval=16 ++workload.reader.read_threads=2  ++workload.dataset.record_length=4096 ++workload.dataset.record_length_stdev=0
+          rm -rf data
+      - name: test_unet3d
+        run: |
+          source ${VENV_PATH}/bin/activate
+          rm -rf output data checkpoints
+          mpirun -np 2 ${DLIO_EXEC} workload=unet3d_a100 ++workload.workflow.generate_data=True ++workload.dataset.num_files_train=42
+          mpirun -np 2 ${DLIO_EXEC} workload=unet3d_h100 ++workload.workflow.generate_data=True ++workload.dataset.num_files_train=42
+          mpirun -np 2 ${DLIO_EXEC} workload=unet3d_h100 ++workload.workflow.generate_data=True ++workload.dataset.num_files_train=42 ++workload.dataset.format=synthetic
+          rm -rf data
+      - name: test_resnet50
+        run: |
+          source ${VENV_PATH}/bin/activate
+          rm -rf output data checkpoints
+          mpirun -np 2 ${DLIO_EXEC} workload=resnet50_a100 ++workload.workflow.generate_data=True ++workload.dataset.num_files_train=8 ++workload.reader.read_threads=1
+          mpirun -np 2 ${DLIO_EXEC} workload=resnet50_h100 ++workload.workflow.generate_data=True ++workload.dataset.num_files_train=8 ++workload.reader.read_threads=1
+          mpirun -np 2 ${DLIO_EXEC} workload=resnet50_h100 ++workload.workflow.generate_data=True ++workload.dataset.num_files_train=8 ++workload.reader.read_threads=1 ++workload.dataset.format=synthetic
+          rm -rf data
+      - name: test_cosmoflow
+        run: |
+          source ${VENV_PATH}/bin/activate
+          rm -rf output data checkpoints
+          mpirun -np 2 ${DLIO_EXEC} workload=cosmoflow_a100 ++workload.workflow.generate_data=True ++workload.dataset.num_files_train=16
+          mpirun -np 2 ${DLIO_EXEC} workload=cosmoflow_h100 ++workload.workflow.generate_data=True ++workload.dataset.num_files_train=16
+          mpirun -np 2 ${DLIO_EXEC} workload=cosmoflow_h100 ++workload.workflow.generate_data=True ++workload.dataset.num_files_train=16 ++workload.dataset.format=synthetic
+          rm -rf data
+      - name: test_computation_time_distribution
+        run: |
+          source ${VENV_PATH}/bin/activate
+          rm -rf output data checkpoints
+          mpirun -np 2 pytest -k test_computation_time_distribution -v
+          rm -rf data
+      - name: test_llama_8b
+        run: |
+          source ${VENV_PATH}/bin/activate
+          rm -rf output data checkpoints
+          mpirun -np 2 ${DLIO_EXEC} workload=llama_8b_zero3 ++workload.model.parallelism.data=1024 ++workload.checkpoint.mode=subset
+      # S3-specific setup and tests
+      - name: Install S3TorchConnector
+        run: |
+          source ${VENV_PATH}/bin/activate
+          pip install s3torchconnector
+      - name: test_s3_gen_data
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 1 pytest -k test_s3_gen_data[npy-pytorch] -v
+          mpirun -np 1 pytest -k test_s3_gen_data[npz-pytorch] -v
+      - name: test_s3_train
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 1 pytest -k test_s3_train[npy-pytorch-pytorch-True] -v
+          mpirun -np 1 pytest -k test_s3_train[npz-pytorch-pytorch-True] -v
+          mpirun -np 1 pytest -k test_s3_train[npy-pytorch-pytorch-False] -v
+          mpirun -np 1 pytest -k test_s3_train[npz-pytorch-pytorch-False] -v
+      - name: test_s3_eval
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 1 pytest -k test_s3_eval -v
+      - name: test_s3_multi_threads
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 1 pytest -k test_s3_multi_threads[pytorch-0]  -v
+          mpirun -np 1 pytest -k test_s3_multi_threads[pytorch-1]  -v
+          mpirun -np 1 pytest -k test_s3_multi_threads[pytorch-2]  -v
+      - name: test_s3_pytorch_multiprocessing_context
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 1 pytest -k test_s3_pytorch_multiprocessing_context[0-None] -v
+          mpirun -np 1 pytest -k test_s3_pytorch_multiprocessing_context[1-fork] -v
+      - name: test_s3_subset
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 1 pytest -k test_s3_subset -v
+      - name: test_s3_checkpoint_epoch
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 1 pytest -k test_s3_checkpoint_epoch[pytorch-1024-optimizers0-2-layer_params0-0-True] -v
+          mpirun -np 1 pytest -k test_s3_checkpoint_epoch[pytorch-1024-optimizers1-2-layer_params1-3-True] -v
+          mpirun -np 1 pytest -k test_s3_checkpoint_epoch[pytorch-1024-optimizers2-1-layer_params2-0-True] -v
+          mpirun -np 1 pytest -k test_s3_checkpoint_epoch[pytorch-1024-optimizers3-2-layer_params3-0-False] -v
+          mpirun -np 1 pytest -k test_s3_checkpoint_epoch[pytorch-1024-optimizers4-2-layer_params4-3-False] -v
+          mpirun -np 1 pytest -k test_s3_checkpoint_epoch[pytorch-1024-optimizers5-1-layer_params5-0-False] -v
+      - name: test_s3_checkpoint_ksm_config
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 1 pytest -k test_s3_checkpoint_ksm_config -v
+      - name: test_s3_checkpoint_step
+        run: |
+          source ${VENV_PATH}/bin/activate
+          mpirun -np 1 pytest -k test_s3_checkpoint_step -v

@@ -1,0 +1,10 @@
+# A set of configuration
+defaults:
+ - _self_
+ - workload: plugin_default
+ - override hydra/help: dlio_benchmark_help.yaml
+ - override hydra/job_logging: disabled
+ - override hydra/hydra_logging: disabled
+hydra:
+  run:
+    dir: ./hydra_log/${workload.model}/${now:%Y-%m-%d}-${now:%H-%M-%S}
