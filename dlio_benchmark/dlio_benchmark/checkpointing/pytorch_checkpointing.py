@@ -17,9 +17,8 @@
 import os
 import torch
 import ctypes
-import numpy as np
 from dlio_benchmark.checkpointing.base_checkpointing import BaseCheckpointing
-from dlio_benchmark.utils.utility import Profile, dft_ai, gen_random_tensor
+from dlio_benchmark.utils.utility import Profile, dft_ai
 
 from dlio_benchmark.common.constants import MODULE_CHECKPOINT
 
@@ -61,33 +60,14 @@ class PyTorchCheckpointing(BaseCheckpointing):
     def get_tensor_core(self, length, datatype="int8", randomize=True):
         torch_dtype=get_torch_datatype(datatype)
         if randomize:
-            # Use gen_random_tensor() to leverage dgen-py (155x faster than torch.rand)
-            # Maps torch dtype to numpy dtype for gen_random_tensor
-            dtype_map = {
-                torch.float32: np.float32,
-                torch.float16: np.float16,
-                torch.float64: np.float64,
-                torch.bfloat16: np.float32,  # NumPy doesn't have bfloat16, use float32 then convert
-                torch.int8: np.int8,
-                torch.uint8: np.uint8,
-            }
-            
-            if torch_dtype not in dtype_map:
+            if torch_dtype in [torch.float32, torch.float16, torch.float64, torch.bfloat16]:
+                return torch.rand(length, dtype=torch_dtype)
+            elif torch_dtype == torch.int8:
+                return torch.randint(low=-128,high=128, size=(length,), dtype=torch_dtype)
+            elif torch_dtype == torch.uint8:
+                return torch.randint(low=0, high=256, size=(length,), dtype=torch_dtype)
+            else:
                 raise Exception(f"Datatype {torch_dtype} cannot be randomized for random tensor generation.")
-            
-            np_dtype = dtype_map[torch_dtype]
-            
-            # Generate data using gen_random_tensor (auto-uses dgen-py if available)
-            np_array = gen_random_tensor(shape=(length,), dtype=np_dtype)
-            
-            # Convert to torch tensor
-            tensor = torch.from_numpy(np_array)
-            
-            # Handle bfloat16 special case (NumPy doesn't support it)
-            if torch_dtype == torch.bfloat16:
-                tensor = tensor.to(torch.bfloat16)
-            
-            return tensor
         else:
             return torch.ones(length, dtype=torch_dtype)
 

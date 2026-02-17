@@ -53,7 +53,12 @@ class Framework(ABC):
                                                          dataset_type=DatasetType.TRAIN, epoch=epoch)
         self.reader_valid = DataLoaderFactory.get_loader(data_loader, format_type,
                                                          dataset_type=DatasetType.VALID, epoch=epoch)
-        self.storage = StorageFactory().get_storage(self.args.storage_type, self.args.storage_root, self.args.framework)
+        self.storage = StorageFactory().get_storage(
+            self.args.storage_type,
+            self.args.storage_root,
+            self.args.framework,
+            getattr(self.args, 'storage_library', None)
+        )
 
     @abstractmethod 
     def get_type(self):

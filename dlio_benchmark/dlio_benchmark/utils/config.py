@@ -23,7 +23,7 @@ import logging
 from typing import Any, Dict, List, ClassVar, Union
 
 from dlio_benchmark.common.constants import MODULE_CONFIG
-from dlio_benchmark.common.enumerations import StorageType, FormatType, Shuffle, ReadType, FileAccess, Compression, \
+from dlio_benchmark.common.enumerations import StorageType, StorageLibrary, FormatType, Shuffle, ReadType, FileAccess, Compression, \
     FrameworkType, \
     DataLoaderType, Profiler, DataLoaderSampler, CheckpointLocationType, CheckpointMechanismType, CheckpointModeType
 from dlio_benchmark.utils.utility import DLIOMPI, get_trace_name, utcnow
@@ -55,6 +55,7 @@ class ConfigArguments:
     # Set root as the current directory by default
     storage_root: str = "./"
     storage_type: StorageType = StorageType.LOCAL_FS
+    storage_library: Optional[StorageLibrary] = None  # For S3: s3torchconnector, s3dlio, minio
     storage_options: Optional[Dict[str, str]] = None
     record_length: int = 64 * 1024
     record_length_stdev: int = 0
@@ -887,6 +888,8 @@ def LoadConfig(args, config):
     if 'storage' in config:
         if 'storage_type' in config['storage']:
             args.storage_type = StorageType(config['storage']['storage_type'])
+        if 'storage_library' in config['storage']:
+            args.storage_library = StorageLibrary(config['storage']['storage_library'])
         if 'storage_root' in config['storage']:
             args.storage_root = config['storage']['storage_root']
         if 'storage_options' in config['storage']:
@@ -1011,6 +1014,18 @@ def LoadConfig(args, config):
             args.transformed_record_dims = list(reader['transformed_record_dims'])
         if 'transformed_record_element_type' in reader:
             args.transformed_record_element_type = reader['transformed_record_element_type']
+        
+        # Storage configuration (multi-protocol architecture)
+        if 'storage_type' in reader:
+            args.storage_type = StorageType(reader['storage_type'])
+        if 'protocol' in reader:
+            args.protocol = reader['protocol']
+        if 'storage_library' in reader:
+            args.storage_library = reader['storage_library']
+        if 'storage_root' in reader:
+            args.storage_root = reader['storage_root']
+        if 'storage_options' in reader:
+            args.storage_options = reader['storage_options']
 
     # training relevant setting
     if 'train' in config:

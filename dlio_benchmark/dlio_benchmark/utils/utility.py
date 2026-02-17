@@ -28,14 +28,6 @@ import argparse
 import psutil
 import numpy as np
 
-# Try to import dgen-py for high-performance data generation (30-50x faster than NumPy)
-try:
-    import dgen_py
-    HAS_DGEN = True
-except ImportError:
-    HAS_DGEN = False
-    dgen_py = None
-
 from dlio_benchmark.common.enumerations import MPIState
 from dftracer.python import (
     dftracer as PerfTrace,
@@ -43,6 +35,13 @@ from dftracer.python import (
     ai as dft_ai,
     DFTRACER_ENABLE
 )
+
+# Check if dgen-py is available for optimized data generation
+try:
+    import dgen_py as dgen
+    HAS_DGEN = True
+except ImportError:
+    HAS_DGEN = False
 
 LOG_TS_FORMAT = "%Y-%m-%dT%H:%M:%S.%f"
 
@@ -331,69 +330,7 @@ def sleep(config):
         base_sleep(sleep_time)
     return sleep_time
 
-def gen_random_tensor(shape, dtype, rng=None, method=None):
-    """Generate random tensor data for DLIO benchmarks.
-    
-    Supports two data generation methods:
-    - 'dgen': Uses dgen-py with zero-copy BytesView (155x faster, default if available)
-    - 'numpy': Uses NumPy random generation (legacy method for comparison)
-    
-    Method selection (in priority order):
-    1. Explicit 'method' parameter (if provided)
-    2. DLIO_DATA_GEN environment variable ('dgen' or 'numpy')
-    3. Auto-detect: Use dgen-py if installed, else NumPy
-    
-    Args:
-        shape: Tuple specifying tensor dimensions
-        dtype: NumPy dtype for the output array
-        rng: Optional NumPy random generator (only used for NumPy method)
-        method: Optional override for generation method ('dgen' or 'numpy')
-    
-    Returns:
-        NumPy array with random data
-    """
-    # Determine which method to use
-    if method is None:
-        method = os.environ.get('DLIO_DATA_GEN', 'auto').lower()
-    
-    method = method.lower()
-    
-    # Force numpy mode if requested, or if dgen not available
-    use_dgen = (method in ['auto', 'dgen']) and HAS_DGEN
-    
-    if method == 'numpy':
-        use_dgen = False
-    elif method == 'dgen' and not HAS_DGEN:
-        # User explicitly requested dgen but it's not available - warn
-        import warnings
-        warnings.warn(
-            "dgen-py requested but not installed. Install with: pip install dgen-py "
-            "Falling back to NumPy (155x slower).",
-            RuntimeWarning
-        )
-        use_dgen = False
-    
-    # Fast path: Use dgen-py with ZERO-COPY BytesView (155x faster than NumPy)
-    if use_dgen:
-        total_size = int(np.prod(shape))
-        element_size = np.dtype(dtype).itemsize
-        total_bytes = total_size * element_size
-        
-        # Use dgen-py Generator to create zero-copy BytesView
-        # This is 155x faster than NumPy and uses no extra memory
-        # Uses entropy (no seed) by default for unique random data each call
-        # This matches NumPy's default_rng() behavior (entropy-based)
-        gen = dgen_py.Generator(size=total_bytes)  # No seed = entropy
-        bytesview = gen.get_chunk(total_bytes)  # Returns BytesView (zero-copy, immutable)
-        
-        # Convert to NumPy array with correct dtype and reshape (ZERO-COPY)
-        # np.frombuffer on BytesView is zero-copy because BytesView implements buffer protocol
-        arr = np.frombuffer(bytesview, dtype=dtype).reshape(shape)
-        
-        # Make writable copy (required for some use cases)
-        return arr.copy()
-    
-    # Slow path: NumPy random generation (legacy method)
+def gen_random_tensor(shape, dtype, rng=None):
     if rng is None:
         rng = np.random.default_rng()
     if not np.issubdtype(dtype, np.integer):

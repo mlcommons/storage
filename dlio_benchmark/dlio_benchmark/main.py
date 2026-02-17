@@ -69,8 +69,12 @@ class DLIOBenchmark(object):
         t0 = time()
         self.args = ConfigArguments.get_instance()
         LoadConfig(self.args, cfg)
-        self.storage = StorageFactory().get_storage(self.args.storage_type, self.args.storage_root,
-                                                    self.args.framework)
+        self.storage = StorageFactory().get_storage(
+            self.args.storage_type,
+            self.args.storage_root,
+            self.args.framework,
+            getattr(self.args, 'storage_library', None)
+        )
 
         self.output_folder = self.args.output_folder
         os.makedirs(self.args.output_folder, mode=0o755, exist_ok=True)
@@ -191,8 +195,7 @@ class DLIOBenchmark(object):
                     fullpaths = self.storage.walk_node(
                         os.path.join(self.args.data_folder, f"{dataset_type}/*/*.{self.args.format}"),
                         use_pattern=True)
-                    files = [self.storage.get_basename(f) for f in fullpaths]
-                    idx = np.argsort(files)
+                    idx = np.argsort(fullpaths)
                     fullpaths = [fullpaths[i] for i in idx]
                     self.logger.debug(f"fullpaths {fullpaths}")
                 else:

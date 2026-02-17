@@ -62,6 +62,17 @@ class StorageType(Enum):
     def __str__(self):
         return self.value
 
+class StorageLibrary(Enum):
+    """
+    Different S3-compatible storage libraries
+    """
+    S3TORCHCONNECTOR = 's3torchconnector'  # Default from dpsi fork
+    S3DLIO = 's3dlio'                      # High-performance multi-protocol
+    MINIO = 'minio'                        # MinIO Python SDK
+
+    def __str__(self):
+        return self.value
+
 class MetadataType(Enum):
     """
     Different types of storage metadata

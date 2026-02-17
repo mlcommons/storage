@@ -26,7 +26,7 @@ class Namespace:
 class DataStorage(ABC):
     def __init__(self, framework=None):
         self._args = ConfigArguments.get_instance()
-        self.logger = self._args.logger  # dpsi compatibility: add logger property
+        self.logger = self._args.logger
         if framework is not None:
             self.framework = FrameworkFactory().get_framework(self._args.framework, profiling=False)
             self.is_framework_nativeio_available = self.framework.is_nativeio_available()

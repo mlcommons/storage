@@ -32,7 +32,12 @@ class NPZReaderS3(NPZReader):
     @dlp.log_init
     def __init__(self, dataset_type, thread_index, epoch):
         super().__init__(dataset_type, thread_index, epoch)
-        self.storage = StorageFactory().get_storage(self._args.storage_type, self._args.storage_root, self._args.framework)
+        self.storage = StorageFactory().get_storage(
+            self._args.storage_type,
+            self._args.storage_root,
+            self._args.framework,
+            getattr(self._args, 'storage_library', None)
+        )
 
     @dlp.log
     def open(self, filename):

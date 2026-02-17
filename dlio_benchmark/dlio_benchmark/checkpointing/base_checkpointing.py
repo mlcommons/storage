@@ -48,8 +48,12 @@ class BaseCheckpointing(ABC):
         #TODO(Huihuo): Add support for checkpointing rng states for transformer type of architecture
         self.ext = ext
         self.args = ConfigArguments.get_instance()
-        self.checkpoint_storage = StorageFactory().get_storage(self.args.storage_type, self.args.checkpoint_folder,
-                                                          self.args.framework)
+        self.checkpoint_storage = StorageFactory().get_storage(
+            self.args.storage_type,
+            self.args.storage_root,
+            self.args.framework,
+            getattr(self.args, 'storage_library', None)
+        )
         self.logger = self.args.logger
         self.MPI = DLIOMPI.get_instance()
         self.comm = self.MPI.comm()
@@ -279,7 +283,7 @@ class BaseCheckpointing(ABC):
         pass
 
     def get_name(self, suffix):
-        return os.path.join(self.args.checkpoint_folder, f"{suffix}.{self.ext}")
+        return os.path.join(self.args.storage_root, self.args.checkpoint_folder, f"{suffix}.{self.ext}")
 
     def get_num_parameters(self):
         if self.args.num_layers <= 0:

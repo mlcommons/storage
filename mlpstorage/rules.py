@@ -598,12 +598,22 @@ class TrainingRunRulesChecker(RunRulesChecker):
         closed_allowed_params = ['dataset.num_files_train', 'dataset.num_subfolders_train', 'dataset.data_folder',
                                  'reader.read_threads', 'reader.computation_threads', 'reader.transfer_size',
                                  'reader.odirect', 'reader.prefetch_size', 'checkpoint.checkpoint_folder',
-                                 'storage.storage_type', 'storage.storage_root']
+                                 'storage.storage_type', 'storage.storage_root', 'storage.storage_library',
+                                 'train.epochs']
         open_allowed_params = ['framework', 'dataset.format', 'dataset.num_samples_per_file', 'reader.data_loader']
         issues = []
         for param, value in self.benchmark_run.override_parameters.items():
             if param.startswith("workflow"):
                 # We handle workflow parameters separately
+                continue
+            # Allow all storage.storage_options.* parameters (S3 configuration)
+            if param.startswith("storage.storage_options."):
+                issues.append(Issue(
+                    validation=PARAM_VALIDATION.CLOSED,
+                    message=f"Closed parameter override allowed: {param} = {value}",
+                    parameter="Overrode Parameters",
+                    actual=value
+                ))
                 continue
             self.logger.debug(f"Processing override parameter: {param} = {value}")
             if param in closed_allowed_params:

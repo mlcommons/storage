@@ -18,7 +18,7 @@ import numpy as np
 import PIL.Image as im
 
 from dlio_benchmark.data_generator.data_generator import DataGenerator
-from dlio_benchmark.utils.utility import progress, utcnow, gen_random_tensor
+from dlio_benchmark.utils.utility import progress, utcnow
 from dlio_benchmark.utils.utility import Profile
 from dlio_benchmark.common.constants import MODULE_DATA_GENERATOR
 
@@ -36,7 +36,6 @@ class JPEGGenerator(DataGenerator):
         """
         super().generate()
         np.random.seed(10)
-        rng = np.random.default_rng()
         dim = self.get_dimension(self.total_files_to_generate)
         for i in dlp.iter(range(self.my_rank, int(self.total_files_to_generate), self.comm_size)):
             dim_ = dim[2*i]
@@ -46,9 +45,7 @@ class JPEGGenerator(DataGenerator):
             else:
                 dim1 = dim_
                 dim2 = dim[2*i+1]
-            # Use gen_random_tensor (auto-uses dgen-py if available for 30-50x speedup)
-            records = gen_random_tensor(shape=(dim1, dim2), dtype=np.uint8, rng=rng)
-            records = np.clip(records, 0, 255).astype(np.uint8)  # Ensure valid JPEG range
+            records = np.random.randint(255, size=(dim1, dim2), dtype=np.uint8)
             if self.my_rank==0:
                 self.logger.debug(f"{utcnow()} Dimension of images: {dim1} x {dim2}")
             img = im.fromarray(records)

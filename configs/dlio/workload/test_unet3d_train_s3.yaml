@@ -1,0 +1,67 @@
+# Unet3d Training - S3 Object Storage Test with s3dlio
+# Purpose: Read NPZ dataset from S3 using s3dlio + s3:// protocol
+# Framework: PyTorch
+# Format: NPZ (compatible with PyTorch)
+# Storage Library: s3dlio
+
+model: 
+  name: unet3d
+  type: cnn
+  model_size: 499153191
+
+framework: pytorch
+
+workflow:
+  generate_data: False
+  train: True
+  checkpoint: False
+
+dataset: 
+  # Relative path - reader.storage_root provides the S3 base URI
+  data_folder: .
+  format: npz
+  
+  # Match datagen config
+  num_files_train: 10
+  num_samples_per_file: 1
+  record_length_bytes: 10485760  # 10 MB
+  record_length_bytes_stdev: 1048576
+  record_length_bytes_resize: 2097152
+  
+reader: 
+  data_loader: pytorch
+  
+  # NEW ARCHITECTURE: Separated concerns
+  storage_type: object        # object (S3/Azure/GCS) or file (local/parallel FS)
+  protocol: s3                # Specific protocol (s3, az, gcs, file)
+  storage_library: s3dlio     # Specific client library (s3dlio, s3torchconnector, minio)
+  
+  # Storage root for S3 (bucket/prefix format: bucket/path - NO protocol prefix)
+  # Override with: --params reader.storage_root=pr1-test-bucket/unet3d
+  storage_root: pr1-test-bucket/unet3d
+  
+  # S3 credentials - will be provided via command-line overrides
+  storage_options:
+    access_key_id: ""
+    secret_access_key: ""
+    endpoint_url: ""
+    region: us-east-1
+    s3_force_path_style: true
+  
+  # Small batch size for testing
+  batch_size: 2  # Original: 7
+  read_threads: 4
+  file_shuffle: seed
+  sample_shuffle: seed
+
+train:
+  epochs: 1  # Just 1 epoch for quick test
+  computation_time: 0.001  # Minimal compute simulation
+
+checkpoint:
+  checkpoint_folder: checkpoints/unet3d
+  checkpoint_after_epoch: 5
+  epochs_between_checkpoints: 2
+
+metric:
+  au: 0.90

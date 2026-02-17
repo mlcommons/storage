@@ -8,10 +8,10 @@ framework: pytorch
 workflow:
   generate_data: True
   train: True
-  checkpoint: False
+  checkpoint: True
 
 dataset: 
-  data_folder: s3://s3pytorchconnector
+  data_folder: data/unet3d/
   format: npz
   num_files_train: 168
   num_samples_per_file: 1
