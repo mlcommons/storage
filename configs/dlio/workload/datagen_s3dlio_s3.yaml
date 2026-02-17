@@ -11,8 +11,8 @@ workflow:
 
 # Dataset configuration - defines what data to generate
 dataset:
-  # For S3 generation, specify S3 URI as data_folder
-  data_folder: s3://benchmark/training-data/resnet50
+  # Use relative path - storage_root provides the S3 base URI
+  data_folder: .
   
   # Data generation parameters
   format: npz            # Options: npz, tfrecord, jpeg, png
@@ -24,8 +24,9 @@ dataset:
 
 # Storage configuration for s3dlio
 storage:
-  storage_type: s3dlio   # Use s3dlio for data generation
-  storage_root: s3://benchmark/training-data/resnet50
+  storage_type: s3  # Must be 's3' (enum value)
+  storage_library: s3dlio  # Which S3 library to use (s3dlio, s3torchconnector, minio)
+  storage_root: benchmark/training-data/resnet50  # Bucket/prefix WITHOUT s3:// (code adds protocol)
   
   # Single endpoint
   storage_options:

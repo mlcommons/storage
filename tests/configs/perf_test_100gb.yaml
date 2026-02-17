@@ -1,0 +1,33 @@
+model: unet3d
+
+framework: pytorch
+
+workflow:
+  generate_data: True
+  train: False
+
+dataset:
+  data_folder: /tmp/dlio_perf_data
+  format: npz
+  num_files_train: 100
+  num_samples_per_file: 1000
+  record_length: 1048576  # 1MB per record
+  record_length_stdev: 0
+  record_length_resize: 1048576
+
+reader:
+  read_threads: 4
+  computation_threads: 1
+  
+checkpoint:
+  checkpoint_folder: /tmp/dlio_perf_checkpoint
+
+storage:
+  storage_type: s3_torch
+  storage_root: s3://perf-test
+  storage_options:
+    storage_library: s3torchconnector  # Will be overridden per test
+train:
+  epochs: 1
+  batch_size: 1
+  computation_time: 0.01

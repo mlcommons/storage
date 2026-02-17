@@ -1,0 +1,52 @@
+# Unet3d Data Generation - S3 Object Storage Test with s3dlio
+# Purpose: Generate small NPZ dataset to S3 using s3:// protocol
+# Framework: PyTorch
+# Format: NPZ (compatible with PyTorch)
+
+model: 
+  name: unet3d
+  type: cnn
+  model_size: 499153191
+
+framework: pytorch
+
+workflow:
+  generate_data: True
+  train: False
+  checkpoint: False
+
+dataset: 
+  # Relative path - storage_root provides the S3 base URI
+  data_folder: .
+  format: npz
+  
+  # Small test dataset (10 files instead of 168)
+  num_files_train: 10
+  num_samples_per_file: 1
+  
+  # Smaller file size for quick testing (~10 MB instead of ~140 MB)
+  # Original: 146600628 bytes (~140 MB)
+  record_length_bytes: 10485760  # 10 MB
+  record_length_bytes_stdev: 1048576  # 1 MB variance
+  record_length_bytes_resize: 2097152  # 2 MB resize
+
+# Storage configuration for S3
+storage:
+  # NEW ARCHITECTURE: Separated concerns
+  storage_type: object        # Generic: 'object' for cloud storage (or 's3' for backward compat)
+  protocol: s3                # Specific: which protocol (s3, az, gcs, file)
+  storage_library: s3dlio     # Specific: which client library (s3dlio, s3torchconnector, minio)
+  
+  # Bucket and path separated (NO protocol prefix)
+  storage_root: pr1-test-bucket/unet3d  # Bucket/prefix format: bucket/path
+  # OR use separate fields (future):
+  # bucket: pr1-test-bucket
+  # path: unet3d
+  
+  storage_options:
+    # Credentials will be provided via command-line overrides
+    access_key_id: ""
+    secret_access_key: ""
+    endpoint_url: ""
+    region: us-east-1
+    s3_force_path_style: true
