@@ -4,8 +4,8 @@ model:
 framework: pytorch
 
 workflow:
-  generate_data: True
-  train: False
+  generate_data: False
+  train: True
   checkpoint: False
 
 dataset:
@@ -34,3 +34,16 @@ dataset:
       - name: timestamp
         dtype: float32
         size: 7
+
+reader:
+  data_loader: pytorch
+  batch_size: 64
+  read_threads: 8
+  file_shuffle: seed
+
+train:
+  epochs: 1
+  computation_time: 1.8
+
+metric:
+  au: 0.90
