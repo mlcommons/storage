@@ -1,0 +1,92 @@
+# Example Parquet Configuration Demonstrating Selective Column Reading
+# This configuration shows how to use the 'read' flag to control which columns
+# are read during training while still generating all columns in the data files.
+
+model:
+  name: parquet_selective_read_example
+
+framework: pytorch
+
+workflow:
+  generate_data: True
+  train: True
+  checkpoint: False
+
+dataset:
+  # Output directory for generated parquet files
+  data_folder: data/parquet_selective_read/
+  
+  # Parquet format configuration
+  format: parquet
+  
+  # Dataset size configuration
+  num_files_train: 16
+  num_samples_per_file: 1000
+  
+  # Compression settings
+  compression: snappy
+  
+  # Parquet-specific configuration
+  parquet:
+    row_group_size: 100000
+    generation_batch_size: 10000
+    read_mode: default
+    
+    # Column definitions with selective reading
+    # The 'read' flag controls whether a column is read during training
+    # - read: true (default) - column is read from disk
+    # - read: false - column is skipped during reading (saves I/O bandwidth)
+    # 
+    # ALL columns are generated in the parquet files regardless of the read flag.
+    # The read flag only affects the reading phase, not generation.
+    columns:
+      # Column 1: Label - ALWAYS READ (used for training)
+      - name: label
+        dtype: float32
+        size: 1
+        read: true
+      
+      # Column 2: Primary features - ALWAYS READ (used for training)
+      - name: primary_features
+        dtype: float32
+        size: 128
+        read: true
+      
+      # Column 3: Auxiliary features - SKIPPED during reading
+      # Use case: Features that were generated but are not needed for this
+      # particular training run. Skipping them saves I/O bandwidth.
+      - name: auxiliary_features
+        dtype: float32
+        size: 256
+        read: false
+      
+      # Column 4: Metadata - SKIPPED during reading
+      # Use case: Metadata columns that are useful for data analysis but
+      # not needed during model training.
+      - name: metadata
+        dtype: float32
+        size: 64
+        read: false
+      
+      # Column 5: Dense embeddings - ALWAYS READ (used for training)
+      - name: dense_embedding
+        dtype: float32
+        size: 512
+        read: true
+
+# Reader configuration
+reader:
+  data_loader: pytorch
+  batch_size: 32
+  read_threads: 4
+  computation_threads: 4
+
+# Training configuration
+train:
+  epochs: 1
+  computation_time: 0.001
+
+# Storage configuration
+storage:
+  storage_root: ./
+  storage_type: local_fs

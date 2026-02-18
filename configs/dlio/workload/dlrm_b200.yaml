@@ -4,10 +4,9 @@ model:
 framework: pytorch
 
 workflow:
-  generate_data: True
-  train: False
+  generate_data: False
+  train: True
   checkpoint: False
-
 
 dataset:
   data_folder: data/dlrm/
@@ -19,7 +18,7 @@ dataset:
   
   # Parquet-specific configuration
   parquet:
-    row_group_size: 8192
+    row_group_size: 8192  # Match batch_size for optimal caching
     read_mode: row_group
     
     columns:
@@ -32,3 +31,18 @@ dataset:
       - name: categorical_features
         dtype: float32
         size: 26
+
+# Reader configuration (used when train: True)
+reader:
+  data_loader: pytorch
+  batch_size: 16384
+  prefetch_size: 2  # Increase from default 2 for better I/O overlap
+  read_threads: 4   # Increase parallelism
+  file_shuffle: seed
+
+train:
+  epochs: 1
+  computation_time: 0.0005
+
+metric:
+  au: 0.70
