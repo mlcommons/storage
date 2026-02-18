@@ -1,0 +1,34 @@
+model:
+  name: dlrm
+
+framework: pytorch
+
+workflow:
+  generate_data: True
+  train: False
+  checkpoint: False
+
+
+dataset:
+  data_folder: data/dlrm/
+  format: parquet
+  num_files_train: 1024        # Number of training files to generate
+  num_samples_per_file: 4194304    # Samples per parquet file
+  record_length_bytes: 160
+  compression: none          # Options: snappy, gzip, lz4, zstd, none
+  
+  # Parquet-specific configuration
+  parquet:
+    row_group_size: 8192
+    read_mode: row_group
+    
+    columns:
+      - name: label
+        dtype: float32
+        size: 1
+      - name: numerical_features
+        dtype: float32
+        size: 13
+      - name: categorical_features
+        dtype: float32
+        size: 26
