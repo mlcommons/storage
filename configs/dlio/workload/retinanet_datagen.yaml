@@ -12,7 +12,6 @@ workflow:
 dataset:
   data_folder: data/retinanet/
   format: jpeg
-  num_files_train: 1743042
+  num_files_train: 1170301
   num_samples_per_file: 1
-  record_length_bytes: 153600
-  record_length_bytes_stdev: 51200
+  record_length_bytes: 322957
