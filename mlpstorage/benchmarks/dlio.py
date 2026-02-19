@@ -8,6 +8,7 @@ from mlpstorage.benchmarks.base import Benchmark
 from mlpstorage.config import (CONFIGS_ROOT_DIR, BENCHMARK_TYPES, EXEC_TYPE, MPIRUN, MLPSTORAGE_BIN_NAME,
                                LLM_ALLOWED_VALUES, LLM_SUBSET_PROCS, EXIT_CODE, MODELS, HYDRA_OUTPUT_SUBDIR,
                                LLM_SIZE_BY_RANK)
+from mlpstorage.dependency_check import validate_benchmark_dependencies
 from mlpstorage.rules import calculate_training_data_size, HostInfo, HostMemoryInfo, HostCPUInfo, ClusterInformation
 from mlpstorage.utils import (read_config_from_file, create_nested_dict, update_nested_dict, generate_mpi_prefix_cmd)
 
@@ -33,10 +34,65 @@ class DLIOBenchmark(Benchmark, abc.ABC):
         self.per_host_mem_kB = None
         self.total_mem_kB = None
 
+        # Fail-fast dependency validation (skip for what-if mode)
+        if not getattr(args, 'what_if', False):
+            self._validate_dependencies(args)
+
         if args.command != "datagen":
             self.cluster_information = self.accumulate_host_info(args)
 
+    def _validate_dependencies(self, args):
+        """Validate required external dependencies before benchmark execution.
+
+        Performs fail-fast checks for MPI and DLIO to provide clear error
+        messages early rather than failing during benchmark execution.
+
+        Args:
+            args: Parsed command-line arguments.
+
+        Raises:
+            DependencyError: If required dependencies are not available.
+        """
+        requires_mpi = getattr(args, 'exec_type', None) == EXEC_TYPE.MPI
+        mpi_bin = getattr(args, 'mpi_bin', 'mpirun')
+        dlio_bin_path = getattr(args, 'dlio_bin_path', None)
+
+        mpi_path, dlio_path = validate_benchmark_dependencies(
+            requires_mpi=requires_mpi,
+            requires_dlio=True,
+            mpi_bin=mpi_bin,
+            dlio_bin_path=dlio_bin_path,
+            logger=self.logger
+        )
+
+        # Update base_command_path if DLIO was found in a different location
+        if dlio_path:
+            self.base_command_path = dlio_path
+
     def accumulate_host_info(self, args):
+        """Collect cluster information from all hosts.
+
+        This method first attempts to collect detailed system information via MPI.
+        If MPI collection fails or is not available, it falls back to using the
+        CLI argument `client_host_memory_in_gb` applied uniformly to all hosts.
+
+        Args:
+            args: Parsed command-line arguments.
+
+        Returns:
+            ClusterInformation instance with host details.
+        """
+        # Try MPI-based collection first
+        cluster_info = self._collect_cluster_information()
+        if cluster_info is not None:
+            self.logger.verbose(
+                f'Using MPI-collected cluster info: {cluster_info.num_hosts} hosts, '
+                f'{cluster_info.total_memory_bytes / (1024**3):.1f} GB total memory'
+            )
+            return cluster_info
+
+        # Fall back to CLI args-based collection
+        self.logger.debug('Using CLI args for cluster info (MPI collection not available)')
         host_info_list = []
         per_host_mem = args.client_host_memory_in_gb
         for host in args.hosts:
@@ -46,7 +102,10 @@ class DLIOBenchmark(Benchmark, abc.ABC):
                 memory=HostMemoryInfo.from_total_mem_int(per_host_mem * 1024 * 1024 * 1024)
             )
             host_info_list.append(host_info)
-        return ClusterInformation(host_info_list=host_info_list, logger=self.logger)
+
+        cluster_info = ClusterInformation(host_info_list=host_info_list, logger=self.logger)
+        cluster_info.collection_method = "args"
+        return cluster_info
 
     @property
     def config_name(self):

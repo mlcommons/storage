@@ -1,0 +1,9 @@
+{
+  "tier": "gpu_only",
+  "num_prompts": 492,
+  "total_tokens": 61733,
+  "elapsed_time": 6.46160626411438,
+  "tokens_per_second": 9553.816416027177,
+  "requests_per_second": 76.14205816476392,
+  "backend": "lmcache"
+}

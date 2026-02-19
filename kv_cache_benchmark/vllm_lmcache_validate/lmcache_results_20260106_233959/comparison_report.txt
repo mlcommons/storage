@@ -1,0 +1,78 @@
+================================================================================
+LMCACHE vs KV-CACHE COMPARISON RESULTS
+================================================================================
+
+vLLM Baseline (no LMCache)
+--------------------------------------------------
+  Trials:        3
+  Tokens/sec:    13730.11 +/-    8.84
+  Requests/sec:     28.62 +/-    0.02
+  Elapsed time:     17.47s +/-    0.01s
+
+LMCache GPU-only
+--------------------------------------------------
+  Trials:        3
+  Tokens/sec:     9508.42 +/-   32.22
+  Requests/sec:     75.88 +/-    0.18
+  Elapsed time:      6.48s +/-    0.02s
+
+LMCache CPU Offload
+--------------------------------------------------
+  Trials:        3
+  Tokens/sec:     9410.65 +/-   90.61
+  Requests/sec:     75.15 +/-    0.72
+  Elapsed time:      6.55s +/-    0.06s
+
+kv-cache.py GPU-only (equal capacity)
+--------------------------------------------------
+  Trials:                   3
+  Storage Throughput:        1691.13 +/-  154.59 tok/s
+  Storage Requests/sec:         6.30 +/-    0.59
+  Total I/O Time:              87.98s +/-    8.36s
+
+kv-cache.py GPU+CPU (equal capacity)
+--------------------------------------------------
+  Trials:                   3
+  Storage Throughput:        1545.70 +/-  258.91 tok/s
+  Storage Requests/sec:         5.74 +/-    0.97
+  Total I/O Time:              98.78s +/-   18.96s
+
+kv-cache.py GPU+CPU+NVMe (equal capacity)
+--------------------------------------------------
+  Trials:                   3
+  Storage Throughput:        1175.43 +/-  181.07 tok/s
+  Storage Requests/sec:         4.36 +/-    0.66
+  Total I/O Time:             121.51s +/-   27.68s
+
+kv-cache.py NVMe-only (MLPerf Storage)
+--------------------------------------------------
+  Trials:                   3
+  Storage Throughput:         262.90 +/-    2.40 tok/s
+  Storage Requests/sec:         0.98 +/-    0.01
+  Total I/O Time:             558.70s +/-    3.91s
+
+================================================================================
+COMPARATIVE ANALYSIS
+================================================================================
+
+Note: kv-cache.py tests use EQUAL total cache capacity for fair comparison.
+      Storage Throughput = tokens / total_storage_io_latency (correct metric)
+
+kv-cache.py Storage Tier Comparison (Storage Throughput):
+  GPU ONLY            :  1691.13 tok/s
+  GPU CPU             :  1545.70 tok/s
+  GPU CPU NVME        :  1175.43 tok/s
+  NVME ONLY           :   262.90 tok/s
+
+  Speedup vs NVMe-only:
+    gpu only        : 6.43x
+    gpu cpu         : 5.88x
+    gpu cpu nvme    : 4.47x
+
+LMCache vs kv-cache.py (NOTE: different tools, different purposes):
+  - LMCache: Real GPU inference with KV cache optimization
+  - kv-cache.py: Storage I/O simulator for MLPerf Storage benchmark
+
+  LMCache CPU offload:       9410.65 tok/s (real inference)
+  kv-cache.py GPU+CPU:       1545.70 tok/s (storage I/O sim)
+  Ratio: 6.09x (expected: LMCache faster due to GPU compute)

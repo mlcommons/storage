@@ -1,0 +1,113 @@
+Using random seed: 42
+[ShareGPT] Loaded 319 conversations with 981 turns
+[ShareGPT] Context tokens: mean=122.4, p50=17.0, p95=677.0
+[ShareGPT] Generation tokens: mean=261.9, p50=244.0, p95=633.0
+[KVCacheGenerator] Pre-generating 256 MB noise buffer...
+
+Integrated Multi-User KV Cache Benchmark - MLPerf Edition
+Model: Mistral 7B
+Users: 50
+Duration: 60s
+Seed: 42
+Generation Mode: none (0.0ms/token)
+Features:
+  - Phase-Aware Processing: Enabled
+  - Multi-turn Conversations: Enabled
+  - Prefix Caching: Enabled
+  - RAG Workload: Disabled
+  - Autoscaling: Disabled
+  - QoS Support: Enabled (Interactive/Responsive/Batch)
+  - Trace-Driven (BurstGPT): Disabled
+  - ShareGPT Dataset: Enabled
+================================================================================
+
+ShareGPT Dataset Statistics:
+  Conversations: 319
+  Total Turns: 981
+
+Starting benchmark...
+--------------------------------------------------------------------------------
+
+================================================================================
+BENCHMARK RESULTS - MLPerf KV Cache Storage Benchmark
+Generation Mode: none (0.0ms/token)
+================================================================================
+
+### STORAGE PERFORMANCE ASSESSMENT: PASS âœ“ ###
+  Criteria Passed: 2/2
+  âœ“ CPU RAM P95 < 150ms: 15.70ms (target: 150.00ms)
+  âœ“ Cache Hit Rate > 30%: 92.6% (target: 30.0%)
+
+### OVERALL PERFORMANCE ###
+Requests Completed: 438
+Total Tokens Generated: 118293
+Throughput: 1950.91 tokens/sec
+Requests/sec: 7.22
+
+### END-TO-END LATENCY (Storage I/O + Token Generation) ###
+  Mean: 22496.61 ms
+  P50:  15972.13 ms
+  P95:  61651.50 ms
+  P99:  63370.45 ms
+
+### STORAGE I/O LATENCY (Primary Metric) ###
+  Mean: 189.40 ms
+  P50:  109.66 ms
+  P95:  669.80 ms
+  P99:  1119.20 ms
+
+### STORAGE PERFORMANCE ###
+  Cache Hit Rate: 92.6%
+  Total Read: 75.68 GB
+  Total Write: 6.68 GB
+  Read/Write Ratio: 11.33
+  Read IOPS: 72.90
+  Write IOPS: 6.33
+
+### CACHE TIER DISTRIBUTION ###
+  GPU Entries: 61 (3.20 GB)
+  CPU Entries: 156 (1.71 GB)
+  NVMe Entries: 158
+
+### PHASE-SPECIFIC METRICS ###
+  Prefill Writes: 380
+  Prefill Bytes Written: 6.68 GB
+  Decode Reads: 4374
+  Decode Bytes Read: 75.68 GB
+
+### TIER-SPECIFIC LATENCIES ###
+  GPU Read P95: 46.69 ms
+  GPU Write P95: 136.19 ms
+  CPU Read P95: 15.70 ms
+
+### CACHE TYPE BREAKDOWNS ###
+  System Prompt Hits: 859
+  Common Phrase Hits: 0
+  User Cache Hits: 3471
+  Multi-turn Hits: 44
+
+### PREFIX CACHING ###
+  Prefix Hits: 93
+  Prefix Misses: 345
+  System Prompt Reuse: 93
+  Bytes Saved: 0.08 GB
+
+### MULTI-TURN CONVERSATIONS ###
+  Multi-turn Cache Hits: 44
+  Multi-turn Cache Misses: 257
+  Multi-turn Hit Rate: 14.6%
+
+### QOS LATENCY METRICS (Informational - includes simulated generation) ###
+
+  INTERACTIVE:
+    Requests: 438
+    Latency P95: 61651.50 ms
+    Latency P99: 63370.45 ms
+    SLA Met: âœ— (compliance: 0.0%)
+
+================================================================================
+NOTES:
+  - Pure storage I/O benchmark (no generation simulation)
+================================================================================
+
+Results saved to lmcache_results_20260106_233959/kvcache_gpu_cpu_nvme_trial1.json
