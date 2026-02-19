@@ -1,0 +1,31 @@
+model:
+  name: flux
+
+framework: pytorch
+
+workflow:
+  generate_data: False
+  train: True
+  checkpoint: False
+
+dataset:
+  data_folder: data/flux/
+  format: jpeg
+  num_files_train: 1099776
+  num_samples_per_file: 1
+  record_length_bytes: 307200
+  record_length_bytes_stdev: 102400
+
+reader:
+  data_loader: pytorch
+  batch_size: 8
+  read_threads: 8
+  file_shuffle: seed
+  sample_shuffle: seed
+
+train:
+  epochs: 5
+  computation_time: 0.850
+
+metric:
+  au: 0.80

@@ -1,0 +1,36 @@
+model:
+  name: flux
+
+framework: pytorch
+
+workflow:
+  generate_data: True
+  train: False
+  checkpoint: False
+
+dataset:
+  data_folder: data/flux/
+  format: parquet
+  compression: none
+  num_files_train: 4296
+  num_samples_per_file: 256
+  record_length: 2164832
+
+  parquet:
+    # Parquet-specific field specifications
+    columns:
+      - name: t5_encodings
+        dtype: float32
+        size: 524328
+      - name: clip_encodings
+        dtype: float32
+        size: 409
+      - name: mean
+        dtype: float32
+        size: 8232
+      - name: logvar
+        dtype: float32
+        size: 8232
+      - name: timestamp
+        dtype: float32
+        size: 7

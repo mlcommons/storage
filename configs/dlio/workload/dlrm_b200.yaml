@@ -1,0 +1,48 @@
+model:
+  name: dlrm
+
+framework: pytorch
+
+workflow:
+  generate_data: False
+  train: True
+  checkpoint: False
+
+dataset:
+  data_folder: data/dlrm/
+  format: parquet
+  num_files_train: 1024        # Number of training files to generate
+  num_samples_per_file: 4194304    # Samples per parquet file
+  record_length_bytes: 160
+  compression: none          # Options: snappy, gzip, lz4, zstd, none
+  
+  # Parquet-specific configuration
+  parquet:
+    row_group_size: 8192  # Match batch_size for optimal caching
+    read_mode: row_group
+    
+    columns:
+      - name: label
+        dtype: float32
+        size: 1
+      - name: numerical_features
+        dtype: float32
+        size: 13
+      - name: categorical_features
+        dtype: float32
+        size: 26
+
+# Reader configuration (used when train: True)
+reader:
+  data_loader: pytorch
+  batch_size: 16384
+  prefetch_size: 2  # Increase from default 2 for better I/O overlap
+  read_threads: 4   # Increase parallelism
+  file_shuffle: seed
+
+train:
+  epochs: 1
+  computation_time: 0.0005
+
+metric:
+  au: 0.70
