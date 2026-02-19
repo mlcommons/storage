@@ -1,9 +1,16 @@
 #!/bin/bash
 # Test MLP implementation with s3dlio library
 
-export AWS_ENDPOINT_URL=http://172.16.1.40:9000
-export AWS_ACCESS_KEY_ID=bqVnJNb1wvrFe5Opo08y
-export AWS_SECRET_ACCESS_KEY=psM7Whx9dpOeNFBbErf7gabRhpdvNCUskBqwG38A
+# Verify required environment variables are set
+if [[ -z "$AWS_ACCESS_KEY_ID" ]] || [[ -z "$AWS_SECRET_ACCESS_KEY" ]] || [[ -z "$AWS_ENDPOINT_URL" ]]; then
+    echo "ERROR: Missing required environment variables"
+    echo ""
+    echo "Please set:"
+    echo "  export AWS_ACCESS_KEY_ID=your_access_key"
+    echo "  export AWS_SECRET_ACCESS_KEY=your_secret_key"
+    echo "  export AWS_ENDPOINT_URL=http://your-s3-endpoint:9000"
+    exit 1
+fi
 
 echo "========================================================================"
 echo "TEST: MLP Implementation with s3dlio"

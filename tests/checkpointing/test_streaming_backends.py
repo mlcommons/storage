@@ -10,11 +10,20 @@ import os
 import time
 import argparse
 
-# Set AWS credentials from environment
-os.environ['AWS_ACCESS_KEY_ID'] = 'bqVnJNb1wvrFe5Opo08y'
-os.environ['AWS_SECRET_ACCESS_KEY'] = 'psM7Whx9dpOeNFBbErf7gabRhpdvNCUskBqwG38A'
-os.environ['AWS_ENDPOINT_URL'] = 'http://172.16.1.40:9000'
-os.environ['AWS_REGION'] = 'us-east-1'
+# Verify required environment variables are set
+required_vars = ['AWS_ACCESS_KEY_ID', 'AWS_SECRET_ACCESS_KEY', 'AWS_ENDPOINT_URL']
+missing_vars = [var for var in required_vars if not os.getenv(var)]
+if missing_vars:
+    print(f"ERROR: Missing required environment variables: {', '.join(missing_vars)}")
+    print("\nPlease set:")
+    print("  export AWS_ACCESS_KEY_ID=your_access_key")
+    print("  export AWS_SECRET_ACCESS_KEY=your_secret_key")
+    print("  export AWS_ENDPOINT_URL=http://your-s3-endpoint:9000")
+    sys.exit(1)
+
+# Set default region if not provided
+if not os.getenv('AWS_REGION'):
+    os.environ['AWS_REGION'] = 'us-east-1'
 
 from mlpstorage.checkpointing import StreamingCheckpointing
 
@@ -121,7 +130,7 @@ Examples:
     print("MULTI-LIBRARY S3 STORAGE COMPARISON")
     print("="*80)
     print(f"Test size: {size_gb:.2f} GB")
-    print(f"Endpoint: http://172.16.1.40:9000")
+    print(f"Endpoint: {os.getenv('AWS_ENDPOINT_URL')}")
     print(f"Bucket: chckpt-test1")
     print(f"Buffer alignment: 32 MB (dgen-py optimized)")
     print(f"Max in-flight: {max_in_flight}")
