@@ -28,6 +28,7 @@ venv/
 ENV/
 env/
 .env
+env-*
 
 # uv
 .uv/
@@ -61,6 +62,7 @@ mlperf.history
 .tmp/
 *.bak
 *.backup
+*.OLD_*/
 
 # OS
 .DS_Store
@@ -69,3 +71,4 @@ Thumbs.db
 # Test artifacts
 hydra_log/
 minio_test/
+Test-Backup/

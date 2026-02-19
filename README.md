@@ -4,6 +4,7 @@ MLPerf® Storage is a benchmark suite to characterize the performance of storage
 - [Overview](#overview)
 - [Prerequisite](#prerequisite)
 - [Installation](#installation)
+- [Testing and Demos](#testing-and-demos)
 - [Configuration](#configuration)
 - [Workloads](#workloads)
 	- [U-Net3D](#u-net3d)
@@ -75,6 +76,24 @@ The working directory structure is as follows
 ```
 
 The benchmark simulation will be performed through the [dlio_benchmark](https://github.com/argonne-lcf/dlio_benchmark) code, a benchmark suite for emulating I/O patterns for deep learning workloads. [dlio_benchmark](https://github.com/argonne-lcf/dlio_benchmark) is listed as a prerequisite to a specific git branch. A future release will update the installer to pull DLIO from PyPi. The DLIO configuration of each workload is specified through a yaml file. You can see the configs of all MLPerf Storage workloads in the `configs` folder. 
+
+## Testing and Demos
+
+The `tests/` directory contains validation scripts and demonstrations of new features:
+
+### Quick Demos
+
+- **StreamingCheckpointing Demo**: Run `./tests/scripts/demo_streaming_checkpoint.sh` to see:
+  - dgen-py integration (155x faster data generation)
+  - StreamingCheckpointing (192x memory reduction)
+  - Comparison of old vs new checkpoint methods
+
+- **Backend Validation**: Test multi-library support:
+  ```bash
+  python tests/checkpointing/test_streaming_backends.py --backends s3dlio minio
+  ```
+
+See [tests/README.md](tests/README.md) for complete documentation of all test scripts and demos.
 
 ## Operation
 The benchmarks uses nested commands to select the workload category, workload, and workload parameters.
