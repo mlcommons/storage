@@ -166,8 +166,16 @@ class StreamingCheckpointing:
         stop_event = mp.Event()
         stats_queue = mp.Queue()
         
-        # Start writer process
-        writer_proc = mp.Process(
+        # Start writer process with fork context (Linux only)
+        # Uses 'fork' to inherit environment variables (AWS credentials, etc.)
+        # Falls back to default 'spawn' on non-Linux platforms
+        try:
+            ctx = mp.get_context('fork')
+        except ValueError:
+            # Fork not available (Windows/macOS), use default spawn
+            ctx = mp.get_context()
+        
+        writer_proc = ctx.Process(
             target=self._writer_process,
             args=(buffer_names, self.chunk_size, filepath, total_size_bytes,
                   buffer_queue, stop_event, stats_queue, self.backend, actual_direct_io, self.fadvise_mode),
@@ -178,14 +186,19 @@ class StreamingCheckpointing:
         
         try:
             # Producer loop
+            print(f"[Main] Starting producer at {time.perf_counter():.3f}s")
             gen_time = self._run_producer(
                 buffers, buffer_queue, total_size_bytes,
                 generator, data_generator
             )
+            print(f"[Main] Producer finished at {time.perf_counter():.3f}s")
             
             # Signal completion and wait for writer
+            print(f"[Main] Signaling writer to stop at {time.perf_counter():.3f}s")
             buffer_queue.put(None)
+            print(f"[Main] Waiting for writer to join at {time.perf_counter():.3f}s")
             writer_proc.join(timeout=300)
+            print(f"[Main] Writer joined at {time.perf_counter():.3f}s")
             
             if writer_proc.is_alive():
                 print("[Main] WARNING: Writer timeout!")
@@ -297,7 +310,16 @@ class StreamingCheckpointing:
     def _writer_process(buffer_names, chunk_size, filepath, total_size,
                        buffer_queue, stop_event, stats_queue, backend, use_direct_io, fadvise_mode, **backend_kwargs):
         """Writer process entry point - isolated I/O timing."""
+        import os
+        import sys
+        
         print(f"[Writer] Starting (PID={os.getpid()})")
+        
+        # DEBUG: Check if environment variables are inherited
+        aws_key = os.environ.get('AWS_ACCESS_KEY_ID', 'NOT SET')
+        aws_endpoint = os.environ.get('AWS_ENDPOINT_URL', 'NOT SET')
+        print(f"[Writer] DEBUG: AWS_ACCESS_KEY_ID = {aws_key[:4] if aws_key != 'NOT SET' else 'NOT SET'}***")
+        print(f"[Writer] DEBUG: AWS_ENDPOINT_URL = {aws_endpoint}")
         
         # Attach to shared memory buffers
         buffers = []
@@ -325,7 +347,7 @@ class StreamingCheckpointing:
             stats_queue.put({'error': str(e)})
             for shm in buffers:
                 shm.close()
-            return
+            sys.exit(1)
         
         written = 0
         total_io_time = 0.0
@@ -355,7 +377,7 @@ class StreamingCheckpointing:
         except Exception as e:
             print(f"[Writer] ERROR during write: {e}")
             stats_queue.put({'error': str(e)})
-            return
+            sys.exit(1)
         
         finally:
             # Close writer and get stats
@@ -370,6 +392,13 @@ class StreamingCheckpointing:
                 writer_stats = {'backend': backend or 'auto', 'total_bytes': written}
                 close_time = 0.0
             
+            # Force cleanup of s3dlio resources
+            try:
+                del writer
+                print(f"[Writer] Deleted writer object")
+            except:
+                pass
+            
             # Report stats
             stats_queue.put({
                 'io_time': total_io_time,
@@ -383,6 +412,12 @@ class StreamingCheckpointing:
                 shm.close()
             
             print(f"[Writer] Finished")
+            
+            # Explicitly exit to avoid hanging on background threads/resources  
+            # Use os._exit() instead of sys.exit() to bypass Python cleanup
+            print(f"[Writer] Exiting (PID={os.getpid()})")
+            sys.stdout.flush()
+            os._exit(0)
     
     def _format_results(self, stats, gen_time, total_time, total_size_bytes):
         """Format results for return."""

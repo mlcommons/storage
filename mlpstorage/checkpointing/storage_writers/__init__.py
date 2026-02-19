@@ -82,7 +82,7 @@ class StorageWriterFactory:
             elif backend == 'minio':
                 try:
                     from .minio_writer import MinIOStorageWriter
-                    return MinIOStorageWriter(**kwargs)
+                    return MinIOStorageWriter(uri_or_path, **kwargs)
                 except ImportError:
                     raise ImportError(
                         "minio backend requires minio package. "
@@ -155,4 +155,6 @@ __all__ = [
     'StorageWriterFactory',
     'FileStorageWriter',
     'S3DLIOStorageWriter',
+    'MinIOStorageWriter',
+    'S3TorchConnectorWriter',
 ]
