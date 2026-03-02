@@ -202,6 +202,14 @@ class TestAcceleratorsConstant:
         """ACCELERATORS contains a100."""
         assert 'a100' in ACCELERATORS
 
+    def test_contains_b200(self):
+        """ACCELERATORS contains b200."""
+        assert 'b200' in ACCELERATORS
+
+    def test_contains_mi355(self):
+        """ACCELERATORS contains mi355."""
+        assert 'mi355' in ACCELERATORS
+
 
 class TestLLMModelsConstant:
     """Tests for LLM_MODELS constant."""
