@@ -84,16 +84,15 @@ def add_checkpointing_arguments(parser):
 
         add_dlio_arguments(_parser)
 
-        # MPI options only for run command
-        if _parser == run_benchmark:
-            _parser.add_argument(
-                '--exec-type', '-et',
-                type=EXEC_TYPE,
-                choices=list(EXEC_TYPE),
-                default=EXEC_TYPE.MPI,
-                help=HELP_MESSAGES['exec_type']
-            )
-            add_mpi_arguments(_parser)
+        # Add exec-type and MPI arguments to both datasize and run
+        _parser.add_argument(
+            '--exec-type', '-et',
+            type=EXEC_TYPE,
+            choices=list(EXEC_TYPE),
+            default=EXEC_TYPE.MPI,
+            help=HELP_MESSAGES['exec_type']
+        )
+        add_mpi_arguments(_parser)
 
         add_universal_arguments(_parser)
 

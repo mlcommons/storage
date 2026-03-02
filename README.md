@@ -167,7 +167,7 @@ If the list of clients is passed in for this command the amount of memory is fou
 usage: mlpstorage training datasize [-h] [--hosts HOSTS [HOSTS ...]] --model {cosmoflow,resnet50,unet3d}
                                     --client-host-memory-in-gb CLIENT_HOST_MEMORY_IN_GB [--exec-type {mpi,docker}]
                                     [--mpi-bin {mpirun,mpiexec}] [--oversubscribe] [--allow-run-as-root]
-                                    --max-accelerators MAX_ACCELERATORS --accelerator-type {h100,a100}
+                                    --max-accelerators MAX_ACCELERATORS --accelerator-type {h100,a100,b200,mi355}
                                     --num-client-hosts NUM_CLIENT_HOSTS [--data-dir DATA_DIR]
                                     [--params PARAMS [PARAMS ...]]
                                     [--results-dir RESULTS_DIR] [--loops LOOPS] [--open | --closed] [--debug]
@@ -192,7 +192,7 @@ optional arguments:
                         Max number of simulated accelerators. In multi-host configurations the accelerators will be
                         initiated in a round-robin fashion to ensure equal distribution of simulated accelerator
                         processes
-  --accelerator-type {h100,a100}, -g {h100,a100}
+  --accelerator-type {h100,a100,b200,mi355}, -g {h100,a100,b200,mi355}
                         Accelerator to simulate for the benchmark. A specific accelerator defines the data access
                         sizes and rates for each supported workload
   --num-client-hosts NUM_CLIENT_HOSTS, -nc NUM_CLIENT_HOSTS
@@ -313,7 +313,7 @@ mlpstorage training datagen --hosts 10.117.61.121,10.117.61.165 --model unet3d -
 usage: mlpstorage training run [-h] [--hosts HOSTS [HOSTS ...]] --model {cosmoflow,resnet50,unet3d}
                                --client-host-memory-in-gb CLIENT_HOST_MEMORY_IN_GB [--exec-type {mpi,docker}]
                                [--mpi-bin {mpirun,mpiexec}] [--oversubscribe] [--allow-run-as-root] --num-accelerators
-                               NUM_ACCELERATORS --accelerator-type {h100,a100} --num-client-hosts NUM_CLIENT_HOSTS
+                               NUM_ACCELERATORS --accelerator-type {h100,a100,b200,mi355} --num-client-hosts NUM_CLIENT_HOSTS
                                [--data-dir DATA_DIR] [--ssh-username SSH_USERNAME] [--params PARAMS [PARAMS ...]]
                                [--results-dir RESULTS_DIR] [--loops LOOPS] [--open | --closed] [--debug] [--verbose]
                                [--stream-log-level STREAM_LOG_LEVEL] [--allow-invalid-params] [--what-if]
@@ -336,7 +336,7 @@ optional arguments:
                         Number of simulated accelerators. In multi-host configurations the accelerators will be
                         initiated in a round-robin fashion to ensure equal distribution of simulated accelerator
                         processes
-  --accelerator-type {h100,a100}, -g {h100,a100}
+  --accelerator-type {h100,a100,b200,mi355}, -g {h100,a100,b200,mi355}
                         Accelerator to simulate for the benchmark. A specific accelerator defines the data access
                         sizes and rates for each supported workload
   --num-client-hosts NUM_CLIENT_HOSTS, -nc NUM_CLIENT_HOSTS

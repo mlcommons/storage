@@ -626,7 +626,7 @@ dataset:
 # Reader configuration (used when train: True)
 reader:
   data_loader: pytorch
-  batch_size: 16384
+  batch_size: 12288
   prefetch_size: 2  # Increase from default 2 for better I/O overlap
   read_threads: 4   # Increase parallelism
   file_shuffle: seed

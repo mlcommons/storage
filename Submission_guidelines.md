@@ -348,7 +348,7 @@ The total compute time can be derived from the batch size, total dataset size, n
 total_compute_time = (records_per_file * total_files) / simulated_accelerators / batch_size * computation_time * epochs.
 ```
 
-*NOTE: The sleep time has been determined by running the actual MLPerf training workloads including the compute step on real hardware and is dependent on the accelerator type. In this version of the benchmark we include sleep times for **NVIDIA A100 and H100 GPUs**. We plan on expanding the measurements to different accelerator types in future releases.*
+*NOTE: The sleep time has been determined by running the actual MLPerf training workloads including the compute step on real hardware and is dependent on the accelerator type. In this version of the benchmark we include sleep times for **NVIDIA A100, H100, and B200 GPUs, as well as AMD MI355 accelerators**. We plan on expanding the measurements to different accelerator types in future releases.*
 
 ### 4.2. Checkpoint Workloads
 

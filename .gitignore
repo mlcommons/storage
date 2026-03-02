@@ -29,3 +29,11 @@ htmlcov/
 # OS files
 .DS_Store
 Thumbs.db
+
+
+# Coding Agents
+.agent/
+.roo/
+.vscode/
+CLAUDE.md
+.roomodes

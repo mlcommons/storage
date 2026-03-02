@@ -67,9 +67,35 @@ def calculate_training_data_size(args, cluster_information, dataset_params, read
 
     # Required Minimum Dataset size is 5x the total client memory
     dataset_size_bytes = 5 * total_mem_bytes
-    file_size_bytes = dataset_params['num_samples_per_file'] * dataset_params['record_length_bytes']
 
-    min_num_files_by_bytes = dataset_size_bytes // file_size_bytes
+    # Calculate record length
+    if 'record_length_bytes' in dataset_params:
+        record_length_bytes = dataset_params['record_length_bytes']
+    elif dataset_params.get('format') == 'parquet' and 'parquet' in dataset_params:
+        # Calculate record length from parquet columns
+        record_length_bytes = 0
+        columns = dataset_params['parquet'].get('columns', [])
+        for col in columns:
+            dtype = col.get('dtype', 'float32')
+            size = int(col.get('size', 1))
+            
+            if dtype == 'float64' or dtype == 'int64':
+                record_length_bytes += size * 8
+            elif dtype == 'uint8' or dtype == 'bool':
+                record_length_bytes += size * 1
+            else:
+                # Default to float32/int32 (4 bytes)
+                record_length_bytes += size * 4
+    else:
+        record_length_bytes = 0
+        logger.warning("Could not determine record_length_bytes. Defaulting to 0.")
+
+    file_size_bytes = dataset_params['num_samples_per_file'] * record_length_bytes
+
+    if file_size_bytes > 0:
+        min_num_files_by_bytes = dataset_size_bytes // file_size_bytes
+    else:
+        min_num_files_by_bytes = 0
     num_samples_by_bytes = min_num_files_by_bytes * dataset_params['num_samples_per_file']
     min_samples = 500 * num_processes * reader_params['batch_size']
     min_num_files_by_samples = min_samples // dataset_params['num_samples_per_file']
