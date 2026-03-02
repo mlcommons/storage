@@ -12,13 +12,13 @@ dataset:
   data_folder: data/dlrm/
   format: parquet
   num_files_train: 1024        # Number of training files to generate
-  num_samples_per_file: 4194304    # Samples per parquet file
+  num_samples_per_file: 4718592    # Samples per parquet file
   record_length_bytes: 761
   compression: none          # Options: snappy, gzip, lz4, zstd, none
   
   # Parquet-specific configuration
   parquet:
-    row_group_size: 8192  # Match batch_size for optimal caching
+    row_group_size: 6144  # Match batch_size for optimal caching
     read_mode: row_group
     
     columns:
@@ -633,7 +633,7 @@ reader:
 
 train:
   epochs: 1
-  computation_time: 0.0005
+  computation_time: 0.000375
 
 metric:
   au: 0.70

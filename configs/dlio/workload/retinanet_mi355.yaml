@@ -18,14 +18,14 @@ dataset:
 
 reader:
   data_loader: pytorch
-  batch_size: 32
+  batch_size: 36
   read_threads: 8
   file_shuffle: seed
   sample_shuffle: seed
 
 train:
   epochs: 8
-  computation_time: 0.0634
+  computation_time: 0.071325
 
 metric:
   au: 0.85
