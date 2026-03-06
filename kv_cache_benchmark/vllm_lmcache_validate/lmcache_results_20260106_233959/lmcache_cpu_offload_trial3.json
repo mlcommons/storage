@@ -1,0 +1,10 @@
+{
+  "tier": "cpu_offload",
+  "num_prompts": 492,
+  "total_tokens": 61605,
+  "elapsed_time": 6.618597030639648,
+  "tokens_per_second": 9307.863844076066,
+  "requests_per_second": 74.33599563810445,
+  "backend": "lmcache",
+  "cpu_mem_gb": 32
+}

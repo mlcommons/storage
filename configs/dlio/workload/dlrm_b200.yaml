@@ -1,0 +1,639 @@
+model:
+  name: dlrm
+
+framework: pytorch
+
+workflow:
+  generate_data: False
+  train: True
+  checkpoint: False
+
+dataset:
+  data_folder: data/dlrm/
+  format: parquet
+  num_files_train: 1024        # Number of training files to generate
+  num_samples_per_file: 4718592    # Samples per parquet file
+  record_length_bytes: 761
+  compression: none          # Options: snappy, gzip, lz4, zstd, none
+  
+  # Parquet-specific configuration
+  parquet:
+    row_group_size: 6144  # Match batch_size for optimal caching
+    read_mode: row_group
+    
+    columns:
+      - name: feature_000
+        dtype: float16
+        read: false
+      - name: feature_001
+        dtype: float16
+        read: false
+      - name: feature_002
+        dtype: float64
+        read: false
+      - name: feature_003
+        dtype: float64
+        read: false
+      - name: feature_004
+        dtype: float32
+        read: false
+      - name: feature_005
+        dtype: float16
+        read: false
+      - name: feature_006
+        dtype: float32
+        read: false
+      - name: feature_007
+        dtype: int8
+        read: false
+      - name: feature_008
+        dtype: float16
+        read: false
+      - name: feature_009
+        dtype: int8
+        read: false
+      - name: feature_010
+        dtype: float32
+        read: false
+      - name: feature_011
+        dtype: float32
+        read: true
+      - name: feature_012
+        dtype: float64
+        read: false
+      - name: feature_013
+        dtype: float32
+        read: false
+      - name: feature_014
+        dtype: int8
+        read: false
+      - name: feature_015
+        dtype: float16
+        read: false
+      - name: feature_016
+        dtype: float32
+        read: false
+      - name: feature_017
+        dtype: float32
+        read: true
+      - name: feature_018
+        dtype: float32
+        read: true
+      - name: feature_019
+        dtype: float16
+        read: false
+      - name: feature_020
+        dtype: float64
+        read: true
+      - name: feature_021
+        dtype: float64
+        read: false
+      - name: feature_022
+        dtype: float64
+        read: false
+      - name: feature_023
+        dtype: float64
+        read: false
+      - name: feature_024
+        dtype: float16
+        read: false
+      - name: feature_025
+        dtype: float32
+        read: true
+      - name: feature_026
+        dtype: float32
+        read: false
+      - name: feature_027
+        dtype: float16
+        read: false
+      - name: feature_028
+        dtype: float16
+        read: false
+      - name: feature_029
+        dtype: float32
+        read: false
+      - name: feature_030
+        dtype: float64
+        read: false
+      - name: feature_031
+        dtype: float32
+        read: true
+      - name: feature_032
+        dtype: float64
+        read: false
+      - name: feature_033
+        dtype: float32
+        read: false
+      - name: feature_034
+        dtype: float16
+        read: false
+      - name: feature_035
+        dtype: float16
+        read: false
+      - name: feature_036
+        dtype: float64
+        read: false
+      - name: feature_037
+        dtype: int8
+        read: false
+      - name: feature_038
+        dtype: int8
+        read: false
+      - name: feature_039
+        dtype: int8
+        read: false
+      - name: feature_040
+        dtype: float16
+        read: false
+      - name: feature_041
+        dtype: float32
+        read: true
+      - name: feature_042
+        dtype: float16
+        read: false
+      - name: feature_043
+        dtype: float32
+        read: true
+      - name: feature_044
+        dtype: float64
+        read: false
+      - name: feature_045
+        dtype: int8
+        read: false
+      - name: feature_046
+        dtype: float64
+        read: false
+      - name: feature_047
+        dtype: float64
+        read: false
+      - name: feature_048
+        dtype: float64
+        read: false
+      - name: feature_049
+        dtype: float32
+        read: true
+      - name: feature_050
+        dtype: float32
+        read: false
+      - name: feature_051
+        dtype: int8
+        read: false
+      - name: feature_052
+        dtype: int8
+        read: false
+      - name: feature_053
+        dtype: float32
+        read: true
+      - name: feature_054
+        dtype: float32
+        read: false
+      - name: feature_055
+        dtype: float32
+        read: false
+      - name: feature_056
+        dtype: int8
+        read: false
+      - name: feature_057
+        dtype: float32
+        read: false
+      - name: feature_058
+        dtype: float16
+        read: true
+      - name: feature_059
+        dtype: float32
+        read: true
+      - name: feature_060
+        dtype: float64
+        read: false
+      - name: feature_061
+        dtype: float16
+        read: false
+      - name: feature_062
+        dtype: float64
+        read: false
+      - name: feature_063
+        dtype: int8
+        read: false
+      - name: feature_064
+        dtype: float32
+        read: false
+      - name: feature_065
+        dtype: float16
+        read: false
+      - name: feature_066
+        dtype: int8
+        read: false
+      - name: feature_067
+        dtype: float32
+        read: true
+      - name: feature_068
+        dtype: float16
+        read: true
+      - name: feature_069
+        dtype: float32
+        read: false
+      - name: feature_070
+        dtype: float16
+        read: false
+      - name: feature_071
+        dtype: float32
+        read: true
+      - name: feature_072
+        dtype: float16
+        read: false
+      - name: feature_073
+        dtype: float32
+        read: false
+      - name: feature_074
+        dtype: float32
+        read: true
+      - name: feature_075
+        dtype: float64
+        read: true
+      - name: feature_076
+        dtype: float16
+        read: false
+      - name: feature_077
+        dtype: int8
+        read: false
+      - name: feature_078
+        dtype: float32
+        read: false
+      - name: feature_079
+        dtype: float64
+        read: false
+      - name: feature_080
+        dtype: int8
+        read: false
+      - name: feature_081
+        dtype: int8
+        read: false
+      - name: feature_082
+        dtype: float32
+        read: false
+      - name: feature_083
+        dtype: float32
+        read: false
+      - name: feature_084
+        dtype: float16
+        read: false
+      - name: feature_085
+        dtype: int8
+        read: false
+      - name: feature_086
+        dtype: float16
+        read: false
+      - name: feature_087
+        dtype: int8
+        read: false
+      - name: feature_088
+        dtype: float32
+        read: true
+      - name: feature_089
+        dtype: int8
+        read: false
+      - name: feature_090
+        dtype: float32
+        read: true
+      - name: feature_091
+        dtype: float32
+        read: true
+      - name: feature_092
+        dtype: float16
+        read: true
+      - name: feature_093
+        dtype: float32
+        read: true
+      - name: feature_094
+        dtype: float64
+        read: true
+      - name: feature_095
+        dtype: float64
+        read: false
+      - name: feature_096
+        dtype: float32
+        read: true
+      - name: feature_097
+        dtype: float16
+        read: true
+      - name: feature_098
+        dtype: int8
+        read: false
+      - name: feature_099
+        dtype: float16
+        read: false
+      - name: feature_100
+        dtype: float16
+        read: false
+      - name: feature_101
+        dtype: float64
+        read: false
+      - name: feature_102
+        dtype: float16
+        read: false
+      - name: feature_103
+        dtype: float32
+        read: false
+      - name: feature_104
+        dtype: float64
+        read: false
+      - name: feature_105
+        dtype: float16
+        read: false
+      - name: feature_106
+        dtype: float16
+        read: false
+      - name: feature_107
+        dtype: float32
+        read: false
+      - name: feature_108
+        dtype: float64
+        read: false
+      - name: feature_109
+        dtype: float32
+        read: false
+      - name: feature_110
+        dtype: float64
+        read: false
+      - name: feature_111
+        dtype: float64
+        read: false
+      - name: feature_112
+        dtype: int8
+        read: false
+      - name: feature_113
+        dtype: float16
+        read: false
+      - name: feature_114
+        dtype: float16
+        read: false
+      - name: feature_115
+        dtype: int8
+        read: false
+      - name: feature_116
+        dtype: int8
+        read: true
+      - name: feature_117
+        dtype: float64
+        read: true
+      - name: feature_118
+        dtype: float32
+        read: false
+      - name: feature_119
+        dtype: int8
+        read: false
+      - name: feature_120
+        dtype: float16
+        read: false
+      - name: feature_121
+        dtype: float16
+        read: false
+      - name: feature_122
+        dtype: int8
+        read: false
+      - name: feature_123
+        dtype: int8
+        read: false
+      - name: feature_124
+        dtype: int8
+        read: false
+      - name: feature_125
+        dtype: float16
+        read: false
+      - name: feature_126
+        dtype: int8
+        read: false
+      - name: feature_127
+        dtype: int8
+        read: false
+      - name: feature_128
+        dtype: float32
+        read: false
+      - name: feature_129
+        dtype: int8
+        read: false
+      - name: feature_130
+        dtype: float16
+        read: false
+      - name: feature_131
+        dtype: float32
+        read: false
+      - name: feature_132
+        dtype: float64
+        read: false
+      - name: feature_133
+        dtype: float16
+        read: false
+      - name: feature_134
+        dtype: float16
+        read: false
+      - name: feature_135
+        dtype: float64
+        read: false
+      - name: feature_136
+        dtype: float16
+        read: false
+      - name: feature_137
+        dtype: float32
+        read: true
+      - name: feature_138
+        dtype: float64
+        read: false
+      - name: feature_139
+        dtype: float64
+        read: false
+      - name: feature_140
+        dtype: float16
+        read: false
+      - name: feature_141
+        dtype: float32
+        read: true
+      - name: feature_142
+        dtype: int8
+        read: false
+      - name: feature_143
+        dtype: int8
+        read: false
+      - name: feature_144
+        dtype: float64
+        read: false
+      - name: feature_145
+        dtype: float32
+        read: false
+      - name: feature_146
+        dtype: float64
+        read: false
+      - name: feature_147
+        dtype: float32
+        read: true
+      - name: feature_148
+        dtype: float64
+        read: false
+      - name: feature_149
+        dtype: float64
+        read: false
+      - name: feature_150
+        dtype: int8
+        read: false
+      - name: feature_151
+        dtype: int8
+        read: false
+      - name: feature_152
+        dtype: int8
+        read: false
+      - name: feature_153
+        dtype: float64
+        read: false
+      - name: feature_154
+        dtype: float64
+        read: true
+      - name: feature_155
+        dtype: float32
+        read: true
+      - name: feature_156
+        dtype: float32
+        read: false
+      - name: feature_157
+        dtype: int8
+        read: false
+      - name: feature_158
+        dtype: float32
+        read: true
+      - name: feature_159
+        dtype: float16
+        read: false
+      - name: feature_160
+        dtype: float32
+        read: true
+      - name: feature_161
+        dtype: float16
+        read: false
+      - name: feature_162
+        dtype: float32
+        read: true
+      - name: feature_163
+        dtype: float16
+        read: false
+      - name: feature_164
+        dtype: float64
+        read: false
+      - name: feature_165
+        dtype: float16
+        read: false
+      - name: feature_166
+        dtype: float64
+        read: false
+      - name: feature_167
+        dtype: float16
+        read: false
+      - name: feature_168
+        dtype: float32
+        read: false
+      - name: feature_169
+        dtype: int8
+        read: true
+      - name: feature_170
+        dtype: float64
+        read: false
+      - name: feature_171
+        dtype: float16
+        read: false
+      - name: feature_172
+        dtype: int8
+        read: false
+      - name: feature_173
+        dtype: float64
+        read: false
+      - name: feature_174
+        dtype: int8
+        read: false
+      - name: feature_175
+        dtype: int8
+        read: false
+      - name: feature_176
+        dtype: int8
+        read: false
+      - name: feature_177
+        dtype: int8
+        read: false
+      - name: feature_178
+        dtype: float16
+        read: false
+      - name: feature_179
+        dtype: float16
+        read: false
+      - name: feature_180
+        dtype: int8
+        read: true
+      - name: feature_181
+        dtype: float64
+        read: false
+      - name: feature_182
+        dtype: float64
+        read: false
+      - name: feature_183
+        dtype: float64
+        read: false
+      - name: feature_184
+        dtype: float16
+        read: false
+      - name: feature_185
+        dtype: float64
+        read: false
+      - name: feature_186
+        dtype: int8
+        read: true
+      - name: feature_187
+        dtype: int8
+        read: false
+      - name: feature_188
+        dtype: float16
+        read: false
+      - name: feature_189
+        dtype: float32
+        read: true
+      - name: feature_190
+        dtype: float64
+        read: false
+      - name: feature_191
+        dtype: int8
+        read: false
+      - name: feature_192
+        dtype: float64
+        read: false
+      - name: feature_193
+        dtype: float32
+        read: false
+      - name: feature_194
+        dtype: float64
+        read: false
+      - name: feature_195
+        dtype: float32
+        read: true
+      - name: feature_196
+        dtype: float32
+        read: false
+      - name: feature_197
+        dtype: float64
+        read: false
+      - name: feature_198
+        dtype: float64
+        read: false
+      - name: feature_199
+        dtype: float16
+        read: false
+
+# Reader configuration (used when train: True)
+reader:
+  data_loader: pytorch
+  batch_size: 12288
+  prefetch_size: 2  # Increase from default 2 for better I/O overlap
+  read_threads: 4   # Increase parallelism
+  file_shuffle: seed
+
+train:
+  epochs: 1
+  computation_time: 0.000375
+
+metric:
+  au: 0.70

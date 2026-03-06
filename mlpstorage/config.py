@@ -21,9 +21,9 @@ def check_env(setting, default_value=None):
             value_from_environment = False
 
     set_value = None
-    if value_from_environment:
+    if value_from_environment is not None:
         set_value = value_from_environment
-    elif default_value:
+    elif default_value is not None:
         set_value = default_value
     else:
         set_value = None
@@ -48,11 +48,16 @@ HYDRA_OUTPUT_SUBDIR = "dlio_config"
 COSMOFLOW = "cosmoflow"
 RESNET = "resnet50"
 UNET = "unet3d"
-MODELS = [COSMOFLOW, RESNET, UNET]
+DLRM = "dlrm"
+RETINANET = "retinanet"
+FLUX = "flux"
+MODELS = [COSMOFLOW, RESNET, UNET, DLRM, RETINANET, FLUX]
 
 H100 = "h100"
 A100 = "a100"
-ACCELERATORS = [H100, A100]
+B200 = "b200"
+MI355 = "mi355"
+ACCELERATORS = [H100, A100, B200, MI355]
 
 OPEN = "open"
 CLOSED = "closed"
@@ -86,6 +91,24 @@ CHECKPOINT_RANKS_STRINGS = "\n    ".join(
     [f'{key}: CLOSED in [{value[0]} || {value[3]}], OPEN allows a multiple of {value[2]}' for key, value in LLM_ALLOWED_VALUES.items()])
 
 LLM_MODELS_STRINGS = "\n    ".join(LLM_MODELS)
+
+# KV Cache benchmark model configurations
+KVCACHE_MODELS = [
+    'tiny-1b',
+    'mistral-7b',
+    'llama2-7b',
+    'llama3.1-8b',
+    'llama3.1-70b-instruct',
+]
+
+# KV Cache performance profiles
+KVCACHE_PERFORMANCE_PROFILES = ['latency', 'throughput']
+
+# KV Cache generation modes
+KVCACHE_GENERATION_MODES = ['none', 'fast', 'realistic']
+
+# Default runtime for KV Cache benchmark (seconds)
+KVCACHE_DEFAULT_DURATION = 60
 
 MPIRUN = "mpirun"
 MPIEXEC = "mpiexec"
@@ -137,6 +160,7 @@ class BENCHMARK_TYPES(enum.Enum):
     training = "training"
     vector_database = "vector_database"
     checkpointing = "checkpointing"
+    kv_cache = "kv_cache"
 
 # Enum for supported search metric types of COSINE, L2, IP
 SEARCH_METRICS = ["COSINE", "L2", "IP"]
