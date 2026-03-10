@@ -316,10 +316,8 @@ class NVMeBackend(StorageBackend):
 
     def delete(self, key: str):
         path = self._get_path(key)
-        if path.exists():
-            path.unlink()
-        if key in self.metadata:
-            del self.metadata[key]
+        path.unlink(missing_ok=True)
+        self.metadata.pop(key, None)
 
     def clear(self):
         """Deletes all .npy files from the cache directory."""

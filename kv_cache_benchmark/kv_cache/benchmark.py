@@ -792,6 +792,7 @@ class IntegratedBenchmark:
         state = {'written_bytes': 0, 'seq': 0, 'last_report': 0}
 
         def worker():
+            consecutive_failures = 0
             while True:
                 with lock:
                     if state['written_bytes'] >= target_bytes:
@@ -803,6 +804,7 @@ class IntegratedBenchmark:
                 success, tier, latency = self.cache.allocate_cache(key, tokens_per_entry)
 
                 if success:
+                    consecutive_failures = 0
                     entry = self.cache.cache_entries.get(key)
                     if entry:
                         with lock:
@@ -811,6 +813,13 @@ class IntegratedBenchmark:
                             if gb_written - state['last_report'] >= 10:
                                 print(f"  Preconditioning progress: {gb_written:.1f} / {target_gb:.1f} GB")
                                 state['last_report'] = gb_written
+                else:
+                    consecutive_failures += 1
+                    if consecutive_failures > 50:
+                        with lock:
+                            print(f"  WARNING: Preconditioning stalled at {state['written_bytes']/1024**3:.1f} GB — filesystem full. Continuing.")
+                        return
+                    time.sleep(0.1)
 
         with ThreadPoolExecutor(max_workers=num_threads) as executor:
             futures = [executor.submit(worker) for _ in range(num_threads)]
