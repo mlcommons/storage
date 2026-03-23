@@ -211,6 +211,7 @@ class MultiTierCache:
                  gpu_memory_gb: float,
                  cpu_memory_gb: float,
                  cache_dir: str = None,
+                 use_mmap: bool = False,
                  eviction_policy: str = 'lru',
                  performance_profile: str = 'latency',
                  seed: Optional[int] = None,
@@ -237,7 +238,7 @@ class MultiTierCache:
             logger.warning(f"Could not initialize GPU backend: {e}")
 
         self.backends['cpu'] = CPUMemoryBackend()
-        self.backends['nvme'] = NVMeBackend(base_path=cache_dir)
+        self.backends['nvme'] = NVMeBackend(base_path=cache_dir, use_mmap=use_mmap)
 
         self.generator = KVCacheGenerator(model_config, global_seed=self.seed)
 

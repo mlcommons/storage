@@ -244,6 +244,9 @@ def main():
                         help='The amount of CPU memory (RAM) to allocate for the cache in GB.')
     parser.add_argument('--cache-dir', type=str, default=None,
                         help='The directory to use for the NVMe cache tier.')
+    parser.add_argument('--use-mmap', action='store_true',
+                        help='Use memory-mapped loading (np.load(mmap_mode="r") + np.array()). '
+                             'Default is False (direct loading with np.load() only), which is faster for multi-threaded workloads.')
     parser.add_argument('--generation-mode', type=str, default='realistic', choices=[g.value for g in GenerationMode],
                         help='The token generation speed simulation mode.')
     parser.add_argument('--performance-profile', type=str, default='latency', choices=['latency', 'throughput'],
@@ -352,6 +355,7 @@ def main():
         cpu_memory_gb=args.cpu_mem_gb,
         duration_seconds=args.duration,
         cache_dir=args.cache_dir,
+        use_mmap=args.use_mmap,
         enable_autoscaling=args.enable_autoscaling,
         autoscaler_mode=args.autoscaler_mode,
         target_saturation=args.target_saturation,

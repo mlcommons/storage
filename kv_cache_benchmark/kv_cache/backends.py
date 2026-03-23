@@ -238,8 +238,22 @@ class NVMeBackend(StorageBackend):
     This is the third and slowest tier, used for offloading from CPU RAM.
     """
 
-    def __init__(self, base_path: str = None):
+    def __init__(self, base_path: str = None, use_mmap: bool = False):
+        """
+        Initialize NVMe backend.
+
+        Args:
+            base_path: Directory for cache files. If None, uses temp directory.
+            use_mmap: If True, use memory-mapped loading (np.load(mmap_mode='r') + np.array()).
+                     If False (default), use direct loading (np.load() only).
+
+        Note:
+            - use_mmap=False: Faster for multi-threaded workloads (avoids memory allocation contention)
+            - use_mmap=True: May be faster for single-threaded or when memory is constrained
+        """
         self.temp_dir = None
+        self.use_mmap = use_mmap
+
         if base_path is None:
             self.temp_dir = tempfile.TemporaryDirectory(prefix="kv_cache_")
             self.base_path = Path(self.temp_dir.name)
@@ -304,14 +318,29 @@ class NVMeBackend(StorageBackend):
             pass
 
         pre_load = time.perf_counter()
-        data = np.load(path, allow_pickle=False)
-        load_done = time.perf_counter()
-        data = np.array(data)
-        copy_done = time.perf_counter()
 
-        device_time = load_done - pre_load
-        host_time = (pre_load - start) + (copy_done - load_done)
-        total = copy_done - start
+        if self.use_mmap:
+            # Memory-mapped mode: Load as mmap, then copy to array
+            # This can be faster in single-threaded scenarios or when memory is constrained
+            data = np.load(path, mmap_mode='r', allow_pickle=False)
+            mmap_done = time.perf_counter()
+            data = np.array(data)  # Copy from mmap to writable array
+            copy_done = time.perf_counter()
+
+            # Device time = mmap creation + copy (actual data movement)
+            device_time = (mmap_done - pre_load) + (copy_done - mmap_done)
+            host_time = pre_load - start  # Just cache drop overhead
+            total = copy_done - start
+        else:
+            # Direct mode (default): Load directly into memory
+            # This is faster for multi-threaded workloads (avoids memory allocation contention)
+            data = np.load(path, mmap_mode=None, allow_pickle=False)
+            load_done = time.perf_counter()
+
+            device_time = load_done - pre_load  # Disk I/O + deserialization time
+            host_time = pre_load - start  # Just cache drop overhead
+            total = load_done - start
+
         return data, StorageBackend.IOTiming(total=total, device=device_time, host=host_time)
 
     def delete(self, key: str):
