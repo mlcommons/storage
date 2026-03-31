@@ -200,7 +200,7 @@ def add_universal_arguments(parser):
         nargs="?",
         type=str,
         const="s3",
-        choices=["s3", "azure", "gcs"],
+        choices=["s3"],
         help="Use the given Object API as the data access method, defaults to S3"
     )
 
