@@ -1,0 +1,87 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mlpstorage"
+version = "2.0.0b1"
+description = "MLPerf Storage Benchmark Suite"
+readme = "README.md"
+authors = [
+    {name = "MLCommons Storage Working Group"}
+]
+requires-python = ">=3.12, <3.13"
+dependencies = [
+    "psutil>=5.9",
+    "pyarrow",
+    "pyyaml>=6.0",
+    "packaging>=21.0",  # For PEP 440 version parsing in lockfile validation
+    "rich>=13.0",  # Progress indication (UX-04)
+]
+
+[project.optional-dependencies]
+dlio = [
+    "dlio-benchmark @ git+https://github.com/mlcommons/DLIO_local_changes.git",
+]
+test = [
+    "pytest>=7.0",
+    "pytest-cov>=4.0",
+    "pytest-mock>=3.0",
+]
+# Full installation with DLIO for running benchmarks.
+# Note: DLIO depends on PyTorch. The [tool.uv] configuration ensures
+# CPU-only PyTorch wheels are used to avoid GPU dependencies.
+full = [
+    "dlio-benchmark @ git+https://github.com/mlcommons/DLIO_local_changes.git",
+]
+
+[project.urls]
+"Homepage" = "https://github.com/mlcommons/storage"
+"Bug Tracker" = "https://github.com/mlcommons/storage/issues"
+
+[tool.setuptools]
+packages = {find = {}}
+
+[tool.setuptools.package-data]
+"mlpstorage" = ["../configs/dlio/workload/*.yaml"]
+
+[project.scripts]
+mlpstorage = 'mlpstorage.main:main'
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --setup-show"
+filterwarnings = [
+    "ignore::DeprecationWarning",
+]
+
+[tool.coverage.run]
+source = ["mlpstorage"]
+omit = ["*/tests/*", "*/__pycache__/*"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "def __repr__",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+]
+
+# =============================================================================
+# UV Configuration for CPU-only builds
+# =============================================================================
+# MLPerf Storage is a storage benchmark and does not require GPU support.
+# These settings ensure CPU-only PyTorch wheels are used, avoiding large
+# CUDA downloads and nvidia-* package dependencies.
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu" }]
+torchvision = [{ index = "pytorch-cpu" }]
+torchaudio = [{ index = "pytorch-cpu" }]
