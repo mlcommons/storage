@@ -105,7 +105,19 @@ def parse_arguments():
     # Apply YAML config file overrides if specified
     if hasattr(parsed_args, 'config_file') and parsed_args.config_file:
         parsed_args = apply_yaml_config_overrides(parsed_args)
-    
+
+    # Consolidate the data access protocol into a single field
+    if parsed_args.file:
+        parsed_args.data_access_protocol = "file"
+    else:
+        parsed_args.data_access_protocol = parsed_args.object
+    del parsed_args.file
+    del parsed_args.object
+
+    """
+    print(f"Arguments found: {parsed_args}")
+    """
+
     validate_args(parsed_args)
     return parsed_args
 
