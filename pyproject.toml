@@ -10,7 +10,7 @@ readme = "README.md"
 authors = [
     {name = "MLCommons Storage Working Group"}
 ]
-requires-python = ">=3.10.0"
+requires-python = ">=3.12, <3.13"
 dependencies = [
     "psutil>=5.9",
     "pyarrow",
@@ -21,7 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 dlio = [
-    "dlio-benchmark @ git+https://github.com/wvaske/dlio_benchmark.git@parquet-support",
+    "dlio-benchmark @ git+https://github.com/mlcommons/DLIO_local_changes.git",
 ]
 test = [
     "pytest>=7.0",
@@ -32,7 +32,7 @@ test = [
 # Note: DLIO depends on PyTorch. The [tool.uv] configuration ensures
 # CPU-only PyTorch wheels are used to avoid GPU dependencies.
 full = [
-    "dlio-benchmark @ git+https://github.com/wvaske/dlio_benchmark.git@parquet-support",
+    "dlio-benchmark @ git+https://github.com/mlcommons/DLIO_local_changes.git",
 ]
 
 [project.urls]
