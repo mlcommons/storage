@@ -203,7 +203,7 @@ class TrainingBenchmark(DLIOBenchmark):
         if self.args.command not in ("datagen", "datasize"):
             self.verify_benchmark()
 
-        if self.args.command != "datasize":
+        if self.args.command != "datasize" and self.args.data_dir:
             # The datasize command uses --data-dir and needs to generate a command that also calls --data-dir
             # The add_datadir_param would convert --data-dir to --dataset.data_folder which is invalid to
             # mlpstorage.
@@ -212,19 +212,30 @@ class TrainingBenchmark(DLIOBenchmark):
 
     def add_datadir_param(self):
         self.params_dict['dataset.data_folder'] = self.args.data_dir
+        # Detect object storage: if storage.storage_type is not 'local' (or unset),
+        # data_folder is an S3/object-store key prefix — never a local filesystem path.
+        storage_type = self.params_dict.get('storage.storage_type', 'local')
+        is_object_storage = storage_type != 'local'
+
         if not any([self.args.data_dir.endswith(m) for m in MODELS]):
-            # Add the model to the data dir path and make sure it exists
+            # Append the model name to the data dir path
             self.params_dict['dataset.data_folder'] = os.path.join(self.args.data_dir, self.args.model)
-            if not os.path.exists(self.params_dict['dataset.data_folder']):
+            if not is_object_storage and not os.path.exists(self.params_dict['dataset.data_folder']):
                 self.logger.info(f'Creating data directory: {self.params_dict["dataset.data_folder"]}...')
                 os.makedirs(self.params_dict['dataset.data_folder'])
 
-        # Create the train, eval, test directories
-        for folder in ["train", "valid", "test"]:
-            folder_path = os.path.join(self.params_dict['dataset.data_folder'], folder)
-            if not os.path.exists(folder_path):
-                self.logger.info(f'Creating directory: {folder_path}...')
-                os.makedirs(folder_path)
+        if not is_object_storage:
+            # For local storage only: ensure train/valid/test sub-directories exist on disk
+            for folder in ["train", "valid", "test"]:
+                folder_path = os.path.join(self.params_dict['dataset.data_folder'], folder)
+                if not os.path.exists(folder_path):
+                    self.logger.info(f'Creating directory: {folder_path}...')
+                    os.makedirs(folder_path)
+        else:
+            self.logger.debug(
+                f'Object storage ({storage_type}): skipping local directory creation for '
+                f'{self.params_dict["dataset.data_folder"]} — path is an S3 key prefix, not a filesystem path.'
+            )
 
     def add_workflow_to_cmd(self, cmd) -> str:
         # # Configure the workflow depending on command

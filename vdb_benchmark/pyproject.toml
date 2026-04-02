@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=42", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "vdbbench"
+version = "0.1.0"
+description = "Vector Database Benchmarking Tool"
+readme = "README.md"
+authors = [
+    {name = "Vector DB Storage WG TF"}
+]
+license = {text = "MIT"}
+requires-python = ">=3.8"
+dependencies = [
+    "numpy",
+    "pandas",
+    "pymilvus",
+    "pyyaml",
+    "tabulate"
+]
+
+[project.urls]
+"Homepage" = "https://github.com/mlcommons/storage/tree/TF_VDBBench/vdb_benchmark"
+"Bug Tracker" = "https://github.com/mlcommons/storage/issues"
+
+[project.scripts]
+compact-and-watch = "vdbbench.compact_and_watch:main"
+load-vdb = "vdbbench.load_vdb:main"
+vdbbench = "vdbbench.simple_bench:main"
+
+[tool.setuptools]
+packages = {find = {}}
+
+[tool.setuptools.package-data]
+vdbbench = ["*.py"]

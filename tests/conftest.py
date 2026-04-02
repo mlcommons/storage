@@ -4,6 +4,15 @@ Shared pytest fixtures for mlpstorage tests.
 These fixtures provide mock data, loggers, and test utilities that can be
 used across all test modules without requiring DLIO to be installed.
 """
+# ---------------------------------------------------------------------------
+# Prevent pytest from collecting CLI scripts that live alongside real tests.
+# These files have test_ prefixes but are standalone executables — importing
+# them at collection time causes SystemExit / argparse errors.
+# ---------------------------------------------------------------------------
+collect_ignore_glob = [
+    "integration/test_s3_connectivity.py",  # argparse.parse_args() at module level
+    "integration/test_compat_runtime.py",   # full S3 smoke-test at module level
+]
 
 import json
 import os

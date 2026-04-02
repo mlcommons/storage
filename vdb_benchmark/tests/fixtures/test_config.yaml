@@ -1,0 +1,54 @@
+# Test configuration for vdb-bench unit tests
+database:
+  host: 127.0.0.1
+  port: 19530
+  database: test_milvus
+  timeout: 30
+  max_receive_message_length: 514983574
+  max_send_message_length: 514983574
+
+dataset:
+  collection_name: test_collection_sample
+  num_vectors: 10000
+  dimension: 128
+  distribution: uniform
+  batch_size: 500
+  chunk_size: 1000
+  num_shards: 2
+  vector_dtype: FLOAT_VECTOR
+
+index:
+  index_type: HNSW
+  metric_type: L2
+  params:
+    M: 16
+    efConstruction: 200
+    ef: 64
+
+benchmark:
+  num_queries: 1000
+  top_k: 10
+  batch_size: 100
+  num_processes: 4
+  runtime: 60
+  warmup_queries: 100
+
+monitoring:
+  enabled: true
+  interval: 5
+  metrics:
+    - qps
+    - latency
+    - recall
+    - memory_usage
+
+workflow:
+  compact: true
+  compact_threshold: 0.2
+  flush_interval: 10000
+  auto_index: true
+
+logging:
+  level: INFO
+  file: test_benchmark.log
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"

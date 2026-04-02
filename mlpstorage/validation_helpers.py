@@ -162,6 +162,23 @@ def _validate_required_params(args) -> List[Exception]:
     return errors
 
 
+def _is_object_storage(args) -> bool:
+    """Return True if args indicate object/S3 storage (skip all filesystem checks)."""
+    # Check params list for storage.storage_type=s3
+    params = getattr(args, 'params', None) or []
+    for p in params:
+        if '=' in p:
+            k, v = p.split('=', 1)
+            if k.strip() == 'storage.storage_type' and v.strip() in ('s3', 'object'):
+                return True
+    # Also detect by URI scheme on data_dir or checkpoint_folder
+    for attr in ('data_dir', 'checkpoint_folder'):
+        val = getattr(args, attr, None)
+        if val and str(val).startswith('s3://'):
+            return True
+    return False
+
+
 def _validate_paths(args) -> List[Exception]:
     """
     Validate file system paths exist and are accessible.
@@ -174,6 +191,10 @@ def _validate_paths(args) -> List[Exception]:
     """
     errors = []
     command = getattr(args, 'command', None)
+
+    # Skip all filesystem path checks for object storage (S3/minio/etc.)
+    if _is_object_storage(args):
+        return errors
 
     # Validate data directory for run commands
     if command == 'run':

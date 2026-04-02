@@ -37,6 +37,7 @@ from kv_cache.monitoring import StorageMonitor, WorkloadAutoscaler, QoSMonitor
 from kv_cache.workload import (
     ValidationEngine, UserSimulator, ShareGPTDatasetLoader,
 )
+from kv_cache.tracer import IOTracer
 
 logger = logging.getLogger(__name__)
 
@@ -50,6 +51,8 @@ class IntegratedBenchmark:
                  gpu_memory_gb: float,
                  cpu_memory_gb: float,
                  duration_seconds: int,
+                 num_gpus: int = 1,
+                 tensor_parallel: int = 1,
                  cache_dir: str = None,
                  enable_autoscaling: bool = False,
                  autoscaler_mode: str = 'qos',
@@ -77,12 +80,17 @@ class IntegratedBenchmark:
                  replay_cycles: int = 0,
                  prefill_only: bool = False,
                  decode_only: bool = False,
+                 io_trace_log: Optional[str] = None,
                  enable_latency_tracing: bool = False):
 
         self.model_config = model_config
         self.num_users = num_users
         self.initial_users = num_users
         self.duration = duration_seconds
+        self.num_gpus = max(1, num_gpus)
+        self.tensor_parallel = max(1, tensor_parallel)
+        self.gpu_memory_gb_per_card = gpu_memory_gb
+        self.total_gpu_memory_gb = gpu_memory_gb * self.num_gpus
         self.enable_autoscaling = enable_autoscaling
         self.enable_multi_turn = enable_multi_turn
         self.enable_latency_tracing = enable_latency_tracing
@@ -109,6 +117,12 @@ class IntegratedBenchmark:
         self.replay_cycles = replay_cycles
         self.prefill_only = prefill_only
         self.decode_only = decode_only
+
+        # Trace mode: IOTracer is created here and closed at the end of run()
+        if io_trace_log:
+            self.io_tracer: Optional[IOTracer] = IOTracer(io_trace_log)
+        else:
+            self.io_tracer = None
         self.burst_trace_files: List[str] = []
         self.sharegpt_loader: Optional[ShareGPTDatasetLoader] = None
 
@@ -128,13 +142,15 @@ class IntegratedBenchmark:
         # Initialize components
         self.cache = MultiTierCache(
             model_config=model_config,
-            gpu_memory_gb=gpu_memory_gb,
+            gpu_memory_gb=self.total_gpu_memory_gb,
             cpu_memory_gb=cpu_memory_gb,
             cache_dir=cache_dir,
             performance_profile=performance_profile,
             seed=seed,
             max_concurrent_allocs=max_concurrent_allocs,
-            storage_capacity_gb=storage_capacity_gb
+            storage_capacity_gb=storage_capacity_gb,
+            tensor_parallel=self.tensor_parallel,
+            io_tracer=self.io_tracer,
         )
         self.conversation_manager = ConversationManager()
         self.prefix_cache_manager = PrefixCacheManager(self.cache) if enable_prefix_caching else None
@@ -1123,6 +1139,11 @@ class IntegratedBenchmark:
         """The main entry point to start the benchmark execution."""
         print(f"\nIntegrated Multi-User KV Cache Benchmark - MLPerf Edition")
         print(f"Model: {self.model_config.name}")
+        if self.num_gpus > 1 or self.tensor_parallel > 1:
+            print(f"System: {self.num_gpus}× {self.gpu_memory_gb_per_card:.0f} GB GPU  "
+                  f"(total {self.total_gpu_memory_gb:.0f} GB HBM)  │  TP={self.tensor_parallel}")
+        else:
+            print(f"GPU Memory: {self.total_gpu_memory_gb:.0f} GB")
         print(f"Users: {self.num_users}")
         print(f"Duration: {self.duration}s")
         if self.seed is not None:
@@ -1138,6 +1159,9 @@ class IntegratedBenchmark:
             print(f"    - Mode: {self.autoscaler.mode}")
         print(f"  - QoS Support: Enabled (Interactive/Responsive/Batch)")
         print(f"  - Trace-Driven (BurstGPT): {'Enabled' if self.use_burst_trace else 'Disabled'}")
+        if self.io_tracer is not None:
+            print(f"  - I/O TRACE MODE: ACTIVE — writing trace to {self.io_tracer.path}")
+            print(f"    (No real GPU/CPU/NVMe I/O will be performed)")
         if self.use_burst_trace:
             print(f"    Trace files: {len(self.burst_trace_files)}")
             print(f"    Trace speedup: {self.trace_speedup}x ({'no delay' if self.trace_speedup == 0 else 'real-time' if self.trace_speedup == 1.0 else f'{self.trace_speedup}x faster'})")
@@ -1151,10 +1175,14 @@ class IntegratedBenchmark:
         if not self.use_burst_trace and not self.use_dataset:
             users = UserSimulator.generate_mixed_users(self.num_users)
             context_lengths = [u.context_length for u in users]
+            bytes_per_token_per_rank = self.model_config.kv_cache_size_per_token / self.tensor_parallel
+            tp_note = f" per TP rank (full={bytes_per_token_per_rank * self.tensor_parallel / 1024**2 * min(context_lengths):.2f} MB)" if self.tensor_parallel > 1 else ""
             print(f"\nUser Context Length Distribution:")
-            print(f"  Min: {min(context_lengths)} tokens ({min(context_lengths) * self.model_config.kv_cache_size_per_token / 1024**2:.2f} MB)")
-            print(f"  Max: {max(context_lengths)} tokens ({max(context_lengths) * self.model_config.kv_cache_size_per_token / 1024**2:.2f} MB)")
-            print(f"  Mean: {np.mean(context_lengths):.0f} tokens ({np.mean(context_lengths) * self.model_config.kv_cache_size_per_token / 1024**2:.2f} MB)")
+            print(f"  Min: {min(context_lengths)} tokens ({min(context_lengths) * bytes_per_token_per_rank / 1024**2:.2f} MB{tp_note})")
+            print(f"  Max: {max(context_lengths)} tokens ({max(context_lengths) * bytes_per_token_per_rank / 1024**2:.2f} MB)")
+            print(f"  Mean: {np.mean(context_lengths):.0f} tokens ({np.mean(context_lengths) * bytes_per_token_per_rank / 1024**2:.2f} MB)")
+            if self.tensor_parallel > 1:
+                print(f"  (sizes shown are per-rank 1/{self.tensor_parallel} shard; TP={self.tensor_parallel})")
 
             qos_dist = {level: sum(1 for u in users if u.qos_level == level) for level in QoSLevel}
             print(f"\nQoS Distribution:")
@@ -1239,6 +1267,9 @@ class IntegratedBenchmark:
 
         if self.validator:
             self.results['validation'] = self.validator.validate_benchmark(self.results)
+
+        if self.io_tracer is not None:
+            self.io_tracer.close()
 
         return self.results
 

@@ -1,0 +1,40 @@
+# Test config for dpsi S3 implementation (bucket+key architecture)
+# Usage: DLIO_S3_IMPLEMENTATION=dpsi mlpstorage training datagen ...
+
+model: unet3d
+
+dataset:
+  # S3 Storage Configuration (dpsi architecture)
+  storage_type: s3
+  storage_root: test-bucket  # Bucket name (NOT s3:// URI)
+  
+  storage_options:
+    endpoint_url: ${AWS_ENDPOINT_URL}  # e.g., http://192.168.1.100:9000
+    access_key_id: ${AWS_ACCESS_KEY_ID}
+    secret_access_key: ${AWS_SECRET_ACCESS_KEY}
+    region: us-east-1
+    s3_force_path_style: true  # Required for MinIO
+    s3_max_attempts: 3
+  
+  # Small test dataset
+  num_files_train: 10
+  num_samples_per_file: 100
+  data_folder: dlio-test-dpsi/train  # Prefix within bucket (NO s3:// prefix)
+  
+  record_length: 262144  # 256 KB records
+  record_length_stdev: 0
+  
+  format: npz
+  keep_files: true
+
+reader:
+  read_threads: 1
+  
+checkpoint:
+  checkpoint_folder: dlio-test-dpsi/checkpoints  # Prefix within bucket
+
+workflow:
+  generate_data: true
+  train: false
+  
+framework: pytorch

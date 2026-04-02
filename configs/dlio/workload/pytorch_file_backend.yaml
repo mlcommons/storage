@@ -1,0 +1,39 @@
+model: resnet50
+
+workflow:
+  generate_data: False
+  train: True
+
+# Dataset configuration
+dataset:
+  data_folder: /tmp/dlio_data
+  num_files_train: 100
+  num_samples_per_file: 10
+  record_length: 204800  # 200 KB records
+  record_length_stdev: 0
+  record_length_resize: 204800
+
+# Reader configuration - File backend for testing
+reader:
+  data_loader: pytorch
+  data_loader_classname: torch.utils.data.DataLoader
+  
+  # File backend - no S3 required
+  data_loader_root: file:///tmp/dlio_data/train
+  
+  # PyTorch DataLoader settings
+  batch_size: 32
+  read_threads: 4
+  prefetch_size: 2
+  shuffle: True
+  
+  checkpoint_folder: file:///tmp/dlio_checkpoints
+
+# Training configuration
+train:
+  computation_time: 0.01
+  epochs: 1
+
+# Profiling
+profiling:
+  profiler: iostat

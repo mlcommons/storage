@@ -1,0 +1,57 @@
+# Quick Local Filesystem Test - Training/Reading
+# Read test data from /mnt/scratch/dlio-test using file:// protocol
+
+model: resnet50
+
+workflow:
+  generate_data: False  # Don't generate (read only)
+  train: True           # Read and "train"
+  checkpoint: False
+
+# Dataset configuration
+dataset:
+  # Not used during training, but required by schema
+  data_folder: /tmp/dlio_data_unused
+  
+  num_files_train: 10
+  num_samples_per_file: 5
+  record_length: 102400    # 100 KB per record
+  record_length_stdev: 0
+  record_length_resize: 102400
+
+# Reader configuration - PyTorch + s3dlio
+reader:
+  data_loader: pytorch
+  data_loader_classname: torch.utils.data.DataLoader
+  
+  storage_library: s3dlio
+  
+  # Read from local filesystem
+  data_loader_root: file:///mnt/scratch/dlio-test
+  
+  # No credentials needed for file:// protocol
+  storage_options: {}
+  
+  # PyTorch DataLoader settings
+  batch_size: 4          # Small batch for quick test
+  read_threads: 2
+  prefetch_size: 2
+  shuffle: False         # Disable shuffle for simpler test
+
+# Training configuration
+train:
+  computation_time: 0.001  # 1ms per sample (fast for testing)
+  epochs: 1
+
+# Profiling
+profiling:
+  profiler: iostat
+
+# USAGE:
+# 1. First generate data (if not already done):
+#    mlpstorage training datagen --config configs/dlio/workload/test_local_datagen.yaml
+#
+# 2. Run training (reading test):
+#    mlpstorage training run --config configs/dlio/workload/test_local_train.yaml
+#
+# 3. Watch for successful completion with throughput metrics

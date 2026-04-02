@@ -1,0 +1,45 @@
+model: 
+  name: resnet50_zerocopy_test
+  type: cnn
+
+framework: pytorch
+
+workflow:
+  generate_data: False  # Data already generated
+  train: True
+  checkpoint: False
+
+dataset: 
+  data_folder: /tmp/dlio-zerocopy-test
+  format: npz
+  num_files_train: 10
+  num_samples_per_file: 2
+  record_length_bytes: 301500  # Approx 224*224*3 bytes (compressed NPZ)
+  record_length_bytes_stdev: 0
+
+storage:
+  storage_type: s3dlio
+  storage_root: file:///tmp/dlio-zerocopy-test/
+  storage_options:
+    # No credentials needed for file://
+    # s3dlio will use local filesystem
+
+reader: 
+  data_loader: pytorch
+  batch_size: 4
+  read_threads: 2
+  file_shuffle: seed
+  sample_shuffle: seed
+  seed: 42
+
+train:
+  epochs: 2
+  computation_time: 0.001  # Minimal compute for I/O testing
+
+checkpoint:
+  checkpoint_folder: /tmp/dlio-checkpoints
+  checkpoint_after_epoch: 5
+  epochs_between_checkpoints: 1
+
+metric:
+  au: 0.90

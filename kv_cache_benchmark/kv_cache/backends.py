@@ -329,3 +329,45 @@ class NVMeBackend(StorageBackend):
         """Cleans up the temporary directory when the object is destroyed."""
         if self.temp_dir:
             self.temp_dir.cleanup()
+
+
+class NullBackend(StorageBackend):
+    """
+    No-op storage backend used exclusively in trace mode (--io-trace-log).
+
+    All operations are instant and consume no real GPU VRAM, CPU RAM, or
+    disk space. The backend tracks object sizes so that reads can return
+    a correctly-sized dummy buffer for any downstream .nbytes checks.
+
+    Data is never actually stored — this backend exists solely to let the
+    tier-selection and eviction logic run normally while eliminating all
+    hardware I/O, enabling the benchmark to act as a pure logical engine
+    that characterises I/O patterns without performing them.
+    """
+
+    _ZERO_TIMING = StorageBackend.IOTiming(total=0.0, device=0.0, host=0.0)
+
+    def __init__(self):
+        # Maps key → byte size of the stored object
+        self._sizes: dict = {}
+
+    def write(self, key: str, data: np.ndarray) -> StorageBackend.IOTiming:
+        self._sizes[key] = data.nbytes
+        return self._ZERO_TIMING
+
+    def write_size(self, key: str, size_bytes: int) -> StorageBackend.IOTiming:
+        """Trace-mode shortcut: record size without requiring a numpy array."""
+        self._sizes[key] = size_bytes
+        return self._ZERO_TIMING
+
+    def read(self, key: str) -> Tuple[np.ndarray, StorageBackend.IOTiming]:
+        if key not in self._sizes:
+            raise KeyError(f"Key {key} not found in NullBackend")
+        dummy = np.zeros(self._sizes[key], dtype=np.uint8)
+        return dummy, self._ZERO_TIMING
+
+    def delete(self, key: str):
+        self._sizes.pop(key, None)
+
+    def clear(self):
+        self._sizes.clear()

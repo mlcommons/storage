@@ -1,0 +1,31 @@
+# Unet3d Data Generation - Local Filesystem Test with s3dlio
+# Purpose: Generate small NPZ dataset to local filesystem using file:// protocol
+# Framework: PyTorch
+# Format: NPZ (compatible with PyTorch)
+
+model: 
+  name: unet3d
+  type: cnn
+  model_size: 499153191
+
+framework: pytorch
+
+workflow:
+  generate_data: True
+  train: False
+  checkpoint: False
+
+dataset: 
+  # Will be overridden by --data-dir command-line parameter
+  data_folder: /mnt/scratch/unet3d-test/
+  format: npz
+  
+  # Small test dataset (10 files instead of 168)
+  num_files_train: 10
+  num_samples_per_file: 1
+  
+  # Smaller file size for quick testing (~10 MB instead of ~140 MB)
+  # Original: 146600628 bytes (~140 MB)
+  record_length_bytes: 10485760  # 10 MB
+  record_length_bytes_stdev: 1048576  # 1 MB variance
+  record_length_bytes_resize: 2097152  # 2 MB resize
