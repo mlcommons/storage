@@ -68,8 +68,8 @@ class KVCacheBenchmark(Benchmark):
                 - model: KV cache model configuration to use
                 - num_users: Number of concurrent users to simulate
                 - duration: Benchmark duration in seconds
-                - gpu_mem_gb: GPU memory for cache tier (GB)
-                - cpu_mem_gb: CPU memory for cache tier (GB)
+                - gpu_mem_gb: GPU memory for cache tier (GiB)
+                - cpu_mem_gb: CPU memory for cache tier (GiB)
                 - cache_dir: Directory for NVMe cache tier
                 - generation_mode: Token generation simulation mode
                 - performance_profile: Pass/fail criteria profile
@@ -242,12 +242,12 @@ class KVCacheBenchmark(Benchmark):
         self.logger.info(f"\nKV Cache Size Estimates for {self.model}:")
         self.logger.info(f"  Per-token cache: {per_token} bytes")
         self.logger.info(f"  Typical sequence length: {seq_len} tokens")
-        self.logger.info(f"  Per-user cache estimate: {cache_per_user_mb:.2f} MB")
-        self.logger.info(f"  Total for {self.num_users} users: {total_cache_mb:.2f} MB")
+        self.logger.info(f"  Per-user cache estimate: {cache_per_user_mb:.2f}MiB")
+        self.logger.info(f"  Total for {self.num_users} users: {total_cache_mb:.2f}MiB")
         self.logger.info(f"\nRecommended tier sizes:")
-        self.logger.info(f"  GPU memory: {max(self.gpu_mem_gb, total_cache_mb/1024 * 0.2):.1f} GB")
-        self.logger.info(f"  CPU memory: {max(self.cpu_mem_gb, total_cache_mb/1024 * 0.5):.1f} GB")
-        self.logger.info(f"  NVMe storage: {total_cache_mb/1024 * 2:.1f} GB (2x for headroom)")
+        self.logger.info(f"  GPU memory: {max(self.gpu_mem_gb, total_cache_mb/1024 * 0.2):.1f}GiB")
+        self.logger.info(f"  CPU memory: {max(self.cpu_mem_gb, total_cache_mb/1024 * 0.5):.1f}GiB")
+        self.logger.info(f"  NVMe storage: {total_cache_mb/1024 * 2:.1f}GiB (2x for headroom)")
 
         return 0
 

@@ -64,8 +64,8 @@ def export_results_to_xlsx(results: Dict, args, output_path: str):
         'Model': args.model,
         'Num Users': args.num_users,
         'Duration (s)': args.duration,
-        'GPU Memory (GB)': args.gpu_mem_gb,
-        'CPU Memory (GB)': args.cpu_mem_gb,
+        'GPU Memory (GiB)': args.gpu_mem_gb,
+        'CPU Memory (GiB)': args.cpu_mem_gb,
         'Generation Mode': args.generation_mode,
         'Performance Profile': args.performance_profile,
         'Multi-turn': not args.disable_multi_turn,
@@ -78,9 +78,9 @@ def export_results_to_xlsx(results: Dict, args, output_path: str):
         'Max Requests': args.max_requests,
         'Dataset Path': args.dataset_path or 'N/A',
         'Cache Dir': args.cache_dir or 'temp',
-        'Storage Capacity (GB)': args.storage_capacity_gb,
+        'Storage Capacity (GiB)': args.storage_capacity_gb,
         'Precondition': args.precondition,
-        'Precondition Size (GB)': args.precondition_size_gb,
+        'Precondition Size (GiB)': args.precondition_size_gb,
         'Precondition Threads': args.precondition_threads if args.precondition_threads > 0 else (os.cpu_count() or 4),
         'Trace Speedup': args.trace_speedup,
         'Replay Cycles': args.replay_cycles,
@@ -148,23 +148,23 @@ def export_results_to_xlsx(results: Dict, args, output_path: str):
 
         'Cache Hit Rate': get_nested(summary, ['cache_stats', 'cache_hit_rate']),
         'Read/Write Ratio': get_nested(summary, ['cache_stats', 'read_write_ratio']),
-        'Total Read (GB)': get_nested(summary, ['cache_stats', 'total_read_gb']),
-        'Total Write (GB)': get_nested(summary, ['cache_stats', 'total_write_gb']),
+        'Total Read (GiB)': get_nested(summary, ['cache_stats', 'total_read_gb']),
+        'Total Write (GiB)': get_nested(summary, ['cache_stats', 'total_write_gb']),
 
-        'Tier GPU KV Bytes Written (GB)': get_nested(summary, ['cache_stats', 'tier_gpu_kv_bytes_written_gb']),
-        'Tier CPU KV Bytes Written (GB)': get_nested(summary, ['cache_stats', 'tier_cpu_kv_bytes_written_gb']),
-        'Tier Storage KV Bytes Written (GB)': get_nested(summary, ['cache_stats', 'tier_storage_kv_bytes_written_gb']),
+        'Tier GPU KV Bytes Written (GiB)': get_nested(summary, ['cache_stats', 'tier_gpu_kv_bytes_written_gb']),
+        'Tier CPU KV Bytes Written (GiB)': get_nested(summary, ['cache_stats', 'tier_cpu_kv_bytes_written_gb']),
+        'Tier Storage KV Bytes Written (GiB)': get_nested(summary, ['cache_stats', 'tier_storage_kv_bytes_written_gb']),
 
-        'Tier GPU KV Bytes Read (GB)': get_nested(summary, ['cache_stats', 'tier_gpu_kv_bytes_read_gb']),
-        'Tier CPU KV Bytes Read (GB)': get_nested(summary, ['cache_stats', 'tier_cpu_kv_bytes_read_gb']),
-        'Tier Storage KV Bytes Read (GB)': get_nested(summary, ['cache_stats', 'tier_storage_kv_bytes_read_gb']),
+        'Tier GPU KV Bytes Read (GiB)': get_nested(summary, ['cache_stats', 'tier_gpu_kv_bytes_read_gb']),
+        'Tier CPU KV Bytes Read (GiB)': get_nested(summary, ['cache_stats', 'tier_cpu_kv_bytes_read_gb']),
+        'Tier Storage KV Bytes Read (GiB)': get_nested(summary, ['cache_stats', 'tier_storage_kv_bytes_read_gb']),
 
-        'Tier GPU Read Bandwidth (GB/s)': get_nested(summary, ['cache_stats', 'tier_gpu_read_bandwidth_gbps']),
-        'Tier GPU Write Bandwidth (GB/s)': get_nested(summary, ['cache_stats', 'tier_gpu_write_bandwidth_gbps']),
-        'Tier CPU Read Bandwidth (GB/s)': get_nested(summary, ['cache_stats', 'tier_cpu_read_bandwidth_gbps']),
-        'Tier CPU Write Bandwidth (GB/s)': get_nested(summary, ['cache_stats', 'tier_cpu_write_bandwidth_gbps']),
-        'Tier Storage Read Bandwidth (GB/s)': get_nested(summary, ['cache_stats', 'tier_storage_read_bandwidth_gbps']),
-        'Tier Storage Write Bandwidth (GB/s)': get_nested(summary, ['cache_stats', 'tier_storage_write_bandwidth_gbps']),
+        'Tier GPU Read Bandwidth (GiB/s)': get_nested(summary, ['cache_stats', 'tier_gpu_read_bandwidth_gbps']),
+        'Tier GPU Write Bandwidth (GiB/s)': get_nested(summary, ['cache_stats', 'tier_gpu_write_bandwidth_gbps']),
+        'Tier CPU Read Bandwidth (GiB/s)': get_nested(summary, ['cache_stats', 'tier_cpu_read_bandwidth_gbps']),
+        'Tier CPU Write Bandwidth (GiB/s)': get_nested(summary, ['cache_stats', 'tier_cpu_write_bandwidth_gbps']),
+        'Tier Storage Read Bandwidth (GiB/s)': get_nested(summary, ['cache_stats', 'tier_storage_read_bandwidth_gbps']),
+        'Tier Storage Write Bandwidth (GiB/s)': get_nested(summary, ['cache_stats', 'tier_storage_write_bandwidth_gbps']),
 
         'GPU Entries': get_nested(summary, ['cache_stats', 'gpu_entries']),
         'CPU Entries': get_nested(summary, ['cache_stats', 'cpu_entries']),
@@ -222,12 +222,12 @@ def export_results_to_xlsx(results: Dict, args, output_path: str):
                         ('fsync_us', 'fsync (us)', 'Device flush'),
                         ('write_to_fsync_us', 'Write-to-fsync (us)', 'CPU serialization gap'),
                         ('fadvise_to_read_us', 'fadvise-to-read (us)', 'Cache drop overhead'),
-                        ('bssplit_read_kb', 'Block Size Read (KB)', 'I/O size distribution'),
-                        ('bssplit_write_kb', 'Block Size Write (KB)', 'I/O size distribution'),
+                        ('bssplit_read_kb', 'Block Size Read (KiB)', 'I/O size distribution'),
+                        ('bssplit_write_kb', 'Block Size Write (KiB)', 'I/O size distribution'),
                         ('qd_read', 'Queue Depth Read', 'Instantaneous QD at dispatch'),
                         ('qd_write', 'Queue Depth Write', 'Instantaneous QD at dispatch'),
-                        ('lba_read_gb', 'LBA Heatmap Read (GB)', 'Spatial I/O distribution'),
-                        ('lba_write_gb', 'LBA Heatmap Write (GB)', 'Spatial I/O distribution'),
+                        ('lba_read_gb', 'LBA Heatmap Read (GiB)', 'Spatial I/O distribution'),
+                        ('lba_write_gb', 'LBA Heatmap Write (GiB)', 'Spatial I/O distribution'),
                     ]
 
                     def hist_pct(buckets, pct):
@@ -311,9 +311,9 @@ def main():
     parser.add_argument('--duration', type=int, default=60,
                         help='The duration of the benchmark in seconds.')
     parser.add_argument('--gpu-mem-gb', type=float, default=16,
-                        help='The amount of GPU memory (VRAM) to allocate for the cache in GB.')
+                        help='The amount of GPU memory (VRAM) to allocate for the cache in GiB.')
     parser.add_argument('--cpu-mem-gb', type=float, default=32,
-                        help='The amount of CPU memory (RAM) to allocate for the cache in GB.')
+                        help='The amount of CPU memory (RAM) to allocate for the cache in GiB.')
     parser.add_argument('--cache-dir', type=str, default=None,
                         help='The directory to use for the NVMe cache tier.')
     parser.add_argument('--generation-mode', type=str, default='realistic', choices=[g.value for g in GenerationMode],
@@ -356,11 +356,11 @@ def main():
     parser.add_argument('--config', type=str, default=None,
                         help='Path to YAML configuration file.')
     parser.add_argument('--storage-capacity-gb', type=float, default=0,
-                        help='NVMe/storage tier capacity in GB. 0 = auto-detect.')
+                        help='NVMe/storage tier capacity in GiB. 0 = auto-detect.')
     parser.add_argument('--precondition', action='store_true',
                         help='Enable SSD preconditioning phase before benchmark.')
     parser.add_argument('--precondition-size-gb', type=float, default=0,
-                        help='Preconditioning data volume in GB. 0 = 2x NVMe capacity.')
+                        help='Preconditioning data volume in GiB. 0 = 2x NVMe capacity.')
     parser.add_argument('--precondition-threads', type=int, default=0,
                         help='Number of threads for preconditioning writes. 0 = os.cpu_count().')
     parser.add_argument('--trace-speedup', type=float, default=1.0,

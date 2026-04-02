@@ -102,7 +102,7 @@ class RAGDocumentManager:
 
         if max_tokens_per_chunk < self.chunk_size:
             logger.debug(f"Adjusting chunk size for {doc_id} to {max_tokens_per_chunk} tokens "
-                  f"to stay under {max_chunk_bytes / 1024**2:.0f} MB per chunk.")
+                  f"to stay under {max_chunk_bytes / 1024**2:.0f}MiB per chunk.")
 
         num_chunks = (total_tokens + max_tokens_per_chunk - 1) // max_tokens_per_chunk
 

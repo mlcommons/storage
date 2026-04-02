@@ -128,7 +128,7 @@ class KVCacheRunRulesChecker(RunRulesChecker):
         if gpu_mem_gb < self.MIN_GPU_MEM_GB:
             return Issue(
                 validation=PARAM_VALIDATION.INVALID,
-                message=f"GPU memory must be at least {self.MIN_GPU_MEM_GB} GB",
+                message=f"GPU memory must be at least {self.MIN_GPU_MEM_GB}GiB",
                 parameter="gpu_mem_gb",
                 expected=f">= {self.MIN_GPU_MEM_GB}",
                 actual=gpu_mem_gb
@@ -137,7 +137,7 @@ class KVCacheRunRulesChecker(RunRulesChecker):
         if cpu_mem_gb < self.MIN_CPU_MEM_GB:
             return Issue(
                 validation=PARAM_VALIDATION.INVALID,
-                message=f"CPU memory must be at least {self.MIN_CPU_MEM_GB} GB",
+                message=f"CPU memory must be at least {self.MIN_CPU_MEM_GB}GiB",
                 parameter="cpu_mem_gb",
                 expected=f">= {self.MIN_CPU_MEM_GB}",
                 actual=cpu_mem_gb

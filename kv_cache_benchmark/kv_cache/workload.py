@@ -153,12 +153,12 @@ def validate_args(args: argparse.Namespace) -> argparse.Namespace:
     if args.gpu_mem_gb < 0:
         errors.append(f"--gpu-mem-gb cannot be negative, got {args.gpu_mem_gb}")
     if args.gpu_mem_gb > MAX_GPU_MEMORY_GB:
-        errors.append(f"--gpu-mem-gb exceeds limit ({MAX_GPU_MEMORY_GB}GB), got {args.gpu_mem_gb}")
+        errors.append(f"--gpu-mem-gb exceeds limit ({MAX_GPU_MEMORY_GB}GiB), got {args.gpu_mem_gb}")
 
     if args.cpu_mem_gb < 0:
         errors.append(f"--cpu-mem-gb cannot be negative, got {args.cpu_mem_gb}")
     if args.cpu_mem_gb > MAX_CPU_MEMORY_GB:
-        errors.append(f"--cpu-mem-gb exceeds limit ({MAX_CPU_MEMORY_GB}GB), got {args.cpu_mem_gb}")
+        errors.append(f"--cpu-mem-gb exceeds limit ({MAX_CPU_MEMORY_GB}GiB), got {args.cpu_mem_gb}")
 
     if args.rag_num_docs < 0:
         errors.append(f"--rag-num-docs cannot be negative, got {args.rag_num_docs}")

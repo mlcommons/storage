@@ -159,7 +159,7 @@ class MockClusterCollector(ClusterCollectorInterface):
 
         Args:
             num_hosts: Number of hosts to generate.
-            memory_gb: Memory per host in GB.
+            memory_gb: Memory per host in GiB.
             cpu_cores: CPU cores per host.
         """
         hosts = []

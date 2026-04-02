@@ -696,7 +696,7 @@ class TestDedup:
 
         stats = self._block_dedup_ratio(raw_list)
         total_mb = sum(len(r) for r in raw_list) / 1024**2
-        print(f"\n  Combined dedup ({total_mb:.1f} MB across {len(raw_list)} entries): "
+        print(f"\n  Combined dedup ({total_mb:.1f} MiB across {len(raw_list)} entries): "
               f"{stats['total']:,} blocks, {stats['unique']:,} unique, "
               f"ratio={stats['ratio']:.4%}")
         assert stats['ratio'] < 0.01, (
@@ -1977,7 +1977,7 @@ class TestPerTierPhaseMetrics:
             f"CPU read bytes should increase: {cpu_read_before} -> {cpu_read_after}"
     
     def test_gpu_bytes_zero_when_gpu_disabled(self, multi_tier_cache_cpu_only):
-        """With GPU disabled (0 GB), GPU tier bytes should remain zero."""
+        """With GPU disabled (0 GiB), GPU tier bytes should remain zero."""
         # Do some allocations and accesses
         for i in range(5):
             multi_tier_cache_cpu_only.allocate_cache(f"entry_{i}", num_tokens=100)
@@ -2449,9 +2449,9 @@ class TestThreeTierEvictionCascade:
             if tier == 'gpu':
                 gpu_keys.append(key)
             print(f"    [{i:3d}] key={key:<20s} → tier={tier}  "
-                  f"(GPU={cache.gpu_memory_used/1024:.0f}KB  "
-                  f"CPU={cache.cpu_memory_used/1024:.0f}KB  "
-                  f"NVMe={cache.nvme_memory_used/1024:.0f}KB)")
+                  f"(GPU={cache.gpu_memory_used/1024:.0f}KiB  "
+                  f"CPU={cache.cpu_memory_used/1024:.0f}KiB  "
+                  f"NVMe={cache.nvme_memory_used/1024:.0f}KiB)")
 
         # --- Phase 2: Verify entries exist on all three tiers ---
         gpu_entries = [k for k, v in cache.cache_entries.items() if v['location'] == 'gpu']
@@ -2469,7 +2469,7 @@ class TestThreeTierEvictionCascade:
 
         # With 50 entries and ~24 capacity, evictions must have happened
         assert cache.stats['evictions'] > 0, \
-            "Evictions should have occurred with 50 entries across 6MB total"
+            "Evictions should have occurred with 50 entries across 6MiB total"
 
         # CPU demotion must have occurred (GPU → CPU)
         assert cache.stats['offloads_cpu'] > 0, \
@@ -2638,8 +2638,8 @@ class TestNVMeOnlyEviction:
             storage_capacity_gb=0.01  # 10 MB NVMe
         )
 
-        print(f"\n    NVMe limit: {cache.nvme_memory_limit / 1024:.0f} KB")
-        print(f"    CPU limit:  {cache.cpu_memory_limit / 1024:.0f} KB")
+        print(f"\n    NVMe limit: {cache.nvme_memory_limit / 1024:.0f}KiB")
+        print(f"    CPU limit:  {cache.cpu_memory_limit / 1024:.0f}KiB")
         print(f"    Tier order: {cache._get_tier_order()}")
 
         for i in range(5):
@@ -2674,7 +2674,7 @@ class TestNVMeOnlyEviction:
 
         nvme_dir = cache.backends['nvme'].base_path
         print(f"\n    NVMe dir: {nvme_dir}")
-        print(f"    NVMe limit: {cache.nvme_memory_limit / 1024:.0f} KB")
+        print(f"    NVMe limit: {cache.nvme_memory_limit / 1024:.0f}KiB")
         print(f"    Tier order: {cache._get_tier_order()}")
 
         # --- Pass 1: Fill NVMe to trigger eviction ---
@@ -2690,7 +2690,7 @@ class TestNVMeOnlyEviction:
 
             print(f"    [{i:2d}] success={success} tier={tier:<5s} "
                   f"entries={entry_count:3d}  .npy={npy_count:3d}  "
-                  f"nvme_used={cache.nvme_memory_used/1024:.0f}KB  "
+                  f"nvme_used={cache.nvme_memory_used/1024:.0f}KiB  "
                   f"evictions={cache.stats['evictions']}")
 
             assert success, f"Allocation {i} should succeed even after eviction"
@@ -2699,7 +2699,7 @@ class TestNVMeOnlyEviction:
         evictions = cache.stats['evictions']
         print(f"\n    Evictions after pass 1: {evictions}")
         assert evictions > 0, \
-            "Evictions should have occurred with 30 entries in 2 MB"
+            "Evictions should have occurred with 30 entries in 2 MiB"
 
         # --- Verify early keys were deleted ---
         early_keys_present = sum(1 for k in all_keys[:10] if k in cache.cache_entries)
@@ -2737,7 +2737,7 @@ class TestNVMeOnlyEviction:
 
             if i < 5 or i >= 15:
                 print(f"    [{i:2d}] success={success} tier={tier:<5s} "
-                      f"nvme_used={cache.nvme_memory_used/1024:.0f}KB  "
+                      f"nvme_used={cache.nvme_memory_used/1024:.0f}KiB  "
                       f"evictions={cache.stats['evictions']}")
 
         print(f"\n    Pass 2 successes: {pass2_success}/20")
@@ -2745,7 +2745,7 @@ class TestNVMeOnlyEviction:
             f"All pass-2 allocations should succeed, got {pass2_success}/20"
 
         # --- Verify nvme_memory_used didn't go negative ---
-        print(f"    Final nvme_memory_used: {cache.nvme_memory_used/1024:.0f} KB")
+        print(f"    Final nvme_memory_used: {cache.nvme_memory_used/1024:.0f}KiB")
         assert cache.nvme_memory_used >= 0, \
             f"nvme_memory_used drifted negative: {cache.nvme_memory_used}"
 
@@ -2763,7 +2763,7 @@ class TestNVMeOnlyEviction:
             storage_capacity_gb=1.0 / 1024,  # 1 MB — very tight
         )
 
-        print(f"\n    NVMe limit: {cache.nvme_memory_limit / 1024:.0f} KB")
+        print(f"\n    NVMe limit: {cache.nvme_memory_limit / 1024:.0f}KiB")
 
         # Rapid-fire 100 allocations into 1 MB — heavy eviction pressure
         for i in range(100):
@@ -2776,8 +2776,8 @@ class TestNVMeOnlyEviction:
         )
 
         tracked = cache.nvme_memory_used
-        print(f"    Tracked nvme_memory_used: {tracked / 1024:.0f} KB")
-        print(f"    Actual from cache_entries: {actual_nvme / 1024:.0f} KB")
+        print(f"    Tracked nvme_memory_used: {tracked / 1024:.0f}KiB")
+        print(f"    Actual from cache_entries: {actual_nvme / 1024:.0f}KiB")
         print(f"    Evictions: {cache.stats['evictions']}")
 
         assert tracked >= 0, \
@@ -2786,8 +2786,8 @@ class TestNVMeOnlyEviction:
         # Tracked should be >= actual (it can overcount due to forced writes,
         # but should never undercount after our fix)
         assert tracked >= actual_nvme * 0.5, \
-            f"Tracked usage ({tracked/1024:.0f}KB) is suspiciously low vs " \
-            f"actual ({actual_nvme/1024:.0f}KB) — possible double-decrement"
+            f"Tracked usage ({tracked/1024:.0f}KiB) is suspiciously low vs " \
+            f"actual ({actual_nvme/1024:.0f}KiB) — possible double-decrement"
 
     def test_nvme_only_concurrent_allocation(self, tiny_model_config):
         """
@@ -2835,7 +2835,7 @@ class TestNVMeOnlyEviction:
         print(f"    Successes: {results['success']}")
         print(f"    Failures:  {results['fail']}")
         print(f"    Evictions: {cache.stats['evictions']}")
-        print(f"    nvme_memory_used: {cache.nvme_memory_used / 1024:.0f} KB")
+        print(f"    nvme_memory_used: {cache.nvme_memory_used / 1024:.0f}KiB")
         print(f"    Entries in cache: {len(cache.cache_entries)}")
 
         assert results['success'] > 0, "At least some allocations should succeed"
@@ -2983,7 +2983,7 @@ class TestVisualizeUserRequestFlow:
         print(f"    attention_type  = {m.attention_type}")
         print(f"\n  Formula: num_layers × kv_heads × kv_dim_per_head × 2(K+V) × dtype_bytes")
         print(f"           {m.num_layers} × {m.kv_heads} × {m.kv_dim_per_head} × 2 × {m.bytes_per_element}")
-        print(f"         = {bpt:,d} bytes/token  ({bpt / 1024:.1f} KB/token)")
+        print(f"         = {bpt:,d} bytes/token  ({bpt / 1024:.1f}KiB/token)")
 
         expected = m.num_layers * m.kv_heads * m.kv_dim_per_head * 2 * m.bytes_per_element
         assert bpt == expected, f"Formula mismatch: {bpt} != {expected}"
@@ -2992,7 +2992,7 @@ class TestVisualizeUserRequestFlow:
         print(f"\n  Context size → cache bytes:")
         for tokens in [100, 512, 2048, 8192, 16384]:
             total = tokens * bpt
-            print(f"    {tokens:>6,d} tokens × {bpt/1024:.0f} KB/tok = {total / 1024**2:>8.2f} MB")
+            print(f"    {tokens:>6,d} tokens × {bpt/1024:.0f}KiB/tok = {total / 1024**2:>8.2f}MiB")
 
         # Compare with a larger model
         print(f"\n  Comparison across models:")
@@ -3000,8 +3000,8 @@ class TestVisualizeUserRequestFlow:
             mc = MODEL_CONFIGS[model_key]
             bpt2 = mc.kv_cache_size_per_token
             size_2k = 2048 * bpt2
-            print(f"    {model_key:<25s}  {bpt2/1024:>6.0f} KB/tok  "
-                  f"  2048 ctx = {size_2k / 1024**2:>7.1f} MB")
+            print(f"    {model_key:<25s}  {bpt2/1024:>6.0f}KiB/tok  "
+                  f"  2048 ctx = {size_2k / 1024**2:>7.1f}MiB")
 
         # Show MLA (DeepSeek) is different
         if 'deepseek-v3' in MODEL_CONFIGS:
@@ -3010,7 +3010,7 @@ class TestVisualizeUserRequestFlow:
             print(f"\n  MLA model (DeepSeek V3): different formula")
             print(f"    num_layers × (kv_lora_rank + qk_rope_head_dim) × dtype_bytes")
             print(f"    {ds.num_layers} × ({ds.kv_lora_rank} + {ds.qk_rope_head_dim}) × {ds.bytes_per_element}")
-            print(f"    = {ds_bpt:,d} bytes/token  ({ds_bpt / 1024:.1f} KB/token)")
+            print(f"    = {ds_bpt:,d} bytes/token  ({ds_bpt / 1024:.1f}KiB/token)")
 
     # ------------------------------------------------------------------
     # Part 3: The 4 latency levels (nested hierarchy)
@@ -3064,7 +3064,7 @@ class TestVisualizeUserRequestFlow:
         cache_bytes = context_tokens * bpt
 
         print(f"\n  Request: {context_tokens} context tokens, {generate_tokens} gen tokens")
-        print(f"  Cache entry: {context_tokens} × {bpt:,d} = {cache_bytes:,d} bytes ({cache_bytes/1024:.0f} KB)")
+        print(f"  Cache entry: {context_tokens} × {bpt:,d} = {cache_bytes:,d} bytes ({cache_bytes/1024:.0f}KiB)")
         print(f"  Generation mode: NONE (0 ms/tok) — real benchmark uses FAST or REALISTIC")
 
         # ═══════════════════════════════════════════════════════════════
@@ -3329,7 +3329,7 @@ class TestVisualizeUserRequestFlow:
         print(f"  Allocated {len(keys)} requests → {len(npy_files)} files:")
         for f in npy_files:
             sz = f.stat().st_size
-            print(f"    {f.name:<30s}  {sz:>10,d} bytes  ({sz/1024:.1f} KB)")
+            print(f"    {f.name:<30s}  {sz:>10,d} bytes  ({sz/1024:.1f}KiB)")
 
         assert file_path.exists(), f"Expected .npy file at {file_path}"
         assert file_size > expected_data_bytes, "File should include .npy header"
@@ -3385,7 +3385,7 @@ class TestVisualizeUserRequestFlow:
 
         print(f"\n  Simulating {num_turns} turns, {context_per_turn} context tokens each")
         print(f"  Entry size per turn: {context_per_turn} × {bpt:,d} = "
-              f"{context_per_turn * bpt / 1024:.0f} KB")
+              f"{context_per_turn * bpt / 1024:.0f}KiB")
 
         for turn in range(1, num_turns + 1):
             print(f"\n  {'━' * 64}")
@@ -3471,8 +3471,8 @@ class TestVisualizeUserRequestFlow:
         print(f"  NVMe cache entries:    {len(all_entries)}")
         print(f"  Total writes:          {cache.stats['prefill_writes']}")
         print(f"  Total reads:           {cache.stats['decode_reads']}")
-        print(f"  Total write bytes:     {cache.stats['total_write_bytes']/1024:.0f} KB")
-        print(f"  Total read bytes:      {cache.stats['total_read_bytes']/1024:.0f} KB")
+        print(f"  Total write bytes:     {cache.stats['total_write_bytes']/1024:.0f}KiB")
+        print(f"  Total read bytes:      {cache.stats['total_read_bytes']/1024:.0f}KiB")
 
         multi_turn_reads = (num_turns * (num_turns - 1)) // 2
 
@@ -3537,8 +3537,8 @@ class TestVisualizeUserRequestFlow:
         conv_id = conv_mgr.start_conversation("bob")
 
         num_turns = 6
-        print(f"\n  Entry size: {entry_bytes/1024:.0f} KB")
-        print(f"  NVMe capacity: {capacity_bytes/1024:.0f} KB (~{capacity_bytes/entry_bytes:.1f} entries)")
+        print(f"\n  Entry size: {entry_bytes/1024:.0f}KiB")
+        print(f"  NVMe capacity: {capacity_bytes/1024:.0f}KiB (~{capacity_bytes/entry_bytes:.1f} entries)")
         print(f"  Turns: {num_turns} (will force eviction after turn 3)")
 
         total_hits = 0
@@ -3663,13 +3663,13 @@ class TestVisualizeUserRequestFlow:
         entries_per_tier = int((gpu_mb * 1024) / entry_kb)
 
         print(f"\n  Tier order: {tier_order}")
-        print(f"  Entry size: {tokens} tokens × {bpt:,d} B/tok = {entry_kb:.0f} KB")
-        print(f"  Tier capacity: GPU={gpu_mb}MB, CPU={cpu_mb}MB, NVMe={nvme_mb}MB")
+        print(f"  Entry size: {tokens} tokens × {bpt:,d} B/tok = {entry_kb:.0f}KiB")
+        print(f"  Tier capacity: GPU={gpu_mb}MiB, CPU={cpu_mb}MiB, NVMe={nvme_mb}MiB")
         print(f"  Entries per tier: ~{entries_per_tier}")
         print(f"\n  Writing 30 entries (much more than total 3-tier capacity)...")
 
-        print(f"\n  {'#':>4s} {'Key':<14s} {'Tier':<6s} {'GPU KB':>7s} {'CPU KB':>7s} "
-              f"{'NVMe KB':>8s} {'Evict':>5s} {'→CPU':>4s} {'→NVMe':>5s} {'Event'}")
+        print(f"\n  {'#':>4s} {'Key':<14s} {'Tier':<6s} {'GPU KiB':>7s} {'CPU KiB':>7s} "
+              f"{'NVMe KiB':>8s} {'Evict':>5s} {'→CPU':>4s} {'→NVMe':>5s} {'Event'}")
         print(f"  {'─'*4} {'─'*14} {'─'*6} {'─'*7} {'─'*7} {'─'*8} {'─'*5} {'─'*4} {'─'*5} {'─'*30}")
 
         prev_evictions = 0
@@ -3781,8 +3781,8 @@ class TestVisualizeUserRequestFlow:
 
         print(f"\n  Tier order: {tier_order}")
         print(f"  CPU limit: {cache.cpu_memory_limit} bytes (zero → skipped)")
-        print(f"  NVMe limit: {cache.nvme_memory_limit / 1024:.0f} KB")
-        print(f"  Entry size: {entry_kb:.0f} KB")
+        print(f"  NVMe limit: {cache.nvme_memory_limit / 1024:.0f}KiB")
+        print(f"  Entry size: {entry_kb:.0f}KiB")
         print(f"  Entries that fit: ~{entries_fit}")
         print(f"  NVMe dir: {nvme_dir}")
 
@@ -3794,8 +3794,8 @@ class TestVisualizeUserRequestFlow:
         print(f"    → Skip low-data bailout  (keep evicting)")
         print(f"    → Eviction = DELETE file  (not demote)")
 
-        print(f"\n  Writing 20 entries into {nvme_mb} MB NVMe...")
-        print(f"\n  {'#':>4s} {'Key':<12s} {'Tier':<6s} {'NVMe KB':>8s} "
+        print(f"\n  Writing 20 entries into {nvme_mb}MiB NVMe...")
+        print(f"\n  {'#':>4s} {'Key':<12s} {'Tier':<6s} {'NVMe KiB':>8s} "
               f"{'Files':>5s} {'Evict':>5s} {'Event'}")
         print(f"  {'─'*4} {'─'*12} {'─'*6} {'─'*8} {'─'*5} {'─'*5} {'─'*20}")
 
@@ -3825,7 +3825,7 @@ class TestVisualizeUserRequestFlow:
         print(f"    Entries in cache: {entries_alive}")
         print(f"    .npy on disk:    {npy_final}")
         print(f"    Total evictions: {cache.stats['evictions']}  (all were DELETEs)")
-        print(f"    nvme_memory_used: {cache.nvme_memory_used / 1024:.0f} KB")
+        print(f"    nvme_memory_used: {cache.nvme_memory_used / 1024:.0f}KiB")
         print(f"    Offloads to CPU: {cache.stats['offloads_cpu']}  (0 — no CPU tier)")
         print(f"    Offloads to NVMe: {cache.stats['offloads_storage']}  (= every allocation, since NVMe is the only tier)")
 

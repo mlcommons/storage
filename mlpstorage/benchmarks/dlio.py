@@ -87,7 +87,7 @@ class DLIOBenchmark(Benchmark, abc.ABC):
         if cluster_info is not None:
             self.logger.verbose(
                 f'Using MPI-collected cluster info: {cluster_info.num_hosts} hosts, '
-                f'{cluster_info.total_memory_bytes / (1024**3):.1f} GB total memory'
+                f'{cluster_info.total_memory_bytes / (1024**3):.1f}GiB total memory'
             )
             return cluster_info
 
@@ -282,7 +282,7 @@ class TrainingBenchmark(DLIOBenchmark):
         )
         self.logger.result(f'Number of training files: {num_files_train}')
         self.logger.result(f'Number of training subfolders: {num_subfolders_train}')
-        self.logger.result(f'Total disk space required for training: {total_disk_bytes / 1024**3:.2f} GB')
+        self.logger.result(f'Total disk space required for training: {total_disk_bytes / 1024**3:.2f}GiB')
 
         if num_files_train > 10000:
             self.logger.warning(
@@ -358,7 +358,7 @@ class CheckpointingBenchmark(DLIOBenchmark):
         model_gb, optimizer_gb = LLM_SIZE_BY_RANK.get(self.args.model)
         rank_gb = []
 
-        self.logger.verbose(f'Model & optimizer size: {model_gb:.2f} GB, {optimizer_gb:.2f} GB')
+        self.logger.verbose(f'Model & optimizer size: {model_gb:.2f}GiB, {optimizer_gb:.2f}GiB')
         for rank in range(self.args.num_processes):
             rank_gb.append(0)
             if zero_level == 1:
@@ -366,17 +366,17 @@ class CheckpointingBenchmark(DLIOBenchmark):
                 rank_gb[rank] = optimizer_gb / self.args.num_processes
                 if rank < GPUpDP:
                     rank_gb[rank] += model_gb / GPUpDP
-                    self.logger.debug(f'First DP: rank-{rank} write model: {rank_gb[rank]:.2f} GB')
+                    self.logger.debug(f'First DP: rank-{rank} write model: {rank_gb[rank]:.2f}GiB')
             elif zero_level == 3:
                 rank_gb[rank] = (model_gb + optimizer_gb) / self.args.num_processes
-                self.logger.debug(f'Rank {rank} writes portion of model and optimizer: {rank_gb[rank]:.2f} GB')
+                self.logger.debug(f'Rank {rank} writes portion of model and optimizer: {rank_gb[rank]:.2f}GiB')
             else:
                 self.logger.error(f'Invalid zero_level: {zero_level}')
                 raise ValueError("Invalid zero_level")
 
-        rank_string = "\n\t".join(f"Rank {rank}: {rank_gb[rank]:.2f} GB" for rank in range(self.args.num_processes))
+        rank_string = "\n\t".join(f"Rank {rank}: {rank_gb[rank]:.2f}GiB" for rank in range(self.args.num_processes))
 
-        self.logger.result(f'Total GB required per rank:\n\t{rank_string}')
-        self.logger.result(f'Total GB required for all ranks: {sum(rank_gb):.2f} GB')
+        self.logger.result(f'Total GiB required per rank:\n\t{rank_string}')
+        self.logger.result(f'Total GiB required for all ranks: {sum(rank_gb):.2f}GiB')
 
 

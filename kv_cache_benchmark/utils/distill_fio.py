@@ -86,7 +86,7 @@ def hist_percentile(buckets: List[Dict], pct: float) -> int:
 
 
 def hist_to_bssplit(buckets: List[Dict]) -> str:
-    """Convert a bpftrace size histogram (KB) to fio bssplit format."""
+    """Convert a bpftrace size histogram (KiB) to fio bssplit format."""
     total = sum(b['count'] for b in buckets)
     if total == 0:
         return "4k/100"
@@ -151,7 +151,7 @@ def generate_fio(histograms: Dict, process_name: str = "") -> str:
         if total > 0:
             hot = [b for b in buckets if b['count'] > total * 0.01]
             if hot:
-                lba_summary += f"#   {direction} hot zone: {hot[0]['low']}-{hot[-1]['high']} GB ({sum(b['count'] for b in hot)*100//total}% of I/O)\n"
+                lba_summary += f"#   {direction} hot zone: {hot[0]['low']}-{hot[-1]['high']}GiB ({sum(b['count'] for b in hot)*100//total}% of I/O)\n"
 
     # ── D2C summary ──
     d2c_summary = ""

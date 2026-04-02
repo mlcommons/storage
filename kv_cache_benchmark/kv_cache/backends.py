@@ -110,8 +110,8 @@ class GPUMemoryBackend(StorageBackend):
 
                 if len(self.cache) == 0:
                     logger.warning(
-                        f"GPU OOM: Need {required_bytes / 1024**2:.1f}MB, "
-                        f"have {free_memory / 1024**2:.1f}MB, no entries to evict"
+                        f"GPU OOM: Need {required_bytes / 1024**2:.1f}MiB, "
+                        f"have {free_memory / 1024**2:.1f}MiB, no entries to evict"
                     )
                     break
 
@@ -132,7 +132,7 @@ class GPUMemoryBackend(StorageBackend):
                 eviction_count += 1
                 logger.debug(
                     f"GPU eviction #{eviction_count}: evicted {oldest_key} "
-                    f"({evicted_size / 1024**2:.1f}MB)"
+                    f"({evicted_size / 1024**2:.1f}MiB)"
                 )
 
             if eviction_count > 0:

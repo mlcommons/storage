@@ -29,8 +29,8 @@ KVCACHE_HELP_MESSAGES = {
     ),
     'num_users': "Number of concurrent users to simulate for multi-tenant inference.",
     'duration': "Duration of the benchmark run in seconds.",
-    'gpu_mem_gb': "GPU memory available for the first cache tier (GB).",
-    'cpu_mem_gb': "CPU memory available for the second cache tier (GB).",
+    'gpu_mem_gb': "GPU memory available for the first cache tier (GiB).",
+    'cpu_mem_gb': "CPU memory available for the second cache tier (GiB).",
     'cache_dir': (
         "Directory path for NVMe cache tier storage. If not specified, "
         "a subdirectory in the results folder will be used."

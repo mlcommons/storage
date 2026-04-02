@@ -501,7 +501,7 @@ class ClusterInformation:
                 if variance > 0.1:
                     issues.append(
                         f"Memory variance across hosts: {variance:.1%} "
-                        f"(min: {min_mem / (1024**3):.1f}GB, max: {max_mem / (1024**3):.1f}GB)"
+                        f"(min: {min_mem / (1024**3):.1f}GiB, max: {max_mem / (1024**3):.1f}GiB)"
                     )
 
         core_counts = [h.cpu.num_cores for h in self.host_info_list

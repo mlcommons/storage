@@ -191,7 +191,7 @@ Fix these issues and re-run the benchmark.
 
     def _format_bytes(self, value: float) -> str:
         """Format bytes value with appropriate unit."""
-        for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        for unit in ['B', 'KiB', 'MiB', 'GiB', 'TiB']:
             if abs(value) < 1024.0:
                 return f"{value:,.1f} {unit}"
             value /= 1024.0

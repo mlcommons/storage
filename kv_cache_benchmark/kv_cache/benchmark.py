@@ -882,7 +882,7 @@ class IntegratedBenchmark:
 
             print(f"\n  {label}:")
             print(f"    I/O count: {total_count}")
-            print(f"    P50: [{p50['range_us'][0]:,}, {p50['range_us'][1]:,}) KB")
+            print(f"    P50: [{p50['range_us'][0]:,}, {p50['range_us'][1]:,})KiB")
             for raw_line in trace_data[key]['raw']:
                 print(f"    {raw_line}")
 
@@ -912,8 +912,8 @@ class IntegratedBenchmark:
 
         # ── LBA heatmap ──
         lba_histograms = [
-            ('lba_read_gb', 'LBA Heatmap (Reads, 10 GB buckets)'),
-            ('lba_write_gb', 'LBA Heatmap (Writes, 10 GB buckets)'),
+            ('lba_read_gb', 'LBA Heatmap (Reads, 10GiB buckets)'),
+            ('lba_write_gb', 'LBA Heatmap (Writes, 10GiB buckets)'),
         ]
 
         for key, label in lba_histograms:
@@ -936,7 +936,7 @@ class IntegratedBenchmark:
             print(f"\n  {label}:")
             print(f"    I/O count: {total_count}")
             if hot_zones:
-                print(f"    Hot zone: {hot_start}-{hot_end} GB ({hot_pct:.0f}% of I/O)")
+                print(f"    Hot zone: {hot_start}-{hot_end}GiB ({hot_pct:.0f}% of I/O)")
             for raw_line in trace_data[key]['raw']:
                 print(f"    {raw_line}")
 
@@ -1020,7 +1020,7 @@ class IntegratedBenchmark:
             f"# KV Cache Benchmark; Traced Workload",
             f"# Generated: {timestamp}",
             f"# Model: {model_name}, Users: {self.num_users}, Duration: {self.duration}s",
-            f"# KV bytes/token: {bpt:,} bytes ({bpt/1024:.0f} KB)",
+            f"# KV bytes/token: {bpt:,} bytes ({bpt/1024:.0f}KiB)",
             f"#",
             f"# Distilled from bpftrace block-layer tracing during benchmark run.",
             f"# Total traced I/Os: {total_io:,} ({read_count:,} reads, {write_count:,} writes)",
@@ -1104,17 +1104,17 @@ class IntegratedBenchmark:
 
         print(f"\n### MEMORY SAFETY CHECK ###")
         print(f"  Formula: peak = (workers x 2 x mean_entry_bytes) + baseline")
-        print(f"         = ({num_workers} x 2 x {mean_entry_bytes / 1024**2:.0f} MB) + {baseline / 1024**3:.1f} GB")
-        print(f"         = {estimated_peak / 1024**3:.1f} GB")
-        print(f"  Available RAM: {available_ram / 1024**3:.1f} GB")
-        print(f"  Mean entry size: {mean_entry_bytes / 1024**2:.0f} MB  ({mean_context_tokens} tok x {bpt:,} B/tok)")
-        print(f"  Peak per thread: {per_thread_peak / 1024**2:.0f} MB  (np.load + np.array copy)")
+        print(f"         = ({num_workers} x 2 x {mean_entry_bytes / 1024**2:.0f}MiB) + {baseline / 1024**3:.1f}GiB")
+        print(f"         = {estimated_peak / 1024**3:.1f}GiB")
+        print(f"  Available RAM: {available_ram / 1024**3:.1f}GiB")
+        print(f"  Mean entry size: {mean_entry_bytes / 1024**2:.0f}MiB  ({mean_context_tokens} tok x {bpt:,} B/tok)")
+        print(f"  Peak per thread: {per_thread_peak / 1024**2:.0f}MiB  (np.load + np.array copy)")
         print(f"  Worker threads: {num_workers}")
         print(f"  Safe concurrent readers: ~{safe_workers}  = (available - baseline) / peak_per_thread")
 
         if estimated_peak > available_ram * 0.85:
-            print(f"  WARNING: Estimated peak memory ({estimated_peak / 1024**3:.1f} GB) exceeds 85% of")
-            print(f"  available RAM ({available_ram / 1024**3:.1f} GB). Risk of OOM with {num_workers} workers.")
+            print(f"  WARNING: Estimated peak memory ({estimated_peak / 1024**3:.1f}GiB) exceeds 85% of")
+            print(f"  available RAM ({available_ram / 1024**3:.1f}GiB). Risk of OOM with {num_workers} workers.")
             print(f"  Consider: --num-users {min(safe_workers, self.num_users)} or --max-concurrent-allocs {max(1, safe_workers // 2)}")
         else:
             print(f"  Status: OK")
@@ -1152,9 +1152,9 @@ class IntegratedBenchmark:
             users = UserSimulator.generate_mixed_users(self.num_users)
             context_lengths = [u.context_length for u in users]
             print(f"\nUser Context Length Distribution:")
-            print(f"  Min: {min(context_lengths)} tokens ({min(context_lengths) * self.model_config.kv_cache_size_per_token / 1024**2:.2f} MB)")
-            print(f"  Max: {max(context_lengths)} tokens ({max(context_lengths) * self.model_config.kv_cache_size_per_token / 1024**2:.2f} MB)")
-            print(f"  Mean: {np.mean(context_lengths):.0f} tokens ({np.mean(context_lengths) * self.model_config.kv_cache_size_per_token / 1024**2:.2f} MB)")
+            print(f"  Min: {min(context_lengths)} tokens ({min(context_lengths) * self.model_config.kv_cache_size_per_token / 1024**2:.2f}MiB)")
+            print(f"  Max: {max(context_lengths)} tokens ({max(context_lengths) * self.model_config.kv_cache_size_per_token / 1024**2:.2f}MiB)")
+            print(f"  Mean: {np.mean(context_lengths):.0f} tokens ({np.mean(context_lengths) * self.model_config.kv_cache_size_per_token / 1024**2:.2f}MiB)")
 
             qos_dist = {level: sum(1 for u in users if u.qos_level == level) for level in QoSLevel}
             print(f"\nQoS Distribution:")
@@ -1256,7 +1256,7 @@ class IntegratedBenchmark:
         target_gb = target_bytes / 1024**3
         num_threads = self.precondition_threads
         print(f"\n### PRECONDITIONING PHASE ###")
-        print(f"  Target: {target_gb:.1f} GB")
+        print(f"  Target: {target_gb:.1f}GiB")
         print(f"  Threads: {num_threads}")
 
         tokens_per_entry = 2048
@@ -1283,13 +1283,13 @@ class IntegratedBenchmark:
                             state['written_bytes'] += entry['size']
                             gb_written = state['written_bytes'] / 1024**3
                             if gb_written - state['last_report'] >= 10:
-                                print(f"  Preconditioning progress: {gb_written:.1f} / {target_gb:.1f} GB")
+                                print(f"  Preconditioning progress: {gb_written:.1f} / {target_gb:.1f}GiB")
                                 state['last_report'] = gb_written
                 else:
                     consecutive_failures += 1
                     if consecutive_failures > 50:
                         with lock:
-                            print(f"  WARNING: Preconditioning stalled at {state['written_bytes']/1024**3:.1f} GB — filesystem full. Continuing.")
+                            print(f"  WARNING: Preconditioning stalled at {state['written_bytes']/1024**3:.1f}GiB — filesystem full. Continuing.")
                         return
                     time.sleep(0.1)
 
@@ -1298,7 +1298,7 @@ class IntegratedBenchmark:
             for f in futures:
                 f.result()
 
-        print(f"  Preconditioning complete: {state['written_bytes'] / 1024**3:.1f} GB written")
+        print(f"  Preconditioning complete: {state['written_bytes'] / 1024**3:.1f}GiB written")
         print(f"  Resetting stats for steady-state measurement...")
         self.cache.reset_stats()
 
@@ -1451,7 +1451,7 @@ class IntegratedBenchmark:
         print(f"\nIMPORTANT: All storage latencies below are measured per KV cache BLOCK,")
         print(f"not per token or per disk page.  Each block holds the full KV state for")
         print(f"one request (all layers, all heads, full sequence length).")
-        print(f"  Model KV bytes/token: {bpt:,} bytes ({bpt/1024:.1f} KB)")
+        print(f"  Model KV bytes/token: {bpt:,} bytes ({bpt/1024:.1f}KiB)")
 
         # Compute entry size distribution from live cache entries
         with self.cache.metadata_lock:
@@ -1459,20 +1459,20 @@ class IntegratedBenchmark:
         if entry_sizes:
             sizes = np.array(entry_sizes)
             print(f"  Entries in cache: {len(sizes)}")
-            print(f"  Block size min:   {np.min(sizes)/1024**2:.1f} MB")
-            print(f"  Block size mean:  {np.mean(sizes)/1024**2:.1f} MB")
-            print(f"  Block size P95:   {np.percentile(sizes, 95)/1024**2:.1f} MB")
-            print(f"  Block size max:   {np.max(sizes)/1024**2:.1f} MB")
+            print(f"  Block size min:   {np.min(sizes)/1024**2:.1f}MiB")
+            print(f"  Block size mean:  {np.mean(sizes)/1024**2:.1f}MiB")
+            print(f"  Block size P95:   {np.percentile(sizes, 95)/1024**2:.1f}MiB")
+            print(f"  Block size max:   {np.max(sizes)/1024**2:.1f}MiB")
         else:
             # Fall back to average from aggregate stats
             total_write_bytes = summary.get('cache_stats', {}).get('total_write_bytes', 0)
             write_ops = summary.get('cache_stats', {}).get('write_iops', 0)
             if write_ops > 0:
                 avg_mb = (total_write_bytes / write_ops) / 1024**2
-                print(f"  Avg block size:   {avg_mb:.1f} MB (from {write_ops} writes)")
+                print(f"  Avg block size:   {avg_mb:.1f}MiB (from {write_ops} writes)")
 
-        print(f"  A 200 MB block at 1 GB/s NVMe read = ~200 ms device latency.")
-        print(f"  Compare latencies against block sizes, not against 4 KB page I/O.\n")
+        print(f"  A 200MiB block at 1GiB/s NVMe read = ~200 ms device latency.")
+        print(f"  Compare latencies against block sizes, not against 4KiB page I/O.\n")
 
         PASS_SYMBOL = "[OK]"
         FAIL_SYMBOL = "[X]"
@@ -1534,8 +1534,8 @@ class IntegratedBenchmark:
 
         print(f"\n### STORAGE PERFORMANCE ###")
         print(f"  Cache Hit Rate: {cache_stats['cache_hit_rate']*100:.1f}%")
-        print(f"  Total Read: {cache_stats['total_read_gb']:.2f} GB")
-        print(f"  Total Write: {cache_stats['total_write_gb']:.2f} GB")
+        print(f"  Total Read: {cache_stats['total_read_gb']:.2f}GiB")
+        print(f"  Total Write: {cache_stats['total_write_gb']:.2f}GiB")
         rw_ratio = cache_stats['read_write_ratio']
         if rw_ratio > 1e9:
             print(f"  Read/Write Ratio: ∞ (read-only)")
@@ -1547,32 +1547,32 @@ class IntegratedBenchmark:
         print(f"  Storage KV Write Operations/sec: {cache_stats['write_iops'] / self.duration:.2f}")
 
         print(f"\n### CACHE TIER DISTRIBUTION ###")
-        print(f"  GPU Entries: {cache_stats['gpu_entries']} ({cache_stats['gpu_memory_used_gb']:.2f} GB)")
-        print(f"  CPU Entries: {cache_stats['cpu_entries']} ({cache_stats['cpu_memory_used_gb']:.2f} GB)")
+        print(f"  GPU Entries: {cache_stats['gpu_entries']} ({cache_stats['gpu_memory_used_gb']:.2f}GiB)")
+        print(f"  CPU Entries: {cache_stats['cpu_entries']} ({cache_stats['cpu_memory_used_gb']:.2f}GiB)")
         print(f"  Storage Entries: {cache_stats['storage_entries']}")
 
         print(f"\n### TIER-SPECIFIC KV BYTES ###")
         if cache_stats.get('tier_gpu_kv_bytes_written_gb', 0) > 0:
-            print(f"  GPU KV Bytes Written: {cache_stats['tier_gpu_kv_bytes_written_gb']:.2f} GB")
+            print(f"  GPU KV Bytes Written: {cache_stats['tier_gpu_kv_bytes_written_gb']:.2f}GiB")
         if cache_stats.get('tier_gpu_kv_bytes_read_gb', 0) > 0:
-            print(f"  GPU KV Bytes Read: {cache_stats['tier_gpu_kv_bytes_read_gb']:.2f} GB")
+            print(f"  GPU KV Bytes Read: {cache_stats['tier_gpu_kv_bytes_read_gb']:.2f}GiB")
         if cache_stats.get('tier_cpu_kv_bytes_written_gb', 0) > 0:
-            print(f"  CPU KV Bytes Written: {cache_stats['tier_cpu_kv_bytes_written_gb']:.2f} GB")
+            print(f"  CPU KV Bytes Written: {cache_stats['tier_cpu_kv_bytes_written_gb']:.2f}GiB")
         if cache_stats.get('tier_cpu_kv_bytes_read_gb', 0) > 0:
-            print(f"  CPU KV Bytes Read: {cache_stats['tier_cpu_kv_bytes_read_gb']:.2f} GB")
+            print(f"  CPU KV Bytes Read: {cache_stats['tier_cpu_kv_bytes_read_gb']:.2f}GiB")
         if cache_stats.get('tier_storage_kv_bytes_written_gb', 0) > 0:
-            print(f"  Storage KV Bytes Written: {cache_stats['tier_storage_kv_bytes_written_gb']:.2f} GB")
+            print(f"  Storage KV Bytes Written: {cache_stats['tier_storage_kv_bytes_written_gb']:.2f}GiB")
         if cache_stats.get('tier_storage_kv_bytes_read_gb', 0) > 0:
-            print(f"  Storage KV Bytes Read: {cache_stats['tier_storage_kv_bytes_read_gb']:.2f} GB")
+            print(f"  Storage KV Bytes Read: {cache_stats['tier_storage_kv_bytes_read_gb']:.2f}GiB")
 
         print(f"\n### STORAGE KV BANDWIDTH ###")
         for tier_label, tier_key in [('GPU', 'gpu'), ('CPU', 'cpu'), ('Storage', 'storage')]:
             read_bw = cache_stats.get(f'tier_{tier_key}_read_bandwidth_gbps', 0)
             write_bw = cache_stats.get(f'tier_{tier_key}_write_bandwidth_gbps', 0)
             if read_bw > 0:
-                print(f"  {tier_label} KV Read Bandwidth: {read_bw:.2f} GB/s")
+                print(f"  {tier_label} KV Read Bandwidth: {read_bw:.2f}GiB/s")
             if write_bw > 0:
-                print(f"  {tier_label} KV Write Bandwidth: {write_bw:.2f} GB/s")
+                print(f"  {tier_label} KV Write Bandwidth: {write_bw:.2f}GiB/s")
 
         print(f"\n### TIER-SPECIFIC LATENCIES (Total = Host + Device) ###")
         for tier in ['gpu', 'cpu', 'storage']:
@@ -1607,7 +1607,7 @@ class IntegratedBenchmark:
             print(f"  Prefix Hits: {prefix_stats['prefix_hits']}")
             print(f"  Prefix Misses: {prefix_stats['prefix_misses']}")
             print(f"  System Prompt Reuse: {prefix_stats['system_prompt_reuse']}")
-            print(f"  Bytes Saved: {prefix_stats['bytes_saved'] / 1024**3:.2f} GB")
+            print(f"  Bytes Saved: {prefix_stats['bytes_saved'] / 1024**3:.2f}GiB")
 
         if summary.get('multi_turn_stats') and summary['multi_turn_stats']['cache_hits'] > 0:
             print(f"\n### MULTI-TURN CONVERSATIONS ###")

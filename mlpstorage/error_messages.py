@@ -220,15 +220,15 @@ ERROR_MESSAGES: Dict[str, str] = {
     # Data Generation Errors
     'DATAGEN_SPACE_INSUFFICIENT': (
         "Insufficient disk space for dataset generation.\n"
-        "Required: {required_gb:.1f} GB\n"
-        "Available: {available_gb:.1f} GB\n"
+        "Required: {required_gb:.1f}GiB\n"
+        "Available: {available_gb:.1f}GiB\n"
         "Free up space or use a different --data-dir location."
     ),
 
     'DATAGEN_MEMORY_INSUFFICIENT': (
         "Insufficient memory for dataset generation.\n"
-        "Required: {required_gb:.1f} GB\n"
-        "Available: {available_gb:.1f} GB\n"
+        "Required: {required_gb:.1f}GiB\n"
+        "Available: {available_gb:.1f}GiB\n"
         "Reduce --num-parallel or use a machine with more memory."
     ),
 

@@ -34,7 +34,7 @@ class KVCacheGenerator:
         self.buffer_size_elements = 128 * 1024 * 1024  # 128 million elements (~256MB for float16)
         self.dtype = np.float16 if 'float16' in self.model_config.dtype else np.float32
 
-        logger.info(f"Pre-generating {self.buffer_size_elements * 2 / 1024**2:.0f} MB noise buffer...")
+        logger.info(f"Pre-generating {self.buffer_size_elements * 2 / 1024**2:.0f}MB noise buffer...")
         rng = np.random.default_rng(self.global_seed)
         self.precomputed_buffer = rng.uniform(-1.0, 1.0, size=self.buffer_size_elements).astype(self.dtype)
 
@@ -49,17 +49,17 @@ class KVCacheGenerator:
 
     @staticmethod
     def _apply_xor_stamp(data: np.ndarray, seed: int) -> None:
-        """XOR-stamp data IN-PLACE so every 4 KB block is unique on disk.
+        """XOR-stamp data IN-PLACE so every 4KiB block is unique on disk.
 
         Problem solved:
-            All entries are sliced from the same 256 MB precomputed buffer.
+            All entries are sliced from the same 256MiB precomputed buffer.
             A repeating stamp fixes cross-entry dedup (different keys →
-            different stamps) but NOT intra-entry dedup: a 2.5 GB entry
+            different stamps) but NOT intra-entry dedup: a 2.5GiB entry
             reuses each buffer block ~10×, and a repeating XOR leaves
             those copies identical — measured at **95-97% dedup ratio**.
 
         Solution (two-layer XOR):
-            1. XOR every block with a key-derived 4 KB base stamp.
+            1. XOR every block with a key-derived 4KiB base stamp.
                → eliminates cross-entry duplicates.
             2. XOR the first 8 bytes of each block with its block index.
                → eliminates intra-entry duplicates (same buffer content
@@ -71,10 +71,10 @@ class KVCacheGenerator:
               - Diff positions → diff output → no intra-entry dedup  ✓
 
         Performance:
-            Layer 1 (full XOR) is the same cost as before: ~15-20 GB/s,
+            Layer 1 (full XOR) is the same cost as before: ~15-20GiB/s,
             limited by memcpy bandwidth.  Layer 2 touches only 8 bytes
-            per 4 KB block (0.2% of data) with one small allocation
-            (8 × n_blocks bytes ≈ 5 MB per 2.5 GB entry).  Net overhead
+            per 4KiB block (0.2% of data) with one small allocation
+            (8 × n_blocks bytes ≈ 5MiB per 2.5GiB entry).  Net overhead
             of Layer 2 vs. original single-layer stamp: <1%.
         """
         STAMP_BYTES = 4096  # one 4 KB disk block
@@ -812,7 +812,7 @@ class MultiTierCache:
                 read_passed = read_bw_gbps > 0
                 criteria.append({
                     'name': 'Storage KV Read Bandwidth',
-                    'target': '>0', 'actual': f"{read_bw_gbps:.2f}", 'unit': 'GB/s', 'passed': read_passed
+                    'target': '>0', 'actual': f"{read_bw_gbps:.2f}", 'unit': 'GiB/s', 'passed': read_passed
                 })
                 all_passed = all_passed and read_passed
 
@@ -821,7 +821,7 @@ class MultiTierCache:
                 write_passed = write_bw_gbps > 0
                 criteria.append({
                     'name': 'Storage KV Write Bandwidth',
-                    'target': '>0', 'actual': f"{write_bw_gbps:.2f}", 'unit': 'GB/s', 'passed': write_passed
+                    'target': '>0', 'actual': f"{write_bw_gbps:.2f}", 'unit': 'GiB/s', 'passed': write_passed
                 })
                 all_passed = all_passed and write_passed
 

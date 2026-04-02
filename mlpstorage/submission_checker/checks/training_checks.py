@@ -171,7 +171,7 @@ class TrainingCheck(BaseCheck):
             
             if expected_size and datagen_size < expected_size:
                 self.log.error(
-                    "Datagen size %.2f GB is less than required %.2f GB",
+                    "Datagen size %.2fGiB is less than required %.2fGiB",
                     datagen_size,
                     expected_size
                 )

@@ -122,24 +122,24 @@ def process_json_files(input_dir='.', output_file='mlperf_storage_summary.xlsx')
                 # === CACHE STATS ===
                 'Cache Hit Rate': get_nested(summary, ['cache_stats', 'cache_hit_rate']),
                 'Read/Write Ratio': get_nested(summary, ['cache_stats', 'read_write_ratio']),
-                'Total Read (GB)': get_nested(summary, ['cache_stats', 'total_read_gb']),
-                'Total Write (GB)': get_nested(summary, ['cache_stats', 'total_write_gb']),
+                'Total Read (GiB)': get_nested(summary, ['cache_stats', 'total_read_gb']),
+                'Total Write (GiB)': get_nested(summary, ['cache_stats', 'total_write_gb']),
                 
                 # === PER-TIER KV BYTES (MLPerf v3.0) ===
-                'Tier GPU KV Bytes Written (GB)': get_nested(summary, ['cache_stats', 'tier_gpu_kv_bytes_written_gb']),
-                'Tier GPU KV Bytes Read (GB)': get_nested(summary, ['cache_stats', 'tier_gpu_kv_bytes_read_gb']),
-                'Tier CPU KV Bytes Written (GB)': get_nested(summary, ['cache_stats', 'tier_cpu_kv_bytes_written_gb']),
-                'Tier CPU KV Bytes Read (GB)': get_nested(summary, ['cache_stats', 'tier_cpu_kv_bytes_read_gb']),
-                'Tier Storage KV Bytes Written (GB)': get_nested(summary, ['cache_stats', 'tier_storage_kv_bytes_written_gb']),
-                'Tier Storage KV Bytes Read (GB)': get_nested(summary, ['cache_stats', 'tier_storage_kv_bytes_read_gb']),
+                'Tier GPU KV Bytes Written (GiB)': get_nested(summary, ['cache_stats', 'tier_gpu_kv_bytes_written_gb']),
+                'Tier GPU KV Bytes Read (GiB)': get_nested(summary, ['cache_stats', 'tier_gpu_kv_bytes_read_gb']),
+                'Tier CPU KV Bytes Written (GiB)': get_nested(summary, ['cache_stats', 'tier_cpu_kv_bytes_written_gb']),
+                'Tier CPU KV Bytes Read (GiB)': get_nested(summary, ['cache_stats', 'tier_cpu_kv_bytes_read_gb']),
+                'Tier Storage KV Bytes Written (GiB)': get_nested(summary, ['cache_stats', 'tier_storage_kv_bytes_written_gb']),
+                'Tier Storage KV Bytes Read (GiB)': get_nested(summary, ['cache_stats', 'tier_storage_kv_bytes_read_gb']),
 
-                # === PER-TIER BANDWIDTH (GB/s) - PRIMARY METRICS ===
-                'Tier GPU Read Bandwidth (GB/s)': get_nested(summary, ['cache_stats', 'tier_gpu_read_bandwidth_gbps']),
-                'Tier GPU Write Bandwidth (GB/s)': get_nested(summary, ['cache_stats', 'tier_gpu_write_bandwidth_gbps']),
-                'Tier CPU Read Bandwidth (GB/s)': get_nested(summary, ['cache_stats', 'tier_cpu_read_bandwidth_gbps']),
-                'Tier CPU Write Bandwidth (GB/s)': get_nested(summary, ['cache_stats', 'tier_cpu_write_bandwidth_gbps']),
-                'Tier Storage Read Bandwidth (GB/s)': get_nested(summary, ['cache_stats', 'tier_storage_read_bandwidth_gbps']),
-                'Tier Storage Write Bandwidth (GB/s)': get_nested(summary, ['cache_stats', 'tier_storage_write_bandwidth_gbps']),
+                # === PER-TIER BANDWIDTH (GiB/s) - PRIMARY METRICS ===
+                'Tier GPU Read Bandwidth (GiB/s)': get_nested(summary, ['cache_stats', 'tier_gpu_read_bandwidth_gbps']),
+                'Tier GPU Write Bandwidth (GiB/s)': get_nested(summary, ['cache_stats', 'tier_gpu_write_bandwidth_gbps']),
+                'Tier CPU Read Bandwidth (GiB/s)': get_nested(summary, ['cache_stats', 'tier_cpu_read_bandwidth_gbps']),
+                'Tier CPU Write Bandwidth (GiB/s)': get_nested(summary, ['cache_stats', 'tier_cpu_write_bandwidth_gbps']),
+                'Tier Storage Read Bandwidth (GiB/s)': get_nested(summary, ['cache_stats', 'tier_storage_read_bandwidth_gbps']),
+                'Tier Storage Write Bandwidth (GiB/s)': get_nested(summary, ['cache_stats', 'tier_storage_write_bandwidth_gbps']),
 
                 # === TIER ENTRY DISTRIBUTION ===
                 'GPU Entries': get_nested(summary, ['cache_stats', 'gpu_entries']),
@@ -173,7 +173,7 @@ def process_json_files(input_dir='.', output_file='mlperf_storage_summary.xlsx')
         print("\nColumns included:")
         print(df.columns.tolist())
         print(f"\nPreview of data (Storage Throughput is the correct metric for tier comparison):")
-        preview_cols = ['Filename', 'Storage Throughput (tok/s)', 'Tier Storage Read Bandwidth (GB/s)', 'Total Tokens']
+        preview_cols = ['Filename', 'Storage Throughput (tok/s)', 'Tier Storage Read Bandwidth (GiB/s)', 'Total Tokens']
         available_cols = [c for c in preview_cols if c in df.columns]
         print(df[available_cols].to_string())
     except Exception as e:

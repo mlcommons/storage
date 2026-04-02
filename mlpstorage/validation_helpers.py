@@ -427,7 +427,7 @@ def check_disk_space(path: str, required_bytes: int, logger=None) -> bool:
         if logger:
             logger.error(
                 f"Insufficient disk space at {check_path}: "
-                f"need {required_gb:.1f} GB, have {available_gb:.1f} GB"
+                f"need {required_gb:.1f}GiB, have {available_gb:.1f}GiB"
             )
 
         raise FileSystemError(

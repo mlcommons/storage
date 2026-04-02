@@ -490,7 +490,7 @@ class ClusterInformation:
                 if variance > 0.1:  # >10% difference
                     issues.append(
                         f"Memory variance across hosts: {variance:.1%} "
-                        f"(min: {min_mem / (1024**3):.1f}GB, max: {max_mem / (1024**3):.1f}GB)"
+                        f"(min: {min_mem / (1024**3):.1f}GiB, max: {max_mem / (1024**3):.1f}GiB)"
                     )
 
         # Check CPU core count consistency
@@ -1743,7 +1743,7 @@ def calculate_training_data_size(args, cluster_information, dataset_params, read
     logger.ridiculous(f'Required sample count: {min_samples}')
     logger.ridiculous(f'Min number of files by samples: {min_num_files_by_samples}')
     logger.ridiculous(f'Min number of files by size: {min_num_files_by_bytes}')
-    logger.ridiculous(f'Required dataset size: {required_file_count * file_size_bytes / 1024 / 1024} MB')
+    logger.ridiculous(f'Required dataset size: {required_file_count * file_size_bytes / 1024 / 1024} MiB')
     logger.ridiculous(f'Number of Samples by size: {num_samples_by_bytes}')
 
     if min_num_files_by_bytes > min_num_files_by_samples:

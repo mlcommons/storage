@@ -34,20 +34,20 @@ class ResultExporter:
             # TODO: Avoid hardcoding this
             # Training
             "3D-Unet - # Accel",
-            "3D-Unet - Read B/W (GB/s)",
+            "3D-Unet - Read B/W (GiB/s)",
             "ResNet-50 - # Accel",
-            "ResNet-50 - Read B/W (GB/s)",
+            "ResNet-50 - Read B/W (GiB/s)",
             "CosmoFlow - # Accel",
-            "CosmoFlow - Read B/W (GB/s)",
+            "CosmoFlow - Read B/W (GiB/s)",
             # Checkpointing
-            "8B - Write B/W (GB/s)",
-            "8B - Read B/W (GB/s)",
-            "70B - Write B/W (GB/s)",
-            "70B - Read B/W (GB/s)",
-            "405B - Write B/W (GB/s)",
-            "405B - Read B/W (GB/s)",
-            "1T - Write B/W (GB/s)",
-            "1T - Read B/W (GB/s)",
+            "8B - Write B/W (GiB/s)",
+            "8B - Read B/W (GiB/s)",
+            "70B - Write B/W (GiB/s)",
+            "70B - Read B/W (GiB/s)",
+            "405B - Write B/W (GiB/s)",
+            "405B - Read B/W (GiB/s)",
+            "1T - Write B/W (GiB/s)",
+            "1T - Read B/W (GiB/s)",
         ]
         self.rows = []
         self.csv_path = csv_path

@@ -461,7 +461,7 @@ class Benchmark(BenchmarkInterface, abc.ABC):
             self.logger.debug(
                 f'Cluster info collected via {collection_method}: '
                 f'{cluster_info.num_hosts} hosts, '
-                f'{cluster_info.total_memory_bytes / (1024**3):.1f} GB total memory, '
+                f'{cluster_info.total_memory_bytes / (1024**3):.1f}GiB total memory, '
                 f'{cluster_info.total_cores} total cores'
             )
 
@@ -542,7 +542,7 @@ class Benchmark(BenchmarkInterface, abc.ABC):
             self.logger.debug(
                 f'Cluster info collected via SSH: '
                 f'{cluster_info.num_hosts} hosts, '
-                f'{cluster_info.total_memory_bytes / (1024**3):.1f} GB total memory'
+                f'{cluster_info.total_memory_bytes / (1024**3):.1f}GiB total memory'
             )
 
             return cluster_info

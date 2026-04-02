@@ -70,7 +70,7 @@ class CheckpointingCheck(BaseCheck):
             
             if data_per_node < min_required:
                 self.log.warning(
-                    "Checkpoint data per node %.2f GB < 3x memory %.2f GB. "
+                    "Checkpoint data per node %.2fGiB < 3x memory %.2fGiB. "
                     "Cache flush may be needed.",
                     data_per_node,
                     min_required
@@ -216,7 +216,7 @@ class CheckpointingCheck(BaseCheck):
             
             if total_accelerator_memory < checkpoint_size_gb:
                 self.log.error(
-                    "Aggregate accelerator memory %.2f GB < checkpoint size %.2f GB",
+                    "Aggregate accelerator memory %.2fGiB < checkpoint size %.2fGiB",
                     total_accelerator_memory,
                     checkpoint_size_gb
                 )
