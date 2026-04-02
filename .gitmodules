@@ -1,4 +1,0 @@
-[submodule "dlio_benchmark"]
-	path = dlio_benchmark
-        url = https://github.com/mlcommons/DLIO_local_changes
-        branch = main
