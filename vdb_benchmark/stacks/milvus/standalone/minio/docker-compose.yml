@@ -1,0 +1,68 @@
+#version: '3.5'
+
+services:
+  etcd:
+    container_name: ${ETCD_CONTAINER_NAME}
+    image: ${ETCD_IMAGE}
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: ${ETCD_AUTO_COMPACTION_MODE}
+      ETCD_AUTO_COMPACTION_RETENTION: ${ETCD_AUTO_COMPACTION_RETENTION}
+      ETCD_QUOTA_BACKEND_BYTES: ${ETCD_QUOTA_BACKEND_BYTES}
+      ETCD_SNAPSHOT_COUNT: ${ETCD_SNAPSHOT_COUNT}
+    volumes:
+      - ${ETCD_DATA_DIR}:/etcd
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls=http://0.0.0.0:2379 --data-dir /etcd
+    ports:
+      - "${ETCD_CLIENT_PORT}:2379"
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  minio:
+    container_name: ${MINIO_CONTAINER_NAME}
+    image: ${MINIO_IMAGE}
+    environment:
+      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY}
+      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY}
+    ports:
+      - "${MINIO_PORT}:${MINIO_PORT}"
+      - "${MINIO_CONSOLE_PORT}:${MINIO_CONSOLE_PORT}"
+    volumes:
+      - "${MINIO_DATA_DIR}:/minio_data"
+    command: minio server /minio_data --console-address ":${MINIO_CONSOLE_PORT}"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${MINIO_PORT}/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  standalone:
+    image: ${MILVUS_IMAGE}
+    container_name: ${MILVUS_CONTAINER_NAME}
+    command: ["milvus", "run", "standalone"]
+    security_opt:
+      - seccomp:unconfined
+    environment:
+      MINIO_ADDRESS: ${MINIO_ADDRESS}
+      MINIO_REGION: ${MINIO_REGION}
+      ETCD_ENDPOINTS: ${ETCD_ENDPOINTS}
+    volumes:
+      - "${MILVUS_DATA_DIR}:/var/lib/milvus"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:${MILVUS_HTTP_PORT}/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 3
+    ports:
+      - "${MILVUS_GRPC_PORT}:${MILVUS_GRPC_PORT}"     # gRPC
+      - "${MILVUS_HTTP_PORT}:${MILVUS_HTTP_PORT}"     # HTTP
+    depends_on:
+      - "etcd"
+      - "minio"
+
+networks:
+  default:
+    name: milvus

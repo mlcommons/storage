@@ -18,8 +18,9 @@ from kv_cache._compat import TORCH_AVAILABLE, CUPY_AVAILABLE
 from kv_cache.config import cfg
 from kv_cache.models import ModelConfig, InferencePhase
 from kv_cache.backends import (
-    StorageBackend, GPUMemoryBackend, CPUMemoryBackend, NVMeBackend,
+    StorageBackend, GPUMemoryBackend, CPUMemoryBackend, NVMeBackend, NullBackend,
 )
+from kv_cache.tracer import IOTracer
 
 logger = logging.getLogger(__name__)
 
@@ -215,7 +216,9 @@ class MultiTierCache:
                  performance_profile: str = 'latency',
                  seed: Optional[int] = None,
                  max_concurrent_allocs: int = 0,
-                 storage_capacity_gb: float = 0):
+                 storage_capacity_gb: float = 0,
+                 tensor_parallel: int = 1,
+                 io_tracer: Optional['IOTracer'] = None):
 
         self.model_config = model_config
         self.gpu_memory_limit = gpu_memory_gb * 1024**3
@@ -224,20 +227,29 @@ class MultiTierCache:
         self.performance_profile = performance_profile
         self.seed = seed
         self.max_concurrent_allocs = max_concurrent_allocs
+        self.tensor_parallel = max(1, tensor_parallel)
+        self.io_tracer = io_tracer
 
         # Initialize storage backends for each tier.
+        # In trace mode all backends are NullBackend — no real hardware I/O.
         self.backends = {}
-        try:
-            if TORCH_AVAILABLE or CUPY_AVAILABLE:
-                self.backends['gpu'] = GPUMemoryBackend(
-                    use_torch=TORCH_AVAILABLE,
-                    on_eviction_callback=self._handle_gpu_eviction
-                )
-        except Exception as e:
-            logger.warning(f"Could not initialize GPU backend: {e}")
+        if self.io_tracer is not None:
+            logger.info("MultiTierCache: trace mode active — using NullBackend for all tiers")
+            self.backends['gpu'] = NullBackend()
+            self.backends['cpu'] = NullBackend()
+            self.backends['nvme'] = NullBackend()
+        else:
+            try:
+                if TORCH_AVAILABLE or CUPY_AVAILABLE:
+                    self.backends['gpu'] = GPUMemoryBackend(
+                        use_torch=TORCH_AVAILABLE,
+                        on_eviction_callback=self._handle_gpu_eviction
+                    )
+            except Exception as e:
+                logger.warning(f"Could not initialize GPU backend: {e}")
 
-        self.backends['cpu'] = CPUMemoryBackend()
-        self.backends['nvme'] = NVMeBackend(base_path=cache_dir)
+            self.backends['cpu'] = CPUMemoryBackend()
+            self.backends['nvme'] = NVMeBackend(base_path=cache_dir)
 
         self.generator = KVCacheGenerator(model_config, global_seed=self.seed)
 
@@ -384,6 +396,10 @@ class MultiTierCache:
                 write_timing = self.backends[to_tier].write(key, data)
                 self.backends[from_tier].delete(key)
 
+                if self.io_tracer is not None:
+                    self.io_tracer.log('Read',  size, from_tier, key=key, phase='Evict')
+                    self.io_tracer.log('Write', size, to_tier,   key=key, phase='Evict')
+
                 with self.metadata_lock:
                     if key in self.cache_entries:
                         self.cache_entries[key]['location'] = to_tier
@@ -397,7 +413,8 @@ class MultiTierCache:
                         self.stats['offloads_cpu'] += 1
                     elif to_tier == 'nvme':
                         self.stats['offloads_storage'] += 1
-                        bytes_per_token = self.model_config.kv_cache_size_per_token
+                        bytes_per_token = (self.model_config.kv_cache_size_per_token
+                                          // max(1, self.tensor_parallel))
                         if bytes_per_token > 0:
                             tokens = size // bytes_per_token
                             self.stats['storage_tokens_processed'] += tokens
@@ -637,16 +654,27 @@ class MultiTierCache:
 
     def _allocate_cache_inner(self, key: str, num_tokens: int, phase: InferencePhase) -> Tuple[bool, str, float]:
         """Inner implementation of allocate_cache, called within semaphore."""
-        try:
-            data = self.generator.generate(sequence_length=num_tokens, key=key)
-        except MemoryError:
-            logger.error(f"MemoryError generating cache for key {key} ({num_tokens} tokens)")
-            return False, 'none', 0.0
-        except Exception as exc:
-            logger.error(f"Failed to generate cache for key {key}: {exc}")
-            return False, 'none', 0.0
-
-        size_bytes = data.nbytes
+        if self.io_tracer is not None:
+            # Trace mode: compute size from model config — no numpy allocation needed.
+            # Divide by tensor_parallel: each TP rank stores only its 1/TP shard.
+            size_bytes = (self.model_config.kv_cache_size_per_token * num_tokens
+                          ) // self.tensor_parallel
+            data = None
+        else:
+            try:
+                data = self.generator.generate(sequence_length=num_tokens, key=key)
+            except MemoryError:
+                logger.error(f"MemoryError generating cache for key {key} ({num_tokens} tokens)")
+                return False, 'none', 0.0
+            except Exception as exc:
+                logger.error(f"Failed to generate cache for key {key}: {exc}")
+                return False, 'none', 0.0
+            if self.tensor_parallel > 1:
+                # Each TP rank owns 1/tensor_parallel of the KV heads.
+                # Take the first shard of the flat buffer as this rank's share.
+                tp_elements = data.size // self.tensor_parallel
+                data = data.ravel()[:tp_elements]
+            size_bytes = data.nbytes
 
         with self.stats_lock:
             if phase == InferencePhase.PREFILL:
@@ -669,7 +697,12 @@ class MultiTierCache:
                 self._update_tier_usage('nvme', size_bytes)
 
         try:
-            if allocated_tier == 'gpu':
+            if self.io_tracer is not None:
+                # Trace mode: record the operation with no actual data movement
+                timing = self.backends[allocated_tier].write_size(key, size_bytes)
+                self.io_tracer.log('Write', size_bytes, allocated_tier,
+                                   key=key, phase=phase.value.capitalize())
+            elif allocated_tier == 'gpu':
                 timing = self.backends['gpu'].write(key, data)
             elif allocated_tier == 'cpu':
                 timing = self.backends['cpu'].write(key, data)
@@ -777,6 +810,10 @@ class MultiTierCache:
 
             try:
                 _, timing = self.backends[location].read(key)
+
+                if self.io_tracer is not None:
+                    self.io_tracer.log('Read', entry_size, location,
+                                       key=key, phase=phase.value.capitalize())
 
                 with self.stats_lock:
                     if location == 'gpu':

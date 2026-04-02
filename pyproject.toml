@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlpstorage"
-version = "2.0.0b1"
+version = "3.0.0"
 description = "MLPerf Storage Benchmark Suite"
 readme = "README.md"
 authors = [
@@ -16,12 +16,13 @@ dependencies = [
     "pyarrow",
     "pyyaml>=6.0",
     "packaging>=21.0",  # For PEP 440 version parsing in lockfile validation
-    "rich>=13.0",  # Progress indication (UX-04)
+    "rich>=13.0",       # Progress indication (UX-04)
+    "s3dlio>=0.9.86",   # High-performance object storage library with S3, Azure, GCS, and AIStore support
 ]
 
 [project.optional-dependencies]
 dlio = [
-    "dlio-benchmark @ git+https://github.com/wvaske/dlio_benchmark.git@parquet-support",
+    "dlio-benchmark @ git+https://github.com/russfellows/dlio_benchmark.git@main",
 ]
 test = [
     "pytest>=7.0",
@@ -32,7 +33,7 @@ test = [
 # Note: DLIO depends on PyTorch. The [tool.uv] configuration ensures
 # CPU-only PyTorch wheels are used to avoid GPU dependencies.
 full = [
-    "dlio-benchmark @ git+https://github.com/wvaske/dlio_benchmark.git@parquet-support",
+    "dlio-benchmark @ git+https://github.com/russfellows/dlio_benchmark.git@main",
 ]
 
 [project.urls]

@@ -1,0 +1,38 @@
+# ResNet-50 Test Configuration with s3dlio Backend
+# This is a minimal test config to verify s3dlio integration
+
+model: 
+  name: resnet50
+  type: cnn
+
+framework: tensorflow
+
+workflow:
+ generate_data: False
+ train: True
+
+# s3dlio storage configuration
+storage:
+  storage_type: s3dlio
+  storage_root: file:///tmp/mlp-test-data/resnet50
+
+dataset:
+ num_files_train: 16  # Small for testing
+ num_samples_per_file: 100
+ record_length_bytes: 114660.07
+ record_length_bytes_resize: 150528
+ data_folder: ${storage.storage_root}/train
+ format: tfrecord
+
+train: 
+ computation_time: 0.01  # Faster for testing
+ epochs: 1  # Just one epoch for verification
+ 
+reader:
+ data_loader: tensorflow
+ read_threads: 2
+ computation_threads: 2
+ batch_size: 32
+
+metric:
+ au: 0.90

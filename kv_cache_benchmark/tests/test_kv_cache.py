@@ -221,6 +221,8 @@ def mock_args():
         duration = 60
         gpu_mem_gb = 16
         cpu_mem_gb = 32
+        num_gpus = 1
+        tensor_parallel = 1
         generation_mode = 'none'
         performance_profile = 'latency'
         disable_multi_turn = False
@@ -231,6 +233,8 @@ def mock_args():
         max_concurrent_allocs = 0
         request_rate = 0
         max_requests = 0
+        max_conversations = 500
+        rag_num_docs = 10
         dataset_path = None
         cache_dir = None
         storage_capacity_gb = 0
@@ -239,6 +243,13 @@ def mock_args():
         precondition_threads = 0
         trace_speedup = 1.0
         replay_cycles = 0
+        prefill_only = False
+        decode_only = False
+        validation_trace = None
+        use_burst_trace = False
+        burst_trace_path = None
+        io_trace_log = None
+        enable_latency_tracing = False
     return MockArgs()
 
 
@@ -1383,6 +1394,8 @@ class TestValidateArgs:
             duration=60,
             gpu_mem_gb=16,
             cpu_mem_gb=32,
+            num_gpus=1,
+            tensor_parallel=1,
             rag_num_docs=10,
             max_conversations=500,
             max_concurrent_allocs=0,
@@ -3927,6 +3940,7 @@ class TestValidateNewTraceArgs:
         import argparse
         return argparse.Namespace(
             num_users=100, duration=60, gpu_mem_gb=16, cpu_mem_gb=32,
+            num_gpus=1, tensor_parallel=1,
             rag_num_docs=10, max_conversations=500, max_concurrent_allocs=0,
             request_rate=0, max_requests=0, target_saturation=0.8,
             cache_dir=None, storage_capacity_gb=0, precondition_size_gb=0,

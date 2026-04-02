@@ -1,9 +1,19 @@
 # MLPerf Storage Benchmark Suite
 MLPerf® Storage is a benchmark suite to characterize the performance of storage systems that support machine learning workloads.
 
+> **⚠️ TEMPORARY — Development Fork**
+>
+> This is a personal development fork ([russfellows/mlc-storage](https://github.com/russfellows/mlc-storage)) containing work-in-progress features not yet merged into the official [MLCommons Storage](https://github.com/mlcommons/storage) repository. Once this work is accepted upstream, this notice will be removed and users should switch to the official repo.
+>
+> **To clone this fork with all submodules (required):**
+> ```bash
+> git clone --recurse-submodules https://github.com/russfellows/mlc-storage.git
+> ```
+
 - [Overview](#overview)
 - [Prerequisite](#prerequisite)
 - [Installation](#installation)
+- [Testing and Demos](#testing-and-demos)
 - [Configuration](#configuration)
 - [Workloads](#workloads)
 	- [U-Net3D](#u-net3d)
@@ -13,7 +23,24 @@ MLPerf® Storage is a benchmark suite to characterize the performance of storage
 	- [CLOSED](#closed)
 	- [OPEN](#open)
 - [Submission Rules](#submission-rules)
-- 
+
+---
+
+## Documentation
+
+Two README files cover the full project in detail — read both before diving into the
+code or running benchmarks:
+
+| Document | What it covers |
+|----------|----------------|
+| **[docs/README.md](docs/README.md)** | Complete project overview: all four benchmark workloads, document reference, object storage library guides, and quick-link index to every test script |
+| **[tests/README.md](tests/README.md)** | Everything needed to run tests: environment setup, unit tests, integration tests, object-store performance scripts, and how pytest is configured |
+
+The top-level sections below give the official MLCommons parameter reference and
+are retained for submission compliance.
+
+---
+
 ## Overview
 For an overview of how this benchmark suite is used by submitters to compare the performance of storage systems supporting an AI cluster, see the MLPerf® Storage Benchmark submission rules here: [doc](https://github.com/mlcommons/storage/blob/main/Submission_guidelines.md). 
 
@@ -75,6 +102,29 @@ The working directory structure is as follows
 ```
 
 The benchmark simulation will be performed through the [dlio_benchmark](https://github.com/argonne-lcf/dlio_benchmark) code, a benchmark suite for emulating I/O patterns for deep learning workloads. [dlio_benchmark](https://github.com/argonne-lcf/dlio_benchmark) is listed as a prerequisite to a specific git branch. A future release will update the installer to pull DLIO from PyPi. The DLIO configuration of each workload is specified through a yaml file. You can see the configs of all MLPerf Storage workloads in the `configs` folder. 
+
+## Testing and Demos
+
+See **[tests/README.md](tests/README.md)** for the complete test guide — environment
+setup, unit tests (no infrastructure required), integration tests, and object-store
+performance scripts for all three supported object storage libraries.
+
+### Quick Demos
+
+- **StreamingCheckpointing Demo**: Run `./tests/checkpointing/demo_checkpoint_methods.sh` to see:
+  - dgen-py integration (155× faster data generation)
+  - StreamingCheckpointing (192× memory reduction)
+  - Comparison of old vs new checkpoint methods
+
+- **Backend Validation**: Test multi-library support:
+  ```bash
+  python tests/checkpointing/test_streaming_backends.py --backends s3dlio minio
+  ```
+
+- **Unit tests** (no infrastructure required):
+  ```bash
+  pytest tests/unit/
+  ```
 
 ## Operation
 The benchmarks uses nested commands to select the workload category, workload, and workload parameters.

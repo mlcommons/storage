@@ -116,8 +116,8 @@ class ValidationEngine:
 # Validation constants with documented rationale
 MAX_USERS = 100000
 MAX_DURATION_SECONDS = 86400
-MAX_GPU_MEMORY_GB = 1024
-MAX_CPU_MEMORY_GB = 16384
+MAX_GPU_MEMORY_GB = 65536   # supports up to 512 × 128 GB HBM per TP group (num_gpus × per-card)
+MAX_CPU_MEMORY_GB = 131072  # supports up to 128 TB DRAM per node
 
 FORBIDDEN_CACHE_PREFIXES = frozenset([
     '/etc', '/bin', '/sbin', '/usr/bin', '/usr/sbin',
@@ -192,6 +192,21 @@ def validate_args(args: argparse.Namespace) -> argparse.Namespace:
 
     if not (0.0 <= args.target_saturation <= 1.0):
         errors.append(f"--target-saturation must be between 0.0 and 1.0, got {args.target_saturation}")
+
+    if args.num_gpus < 1:
+        errors.append(f"--num-gpus must be >= 1, got {args.num_gpus}")
+
+    if args.tensor_parallel < 1:
+        errors.append(f"--tensor-parallel must be >= 1, got {args.tensor_parallel}")
+    elif args.tensor_parallel > args.num_gpus:
+        errors.append(
+            f"--tensor-parallel ({args.tensor_parallel}) cannot exceed --num-gpus ({args.num_gpus})"
+        )
+    elif args.tensor_parallel > 1 and (args.tensor_parallel & (args.tensor_parallel - 1)) != 0:
+        logger.warning(
+            f"--tensor-parallel={args.tensor_parallel} is not a power of 2; "
+            "uncommon for real deployments but allowed"
+        )
 
     if args.cache_dir:
         cache_path = Path(args.cache_dir).resolve()

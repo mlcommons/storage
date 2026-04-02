@@ -1,0 +1,48 @@
+# Quick Local Filesystem Test - Data Generation
+# Generate test data to /mnt/scratch/dlio-test using file:// protocol
+
+model: resnet50
+
+workflow:
+  generate_data: True   # Generate synthetic data
+  train: False          # Don't train (generate only)
+  checkpoint: False
+
+# Dataset configuration - small test dataset
+dataset:
+  data_folder: file:///mnt/scratch/dlio-test
+  
+  # Small test dataset
+  format: npz
+  num_files_train: 10      # Just 10 files for quick test
+  num_samples_per_file: 5  # 5 samples per file
+  record_length: 102400    # 100 KB per record (small for fast test)
+  record_length_stdev: 0
+  record_length_resize: 102400
+
+# Storage configuration for s3dlio with file:// protocol
+storage:
+  storage_type: s3dlio
+  storage_root: file:///mnt/scratch/dlio-test
+  
+  # No credentials needed for file:// protocol
+  storage_options: {}
+
+# Generation settings
+generator:
+  num_workers: 4        # Limited workers for local filesystem
+  buffer_size: 1048576  # 1 MB buffer
+
+# Profiling
+profiling:
+  profiler: iostat
+
+# USAGE:
+# 1. Generate test data:
+#    mlpstorage training datagen --config configs/dlio/workload/test_local_datagen.yaml
+#
+# 2. Verify data was created:
+#    ls -lh /mnt/scratch/dlio-test/
+#
+# 3. Read the data:
+#    mlpstorage training run --config configs/dlio/workload/test_local_train.yaml

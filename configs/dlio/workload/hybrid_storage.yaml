@@ -1,0 +1,61 @@
+# Hybrid: Training data on S3, Checkpoints on local NVMe
+# Demonstrates using different storage backends for different purposes
+
+model: 
+  name: resnet50_hybrid_storage
+  type: cnn
+
+framework: pytorch
+
+workflow:
+  generate_data: False
+  train: True
+  checkpoint: True
+
+dataset: 
+  data_folder: /tmp/dlio-zerocopy-test
+  format: npz
+  num_files_train: 10
+  num_samples_per_file: 2
+  record_length_bytes: 301500
+
+storage:
+  storage_type: s3dlio
+  
+  # Training data from S3 with multi-endpoint
+  storage_root: s3://training-bucket/imagenet-1k/
+  endpoint_uris:
+    - http://s3-endpoint1:9000
+    - http://s3-endpoint2:9000
+  use_mpi_endpoint_distribution: true
+  
+  storage_options:
+    region: us-east-1
+
+reader: 
+  data_loader: pytorch
+  batch_size: 32
+  read_threads: 8
+  file_shuffle: seed
+  sample_shuffle: seed
+
+train:
+  epochs: 90
+  computation_time: 0.05
+
+checkpoint:
+  # Checkpoints to local NVMe for fast I/O (uses file:// backend)
+  checkpoint_folder: file:///nvme/checkpoints/resnet50/
+  checkpoint_after_epoch: 10
+  epochs_between_checkpoints: 5
+  
+  # Or use separate S3 bucket optimized for checkpoints:
+  # checkpoint_folder: s3://checkpoint-bucket/resnet50/
+
+metric:
+  au: 0.90
+
+# Benefits of this setup:
+#   - Training data: Distributed S3 endpoints for high throughput
+#   - Checkpoints: Local NVMe for minimal latency, no network congestion
+#   - Cost: Checkpoints don't consume S3 bandwidth during training

@@ -1,0 +1,95 @@
+# LLaMA 3 8B — s3torchconnector Checkpointing Config
+#
+# Purpose : Checkpoint-only workload for llama3-8b using the AWS
+#           s3torchconnector library for object I/O.
+# Storage : MinIO at https://172.16.1.40:9000  (bucket: chckpt-test1)
+# Data    : s3://chckpt-test1/s3torch/llama3-8b/
+#
+# Model sizing (ZeRO-3, 8 ranks, fp16 model + fp32 optimizer):
+#   Total model+optimizer: 15 GB + 90 GB = 105 GB
+#   Per-rank write:  105 GB / 8 ranks ≈ 13.1 GB
+#   Per-checkpoint total I/O: ~105 GB write + ~105 GB read = ~210 GB
+#
+# Prerequisites (before running dlio_benchmark):
+#   pip install s3torchconnector        # or s3-torch-connector-builder
+#   source /home/eval/Documents/Code/mlp-storage/.env
+#   # ensures AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY are set
+#   # bucket must exist: s3://chckpt-test1/
+#
+# Run directly (8 MPI ranks = 8 simulated GPU processes):
+#   cd /home/eval/Documents/Code/mlp-storage
+#   source .env && source .venv/bin/activate
+#   DLIO_S3_IMPLEMENTATION=mlp \
+#   mpirun -n 8 --allow-run-as-root \
+#     .venv/bin/dlio_benchmark \
+#     workload=llama3_8b_checkpoint_s3torch \
+#     --config-dir=/home/eval/Documents/Code/mlp-storage/configs/dlio
+#
+# Or use the convenience script:
+#   bash tests/object-store/dlio_s3torch_checkpoint.sh
+#
+# Override checkpoint count (quick test with 1 checkpoint):
+#   DLIO_S3_IMPLEMENTATION=mlp mpirun -n 8 --allow-run-as-root \
+#     .venv/bin/dlio_benchmark \
+#     workload=llama3_8b_checkpoint_s3torch \
+#     ++workload.checkpoint.num_checkpoints_write=1 \
+#     ++workload.checkpoint.num_checkpoints_read=1 \
+#     --config-dir=/home/eval/Documents/Code/mlp-storage/configs/dlio
+
+model:
+  name: llama_8b
+  type: transformer
+  num_layers: 32
+  model_datatype: fp16
+  optimizer_datatype: fp32
+  parallelism:
+    pipeline: 1
+    tensor: 1
+    zero_stage: 3
+  transformer:
+    vocab_size: 128256
+    hidden_size: 4096
+    ffn_hidden_size: 14336
+    num_attention_heads: 32
+    num_kv_heads: 8
+
+framework: pytorch
+
+workflow:
+  generate_data: False
+  train: False
+  checkpoint: True
+
+# ---------------------------------------------------------------------------
+# Storage — s3torchconnector talking to MinIO
+# ---------------------------------------------------------------------------
+storage:
+  storage_type: s3
+  storage_root: chckpt-test1           # S3 bucket name
+
+  # storage_library is read by config.py and injected into storage_options so
+  # that PyTorchObjStoreCheckpointing can find it via
+  # storage_options.get("storage_library"). There is NO default — this field
+  # is REQUIRED for all object storage workloads.
+  storage_library: s3torchconnector
+
+  storage_options:
+    endpoint_url: https://172.16.1.40:9000
+    region: us-east-1
+    # Credentials come from environment variables — do NOT hardcode here.
+    # Set these before running:
+    #   export AWS_ACCESS_KEY_ID=...
+    #   export AWS_SECRET_ACCESS_KEY=...
+    # (or: source /home/eval/Documents/Code/mlp-storage/.env)
+
+# ---------------------------------------------------------------------------
+# Checkpoint — full s3:// URI as checkpoint_folder
+# ---------------------------------------------------------------------------
+# checkpoint_folder must be a full s3:// URI when storage_type=s3.
+# PyTorchObjStoreCheckpointing.get_name() calls os.path.join() on this URI
+# and the per-rank suffix to produce the final object key.
+checkpoint:
+  checkpoint_folder: s3://chckpt-test1/s3torch/llama3-8b
+  time_between_checkpoints: 5
+  num_checkpoints_write: 2
+  num_checkpoints_read: 2

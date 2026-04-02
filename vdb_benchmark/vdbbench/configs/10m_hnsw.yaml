@@ -1,0 +1,26 @@
+database:
+  host: 127.0.0.1
+  port: 19530
+  database: milvus
+  max_receive_message_length: 514_983_574
+  max_send_message_length: 514_983_574
+
+dataset:
+  collection_name: mlps_10m_10shards_1536dim_uniform_hnsw
+  num_vectors: 10_000_000
+  dimension: 1536
+  distribution: uniform
+  chunk_size: 1_000_000
+  batch_size: 1000
+  num_shards: 10
+  vector_dtype: FLOAT_VECTOR
+
+index:
+  index_type: HNSW
+  metric_type: COSINE
+  #index_params
+  M: 64
+  ef_construction: 200
+
+workflow:
+  compact: True
