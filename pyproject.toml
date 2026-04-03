@@ -20,7 +20,7 @@ dependencies = [
     "s3dlio>=0.9.86",   # High-performance object storage library with S3, Azure, GCS, and AIStore support
 ]
 
-[project.optional-dependencies]
+[project.dependencies]
 dlio = [
     "dlio-benchmark @ git+https://github.com/mlcommons/DLIO_local_changes.git",
 ]
