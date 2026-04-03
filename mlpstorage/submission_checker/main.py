@@ -16,6 +16,8 @@ from .loader import Loader
 from .checks.checkpointing_checks import CheckpointingCheck
 from .checks.directory_checks import DirectoryCheck
 from .checks.training_checks import TrainingCheck
+from .checks.vdb_checks import VDBCheck
+from .checks.kv_cache_checks import KVCacheCheck
 
 
 # Import result exporter
@@ -84,7 +86,7 @@ def main():
     results = {}
     systems = {}
     errors = []
-    checkers = [DirectoryCheck, TrainingCheck, CheckpointingCheck]
+    checkers = [DirectoryCheck, TrainingCheck, CheckpointingCheck, VDBCheck, KVCacheCheck]
     # Main loop over all the submissions
     for logs in loader.load():
         # TODO: Initialize checkers
