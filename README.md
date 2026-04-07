@@ -47,9 +47,9 @@ Following prerequisites must be satisfied
 ## Installation 
 **The following installation steps must be run on every client host that will participate in running the benchmarks.**
 
-### uv (Recommended)
+### uv (Required)
 
-[`uv`](https://docs.astral.sh/uv/) is a fast Python package and project manager that handles virtual environment creation, dependency resolution, and Python version management automatically — no manual `venv` or `pip` steps required.
+[`uv`](https://docs.astral.sh/uv/) is a fast Python package and project manager that handles virtual environment creation, dependency resolution, and Python version management automatically — no manual `venv` or `pip` steps required. It will install into your virutal environment exactly the versions of supporting libraries and tools that the benchmark has been tested with.
 
 **Install uv** (if not already installed):
 
@@ -63,84 +63,26 @@ Install the MPI runtime (still required for distributed execution):
 sudo apt install libopenmpi-dev openmpi-common
 ```
 
-Clone and install:
+Clone the repo:
 
 ```bash
 git clone https://github.com/mlcommons/storage.git
 cd storage
-uv sync
 ```
-
-`uv sync` creates a `.venv` virtual environment and installs all dependencies — including DLIO benchmark — automatically from the lock file.
 
 Verify the installation:
 
 ```bash
-uv run mlpstorage --help
+mlpstorage --help
 ```
 
-> **Note:** All benchmark commands in this README can be prefixed with `uv run` (e.g., `uv run mlpstorage training run ...`), or you can activate the virtual environment first: `source .venv/bin/activate`
+The `mlpstorage` script executes `uv run` every time you invoke the benchmark, keeping your virtual environment up to date.
+`uv` creates a `.venv` virtual environment and installs all dependencies — including DLIO benchmark — automatically based upon the contents of the the `uv.lock` file.
 
-> **Note:** `uv` installs CPU-only PyTorch by default (sufficient for I/O benchmarking). For GPU-accelerated training workloads, install an appropriate CUDA-enabled PyTorch separately after `uv sync`.
+> **Note:** `uv` installs the CPU-only version of PyTorch.
+> GPU-accelerated training or checkpointing workloads are not supported, there is no need to have GPUs in your benchmark test gear, they will not be used.
 
-To install optional extras:
-
-```bash
-uv sync --all-extras
-```
-
----
-
-### pip (Alternative)
-
-The following steps use standard `pip` and are an alternative to the `uv` workflow above.
-
-#### Dependencies
-DLIO requires MPI package. 
-For eg: when running on Ubuntu 24.04, install openmpi tools and libraries. 
-
-```bash
-sudo apt install python3-pip python3-venv libopenmpi-dev openmpi-common
-```
-
-Create a virtual environment for package installations and activate it.
-
-```bash
-python3 -m venv ~/.venvs/myenv
-source ~/.venvs/myenv/bin/activate
-```
-
-#### pip
-Please ensure you have the latest version of pip installed. This will fix the following error where the package is built as "UNKNOWN". Upgrade pip like so:
-
-```bash
-python3 -m pip install --upgrade pip
-```
-
-
-Clone the latest release from [MLCommons Storage](https://github.com/mlcommons/storage) repository and install Python dependencies.
-
-```bash
-git clone -b v2.0 https://github.com/mlcommons/storage.git
-cd storage
-pip3 install -e .
-```
-
-The working directory structure is as follows
-
-```
-|---storage
-       |---mlpstorage
-           |---(folder contains benchmark src files)
-       |---configs
-           |---dlio
-               |---workload
-                   |---(folder contains configs for all checkpoint and training workloads)
-           |---vectordbbench (These configurations are PREVIEW only and not available for submission)
-               |---(folder contains configs for all vectordb workloads)
-```
-
-The benchmark simulation will be performed through the [dlio_benchmark](https://github.com/argonne-lcf/dlio_benchmark) code, a benchmark suite for emulating I/O patterns for deep learning workloads. [dlio_benchmark](https://github.com/argonne-lcf/dlio_benchmark) is listed as a prerequisite to a specific git branch. A future release will update the installer to pull DLIO from PyPi. The DLIO configuration of each workload is specified through a yaml file. You can see the configs of all MLPerf Storage workloads in the `configs` folder. 
+The benchmark simulation will be performed through the [dlio_benchmark](https://github.com/mlcommons/DLIO_local_changes) code, a benchmark suite for emulating I/O patterns for deep learning workloads. The DLIO configuration of each workload is specified through a yaml file. You can see the configs of all MLPerf Storage workloads in the `configs` folder. 
 
 ## Testing and Demos
 
