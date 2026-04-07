@@ -2,7 +2,7 @@
 KV Cache Benchmark for MLPerf Storage.
 
 This module provides the KVCacheBenchmark class that wraps the kv-cache.py
-benchmark script for integration into the mlpstorage framework.
+benchmark script for integration into the mlpstorage_py framework.
 
 The KV Cache benchmark simulates storage system performance for Large Language
 Model (LLM) Key-Value cache offloading, including:
@@ -20,8 +20,8 @@ import sys
 from pathlib import Path
 from typing import Dict, Any, Optional, List
 
-from mlpstorage.benchmarks.base import Benchmark
-from mlpstorage.config import (
+from mlpstorage_py.benchmarks.base import Benchmark
+from mlpstorage_py.config import (
     BENCHMARK_TYPES,
     EXEC_TYPE,
     KVCACHE_MODELS,
@@ -29,8 +29,8 @@ from mlpstorage.config import (
     KVCACHE_PERFORMANCE_PROFILES,
     KVCACHE_GENERATION_MODES,
 )
-from mlpstorage.interfaces import BenchmarkCommand
-from mlpstorage.utils import generate_mpi_prefix_cmd
+from mlpstorage_py.interfaces import BenchmarkCommand
+from mlpstorage_py.utils import generate_mpi_prefix_cmd
 
 
 class KVCacheBenchmark(Benchmark):

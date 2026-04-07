@@ -5,8 +5,8 @@ This module defines the CLI arguments for the checkpointing benchmark,
 including datasize and run commands.
 """
 
-from mlpstorage.config import DEFAULT_HOSTS, EXEC_TYPE
-from mlpstorage.cli.common_args import (
+from mlpstorage_py.config import DEFAULT_HOSTS, EXEC_TYPE
+from mlpstorage_py.cli.common_args import (
     HELP_MESSAGES,
     add_universal_arguments,
     add_mpi_arguments,

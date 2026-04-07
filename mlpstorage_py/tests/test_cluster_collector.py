@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Tests for mlpstorage.cluster_collector module.
+Tests for mlpstorage_py.cluster_collector module.
 
 This module tests the /proc file parsers, data classes, local collection
 functions, and MPI cluster collector.
 
 Run with:
-    pytest mlpstorage/tests/test_cluster_collector.py -v
+    pytest mlpstorage_py/tests/test_cluster_collector.py -v
 """
 
 import json
@@ -15,7 +15,7 @@ import pytest
 import tempfile
 from unittest.mock import MagicMock, patch, mock_open
 
-from mlpstorage.cluster_collector import (
+from mlpstorage_py.cluster_collector import (
     # Data classes
     HostDiskInfo,
     HostNetworkInfo,

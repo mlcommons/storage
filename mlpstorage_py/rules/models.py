@@ -13,8 +13,8 @@ import yaml
 from dataclasses import dataclass, field, asdict
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 
-from mlpstorage.config import BENCHMARK_TYPES, PARAM_VALIDATION, HYDRA_OUTPUT_SUBDIR
-from mlpstorage.cluster_collector import (
+from mlpstorage_py.config import BENCHMARK_TYPES, PARAM_VALIDATION, HYDRA_OUTPUT_SUBDIR
+from mlpstorage_py.cluster_collector import (
     HostDiskInfo,
     HostNetworkInfo,
     HostSystemInfo,
@@ -22,7 +22,7 @@ from mlpstorage.cluster_collector import (
 )
 
 if TYPE_CHECKING:
-    from mlpstorage.rules.issues import Issue
+    from mlpstorage_py.rules.issues import Issue
 
 
 @dataclass(frozen=True)

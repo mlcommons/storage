@@ -5,11 +5,11 @@ This module exports benchmark classes and registers them with
 the BenchmarkRegistry for dynamic CLI construction.
 """
 
-from mlpstorage.benchmarks.dlio import TrainingBenchmark, CheckpointingBenchmark
-from mlpstorage.benchmarks.vectordbbench import VectorDBBenchmark
-from mlpstorage.benchmarks.kvcache import KVCacheBenchmark
-from mlpstorage.registry import BenchmarkRegistry
-from mlpstorage.cli import (
+from mlpstorage_py.benchmarks.dlio import TrainingBenchmark, CheckpointingBenchmark
+from mlpstorage_py.benchmarks.vectordbbench import VectorDBBenchmark
+from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
+from mlpstorage_py.registry import BenchmarkRegistry
+from mlpstorage_py.cli import (
     PROGRAM_DESCRIPTIONS,
     add_training_arguments,
     add_checkpointing_arguments,

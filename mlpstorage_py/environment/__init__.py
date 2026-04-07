@@ -22,12 +22,12 @@ Public exports:
     collect_validation_issues: Function to separate errors from warnings
 """
 
-from mlpstorage.environment.os_detect import OSInfo, detect_os
-from mlpstorage.environment.install_hints import (
+from mlpstorage_py.environment.os_detect import OSInfo, detect_os
+from mlpstorage_py.environment.install_hints import (
     get_install_instruction,
     INSTALL_INSTRUCTIONS,
 )
-from mlpstorage.environment.validators import (
+from mlpstorage_py.environment.validators import (
     ValidationIssue,
     validate_ssh_connectivity,
     collect_validation_issues,

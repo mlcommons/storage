@@ -1,5 +1,5 @@
 """
-Cluster collector interface definitions for mlpstorage.
+Cluster collector interface definitions for mlpstorage_py.
 
 This module defines the abstract interface for collecting system and cluster
 information from benchmark hosts. Implementations may use different methods

@@ -5,15 +5,15 @@ This module provides the BenchmarkVerifier class that orchestrates
 validation of benchmark runs using the appropriate rules checkers.
 """
 
-from mlpstorage.config import BENCHMARK_TYPES, PARAM_VALIDATION
-from mlpstorage.rules.models import BenchmarkRun
-from mlpstorage.rules.run_checkers import (
+from mlpstorage_py.config import BENCHMARK_TYPES, PARAM_VALIDATION
+from mlpstorage_py.rules.models import BenchmarkRun
+from mlpstorage_py.rules.run_checkers import (
     TrainingRunRulesChecker,
     CheckpointingRunRulesChecker,
     KVCacheRunRulesChecker,
     VectorDBRunRulesChecker,
 )
-from mlpstorage.rules.submission_checkers import (
+from mlpstorage_py.rules.submission_checkers import (
     MultiRunRulesChecker,
     TrainingSubmissionRulesChecker,
     CheckpointSubmissionRulesChecker,
@@ -70,7 +70,7 @@ class BenchmarkVerifier:
             elif isinstance(source, str):
                 # Assume it's a result directory path
                 self.benchmark_runs.append(BenchmarkRun.from_result_dir(source, logger))
-            elif "mlpstorage.benchmarks." in str(type(source)):
+            elif "mlpstorage_py.benchmarks." in str(type(source)):
                 # It's a Benchmark instance - use the factory method
                 self.benchmark_runs.append(BenchmarkRun.from_benchmark(source, logger))
             else:

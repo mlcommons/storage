@@ -12,8 +12,8 @@ Modules:
     - utility_args: Reports and history arguments
 
 Usage:
-    from mlpstorage.cli import add_training_arguments
-    from mlpstorage.registry import BenchmarkRegistry
+    from mlpstorage_py.cli import add_training_arguments
+    from mlpstorage_py.registry import BenchmarkRegistry
 
     BenchmarkRegistry.register(
         'training',
@@ -22,7 +22,7 @@ Usage:
     )
 """
 
-from mlpstorage.cli.common_args import (
+from mlpstorage_py.cli.common_args import (
     HELP_MESSAGES,
     PROGRAM_DESCRIPTIONS,
     add_universal_arguments,
@@ -31,12 +31,12 @@ from mlpstorage.cli.common_args import (
     add_dlio_arguments,
 )
 
-from mlpstorage.cli.training_args import add_training_arguments
-from mlpstorage.cli.checkpointing_args import add_checkpointing_arguments
-from mlpstorage.cli.vectordb_args import add_vectordb_arguments
-from mlpstorage.cli.kvcache_args import add_kvcache_arguments
-from mlpstorage.cli.utility_args import add_reports_arguments, add_history_arguments
-from mlpstorage.cli.lockfile_args import add_lockfile_arguments
+from mlpstorage_py.cli.training_args import add_training_arguments
+from mlpstorage_py.cli.checkpointing_args import add_checkpointing_arguments
+from mlpstorage_py.cli.vectordb_args import add_vectordb_arguments
+from mlpstorage_py.cli.kvcache_args import add_kvcache_arguments
+from mlpstorage_py.cli.utility_args import add_reports_arguments, add_history_arguments
+from mlpstorage_py.cli.lockfile_args import add_lockfile_arguments
 
 __all__ = [
     # Common

@@ -47,20 +47,20 @@ from functools import wraps
 
 from pyarrow.ipc import open_stream
 
-from mlpstorage.config import PARAM_VALIDATION, DATETIME_STR, MLPS_DEBUG, EXEC_TYPE
-from mlpstorage.debug import debug_tryer_wrapper
-from mlpstorage.interfaces import BenchmarkInterface, BenchmarkConfig, BenchmarkCommand
-from mlpstorage.mlps_logging import setup_logging, apply_logging_options
-from mlpstorage.rules import BenchmarkVerifier, generate_output_location, ClusterInformation
-from mlpstorage.rules.models import ClusterSnapshots, TimeSeriesData, TimeSeriesSample
-from mlpstorage.utils import CommandExecutor, MLPSJsonEncoder
-from mlpstorage.cluster_collector import (
+from mlpstorage_py.config import PARAM_VALIDATION, DATETIME_STR, MLPS_DEBUG, EXEC_TYPE
+from mlpstorage_py.debug import debug_tryer_wrapper
+from mlpstorage_py.interfaces import BenchmarkInterface, BenchmarkConfig, BenchmarkCommand
+from mlpstorage_py.mlps_logging import setup_logging, apply_logging_options
+from mlpstorage_py.rules import BenchmarkVerifier, generate_output_location, ClusterInformation
+from mlpstorage_py.rules.models import ClusterSnapshots, TimeSeriesData, TimeSeriesSample
+from mlpstorage_py.utils import CommandExecutor, MLPSJsonEncoder
+from mlpstorage_py.cluster_collector import (
     collect_cluster_info,
     SSHClusterCollector,
     TimeSeriesCollector,
     MultiHostTimeSeriesCollector,
 )
-from mlpstorage.progress import create_stage_progress, progress_context
+from mlpstorage_py.progress import create_stage_progress, progress_context
 
 if TYPE_CHECKING:
     import logging

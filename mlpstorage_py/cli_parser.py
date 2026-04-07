@@ -8,11 +8,11 @@ using modular argument builders from the cli package.
 import argparse
 import sys
 
-from mlpstorage import VERSION
-from mlpstorage.config import LLM_MODELS, VECTORDB_DEFAULT_RUNTIME, EXIT_CODE
+from mlpstorage_py import VERSION
+from mlpstorage_py.config import LLM_MODELS, VECTORDB_DEFAULT_RUNTIME, EXIT_CODE
 
 # Import modular argument builders from cli package
-from mlpstorage.cli import (
+from mlpstorage_py.cli import (
     HELP_MESSAGES,
     PROGRAM_DESCRIPTIONS,
     add_universal_arguments,
@@ -34,7 +34,7 @@ def parse_arguments():
     Returns:
         argparse.Namespace: Parsed and validated arguments.
     """
-    parser = argparse.ArgumentParser(description="Script to launch the MLPerf Storage benchmark")
+    parser = argparse.ArgumentParser(prog="mlpstorage", description="Script to launch the MLPerf Storage benchmark")
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
     sub_programs = parser.add_subparsers(dest="program", required=True)
     sub_programs.required = True

@@ -6,7 +6,7 @@ OPEN vs CLOSED messaging and actionable feedback for users.
 """
 
 from typing import List, Dict, Any, Optional
-from mlpstorage.config import PARAM_VALIDATION
+from mlpstorage_py.config import PARAM_VALIDATION
 
 
 class ValidationMessageFormatter:

@@ -4,13 +4,13 @@ import os.path
 import pprint
 import sys
 
-from mlpstorage.benchmarks.base import Benchmark
-from mlpstorage.config import (CONFIGS_ROOT_DIR, BENCHMARK_TYPES, EXEC_TYPE, MPIRUN, MLPSTORAGE_BIN_NAME,
+from mlpstorage_py.benchmarks.base import Benchmark
+from mlpstorage_py.config import (CONFIGS_ROOT_DIR, BENCHMARK_TYPES, EXEC_TYPE, MPIRUN, MLPSTORAGE_BIN_NAME,
                                LLM_ALLOWED_VALUES, LLM_SUBSET_PROCS, EXIT_CODE, MODELS, HYDRA_OUTPUT_SUBDIR,
                                LLM_SIZE_BY_RANK)
-from mlpstorage.dependency_check import validate_benchmark_dependencies
-from mlpstorage.rules import calculate_training_data_size, HostInfo, HostMemoryInfo, HostCPUInfo, ClusterInformation
-from mlpstorage.utils import (read_config_from_file, create_nested_dict, update_nested_dict, generate_mpi_prefix_cmd)
+from mlpstorage_py.dependency_check import validate_benchmark_dependencies
+from mlpstorage_py.rules import calculate_training_data_size, HostInfo, HostMemoryInfo, HostCPUInfo, ClusterInformation
+from mlpstorage_py.utils import (read_config_from_file, create_nested_dict, update_nested_dict, generate_mpi_prefix_cmd)
 
 
 class DLIOBenchmark(Benchmark, abc.ABC):

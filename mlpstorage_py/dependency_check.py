@@ -23,9 +23,9 @@ import os
 import shutil
 from typing import Optional, Tuple, List
 
-from mlpstorage.environment import detect_os, get_install_instruction
-from mlpstorage.error_messages import format_error
-from mlpstorage.errors import DependencyError
+from mlpstorage_py.environment import detect_os, get_install_instruction
+from mlpstorage_py.error_messages import format_error
+from mlpstorage_py.errors import DependencyError
 
 
 def check_mpi_with_hints(mpi_bin: str = "mpirun") -> str:

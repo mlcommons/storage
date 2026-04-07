@@ -6,9 +6,9 @@ Validates checkpointing benchmark submissions (multiple runs).
 
 from typing import Optional, List
 
-from mlpstorage.config import BENCHMARK_TYPES, LLM_MODELS, PARAM_VALIDATION
-from mlpstorage.rules.issues import Issue
-from mlpstorage.rules.submission_checkers.base import MultiRunRulesChecker
+from mlpstorage_py.config import BENCHMARK_TYPES, LLM_MODELS, PARAM_VALIDATION
+from mlpstorage_py.rules.issues import Issue
+from mlpstorage_py.rules.submission_checkers.base import MultiRunRulesChecker
 
 
 class CheckpointSubmissionRulesChecker(MultiRunRulesChecker):

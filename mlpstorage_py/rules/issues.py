@@ -8,7 +8,7 @@ during benchmark parameter and result validation.
 from dataclasses import dataclass
 from typing import Any, Optional
 
-from mlpstorage.config import PARAM_VALIDATION
+from mlpstorage_py.config import PARAM_VALIDATION
 
 
 @dataclass

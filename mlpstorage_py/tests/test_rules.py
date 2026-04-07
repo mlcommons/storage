@@ -1,17 +1,17 @@
 #!/usr/bin/env python3
 """
-Tests for mlpstorage.rules module, specifically for ClusterInformation
+Tests for mlpstorage_py.rules module, specifically for ClusterInformation
 and system_info metadata handling.
 
 Run with:
-    pytest mlpstorage/tests/test_rules.py -v
+    pytest mlpstorage_py/tests/test_rules.py -v
 """
 
 import pytest
 import logging
 from unittest.mock import MagicMock, patch
 
-from mlpstorage.rules import ClusterInformation, BenchmarkRun, BenchmarkResult
+from mlpstorage_py.rules import ClusterInformation, BenchmarkRun, BenchmarkResult
 
 
 class MockLogger:
@@ -288,7 +288,7 @@ class TestHostInfoFromCollectedData:
 
     def test_from_collected_data_basic(self, mock_logger):
         """Should create HostInfo from collected data dictionary."""
-        from mlpstorage.rules import HostInfo
+        from mlpstorage_py.rules import HostInfo
 
         data = {
             'hostname': 'node1',
@@ -338,7 +338,7 @@ class TestHostInfoFromCollectedData:
 
     def test_from_collected_data_missing_optional_fields(self, mock_logger):
         """Should handle missing optional fields gracefully."""
-        from mlpstorage.rules import HostInfo
+        from mlpstorage_py.rules import HostInfo
 
         data = {
             'hostname': 'node1',
@@ -355,7 +355,7 @@ class TestHostInfoFromCollectedData:
 
     def test_to_dict_includes_all_fields(self, mock_logger):
         """to_dict should include all populated fields."""
-        from mlpstorage.rules import HostInfo
+        from mlpstorage_py.rules import HostInfo
 
         data = {
             'hostname': 'node1',
@@ -452,7 +452,7 @@ class TestClusterInformationConsistencyValidation:
 
     def test_no_issues_for_consistent_cluster(self, mock_logger):
         """Should return empty list for consistent cluster."""
-        from mlpstorage.rules import HostInfo, HostMemoryInfo, HostCPUInfo
+        from mlpstorage_py.rules import HostInfo, HostMemoryInfo, HostCPUInfo
 
         host_info_list = [
             HostInfo(
@@ -474,7 +474,7 @@ class TestClusterInformationConsistencyValidation:
 
     def test_detects_memory_variance(self, mock_logger):
         """Should detect significant memory variance between hosts."""
-        from mlpstorage.rules import HostInfo, HostMemoryInfo, HostCPUInfo
+        from mlpstorage_py.rules import HostInfo, HostMemoryInfo, HostCPUInfo
 
         host_info_list = [
             HostInfo(
@@ -497,7 +497,7 @@ class TestClusterInformationConsistencyValidation:
 
     def test_detects_cpu_core_variance(self, mock_logger):
         """Should detect CPU core count variance."""
-        from mlpstorage.rules import HostInfo, HostMemoryInfo, HostCPUInfo
+        from mlpstorage_py.rules import HostInfo, HostMemoryInfo, HostCPUInfo
 
         host_info_list = [
             HostInfo(
@@ -519,7 +519,7 @@ class TestClusterInformationConsistencyValidation:
 
     def test_single_host_no_validation(self, mock_logger):
         """Should skip validation for single-host clusters."""
-        from mlpstorage.rules import HostInfo, HostMemoryInfo
+        from mlpstorage_py.rules import HostInfo, HostMemoryInfo
 
         host_info_list = [
             HostInfo(
@@ -539,7 +539,7 @@ class TestClusterInformationExtendedAsDict:
 
     def test_as_dict_includes_new_fields(self, mock_logger):
         """as_dict should include all new fields."""
-        from mlpstorage.rules import HostInfo, HostMemoryInfo
+        from mlpstorage_py.rules import HostInfo, HostMemoryInfo
 
         host_info_list = [
             HostInfo(
@@ -564,7 +564,7 @@ class TestClusterInformationExtendedAsDict:
 
     def test_as_dict_includes_consistency_issues(self, mock_logger):
         """as_dict should include consistency issues if present."""
-        from mlpstorage.rules import HostInfo, HostMemoryInfo, HostCPUInfo
+        from mlpstorage_py.rules import HostInfo, HostMemoryInfo, HostCPUInfo
 
         host_info_list = [
             HostInfo(

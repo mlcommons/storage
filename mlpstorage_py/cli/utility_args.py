@@ -5,7 +5,7 @@ This module defines the CLI arguments for utility commands like
 reports and history.
 """
 
-from mlpstorage.cli.common_args import (
+from mlpstorage_py.cli.common_args import (
     HELP_MESSAGES,
     add_universal_arguments,
 )

@@ -17,11 +17,11 @@ import sys
 from dataclasses import dataclass
 from typing import List, Dict, Any, Optional
 
-from mlpstorage.mlps_logging import setup_logging, apply_logging_options
-from mlpstorage.config import MLPS_DEBUG, BENCHMARK_TYPES, EXIT_CODE, PARAM_VALIDATION, LLM_MODELS, MODELS, ACCELERATORS
-from mlpstorage.rules import get_runs_files, BenchmarkVerifier, BenchmarkRun, Issue, RunID
-from mlpstorage.utils import flatten_nested_dict, remove_nan_values
-from mlpstorage.reporting import (
+from mlpstorage_py.mlps_logging import setup_logging, apply_logging_options
+from mlpstorage_py.config import MLPS_DEBUG, BENCHMARK_TYPES, EXIT_CODE, PARAM_VALIDATION, LLM_MODELS, MODELS, ACCELERATORS
+from mlpstorage_py.rules import get_runs_files, BenchmarkVerifier, BenchmarkRun, Issue, RunID
+from mlpstorage_py.utils import flatten_nested_dict, remove_nan_values
+from mlpstorage_py.reporting import (
     ResultsDirectoryValidator,
     ValidationMessageFormatter,
     ClosedRequirementsFormatter,
@@ -72,7 +72,7 @@ class ReportGenerator:
             self.logger = logger
         else:
             # Ensure there is always a logger available
-            self.logger = setup_logging(name="mlpstorage_reporter")
+            self.logger = setup_logging(name="mlpstorage_py")
             apply_logging_options(self.logger, args)
 
         self.results_dir = results_dir

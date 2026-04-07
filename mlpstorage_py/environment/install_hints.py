@@ -11,7 +11,7 @@ Public exports:
 
 from typing import Optional
 
-from mlpstorage.environment.os_detect import OSInfo
+from mlpstorage_py.environment.os_detect import OSInfo
 
 
 # Installation instructions keyed by (dependency, system, distro_id)

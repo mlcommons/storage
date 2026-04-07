@@ -5,14 +5,14 @@ This module defines the CLI arguments for the KV Cache benchmark,
 including run and datasize commands for LLM inference storage testing.
 """
 
-from mlpstorage.config import (
+from mlpstorage_py.config import (
     KVCACHE_MODELS,
     KVCACHE_PERFORMANCE_PROFILES,
     KVCACHE_GENERATION_MODES,
     KVCACHE_DEFAULT_DURATION,
     EXEC_TYPE,
 )
-from mlpstorage.cli.common_args import (
+from mlpstorage_py.cli.common_args import (
     HELP_MESSAGES,
     add_universal_arguments,
     add_host_arguments,

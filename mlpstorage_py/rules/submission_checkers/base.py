@@ -9,9 +9,9 @@ MultiRunRulesCheckers validate groups of benchmark runs as a submission:
 
 from typing import Optional, List, Union
 
-from mlpstorage.config import PARAM_VALIDATION
-from mlpstorage.rules.base import RulesChecker
-from mlpstorage.rules.issues import Issue
+from mlpstorage_py.config import PARAM_VALIDATION
+from mlpstorage_py.rules.base import RulesChecker
+from mlpstorage_py.rules.issues import Issue
 
 
 class MultiRunRulesChecker(RulesChecker):

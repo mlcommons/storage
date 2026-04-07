@@ -5,8 +5,8 @@ This module defines the CLI arguments for the VectorDB benchmark,
 including datagen and run commands.
 """
 
-from mlpstorage.config import VECTOR_DTYPES, DISTRIBUTIONS, VECTORDB_DEFAULT_RUNTIME
-from mlpstorage.cli.common_args import (
+from mlpstorage_py.config import VECTOR_DTYPES, DISTRIBUTIONS, VECTORDB_DEFAULT_RUNTIME
+from mlpstorage_py.cli.common_args import (
     HELP_MESSAGES,
     add_universal_arguments,
     add_timeseries_arguments,

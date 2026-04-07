@@ -2,11 +2,11 @@
 CLI argument builder for lockfile management commands.
 
 Provides arguments for:
-- mlpstorage lockfile generate: Create lockfile from pyproject.toml
-- mlpstorage lockfile verify: Validate installed packages against lockfile
+- mlpstorage_py lockfile generate: Create lockfile from pyproject.toml
+- mlpstorage_py lockfile verify: Validate installed packages against lockfile
 """
 
-from mlpstorage.cli.common_args import add_universal_arguments
+from mlpstorage_py.cli.common_args import add_universal_arguments
 
 
 def add_lockfile_arguments(parser):

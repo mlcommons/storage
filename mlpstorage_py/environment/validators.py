@@ -84,7 +84,7 @@ def validate_ssh_connectivity(
     ssh_path = shutil.which('ssh')
     if ssh_path is None:
         # Import here to avoid circular imports
-        from mlpstorage.environment import detect_os, get_install_instruction
+        from mlpstorage_py.environment import detect_os, get_install_instruction
 
         os_info = detect_os()
         install_cmd = get_install_instruction('ssh', os_info)

@@ -6,9 +6,9 @@ Validates training benchmark submissions (multiple runs).
 
 from typing import Optional
 
-from mlpstorage.config import MODELS, PARAM_VALIDATION
-from mlpstorage.rules.issues import Issue
-from mlpstorage.rules.submission_checkers.base import MultiRunRulesChecker
+from mlpstorage_py.config import MODELS, PARAM_VALIDATION
+from mlpstorage_py.rules.issues import Issue
+from mlpstorage_py.rules.submission_checkers.base import MultiRunRulesChecker
 
 
 class TrainingSubmissionRulesChecker(MultiRunRulesChecker):

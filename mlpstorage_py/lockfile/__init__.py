@@ -24,20 +24,20 @@ Public exports:
     GenerationOptions: Dataclass for lockfile generation options
 """
 
-from mlpstorage.lockfile.models import (
+from mlpstorage_py.lockfile.models import (
     LockedPackage,
     ValidationResult,
     LockfileMetadata,
     parse_lockfile,
 )
-from mlpstorage.lockfile.generator import (
+from mlpstorage_py.lockfile.generator import (
     generate_lockfile,
     generate_lockfiles_for_project,
     check_uv_available,
     LockfileGenerationError,
     GenerationOptions,
 )
-from mlpstorage.lockfile.validator import (
+from mlpstorage_py.lockfile.validator import (
     validate_lockfile,
     validate_package,
     format_validation_report,

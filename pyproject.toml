@@ -4,36 +4,31 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlpstorage"
-version = "3.0.0"
+version = "2.0.0b1"
 description = "MLPerf Storage Benchmark Suite"
 readme = "README.md"
 authors = [
     {name = "MLCommons Storage Working Group"}
 ]
-requires-python = ">=3.10.0"
+requires-python = ">=3.12, <3.13"
 dependencies = [
     "psutil>=5.9",
     "pyarrow",
     "pyyaml>=6.0",
-    "packaging>=21.0",  # For PEP 440 version parsing in lockfile validation
-    "rich>=13.0",       # Progress indication (UX-04)
-    "s3dlio>=0.9.86",   # High-performance object storage library with S3, Azure, GCS, and AIStore support
+    "packaging>=21.0", 
+    "rich>=13.0",
+    "s3dlio>=0.9.86",
+    "dlio-benchmark", # Required dependency
 ]
 
 [project.optional-dependencies]
-dlio = [
-    "dlio-benchmark @ git+https://github.com/russfellows/dlio_benchmark.git@main",
-]
 test = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "pytest-mock>=3.0",
 ]
-# Full installation with DLIO for running benchmarks.
-# Note: DLIO depends on PyTorch. The [tool.uv] configuration ensures
-# CPU-only PyTorch wheels are used to avoid GPU dependencies.
 full = [
-    "dlio-benchmark @ git+https://github.com/russfellows/dlio_benchmark.git@main",
+    "dlio-benchmark",
 ]
 
 [project.urls]
@@ -44,10 +39,10 @@ full = [
 packages = {find = {}}
 
 [tool.setuptools.package-data]
-"mlpstorage" = ["../configs/dlio/workload/*.yaml"]
+"mlpstorage_py" = ["../configs/dlio/workload/*.yaml"]
 
 [project.scripts]
-mlpstorage = 'mlpstorage.main:main'
+mlpstorage = 'mlpstorage_py.main:main'
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -59,7 +54,7 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["mlpstorage"]
+source = ["mlpstorage_py"]
 omit = ["*/tests/*", "*/__pycache__/*"]
 
 [tool.coverage.report]
@@ -71,11 +66,8 @@ exclude_lines = [
 ]
 
 # =============================================================================
-# UV Configuration for CPU-only builds
+# UV Configuration
 # =============================================================================
-# MLPerf Storage is a storage benchmark and does not require GPU support.
-# These settings ensure CPU-only PyTorch wheels are used, avoiding large
-# CUDA downloads and nvidia-* package dependencies.
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
@@ -83,6 +75,7 @@ url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
 [tool.uv.sources]
+dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git" }
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
 torchaudio = [{ index = "pytorch-cpu" }]

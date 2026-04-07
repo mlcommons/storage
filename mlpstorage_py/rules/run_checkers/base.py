@@ -7,7 +7,7 @@ RunRulesCheckers validate individual benchmark runs for:
 - Configuration validity (allowed parameter overrides)
 """
 
-from mlpstorage.rules.base import RulesChecker
+from mlpstorage_py.rules.base import RulesChecker
 
 
 class RunRulesChecker(RulesChecker):

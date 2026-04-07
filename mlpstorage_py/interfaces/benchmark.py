@@ -1,5 +1,5 @@
 """
-Benchmark interface definitions for mlpstorage.
+Benchmark interface definitions for mlpstorage_py.
 
 This module defines the abstract interface that all benchmarks must implement,
 providing a consistent contract for benchmark behavior across different

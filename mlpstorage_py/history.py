@@ -3,8 +3,8 @@ import shlex
 import sys
 from typing import Union
 
-from mlpstorage.config import HISTFILE, DATETIME_STR, EXIT_CODE
-from mlpstorage.mlps_logging import setup_logging
+from mlpstorage_py.config import HISTFILE, DATETIME_STR, EXIT_CODE
+from mlpstorage_py.mlps_logging import setup_logging
 
 
 class HistoryTracker:
@@ -188,7 +188,7 @@ class HistoryTracker:
             command_parts = command_parts[1:]
             
         # Import here to avoid circular imports
-        from mlpstorage.cli_parser import parse_arguments
+        from mlpstorage_py.cli_parser import parse_arguments
         
         # Save original argv and restore after parsing
         original_argv = sys.argv

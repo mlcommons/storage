@@ -6,7 +6,7 @@ before benchmark execution, providing clear error messages for
 common mistakes.
 
 Usage:
-    from mlpstorage.validation_helpers import validate_pre_run, validate_benchmark_environment
+    from mlpstorage_py.validation_helpers import validate_pre_run, validate_benchmark_environment
 
     # Validate before running benchmark
     validate_pre_run(args, logger)  # Raises ConfigurationError on failure
@@ -19,16 +19,16 @@ import os
 import shutil
 from typing import List, Optional, Tuple, Union
 
-from mlpstorage.errors import (
+from mlpstorage_py.errors import (
     ConfigurationError,
     FileSystemError,
     MPIError,
     DependencyError,
     ErrorCode,
 )
-from mlpstorage.error_messages import format_error
-from mlpstorage.dependency_check import check_mpi_with_hints, check_dlio_with_hints, check_ssh_available
-from mlpstorage.environment import detect_os, validate_ssh_connectivity, ValidationIssue
+from mlpstorage_py.error_messages import format_error
+from mlpstorage_py.dependency_check import check_mpi_with_hints, check_dlio_with_hints, check_ssh_available
+from mlpstorage_py.environment import detect_os, validate_ssh_connectivity, ValidationIssue
 
 
 def validate_pre_run(args, logger=None) -> None:
@@ -204,7 +204,7 @@ def _validate_paths(args) -> List[Exception]:
                 f"Data directory not found: {data_dir}",
                 path=data_dir,
                 operation="read",
-                suggestion="Generate data first with 'mlpstorage <benchmark> datagen'",
+                suggestion="Generate data first with 'mlpstorage_py <benchmark> datagen'",
                 code=ErrorCode.FS_PATH_NOT_FOUND
             ))
 

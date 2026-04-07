@@ -9,11 +9,11 @@ from datetime import datetime
 from pprint import pprint, pformat
 from typing import List, Dict, Any, Optional, Tuple
 
-from mlpstorage.config import (MODELS, PARAM_VALIDATION, MAX_READ_THREADS_TRAINING, LLM_MODELS, BENCHMARK_TYPES,
+from mlpstorage_py.config import (MODELS, PARAM_VALIDATION, MAX_READ_THREADS_TRAINING, LLM_MODELS, BENCHMARK_TYPES,
                                DATETIME_STR, LLM_ALLOWED_VALUES, LLM_SUBSET_PROCS, HYDRA_OUTPUT_SUBDIR, UNET)
-from mlpstorage.mlps_logging import setup_logging
-from mlpstorage.utils import is_valid_datetime_format
-from mlpstorage.cluster_collector import (
+from mlpstorage_py.mlps_logging import setup_logging
+from mlpstorage_py.utils import is_valid_datetime_format
+from mlpstorage_py.cluster_collector import (
     HostDiskInfo,
     HostNetworkInfo,
     HostSystemInfo,
@@ -1600,7 +1600,7 @@ class BenchmarkVerifier:
             elif isinstance(source, str):
                 # Assume it's a result directory path
                 self.benchmark_runs.append(BenchmarkRun.from_result_dir(source, logger))
-            elif "mlpstorage.benchmarks." in str(type(source)):
+            elif "mlpstorage_py.benchmarks." in str(type(source)):
                 # It's a Benchmark instance - use the factory method
                 self.benchmark_runs.append(BenchmarkRun.from_benchmark(source, logger))
             else:
@@ -1836,7 +1836,7 @@ def generate_output_location(benchmark, datetime_str=None, **kwargs):
         output_location = os.path.join(output_location, datetime_str)
 
     else:
-        print(f'The given benchmark is not supported by mlpstorage.rules.generate_output_location()')
+        print(f'The given benchmark is not supported by mlpstorage_py.rules.generate_output_location()')
         sys.exit(1)
 
     return output_location
@@ -1857,7 +1857,7 @@ def get_runs_files(results_dir, logger=None) -> List[BenchmarkRun]:
         List of BenchmarkRun instances
     """
     if logger is None:
-        logger = setup_logging(name='mlpstorage.rules.get_runs_files')
+        logger = setup_logging(name='mlpstorage_py.rules.get_runs_files')
 
     if not os.path.exists(results_dir):
         logger.warning(f'Results directory {results_dir} does not exist.')

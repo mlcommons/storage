@@ -8,7 +8,7 @@ This module contains:
 - Validation utilities
 """
 
-from mlpstorage.config import (
+from mlpstorage_py.config import (
     CHECKPOINT_RANKS_STRINGS, MODELS, ACCELERATORS, DEFAULT_HOSTS,
     LLM_MODELS_STRINGS, MPI_CMDS, EXEC_TYPE, DEFAULT_RESULTS_DIR,
     VECTOR_DTYPES, DISTRIBUTIONS

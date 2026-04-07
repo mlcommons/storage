@@ -1,0 +1,2 @@
+#! /bin/bash
+uv run python3 -m mlpstorage_py.main $*

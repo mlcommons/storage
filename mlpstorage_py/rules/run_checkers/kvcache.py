@@ -8,15 +8,15 @@ rules are less strict than training/checkpointing.
 
 from typing import Optional, List
 
-from mlpstorage.config import (
+from mlpstorage_py.config import (
     BENCHMARK_TYPES,
     PARAM_VALIDATION,
     KVCACHE_MODELS,
     KVCACHE_PERFORMANCE_PROFILES,
     KVCACHE_GENERATION_MODES,
 )
-from mlpstorage.rules.issues import Issue
-from mlpstorage.rules.run_checkers.base import RunRulesChecker
+from mlpstorage_py.rules.issues import Issue
+from mlpstorage_py.rules.run_checkers.base import RunRulesChecker
 
 
 class KVCacheRunRulesChecker(RunRulesChecker):

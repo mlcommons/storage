@@ -1,15 +1,6 @@
 # MLPerf Storage Benchmark Suite
 MLPerf® Storage is a benchmark suite to characterize the performance of storage systems that support machine learning workloads.
 
-> **⚠️ TEMPORARY — Development Fork**
->
-> This is a personal development fork ([russfellows/mlc-storage](https://github.com/russfellows/mlc-storage)) containing work-in-progress features not yet merged into the official [MLCommons Storage](https://github.com/mlcommons/storage) repository. Once this work is accepted upstream, this notice will be removed and users should switch to the official repo.
->
-> **To clone this fork with all submodules (required):**
-> ```bash
-> git clone --recurse-submodules https://github.com/russfellows/mlc-storage.git
-> ```
-
 - [Overview](#overview)
 - [Prerequisite](#prerequisite)
 - [Installation](#installation)
@@ -56,7 +47,55 @@ Following prerequisites must be satisfied
 ## Installation 
 **The following installation steps must be run on every client host that will participate in running the benchmarks.**
 
-### Dependencies
+### uv (Recommended)
+
+[`uv`](https://docs.astral.sh/uv/) is a fast Python package and project manager that handles virtual environment creation, dependency resolution, and Python version management automatically — no manual `venv` or `pip` steps required.
+
+**Install uv** (if not already installed):
+
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+Install the MPI runtime (still required for distributed execution):
+
+```bash
+sudo apt install libopenmpi-dev openmpi-common
+```
+
+Clone and install:
+
+```bash
+git clone https://github.com/mlcommons/storage.git
+cd storage
+uv sync
+```
+
+`uv sync` creates a `.venv` virtual environment and installs all dependencies — including DLIO benchmark — automatically from the lock file.
+
+Verify the installation:
+
+```bash
+uv run mlpstorage --help
+```
+
+> **Note:** All benchmark commands in this README can be prefixed with `uv run` (e.g., `uv run mlpstorage training run ...`), or you can activate the virtual environment first: `source .venv/bin/activate`
+
+> **Note:** `uv` installs CPU-only PyTorch by default (sufficient for I/O benchmarking). For GPU-accelerated training workloads, install an appropriate CUDA-enabled PyTorch separately after `uv sync`.
+
+To install optional extras:
+
+```bash
+uv sync --all-extras
+```
+
+---
+
+### pip (Alternative)
+
+The following steps use standard `pip` and are an alternative to the `uv` workflow above.
+
+#### Dependencies
 DLIO requires MPI package. 
 For eg: when running on Ubuntu 24.04, install openmpi tools and libraries. 
 
@@ -71,7 +110,7 @@ python3 -m venv ~/.venvs/myenv
 source ~/.venvs/myenv/bin/activate
 ```
 
-### Pip
+#### pip
 Please ensure you have the latest version of pip installed. This will fix the following error where the package is built as "UNKNOWN". Upgrade pip like so:
 
 ```bash

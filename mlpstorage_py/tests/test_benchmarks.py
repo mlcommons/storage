@@ -1,19 +1,19 @@
 #!/usr/bin/env python3
 """
-Tests for mlpstorage.benchmarks.base module.
+Tests for mlpstorage_py.benchmarks.base module.
 
 This module tests the base Benchmark class, specifically the cluster
 information collection methods added in Phase 3.
 
 Run with:
-    pytest mlpstorage/tests/test_benchmarks.py -v
+    pytest mlpstorage_py/tests/test_benchmarks.py -v
 """
 
 import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 from types import SimpleNamespace
 
-from mlpstorage.config import EXEC_TYPE, BENCHMARK_TYPES
+from mlpstorage_py.config import EXEC_TYPE, BENCHMARK_TYPES
 
 
 class MockLogger:
@@ -59,7 +59,7 @@ class TestShouldCollectClusterInfo:
 
     def test_returns_true_with_hosts_and_run_command(self, base_args, mock_logger):
         """Should return True when hosts are specified and command is 'run'."""
-        from mlpstorage.benchmarks.base import Benchmark
+        from mlpstorage_py.benchmarks.base import Benchmark
 
         # Create a concrete subclass for testing
         class TestBenchmark(Benchmark):
@@ -76,7 +76,7 @@ class TestShouldCollectClusterInfo:
 
     def test_returns_false_without_hosts(self, base_args, mock_logger):
         """Should return False when hosts are not specified."""
-        from mlpstorage.benchmarks.base import Benchmark
+        from mlpstorage_py.benchmarks.base import Benchmark
 
         class TestBenchmark(Benchmark):
             BENCHMARK_TYPE = BENCHMARK_TYPES.training
@@ -94,7 +94,7 @@ class TestShouldCollectClusterInfo:
 
     def test_returns_false_for_datagen_command(self, base_args, mock_logger):
         """Should return False when command is 'datagen'."""
-        from mlpstorage.benchmarks.base import Benchmark
+        from mlpstorage_py.benchmarks.base import Benchmark
 
         class TestBenchmark(Benchmark):
             BENCHMARK_TYPE = BENCHMARK_TYPES.training
@@ -112,7 +112,7 @@ class TestShouldCollectClusterInfo:
 
     def test_returns_false_for_configview_command(self, base_args, mock_logger):
         """Should return False when command is 'configview'."""
-        from mlpstorage.benchmarks.base import Benchmark
+        from mlpstorage_py.benchmarks.base import Benchmark
 
         class TestBenchmark(Benchmark):
             BENCHMARK_TYPE = BENCHMARK_TYPES.training
@@ -130,7 +130,7 @@ class TestShouldCollectClusterInfo:
 
     def test_returns_false_when_skip_cluster_collection_set(self, base_args, mock_logger):
         """Should return False when skip_cluster_collection is True."""
-        from mlpstorage.benchmarks.base import Benchmark
+        from mlpstorage_py.benchmarks.base import Benchmark
 
         class TestBenchmark(Benchmark):
             BENCHMARK_TYPE = BENCHMARK_TYPES.training
@@ -156,7 +156,7 @@ class TestCollectClusterInformation:
 
     def test_returns_none_when_should_not_collect(self, base_args, mock_logger):
         """Should return None when _should_collect_cluster_info returns False."""
-        from mlpstorage.benchmarks.base import Benchmark
+        from mlpstorage_py.benchmarks.base import Benchmark
 
         class TestBenchmark(Benchmark):
             BENCHMARK_TYPE = BENCHMARK_TYPES.training
@@ -175,7 +175,7 @@ class TestCollectClusterInformation:
 
     def test_returns_none_when_not_mpi_exec_type(self, base_args, mock_logger):
         """Should return None when exec_type is not MPI."""
-        from mlpstorage.benchmarks.base import Benchmark
+        from mlpstorage_py.benchmarks.base import Benchmark
 
         class TestBenchmark(Benchmark):
             BENCHMARK_TYPE = BENCHMARK_TYPES.training
@@ -195,8 +195,8 @@ class TestCollectClusterInformation:
 
     def test_calls_collect_cluster_info_with_correct_params(self, base_args, mock_logger):
         """Should call collect_cluster_info with correct parameters."""
-        from mlpstorage.benchmarks.base import Benchmark
-        from mlpstorage.rules import ClusterInformation
+        from mlpstorage_py.benchmarks.base import Benchmark
+        from mlpstorage_py.rules import ClusterInformation
 
         class TestBenchmark(Benchmark):
             BENCHMARK_TYPE = BENCHMARK_TYPES.training
@@ -219,7 +219,7 @@ class TestCollectClusterInformation:
             benchmark.args = base_args
             benchmark.logger = mock_logger
 
-            with patch('mlpstorage.benchmarks.base.collect_cluster_info') as mock_collect:
+            with patch('mlpstorage_py.benchmarks.base.collect_cluster_info') as mock_collect:
                 mock_collect.return_value = mock_collected_data
 
                 result = benchmark._collect_cluster_information()
@@ -240,7 +240,7 @@ class TestCollectClusterInformation:
 
     def test_returns_none_on_exception(self, base_args, mock_logger):
         """Should return None and log warning when collection fails."""
-        from mlpstorage.benchmarks.base import Benchmark
+        from mlpstorage_py.benchmarks.base import Benchmark
 
         class TestBenchmark(Benchmark):
             BENCHMARK_TYPE = BENCHMARK_TYPES.training
@@ -252,7 +252,7 @@ class TestCollectClusterInformation:
             benchmark.args = base_args
             benchmark.logger = mock_logger
 
-            with patch('mlpstorage.benchmarks.base.collect_cluster_info') as mock_collect:
+            with patch('mlpstorage_py.benchmarks.base.collect_cluster_info') as mock_collect:
                 mock_collect.side_effect = Exception("MPI failed")
 
                 result = benchmark._collect_cluster_information()
@@ -269,8 +269,8 @@ class TestDLIOBenchmarkAccumulateHostInfo:
 
     def test_uses_mpi_collection_when_available(self, mock_logger):
         """Should use MPI collection when it succeeds."""
-        from mlpstorage.benchmarks.dlio import TrainingBenchmark
-        from mlpstorage.rules import ClusterInformation
+        from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
+        from mlpstorage_py.rules import ClusterInformation
 
         args = SimpleNamespace(
             hosts=['host1', 'host2'],
@@ -302,8 +302,8 @@ class TestDLIOBenchmarkAccumulateHostInfo:
 
     def test_falls_back_to_args_when_mpi_fails(self, mock_logger):
         """Should fall back to CLI args when MPI collection returns None."""
-        from mlpstorage.benchmarks.dlio import TrainingBenchmark
-        from mlpstorage.rules import ClusterInformation
+        from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
+        from mlpstorage_py.rules import ClusterInformation
 
         args = SimpleNamespace(
             hosts=['host1', 'host2'],
@@ -343,8 +343,8 @@ class TestWriteClusterInfo:
 
     def test_writes_cluster_info_file(self, base_args, mock_logger, tmp_path):
         """Should write cluster info to JSON file."""
-        from mlpstorage.benchmarks.base import Benchmark
-        from mlpstorage.rules import ClusterInformation, HostInfo, HostMemoryInfo
+        from mlpstorage_py.benchmarks.base import Benchmark
+        from mlpstorage_py.rules import ClusterInformation, HostInfo, HostMemoryInfo
         import json
 
         class TestBenchmark(Benchmark):
@@ -383,7 +383,7 @@ class TestWriteClusterInfo:
 
     def test_does_nothing_without_cluster_info(self, base_args, mock_logger, tmp_path):
         """Should do nothing if cluster_information is not set."""
-        from mlpstorage.benchmarks.base import Benchmark
+        from mlpstorage_py.benchmarks.base import Benchmark
 
         class TestBenchmark(Benchmark):
             BENCHMARK_TYPE = BENCHMARK_TYPES.training

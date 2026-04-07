@@ -18,8 +18,8 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, asdict
 from typing import Any, Dict, List, Optional, Tuple
 
-from mlpstorage.config import MPIRUN, MPIEXEC, MPI_RUN_BIN, MPI_EXEC_BIN
-from mlpstorage.interfaces.collector import ClusterCollectorInterface, CollectionResult
+from mlpstorage_py.config import MPIRUN, MPIEXEC, MPI_RUN_BIN, MPI_EXEC_BIN
+from mlpstorage_py.interfaces.collector import ClusterCollectorInterface, CollectionResult
 
 
 # =============================================================================

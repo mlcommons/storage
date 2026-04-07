@@ -15,7 +15,7 @@ Package Structure:
 
 Usage:
     # Verify a single benchmark run
-    from mlpstorage.rules import BenchmarkVerifier
+    from mlpstorage_py.rules import BenchmarkVerifier
 
     verifier = BenchmarkVerifier(benchmark_run, logger=logger)
     result = verifier.verify()  # Returns PARAM_VALIDATION.CLOSED, .OPEN, or .INVALID
@@ -26,13 +26,13 @@ Usage:
 """
 
 # Base classes
-from mlpstorage.rules.base import RulesChecker, RuleState
+from mlpstorage_py.rules.base import RulesChecker, RuleState
 
 # Issue dataclass
-from mlpstorage.rules.issues import Issue
+from mlpstorage_py.rules.issues import Issue
 
 # Data models
-from mlpstorage.rules.models import (
+from mlpstorage_py.rules.models import (
     RunID,
     ProcessedRun,
     BenchmarkRunData,
@@ -48,7 +48,7 @@ from mlpstorage.rules.models import (
 )
 
 # Run checkers
-from mlpstorage.rules.run_checkers import (
+from mlpstorage_py.rules.run_checkers import (
     RunRulesChecker,
     TrainingRunRulesChecker,
     CheckpointingRunRulesChecker,
@@ -57,17 +57,17 @@ from mlpstorage.rules.run_checkers import (
 )
 
 # Submission checkers
-from mlpstorage.rules.submission_checkers import (
+from mlpstorage_py.rules.submission_checkers import (
     MultiRunRulesChecker,
     TrainingSubmissionRulesChecker,
     CheckpointSubmissionRulesChecker,
 )
 
 # Verifier
-from mlpstorage.rules.verifier import BenchmarkVerifier
+from mlpstorage_py.rules.verifier import BenchmarkVerifier
 
 # Utility functions
-from mlpstorage.rules.utils import (
+from mlpstorage_py.rules.utils import (
     calculate_training_data_size,
     generate_output_location,
     get_runs_files,

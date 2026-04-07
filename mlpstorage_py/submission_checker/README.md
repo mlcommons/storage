@@ -10,7 +10,7 @@ The submission checker is a tool designed to validate submissions against specif
 To run the submission checker, use the following command:
 
 ```
-python -m storage.mlpstorage.submission_checker.main --input <submissions_folder> \
+python -m storage.mlpstorage_py.submission_checker.main --input <submissions_folder> \
             [--version v2.0] \
             [--submitters Micron]
 ```

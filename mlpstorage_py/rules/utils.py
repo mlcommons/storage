@@ -9,7 +9,7 @@ import os
 import sys
 from typing import Tuple, List, Optional
 
-from mlpstorage.config import BENCHMARK_TYPES, DATETIME_STR
+from mlpstorage_py.config import BENCHMARK_TYPES, DATETIME_STR
 
 
 def calculate_training_data_size(args, cluster_information, dataset_params, reader_params, logger,
@@ -175,7 +175,7 @@ def generate_output_location(benchmark, datetime_str=None, **kwargs) -> str:
         output_location = os.path.join(output_location, datetime_str)
 
     else:
-        print(f'The given benchmark is not supported by mlpstorage.rules.generate_output_location()')
+        print(f'The given benchmark is not supported by mlpstorage_py.rules.generate_output_location()')
         sys.exit(1)
 
     return output_location
@@ -192,7 +192,7 @@ def get_runs_files(results_dir: str, logger=None) -> List:
     Returns:
         List of BenchmarkRun instances.
     """
-    from mlpstorage.rules.models import BenchmarkRun
+    from mlpstorage_py.rules.models import BenchmarkRun
 
     runs = []
 

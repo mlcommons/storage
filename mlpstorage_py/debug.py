@@ -4,7 +4,7 @@ import traceback
 
 from functools import partialmethod, wraps
 
-from mlpstorage.config import MLPS_DEBUG
+from mlpstorage_py.config import MLPS_DEBUG
 
 
 def debug_tryer_wrapper(on_error, debug, logger, func):

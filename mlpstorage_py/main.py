@@ -12,14 +12,14 @@ import signal
 import sys
 import traceback
 
-from mlpstorage.benchmarks import TrainingBenchmark, VectorDBBenchmark, CheckpointingBenchmark
-from mlpstorage.cli_parser import parse_arguments, validate_args, update_args
-from mlpstorage.config import HISTFILE, DATETIME_STR, EXIT_CODE, DEFAULT_RESULTS_DIR, get_datetime_string, HYDRA_OUTPUT_SUBDIR
-from mlpstorage.debug import debugger_hook, MLPS_DEBUG
-from mlpstorage.history import HistoryTracker
-from mlpstorage.mlps_logging import setup_logging, apply_logging_options
-from mlpstorage.report_generator import ReportGenerator
-from mlpstorage.errors import (
+from mlpstorage_py.benchmarks import TrainingBenchmark, VectorDBBenchmark, CheckpointingBenchmark
+from mlpstorage_py.cli_parser import parse_arguments, validate_args, update_args
+from mlpstorage_py.config import HISTFILE, DATETIME_STR, EXIT_CODE, DEFAULT_RESULTS_DIR, get_datetime_string, HYDRA_OUTPUT_SUBDIR
+from mlpstorage_py.debug import debugger_hook, MLPS_DEBUG
+from mlpstorage_py.history import HistoryTracker
+from mlpstorage_py.mlps_logging import setup_logging, apply_logging_options
+from mlpstorage_py.report_generator import ReportGenerator
+from mlpstorage_py.errors import (
     MLPStorageException,
     ConfigurationError,
     BenchmarkExecutionError,
@@ -29,8 +29,8 @@ from mlpstorage.errors import (
     DependencyError,
     ErrorCode,
 )
-from mlpstorage.error_messages import format_error, ErrorFormatter
-from mlpstorage.lockfile import (
+from mlpstorage_py.error_messages import format_error, ErrorFormatter
+from mlpstorage_py.lockfile import (
     generate_lockfile,
     generate_lockfiles_for_project,
     validate_lockfile,
@@ -38,8 +38,8 @@ from mlpstorage.lockfile import (
     LockfileGenerationError,
     GenerationOptions,
 )
-from mlpstorage.validation_helpers import validate_benchmark_environment
-from mlpstorage.progress import progress_context
+from mlpstorage_py.validation_helpers import validate_benchmark_environment
+from mlpstorage_py.progress import progress_context
 
 logger = setup_logging("MLPerfStorage")
 signal_received = False
@@ -151,7 +151,7 @@ def run_benchmark(args, run_datetime):
         ConfigurationError: If benchmark type is unsupported.
         BenchmarkExecutionError: If benchmark execution fails.
     """
-    from mlpstorage.benchmarks import KVCacheBenchmark
+    from mlpstorage_py.benchmarks import KVCacheBenchmark
 
     # Validate lockfile if requested
     if hasattr(args, 'verify_lockfile') and args.verify_lockfile:

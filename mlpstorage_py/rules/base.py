@@ -10,8 +10,8 @@ import abc
 import enum
 from typing import List, Optional
 
-from mlpstorage.config import PARAM_VALIDATION
-from mlpstorage.rules.issues import Issue
+from mlpstorage_py.config import PARAM_VALIDATION
+from mlpstorage_py.rules.issues import Issue
 
 
 class RuleState(enum.Enum):

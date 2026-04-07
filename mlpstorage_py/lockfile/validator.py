@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from importlib.metadata import version, PackageNotFoundError
 from typing import Optional
 
-from mlpstorage.lockfile.models import (
+from mlpstorage_py.lockfile.models import (
     parse_lockfile,
     LockedPackage,
     ValidationResult,

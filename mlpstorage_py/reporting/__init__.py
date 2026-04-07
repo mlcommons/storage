@@ -12,7 +12,7 @@ Modules:
     - formatters: Format validation messages for display
 
 Usage:
-    from mlpstorage.reporting import (
+    from mlpstorage_py.reporting import (
         ResultsDirectoryValidator,
         ValidationMessageFormatter,
         ClosedRequirementsFormatter,
@@ -20,13 +20,13 @@ Usage:
     )
 """
 
-from mlpstorage.reporting.directory_validator import (
+from mlpstorage_py.reporting.directory_validator import (
     ResultsDirectoryValidator,
     DirectoryValidationError,
     DirectoryValidationResult,
 )
 
-from mlpstorage.reporting.formatters import (
+from mlpstorage_py.reporting.formatters import (
     ValidationMessageFormatter,
     ClosedRequirementsFormatter,
     ReportSummaryFormatter,

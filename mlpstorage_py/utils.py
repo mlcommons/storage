@@ -1,7 +1,7 @@
 """
 Utility Functions for MLPerf Storage Benchmarks.
 
-This module provides shared utility functions used throughout the mlpstorage
+This module provides shared utility functions used throughout the mlpstorage_py
 framework, including:
 
 - JSON encoding with custom type handling
@@ -11,7 +11,7 @@ framework, including:
 - MPI command generation
 
 Classes:
-    MLPSJsonEncoder: Custom JSON encoder for mlpstorage types.
+    MLPSJsonEncoder: Custom JSON encoder for mlpstorage_py types.
     CommandExecutor: Execute shell commands with live output streaming.
 
 Functions:
@@ -41,11 +41,11 @@ import yaml
 from datetime import datetime
 from typing import Any, List, Union, Optional, Dict, Tuple, Set
 
-from mlpstorage.config import CONFIGS_ROOT_DIR, MPIRUN, MPIEXEC, MPI_RUN_BIN, MPI_EXEC_BIN
+from mlpstorage_py.config import CONFIGS_ROOT_DIR, MPIRUN, MPIEXEC, MPI_RUN_BIN, MPI_EXEC_BIN
 
 
 class MLPSJsonEncoder(json.JSONEncoder):
-    """Custom JSON encoder for mlpstorage types.
+    """Custom JSON encoder for mlpstorage_py types.
 
     Handles serialization of special types that the standard JSON encoder
     cannot process:

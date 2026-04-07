@@ -1,5 +1,5 @@
 """
-Interface definitions for mlpstorage.
+Interface definitions for mlpstorage_py.
 
 This package defines the abstract interfaces (contracts) that components
 must implement. Using interfaces enables:
@@ -29,7 +29,7 @@ Collector Interfaces:
     - CollectionResult: Result container for collection operations
 
 Example Usage:
-    from mlpstorage.interfaces import BenchmarkInterface, BenchmarkConfig
+    from mlpstorage_py.interfaces import BenchmarkInterface, BenchmarkConfig
 
     class MyBenchmark(BenchmarkInterface):
         @property
@@ -41,13 +41,13 @@ Example Usage:
         # ... implement other abstract methods
 """
 
-from mlpstorage.interfaces.benchmark import (
+from mlpstorage_py.interfaces.benchmark import (
     BenchmarkInterface,
     BenchmarkConfig,
     BenchmarkCommand,
 )
 
-from mlpstorage.interfaces.validator import (
+from mlpstorage_py.interfaces.validator import (
     ValidatorInterface,
     SubmissionValidatorInterface,
     ValidationResult,
@@ -55,7 +55,7 @@ from mlpstorage.interfaces.validator import (
     ClosedRequirements,
 )
 
-from mlpstorage.interfaces.collector import (
+from mlpstorage_py.interfaces.collector import (
     ClusterCollectorInterface,
     LocalCollectorInterface,
     CollectionResult,

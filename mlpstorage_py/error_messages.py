@@ -8,7 +8,7 @@ This module provides:
 - Context-aware message generation
 
 Usage:
-    from mlpstorage.error_messages import format_error, ERROR_MESSAGES
+    from mlpstorage_py.error_messages import format_error, ERROR_MESSAGES
 
     # Format a known error
     msg = format_error('CONFIG_MISSING_REQUIRED', param='model')

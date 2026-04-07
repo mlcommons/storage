@@ -1,5 +1,5 @@
 """
-Validator interface definitions for mlpstorage.
+Validator interface definitions for mlpstorage_py.
 
 This module defines the abstract interface for benchmark validators,
 which check that benchmark parameters and results meet the requirements
@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 if TYPE_CHECKING:
-    from mlpstorage.rules import Issue
+    from mlpstorage_py.rules import Issue
 
 
 class ValidationCategory(Enum):
@@ -51,12 +51,12 @@ class ValidationResult:
 
     def get_open_issues(self) -> List['Issue']:
         """Get issues that prevent CLOSED submission."""
-        from mlpstorage.config import PARAM_VALIDATION
+        from mlpstorage_py.config import PARAM_VALIDATION
         return [i for i in self.issues if i.validation == PARAM_VALIDATION.OPEN]
 
     def get_invalid_issues(self) -> List['Issue']:
         """Get issues that make the run invalid."""
-        from mlpstorage.config import PARAM_VALIDATION
+        from mlpstorage_py.config import PARAM_VALIDATION
         return [i for i in self.issues if i.validation == PARAM_VALIDATION.INVALID]
 
 

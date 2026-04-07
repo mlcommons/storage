@@ -2,9 +2,9 @@ import os
 import sys
 from typing import Dict, Any
 
-from mlpstorage.benchmarks.base import Benchmark
-from mlpstorage.config import CONFIGS_ROOT_DIR, BENCHMARK_TYPES
-from mlpstorage.utils import read_config_from_file
+from mlpstorage_py.benchmarks.base import Benchmark
+from mlpstorage_py.config import CONFIGS_ROOT_DIR, BENCHMARK_TYPES
+from mlpstorage_py.utils import read_config_from_file
 
 
 class VectorDBBenchmark(Benchmark):

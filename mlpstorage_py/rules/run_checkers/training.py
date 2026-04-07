@@ -6,10 +6,10 @@ Validates training benchmark parameters for individual runs.
 
 from typing import Optional, List
 
-from mlpstorage.config import BENCHMARK_TYPES, PARAM_VALIDATION, UNET, DLRM, RETINANET, FLUX, MODELS
-from mlpstorage.rules.issues import Issue
-from mlpstorage.rules.run_checkers.base import RunRulesChecker
-from mlpstorage.rules.utils import calculate_training_data_size
+from mlpstorage_py.config import BENCHMARK_TYPES, PARAM_VALIDATION, UNET, DLRM, RETINANET, FLUX, MODELS
+from mlpstorage_py.rules.issues import Issue
+from mlpstorage_py.rules.run_checkers.base import RunRulesChecker
+from mlpstorage_py.rules.utils import calculate_training_data_size
 
 
 class TrainingRunRulesChecker(RunRulesChecker):
