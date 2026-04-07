@@ -635,7 +635,7 @@ class TestBenchmarkUnitLabels:
         monkeypatch.setattr(bench, "generate_requests", lambda users, stop_event: stop_event.wait())
         monkeypatch.setattr(bench, "process_requests", lambda stop_event: None)
 
-    def test_run_header_uses_gib(self, tiny_model_config, monkeypatch, capsys):
+    def test_run_header_gpu_memory_uses_gib(self, tiny_model_config, monkeypatch, capsys):
         bench = IntegratedBenchmark(
             model_config=tiny_model_config,
             num_users=1,
@@ -665,7 +665,7 @@ class TestBenchmarkUnitLabels:
         self._prepare_fast_run(bench, monkeypatch)
         bench.run()
         output = capsys.readouterr().out
-        assert "full=" in output
+        assert "per TP rank (full=" in output
         assert " MiB)" in output
         assert " MB)" not in output
 
