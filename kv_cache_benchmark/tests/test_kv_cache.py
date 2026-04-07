@@ -25,6 +25,7 @@ import time
 import argparse
 import tempfile
 import threading
+import logging
 import pytest
 import numpy as np
 from datetime import datetime
@@ -619,6 +620,54 @@ class TestKVCacheGenerator:
     def test_different_key_runs(self, kv_generator):
         """Different key should not crash."""
         kv_generator.generate(sequence_length=10, key="different_key")
+
+    def test_precomputed_buffer_log_uses_mib(self, tiny_model_config, caplog):
+        with caplog.at_level(logging.INFO):
+            KVCacheGenerator(tiny_model_config, global_seed=7)
+        assert any("MiB noise buffer" in message for message in caplog.messages)
+        assert not any("MB noise buffer" in message for message in caplog.messages)
+
+
+class TestBenchmarkUnitLabels:
+    def _prepare_fast_run(self, bench, monkeypatch):
+        monkeypatch.setattr(bench, "_check_memory_safety", lambda: None)
+        monkeypatch.setattr(bench, "_calculate_stats", lambda actual_duration: None)
+        monkeypatch.setattr(bench, "generate_requests", lambda users, stop_event: stop_event.wait())
+        monkeypatch.setattr(bench, "process_requests", lambda stop_event: None)
+
+    def test_run_header_uses_gib(self, tiny_model_config, monkeypatch, capsys):
+        bench = IntegratedBenchmark(
+            model_config=tiny_model_config,
+            num_users=1,
+            gpu_memory_gb=16,
+            cpu_memory_gb=1,
+            duration_seconds=0,
+            num_gpus=2,
+            generation_mode=GenerationMode.NONE,
+        )
+        self._prepare_fast_run(bench, monkeypatch)
+        bench.run()
+        output = capsys.readouterr().out
+        assert "System: 2× 16 GiB GPU  (total 32 GiB HBM)  │  TP=1" in output
+        assert "System: 2× 16 GB GPU" not in output
+
+    def test_tensor_parallel_note_uses_mib(self, tiny_model_config, monkeypatch, capsys):
+        bench = IntegratedBenchmark(
+            model_config=tiny_model_config,
+            num_users=1,
+            gpu_memory_gb=16,
+            cpu_memory_gb=1,
+            duration_seconds=0,
+            num_gpus=1,
+            tensor_parallel=2,
+            generation_mode=GenerationMode.NONE,
+        )
+        self._prepare_fast_run(bench, monkeypatch)
+        bench.run()
+        output = capsys.readouterr().out
+        assert "full=" in output
+        assert " MiB)" in output
+        assert " MB)" not in output
 
 
 # =============================================================================

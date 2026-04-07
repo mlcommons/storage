@@ -1140,10 +1140,10 @@ class IntegratedBenchmark:
         print(f"\nIntegrated Multi-User KV Cache Benchmark - MLPerf Edition")
         print(f"Model: {self.model_config.name}")
         if self.num_gpus > 1 or self.tensor_parallel > 1:
-            print(f"System: {self.num_gpus}× {self.gpu_memory_gb_per_card:.0f} GB GPU  "
-                  f"(total {self.total_gpu_memory_gb:.0f} GB HBM)  │  TP={self.tensor_parallel}")
+            print(f"System: {self.num_gpus}× {self.gpu_memory_gb_per_card:.0f} GiB GPU  "
+                  f"(total {self.total_gpu_memory_gb:.0f} GiB HBM)  │  TP={self.tensor_parallel}")
         else:
-            print(f"GPU Memory: {self.total_gpu_memory_gb:.0f} GB")
+            print(f"GPU Memory: {self.total_gpu_memory_gb:.0f} GiB")
         print(f"Users: {self.num_users}")
         print(f"Duration: {self.duration}s")
         if self.seed is not None:
@@ -1176,7 +1176,7 @@ class IntegratedBenchmark:
             users = UserSimulator.generate_mixed_users(self.num_users)
             context_lengths = [u.context_length for u in users]
             bytes_per_token_per_rank = self.model_config.kv_cache_size_per_token / self.tensor_parallel
-            tp_note = f" per TP rank (full={bytes_per_token_per_rank * self.tensor_parallel / 1024**2 * min(context_lengths):.2f} MB)" if self.tensor_parallel > 1 else ""
+            tp_note = f" per TP rank (full={bytes_per_token_per_rank * self.tensor_parallel / 1024**2 * min(context_lengths):.2f} MiB)" if self.tensor_parallel > 1 else ""
             print(f"\nUser Context Length Distribution:")
             print(f"  Min: {min(context_lengths)} tokens ({min(context_lengths) * bytes_per_token_per_rank / 1024**2:.2f}MiB{tp_note})")
             print(f"  Max: {max(context_lengths)} tokens ({max(context_lengths) * bytes_per_token_per_rank / 1024**2:.2f}MiB)")
