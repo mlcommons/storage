@@ -42,27 +42,18 @@
 
 ## 1. Introduction
 
-MLPerf™ Storage is a benchmark suite to characterize the performance of storage systems that support machine learning workloads. The suite consists of 2 workload categories:
+MLPerf™ Storage is a benchmark suite to characterize the performance of storage systems that support machine learning workloads. The suite consists of 4 workload categories:
 
 1. Training
 2. Checkpointing
+3. Vector Database
+4. KVCache
 
 This benchmark attempts to balance two goals. First, we aim for **comparability** between benchmark submissions to enable decision making by the AI/ML Community. Second, we aim for **flexibility** to enable experimentation and to show off unique storage system features that will benefit the AI/ML Community. To that end we have defined two classes of submissions: CLOSED and OPEN. 
 
 Published results for the 3D-Unet, ResNet-50, and Cosmoflow Training workloads are comparable across v1.0 and v2.0 of the MLPerf Storage benchmark.  A [full listing of comparability is available](https://github.com/mlcommons/policies/blob/master/MLPerf_Compatibility_Table.adoc).
 
 The MLPerf name and logo are trademarks of the MLCommons® Association ("MLCommons"). In order to refer to a result using the MLPerf name, the result must conform to the letter and spirit of the rules specified in this document. MLCommons reserves the right to solely determine if a use of its name or logos is acceptable.
-
-### 1.1 Timeline
-
-| Date | Description |
-| ---- | ----------- |
-| Jun 18, 2025 | Freeze rules & benchmark code. |
-| Jun 24, 2025 | Open benchmark for submissions. |
-| Jul 7, 2025 | **Submissions due.** |
-| Jul 7, 2025 - Aug 4, 2025 | Review period. |
-| Aug 4, 2025 | **Benchmark competition results are published.** |
-
 
 ## 2. Benchmark Overview
 
