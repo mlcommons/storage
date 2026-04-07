@@ -104,10 +104,11 @@ The first argument is the workload category:
  - training
  - checkpointing
  - vectordb
+ - kvcache
 
 ```bash
 [root@localhost ]#  mlpstorage -h
-usage: mlpstorage [-h] [--version] {training,checkpointing,vectordb,reports,history} ...
+usage: mlpstorage [-h] [--version] {training,checkpointing,vectordb,kvcache} ...
 
 Script to launch the MLPerf Storage benchmark
 
@@ -125,25 +126,25 @@ optional arguments:
 
 ### Training Category
 The training category supports emulation of the training of 3 models (FLUX.1, RetinaNet, and DLRMv2).
-The details on those models and how to invoke the benchmark for training workloads can be found in
-[training/README.md](training/README.md).
+
+See [training/README.md](training/README.md) for more details.
 
 ### Checkpointing Category
 The checkpointing category supports emulation of taking a checkpoint of an LLM foundation training task,
 specifically the Llama3 LLM at four different scales: 8B, 70B, 405B, and 1250B parameters.
-The details of how to invoke the benchmark for checkpointing workloads can be found in
-[checkpointing/README.md](checkpointing/README.md).
+
+See [checkpointing/README.md](checkpointing/README.md) for more details.
 
 ### VectorDB Category
 The vectordb category supports emulation of a vector database as used in an LLM RAG pipeline,
 specifically the Milvus VDB using one of three different algorithms: DiskANN, HNSW, and AiSAQ.
-The details of how to invoke the benchmark for vectordb workloads can be found in
-[vdb_benchmark/README.md](vdb_benchmark/README.md).
+
+See [vdb_benchmark/README.md](vdb_benchmark/README.md) for more details.
 
 ### KVCache Category
 The kvcache category supports emulation of a context cache as used by an LLM.
-The details of how to invoke the benchmark for kvcache workloads can be found in
-[kvcache/README.md](kvcache/README.md)
+
+See [kv_cache_benchmark/README.md](kv_cache_benchmark/README.md) for more details.
 
 ## Submission Rules
 
