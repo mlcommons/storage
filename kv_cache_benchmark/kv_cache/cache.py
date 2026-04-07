@@ -35,7 +35,7 @@ class KVCacheGenerator:
         self.buffer_size_elements = 128 * 1024 * 1024  # 128 million elements (~256MB for float16)
         self.dtype = np.float16 if 'float16' in self.model_config.dtype else np.float32
 
-        logger.info(f"Pre-generating {self.buffer_size_elements * 2 / 1024**2:.0f}MB noise buffer...")
+        logger.info(f"Pre-generating {self.buffer_size_elements * 2 / 1024**2:.0f}MiB noise buffer...")
         rng = np.random.default_rng(self.global_seed)
         self.precomputed_buffer = rng.uniform(-1.0, 1.0, size=self.buffer_size_elements).astype(self.dtype)
 
