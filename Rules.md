@@ -1,41 +1,41 @@
 # MLPerf™ Storage V2.0 Benchmark Validation Rules
 ——————————————————————————————————————————
 
-# Table of Contents
+- [MLPerf Storage V2.0 Benchmark Validation Rules](#mlperf-storage-v20-benchmark-validation-rules)
+  - [1. Introduction](#1-introduction)
+  - [2. Core/Common Rules](#2-core-common-rules)
+    - [2.1. Core/Common POSIX API Rules](#21-ccore-common-posix-api-rules)
+    - [2.2. Core/Common Object API Rules](#22-ccore-common-object-api-rules)
+  - [3. Validating the Training Options](#3-validating-the-training-options)
+    - [3.1. Training Sizing Options](#31-training-sizing-options)
+    - [3.2. Training Generation Options](#32-training-ganeration-options)
+    - [3.3. Training Run Options](#33-training-run-options)
+    - [3.4. Training Access Via POSIX API Options](#34-training-access-via-posix-api-options)
+    - [3.5. Training Access Via Object API Options](#35-training-access-via-object-API-options)
+    - [3.6. Training OPEN versus CLOSED Options](#36-training-open-versus-closed-options)
+  - [4. Validating the Checkpointing Options](#4-validating-the-checkpointing-options)
+    - [4.1. Checkpointing Sizing Options](#41-checkpointing-sizing-options)
+    - [4.2. Checkpointing Generation Options](#42-checkpointing-generation-options)
+    - [4.3. Checkpointing Run Options](#43-checkpointing-run-options)
+    - [4.4. Checkpointing Access Via POSIX API Options](#44-checkpointing-access-via-posix-api-options)
+    - [4.5. Checkpointing Access Via Object API Options](#45-checkpointing-access-via-object-API-options)
+    - [4.6. Checkpointing OPEN versus CLOSED Options](#46-checkpointing-open-versus-closed-options)
+    - [4.7. Storage System Must Be Simultaneously R/W or Remappable](#47-storage-system-must-be-simultaneously-rw-or-remappable)
+  - [5. Validating the VDB Options](#5-validating-the-vdb-options)
+    - [5.1. VDB Sizing Options](#51-vdb-sizing-options)
+    - [5.2. VDB Generation Options](#52-vdb-generation-options)
+    - [5.3. VDB Run Options](#53-vdb-run-options)
+    - [5.4. VDB Access Via POSIX API Options](#54-vdb-access-via-posix-api-options)
+    - [5.5. VDB Via Object API Options](#55-vdb-access-via-object-API-options)
+    - [5.6. VDB OPEN versus CLOSED Options](#56-vdb-open-versus-closed-options)
+  - [6. Validating the KVCache Options](#6-validating-the-kvcache-options)
+    - [6.1. KVCache Sizing Options](#61-kvcache-sizing-options)
+    - [6.2. KVCache Generation Options](#62-kvcache-generation-options)
+    - [6.3. KVCache Run Options](#63-kvcache-run-options)
+    - [6.4. KVCache Access Via POSIX API Options](#64-kvcache-access-via-posix-api-options)
+    - [6.5. KVCache Access Via Object API Options](#65-kvcache-access-via-object-API-options)
+    - [6.6. KVCache OPEN versus CLOSED Options](#66-kvcache-open-versus-closed-options)
 
-* [1. Introduction](#1-introduction)
-* [2. Core/Common Rules](#2-corecommon-rules)
-    * [2.1. Core/Common POSIX API Rules](#21-corecommon-posix-api-rules)
-    * [2.2. Core/Common Object API Rules](#22-corecommon-object-api-rules)
-* [3. Validating the Training Options](#3-validating-the-training-options)
-    * [3.1. Training Sizing Options](#31-training-sizing-options)
-    * [3.2. Training Generation Options](#32-training-generation-options)
-    * [3.3. Training Run Options](#33-training-run-options)
-    * [3.4. Training Access Via POSIX API Options](#34-training-access-via-posix-api-options)
-    * [3.5. Training Access Via Object API Options](#35-training-access-via-object-api-options)
-    * [3.6. Training OPEN versus CLOSED Options](#36-training-open-versus-closed-options)
-* [4. Validating the Checkpointing Options](#4-validating-the-checkpointing-options)
-    * [4.1. Checkpointing Sizing Options](#41-checkpointing-sizing-options)
-    * [4.2. Checkpointing Generation Options](#42-checkpointing-generation-options)
-    * [4.3. Checkpointing Run Options](#43-checkpointing-run-options)
-    * [4.4. Checkpointing Access Via POSIX API Options](#44-checkpointing-access-via-posix-api-options)
-    * [4.5. Checkpointing Access Via Object API Options](#45-checkpointing-access-via-object-api-options)
-    * [4.6. Checkpointing OPEN versus CLOSED Options](#46-checkpointing-open-versus-closed-options)
-    * [4.7. Storage System Must Be Simultaneously R/W or Remappable](#47-storage-system-must-be-simultaneously-rw-or-remappable)
-* [5. Validating the VDB Options](#5-validating-the-vdb-options)
-    * [5.1. VDB Sizing Options](#51-vdb-sizing-options)
-    * [5.2. VDB Generation Options](#52-vdb-generation-options)
-    * [5.3. VDB Run Options](#53-vdb-run-options)
-    * [5.4. VDB Access Via POSIX API Options](#54-vdb-access-via-posix-api-options)
-    * [5.5. VDB Access Via Object API Options](#55-vdb-access-via-object-api-options)
-    * [5.6. VDB OPEN versus CLOSED Options](#56-vdb-open-versus-closed-options)
-* [6. Validating the KVCache Options](#6-validating-the-kvcache-options)
-    * [6.1. KVCache Sizing Options](#61-kvcache-sizing-options)
-    * [6.2. KVCache Generation Options](#62-kvcache-generation-options)
-    * [6.3. KVCache Run Options](#63-kvcache-run-options)
-    * [6.4. KVCache Access Via POSIX API Options](#64-kvcache-access-via-posix-api-options)
-    * [6.5. KVCache Access Via Object API Options](#65-kvcache-access-via-object-api-options)
-    * [6.6. KVCache OPEN versus CLOSED Options](#66-kvcache-open-versus-closed-options)
 # 1.  Introduction
 
 These are the requirements for the *submission validation checker* for version 2.0 of the MLPerf™ Storage benchmark,
@@ -156,54 +156,35 @@ root_folder (or any name you prefer)
 │	  	│		│	 		... (5x Runs per Emulated Accelerator Type)
 │	  	│		│	 		└── YYYYMMDD_HHmmss
 │	  	│		│	 			└── dlio_config
-│	  	│	 	├── checkpointing
-│	  	│	 	│	├── llama3-8b
-│	  	│		│	│	├──results.json
-│	  	│		│	│	├── YYYYMMDD_HHmmss
-│	  	│		│	│	│	└── dlio_config 
-│	  	│		│	│ 	... (10x Runs for Read and Write. May be combined in a single run)
-│	  	│		│	│	└── YYYYMMDD_HHmmss
-│	  	│		│	│		└── dlio_config
-│	  	│	 	│	├── llama3-70b
-│	  	│		│	│	├──results.json
-│	  	│		│	│	├── YYYYMMDD_HHmmss
-│	  	│		│	│	│	└── dlio_config 
-│	  	│		│	│ 	... (10x Runs for Read and Write. May be combined in a single run)
-│	  	│		│	│	└── YYYYMMDD_HHmmss
-│	  	│		│	│		└── dlio_config
-│	  	│	 	│	├── llama3-405b
-│	  	│		│	│	├──results.json
-│	  	│		│	│	├── YYYYMMDD_HHmmss
-│	  	│		│	│	│	└── dlio_config 
-│	  	│		│	│ 	... (10x Runs for Read and Write. May be combined in a single run)
-│	  	│		│	│	└── YYYYMMDD_HHmmss
-│	  	│		│	│		└── dlio_config
-│	  	│	 	│	└── llama3-1t
-│	  	│		│		├──results.json
-│	  	│		│	 	├── YYYYMMDD_HHmmss
-│	  	│		│	 	│	└── dlio_config 
-│	  	│		│	 	... (10x Runs for Read and Write. May be combined in a single run)
-│	  	│		│		└── YYYYMMDD_HHmmss
-│	  	│		│	 		└── dlio_config
-│	  	│	 	└── vdb_bench
-|		|			├── AiSEQ
-│	  	│	 		|	├── YYYYMMDD_HHmmss
-│	  	│			|	│	└── summary.json
-│	  	│			|	... (5x Runs total)
-│	  	│			|	└── YYYYMMDD_HHmmss
-│	  	│			|		└── summary.json
-|		|			├── DiskANN
-│	  	│	 		|	├── YYYYMMDD_HHmmss
-│	  	│			|	│	└── summary.json
-│	  	│			|	... (5x Runs total)
-│	  	│			|	└── YYYYMMDD_HHmmss
-│	  	│			|		└── summary.json
-|		|			└── HNSW
-│	  	│	 			├── YYYYMMDD_HHmmss
-│	  	│				│	└── summary.json
-│	  	│				... (5x Runs total)
+│	  	│	 	└── checkpointing
+│	  	│	 		├── llama3-8b
+│	  	│			│	├──results.json
+│	  	│			│	├── YYYYMMDD_HHmmss
+│	  	│			│	│	└── dlio_config 
+│	  	│			 	... (10x Runs for Read and Write. May be combined in a single run)
+│	  	│			│	└── YYYYMMDD_HHmmss
+│	  	│			│		└── dlio_config
+│	  	│	 		├── llama3-70b
+│	  	│			│	├──results.json
+│	  	│			│	├── YYYYMMDD_HHmmss
+│	  	│			│	│	└── dlio_config 
+│	  	│			 	... (10x Runs for Read and Write. May be combined in a single run)
+│	  	│			│	└── YYYYMMDD_HHmmss
+│	  	│			│		└── dlio_config
+│	  	│	 		├── llama3-405b
+│	  	│			│	├──results.json
+│	  	│			│	├── YYYYMMDD_HHmmss
+│	  	│			│	│	└── dlio_config 
+│	  	│			 	... (10x Runs for Read and Write. May be combined in a single run)
+│	  	│			│	└── YYYYMMDD_HHmmss
+│	  	│			│		└── dlio_config
+│	  	│	 		└── llama3-1t
+│	  	│				├──results.json
+│	  	│			 	├── YYYYMMDD_HHmmss
+│	  	│			 	│	└── dlio_config 
+│	  	│			 	... (10x Runs for Read and Write. May be combined in a single run)
 │	  	│				└── YYYYMMDD_HHmmss
-│	  	│					└── summary.json
+│	  	│			 		└── dlio_config
 │	  	└── systems
 │	  		├──system-name-1.yaml
 │	  		├──system-name-1.pdf
@@ -249,54 +230,35 @@ root_folder (or any name you prefer)
 		│		│	 		... (5x Runs per Emulated Accelerator Type)
 		│		│	 		└── YYYYMMDD_HHmmss
 		│		│	 			└── dlio_config
-	  	│	 	├── checkpointing
-	  	│	 	│	├── llama3-8b
-	  	│		│	│	├──results.json
-	  	│		│	│	├── YYYYMMDD_HHmmss
-	  	│		│	│	│	└── dlio_config 
-	  	│		│	│ 	... (10x Runs for Read and Write. May be combined in a single run)
-	  	│		│	│	└── YYYYMMDD_HHmmss
-	  	│		│	│		└── dlio_config
-	  	│	 	│	├── llama3-70b
-	  	│		│	│	├──results.json
-	  	│		│	│	├── YYYYMMDD_HHmmss
-	  	│		│	│	│	└── dlio_config 
-	  	│		│	│ 	... (10x Runs for Read and Write. May be combined in a single run)
-	  	│		│	│	└── YYYYMMDD_HHmmss
-	  	│		│	│		└── dlio_config
-	  	│	 	│	├── llama3-405b
-	  	│		│	│	├──results.json
-	  	│		│	│	├── YYYYMMDD_HHmmss
-	  	│		│	│	│	└── dlio_config 
-	  	│		│	│ 	... (10x Runs for Read and Write. May be combined in a single run)
-	  	│		│	│	└── YYYYMMDD_HHmmss
-	  	│		│	│		└── dlio_config
-	  	│	 	│	└── llama3-1t
-	  	│		│		├──results.json
-	  	│		│	 	├── YYYYMMDD_HHmmss
-	  	│		│	 	│	└── dlio_config 
-	  	│		│	 	... (10x Runs for Read and Write. May be combined in a single run)
-	  	│		│		└── YYYYMMDD_HHmmss
-	  	│		│	 		└── dlio_config
-	  	│	 	└── vdb_bench
-		|			├── AiSEQ
-	  	│	 		|	├── YYYYMMDD_HHmmss
-	  	│			|	│	└── summary.json
-	  	│			|	... (5x Runs total)
-	  	│			|	└── YYYYMMDD_HHmmss
-	  	│			|		└── summary.json
-		|			├── DiskANN
-	  	│	 		|	├── YYYYMMDD_HHmmss
-	  	│			|	│	└── summary.json
-	  	│			|	... (5x Runs total)
-	  	│			|	└── YYYYMMDD_HHmmss
-	  	│			|		└── summary.json
-		|			└── HNSW
-	  	│	 			├── YYYYMMDD_HHmmss
-	  	│				│	└── summary.json
-	  	│				... (5x Runs total)
-	  	│				└── YYYYMMDD_HHmmss
-	  	│					└── summary.json
+		│	 	└── checkpointing
+		│	 		├── llama3-8b
+		│			|	├──results.json
+		│			│	├── YYYYMMDD_HHmmss
+		│			│	│	└── dlio_config 
+		│			│	... (10x Runs for Read and Write. May be combined in a single run)
+		│			│	└── YYYYMMDD_HHmmss
+		│			│		└── dlio_config
+		│	 		├── llama3-70b
+		│			|	├──results.json
+		│			│	├── YYYYMMDD_HHmmss
+		│			│	│	└── dlio_config 
+		│			│	... (10x Runs for Read and Write. May be combined in a single run)
+		│			│	└── YYYYMMDD_HHmmss
+		│			│		└── dlio_config
+		│	 		├── llama3-405b
+		│			|	├──results.json
+		│			│	├── YYYYMMDD_HHmmss
+		│			│	│	└── dlio_config 
+		│			│	... (10x Runs for Read and Write. May be combined in a single run)
+		│			│	└── YYYYMMDD_HHmmss
+		│			│		└── dlio_config
+		│	 		└── llama3-1t
+		│				├──results.json
+		│			 	├── YYYYMMDD_HHmmss
+		│			 	│	└── dlio_config 
+		│				... (10x Runs for Read and Write. May be combined in a single run)
+		│				└── YYYYMMDD_HHmmss
+		│			 		└── dlio_config
 		└── systems
 			├──system-name-1.yaml
 			├──system-name-1.pdf
