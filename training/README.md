@@ -81,10 +81,10 @@ If the list of clients is passed in for this command the amount of memory is fou
 
 ```bash
 [root@localhost ]# mlpstorage training datasize --help
-usage: mlpstorage training datasize [-h] [--hosts HOSTS [HOSTS ...]] --model {cosmoflow,resnet50,unet3d}
+usage: mlpstorage training datasize [-h] [--hosts HOSTS [HOSTS ...]] --model {FLUX.1,RetinaNet,DLRMv2}
                                     --client-host-memory-in-gb CLIENT_HOST_MEMORY_IN_GB [--exec-type {mpi,docker}]
                                     [--mpi-bin {mpirun,mpiexec}] [--oversubscribe] [--allow-run-as-root]
-                                    --max-accelerators MAX_ACCELERATORS --accelerator-type {h100,a100,b200,mi355}
+                                    --max-accelerators MAX_ACCELERATORS --accelerator-type {b200,mi355}
                                     --num-client-hosts NUM_CLIENT_HOSTS [--data-dir DATA_DIR]
                                     [--params PARAMS [PARAMS ...]]
                                     [--results-dir RESULTS_DIR] [--loops LOOPS] [--open | --closed] [--debug]
@@ -96,7 +96,7 @@ optional arguments:
   --hosts HOSTS [HOSTS ...], -s HOSTS [HOSTS ...]
                         Space-separated list of IP addresses or hostnames of the participating hosts. Example: '--
                         hosts 192.168.1.1 192.168.1.2 192.168.1.3' or '--hosts host1 host2 host3'
-  --model {cosmoflow,resnet50,unet3d}, -m {cosmoflow,resnet50,unet3d}
+  --model {FLUX.1,RetinaNet,DLRMv2}, -m {FLUX.1,RetinaNet,DLRMv2}
                         Model to emulate. A specific model defines the sample size, sample container format, and data
                         rates for each supported accelerator.
   --client-host-memory-in-gb CLIENT_HOST_MEMORY_IN_GB, -cm CLIENT_HOST_MEMORY_IN_GB
@@ -109,7 +109,7 @@ optional arguments:
                         Max number of simulated accelerators. In multi-host configurations the accelerators will be
                         initiated in a round-robin fashion to ensure equal distribution of simulated accelerator
                         processes
-  --accelerator-type {h100,a100,b200,mi355}, -g {h100,a100,b200,mi355}
+  --accelerator-type {b200,mi355}, -g {b200,mi355}
                         Accelerator to simulate for the benchmark. A specific accelerator defines the data access
                         sizes and rates for each supported workload
   --num-client-hosts NUM_CLIENT_HOSTS, -nc NUM_CLIENT_HOSTS
@@ -150,17 +150,17 @@ View Only:
 
 Example:
 
-To calculate minimum dataset size for a `unet3d` model running on 2 client machines with 128 GB each with overall 8 simulated a100 accelerators
+To calculate minimum dataset size for a `retinanet` model running on 2 client machines with 128 GB each with overall 8 simulated b200 accelerators
 
 ```bash
-mlpstorage training datasize -m unet3d --client-host-memory-in-gb 128 --max-accelerators 16 --num-client-hosts 2 --accelerator-type a100  --results-dir ~/mlps-results
+mlpstorage training datasize -m retinanet --client-host-memory-in-gb 128 --max-accelerators 16 --num-client-hosts 2 --accelerator-type a100  --results-dir ~/mlps-results
 ```
 
 2. Synthetic data is generated based on the workload requested by the user.
 
 ```bash
 [root@localhost ]# mlpstorage training datagen --help
-usage: mlpstorage training datagen [-h] [--hosts HOSTS [HOSTS ...]] --model {cosmoflow,resnet50,unet3d}
+usage: mlpstorage training datagen [-h] [--hosts HOSTS [HOSTS ...]] --model {flux1,dlrmv2,retinanet}
                                    [--exec-type {mpi,docker}] [--mpi-bin {mpirun,mpiexec}] [--oversubscribe]
                                    [--allow-run-as-root] --num-processes NUM_PROCESSES [--data-dir DATA_DIR]
                                    [--ssh-username SSH_USERNAME] [--params PARAMS [PARAMS ...]]
@@ -173,7 +173,7 @@ optional arguments:
   --hosts HOSTS [HOSTS ...], -s HOSTS [HOSTS ...]
                         Space-separated list of IP addresses or hostnames of the participating hosts. Example: '--
                         hosts 192.168.1.1 192.168.1.2 192.168.1.3' or '--hosts host1 host2 host3'
-  --model {cosmoflow,resnet50,unet3d}, -m {cosmoflow,resnet50,unet3d}
+  --model {flux1,dlrmv2,retinanet}, -m {flux1,dlrmv2,retinanet}
                         Model to emulate. A specific model defines the sample size, sample container format, and data
                         rates for each supported accelerator.
   --exec-type {mpi,docker}, -et {mpi,docker}
@@ -217,20 +217,20 @@ View Only:
 
 Example:
 
-For generating training data of 56,000 files for `unet3d` workload into `unet3d_data` directory using 8 parallel jobs distributed on 2 nodes.
+For generating training data of 56,000 files for `retinanet` workload into `unet3d_data` directory using 8 parallel jobs distributed on 2 nodes.
 
 ```bash
-mlpstorage training datagen --hosts 10.117.61.121,10.117.61.165 --model unet3d --num-processes 8 --data-dir /mnt/unet3d_data --param dataset.num_files_train=56000
+mlpstorage training datagen --hosts 10.117.61.121,10.117.61.165 --model retinanet --num-processes 8 --data-dir /mnt/unet3d_data --param dataset.num_files_train=56000
 ```
 
 #### Running a Training Benchmark
 
 ```bash
 [root@localhost ]# mlpstorage training run --help
-usage: mlpstorage training run [-h] [--hosts HOSTS [HOSTS ...]] --model {cosmoflow,resnet50,unet3d}
+usage: mlpstorage training run [-h] [--hosts HOSTS [HOSTS ...]] --model {flux1,dlrmv2,retinanet}
                                --client-host-memory-in-gb CLIENT_HOST_MEMORY_IN_GB [--exec-type {mpi,docker}]
                                [--mpi-bin {mpirun,mpiexec}] [--oversubscribe] [--allow-run-as-root] --num-accelerators
-                               NUM_ACCELERATORS --accelerator-type {h100,a100,b200,mi355} --num-client-hosts NUM_CLIENT_HOSTS
+                               NUM_ACCELERATORS --accelerator-type {b200,mi355} --num-client-hosts NUM_CLIENT_HOSTS
                                [--data-dir DATA_DIR] [--ssh-username SSH_USERNAME] [--params PARAMS [PARAMS ...]]
                                [--results-dir RESULTS_DIR] [--loops LOOPS] [--open | --closed] [--debug] [--verbose]
                                [--stream-log-level STREAM_LOG_LEVEL] [--allow-invalid-params] [--what-if]
@@ -240,7 +240,7 @@ optional arguments:
   --hosts HOSTS [HOSTS ...], -s HOSTS [HOSTS ...]
                         Space-separated list of IP addresses or hostnames of the participating hosts. Example: '--
                         hosts 192.168.1.1 192.168.1.2 192.168.1.3' or '--hosts host1 host2 host3'
-  --model {cosmoflow,resnet50,unet3d}, -m {cosmoflow,resnet50,unet3d}
+  --model {flux1,dlrmv2,retinanet}, -m {flux1,dlrmv2,retinanet}
                         Model to emulate. A specific model defines the sample size, sample container format, and data
                         rates for each supported accelerator.
   --client-host-memory-in-gb CLIENT_HOST_MEMORY_IN_GB, -cm CLIENT_HOST_MEMORY_IN_GB
@@ -253,7 +253,7 @@ optional arguments:
                         Number of simulated accelerators. In multi-host configurations the accelerators will be
                         initiated in a round-robin fashion to ensure equal distribution of simulated accelerator
                         processes
-  --accelerator-type {h100,a100,b200,mi355}, -g {h100,a100,b200,mi355}
+  --accelerator-type {b200,mi355}, -g {b200,mi355}
                         Accelerator to simulate for the benchmark. A specific accelerator defines the data access
                         sizes and rates for each supported workload
   --num-client-hosts NUM_CLIENT_HOSTS, -nc NUM_CLIENT_HOSTS
@@ -295,10 +295,10 @@ View Only:
 
 Example:
 
-For running benchmark on `unet3d` workload with data located in `unet3d_data` directory using 2 h100 accelerators spread across 2 client hosts(with IPs 10.117.61.121,10.117.61.165) and results on `unet3d_results` directory, 
+For running benchmark on `retinanet` workload with data located in `unet3d_data` directory using 2 b200 accelerators spread across 2 client hosts(with IPs 10.117.61.121,10.117.61.165) and results on `unet3d_results` directory, 
 
 ```bash
-mlpstorage training run --hosts 10.117.61.121,10.117.61.165 --num-client-hosts 2 --client-host-memory-in-gb 64 --num-accelerators 2 --accelerator-type h100 --model unet3d  --data-dir unet3d_data --results-dir unet3d_results    --param dataset.num_files_train=400 
+mlpstorage training run --hosts 10.117.61.121,10.117.61.165 --num-client-hosts 2 --client-host-memory-in-gb 64 --num-accelerators 2 --accelerator-type b200 --model retinanet  --data-dir unet3d_data --results-dir unet3d_results    --param dataset.num_files_train=400 
 ```
 
 4. Benchmark submission report is generated by aggregating the individual run results. The reporting command provides the associated functions to generate a report for a given results directory
@@ -370,34 +370,34 @@ Note: The `reportgen` script must be run in the launcher client host.
 
 ## Training Models
 Currently, the storage benchmark suite supports benchmarking of 3 deep learning workloads
-- Image segmentation using U-Net3D model 
-- Image classification using Resnet-50 model
-- Cosmology parameter prediction using CosmoFlow model
+- Image generation using a FLUX.1 model 
+- Image recognition using a RetinaNet model
+- Recommendations using a DLRMv2 model
 
 ### FLUX.1
 
 Calculate minimum dataset size required for the benchmark run based on your client configuration
 
 ```bash
-mlpstorage training datasize --model unet3d --client-host-memory-in-gb 64 --num-client-hosts 1 --max-accelerators 4 --accelerator-type h100
+mlpstorage training datasize --model retinanet --client-host-memory-in-gb 64 --num-client-hosts 1 --max-accelerators 4 --accelerator-type b200
 ```
 
 Generate data for the benchmark run based on the minimum files
 
 ```bash
-mlpstorage training datagen --hosts 127.0.0.1 --num-processes 8 --model unet3d --data-dir unet3d_data --results-dir unet3d_results  --param dataset.num_files_train=42000
+mlpstorage training datagen --hosts 127.0.0.1 --num-processes 8 --model retinanet --data-dir retinanet_data --results-dir retinanet_results  --param dataset.num_files_train=42000
 ```
   
 Run the benchmark.
 
 ```bash
-mlpstorage training run --hosts 127.0.0.1 --num-client-hosts 1 --client-host-memory-in-gb 64 --num-accelerators 4 --accelerator-type h100 --model unet3d  --data-dir unet3d_data --results-dir unet3d_results --param dataset.num_files_train=42000
+mlpstorage training run --hosts 127.0.0.1 --num-client-hosts 1 --client-host-memory-in-gb 64 --num-accelerators 4 --accelerator-type b200 --model retinanet  --data-dir retinanet_data --results-dir retinanet_results --param dataset.num_files_train=42000
 ```
 
 All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
 
 ```bash 
-mlpstorage reports reportgen --results-dir unet3d_results
+mlpstorage reports reportgen --results-dir retinanet_results
 ```
 
 ### RetinaNet
@@ -405,25 +405,25 @@ mlpstorage reports reportgen --results-dir unet3d_results
 Calculate minimum dataset size required for the benchmark run based on your client configuration
 
 ```bash
- mlpstorage training datasize --model resnet50 --client-host-memory-in-gb 64 --num-client-hosts 1 --max-accelerators 16 --accelerator-type h100
+ mlpstorage training datasize --model dlrmv2 --client-host-memory-in-gb 64 --num-client-hosts 1 --max-accelerators 16 --accelerator-type b200
 ```
 
 Generate data for the benchmark run
 
 ```bash
-mlpstorage training datagen --hosts 127.0.0.1 --num-processes 8 --model resnet50 --data-dir resnet50_data --results-dir resnet50_results  --param dataset.num_files_train=2557
+mlpstorage training datagen --hosts 127.0.0.1 --num-processes 8 --model dlrmv2 --data-dir dlrmv2_data --results-dir dlrmv2_results  --param dataset.num_files_train=2557
 ```
   
 Run the benchmark.
 
 ```bash
-mlpstorage training run --hosts 127.0.0.1 --num-client-hosts 1  --client-host-memory-in-gb 64  --num-accelerators 16 --accelerator-type h100  --model resnet50  --data-dir resnet50_data --results-dir resnet50_results --param dataset.num_files_train=2557
+mlpstorage training run --hosts 127.0.0.1 --num-client-hosts 1  --client-host-memory-in-gb 64  --num-accelerators 16 --accelerator-type b200  --model dlrmv2  --data-dir dlrmv2_data --results-dir dlrmv2_results --param dataset.num_files_train=2557
 ```
 
 All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
 
 ```bash 
-mlpstorage reports reportgen --results-dir resnet50_results
+mlpstorage reports reportgen --results-dir dlrmv2_results
 ```
 
 ### DLRMv2
@@ -431,25 +431,25 @@ mlpstorage reports reportgen --results-dir resnet50_results
 Calculate minimum dataset size required for the benchmark run based on your client configuration
 
 ```bash
-mlpstorage training datasize --model cosmoflow --client-host-memory-in-gb 64 --num-client-hosts 1 --max-accelerators 16 --accelerator-type h100 
+mlpstorage training datasize --model flux1 --client-host-memory-in-gb 64 --num-client-hosts 1 --max-accelerators 16 --accelerator-type b200 
 ```
 
 Generate data for the benchmark run
 
 ```bash
-mlpstorage training datagen --hosts 127.0.0.1 --num-processes 8 --model cosmoflow --data-dir cosmoflow_data --results-dir=cosmoflow_results  --param dataset.num_files_train=121477
+mlpstorage training datagen --hosts 127.0.0.1 --num-processes 8 --model flux1 --data-dir flux1_data --results-dir=flux1_results  --param dataset.num_files_train=121477
 ```
   
 Run the benchmark.
 
 ```bash
-mlpstorage training run  --hosts 127.0.0.1 --num-client-hosts 1  --client-host-memory-in-gb 64 --num-accelerators 16  --accelerator-type h100  --model cosmoflow --data-dir cosmoflow_data --results-dir cosmoflow_results --param dataset.num_files_train=121477 
+mlpstorage training run  --hosts 127.0.0.1 --num-client-hosts 1  --client-host-memory-in-gb 64 --num-accelerators 16  --accelerator-type b200  --model flux1 --data-dir flux1_data --results-dir flux1_results --param dataset.num_files_train=121477 
 ```
 
 All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
 
 ```bash 
-mlpstorage reports reportgen --results-dir cosmoflow_results
+mlpstorage reports reportgen --results-dir flux1_results
 ```
 
 ## Parameters 
@@ -468,7 +468,7 @@ Below table displays the list of configurable parameters for the benchmark in th
 | reader.computation_threads    | Number of threads to preprocess the data(for TensorFlow)      |1|
 | reader.prefetch_size    | Number of batches to prefetch      |2|
 | reader.transfer_size       | Number of bytes in the read buffer(only for Tensorflow)  		        | |
-| reader.odirect                  | Whether to use direct I/O for reader (currectly applicable to UNet3D)   | False | 
+| reader.odirect                  | Whether to use direct I/O for reader   | False | 
 | **Checkpoint params**		|								|   |
 | checkpoint.checkpoint_folder	| The folder to save the checkpoints  				| --|
 | **Storage params**		|								|   |
@@ -500,8 +500,6 @@ MLPerf™ Storage is a benchmark suite to characterize the performance of storag
 
 This benchmark attempts to balance two goals. First, we aim for **comparability** between benchmark submissions to enable decision making by the AI/ML Community. Second, we aim for **flexibility** to enable experimentation and to show off unique storage system features that will benefit the AI/ML Community. To that end we have defined two classes of submissions: CLOSED and OPEN. 
 
-Published results for the 3D-Unet, ResNet-50, and Cosmoflow Training workloads are comparable across v1.0 and v2.0 of the MLPerf Storage benchmark.  A [full listing of comparability is available](https://github.com/mlcommons/policies/blob/master/MLPerf_Compatibility_Table.adoc).
-
 The MLPerf name and logo are trademarks of the MLCommons® Association ("MLCommons"). In order to refer to a result using the MLPerf name, the result must conform to the letter and spirit of the rules specified in this document. MLCommons reserves the right to solely determine if a use of its name or logos is acceptable.
 
 ## Benchmark Overview
@@ -514,15 +512,15 @@ MLPerf Storage emulates (or "simulates", the terms are used interchangably in th
 
 Instead, our benchmark tool replaces the training on the accelerator for a single batch of data with a ``sleep()`` call. The ``sleep()`` interval depends on the batch size and accelerator type and has been determined through measurement on a system running the real training workload. The rest of the data ingestion pipeline (data loading, caching, checkpointing) is unchanged and runs in the same way as when the actual training is performed.
 
-There are two main advantages to accelerator emulation. First, MLPerf Storage allows testing different storage systems with different types of accelerators. To change the type of accelerator that the benchmark emulates (e.g., to switch to a system with NVIDIA H100 GPUs instead of A100 GPUs), it is enough to adjust the batch size and ``sleep()`` parameter. The second advantage is that MLPerf Storage can put a high load on the storage system simply by increasing the number of emulated accelerators. This allows for testing the behavior of the storage system in large-scale scenarios without purchasing/renting the AI compute infrastructure.
+There are two main advantages to accelerator emulation. First, MLPerf Storage allows testing different storage systems with different types of accelerators. To change the type of accelerator that the benchmark emulates (e.g., to switch to a system with NVIDIA B200 GPUs), it is enough to adjust the batch size and ``sleep()`` parameter. The second advantage is that MLPerf Storage can put a high load on the storage system simply by increasing the number of emulated accelerators. This allows for testing the behavior of the storage system in large-scale scenarios without purchasing/renting the AI compute infrastructure.
 
 The benchmark suite provides workload [configurations](https://github.com/mlcommons/storage/tree/main/storage-conf/workload) that simulate the I/O patterns of selected workloads listed in Table 1. The I/O patterns for each MLPerf Storage benchmark correspond to the I/O patterns of the MLPerf Training and MLPerf HPC benchmarks (i.e., the I/O generated by our tool for 3D U-Net closely follows the I/O generated by actually running the 3D U-Net training workload). The benchmark suite can also generate synthetic datasets which show the same I/O load as the actual datasets listed in Table 1. 
 
 | Area | Problem | Model | Data Loader | Dataset seed | Minimum AU% |
 | ---- | ------- | ----- | ----------- | ------------ | ----------- |
-| Vision | Image segmentation (medical) | 3D U-Net | PyTorch | KiTS 19 (140MB/sample) | 90% |
-| Vision | Image classification | ResNet-50 | TensorFlow | ImageNet (150KB/sample) | 90% |
-| Scientific | Cosmology | parameter prediction | TensorFlow | CosmoFlow N-body simulation (2MB/sample) | 70% |
+| Vision | Image generation | FLUX.1 | PyTorch | ??? | 90% |
+| Vision | Image Recognition | RetinaNet | PyTorch | ??? | 90% |
+| Recommender | Recommender | ??? | PyTorch | ??? | 90% |
 
 Table 1: Benchmark description
 
@@ -571,7 +569,7 @@ The following definitions are used throughout this document:
 
 The metrics reported by the benchmark are different for different types of workloads.  They are broken out below.
 
-The benchmark performance metric for Training workloads (3D-Unet, ResNet-50, and Cosmflow) is **samples per second, subject to a minimum accelerator utilization (AU) defined for that workload**. Higher samples per second is better. 
+The benchmark performance metric for Training workloads is **samples per second, subject to a minimum accelerator utilization (AU) defined for that workload**. Higher samples per second is better. 
 
 To pass a benchmark run, the AU should be equal to or greater than the minimum value, and is computed as follows:
 ```
@@ -587,7 +585,7 @@ The total compute time can be derived from the batch size, total dataset size, n
 total_compute_time = (records_per_file * total_files) / simulated_accelerators / batch_size * computation_time * epochs.
 ```
 
-*NOTE: The sleep time has been determined by running the actual MLPerf training workloads including the compute step on real hardware and is dependent on the accelerator type. In this version of the benchmark we include sleep times for **NVIDIA A100, H100, and B200 GPUs, as well as AMD MI355 accelerators**. We plan on expanding the measurements to different accelerator types in future releases.*
+*NOTE: The sleep time has been determined by running the actual MLPerf training workloads including the compute step on real hardware and is dependent on the accelerator type. In this version of the benchmark we include sleep times for **NVIDIA B200 GPUs, as well as AMD MI355 accelerators**. We plan on expanding the measurements to different accelerator types in future releases.*
 
 ## Dataset Generation
 
@@ -667,10 +665,9 @@ A small number of parameters can be configured in CLOSED submissions; listed in 
 |                              |                                                                                                                                     |          |
 | *Reader parameters*          |                                                                                                                                     |          |
 | reader.read_threads          | Number of threads to load the data                                                                                                  | --       |
-| reader.computation_threads   | Number of threads to preprocess the data (only for resnet)                                                                          | --       |
-| reader.transfer_size         | An int64 scalar representing the number of bytes in the read buffer. (only supported for Tensorflow models -- Resnet and Cosmoflow) |          |
+| reader.computation_threads   | Number of threads to preprocess the data                                                                          | --       |
 | reader.prefetch_size         | An int64 scalar representing the amount of prefetching done, with values of 0, 1, or 2.                                             |          |
-| reader.odirect               | Enable ODIRECT mode for Unet3D Training                                                                                             | False    |
+| reader.odirect               | Enable ODIRECT mode                                                                                             | False    |
 |                              |                                                                                                                                     |          |
 | *Checkpoint parameters*      |                                                                                                                                     |          |
 | checkpoint.checkpoint_folder | The folder to save the checkpoints                                                                                                  | --       |
@@ -698,20 +695,20 @@ The essence of OPEN division results is that for a given benchmark area, they ar
 
 Changes to DLIO itself are allowed in OPEN division submissions.  Any changes to DLIO code or command line options must be disclosed. 
 
-While changes to DLIO are allowed, changing the workload itself is not.  Ie: how the workload is processed can be changed, but those changes cannot fundamentally change the purpose and result of the training.  For example, changing the workload imposed upon storage by a ResNet-50 training task into 3D-Unet training task is not allowed.
+While changes to DLIO are allowed, changing the workload itself is not.  Ie: how the workload is processed can be changed, but those changes cannot fundamentally change the purpose and result of the training.  For example, changing the workload imposed upon storage by a training task into a checkpointing task is not allowed.
 
 In addition to what can be changed in the CLOSED submission, the following parameters can be changed in the benchmark.sh script:
 
 | Parameter                    | Description                                | Default                                                             |
 |------------------------------|--------------------------------------------|---------------------------------------------------------------------|
-| framework                    | The machine learning framework.            | 3D U-Net: PyTorch<br>ResNet-50: Tensorflow<br>Cosmoflow: Tensorflow |
+| framework                    | The machine learning framework.            | PyTorch |
 |                              |                                            |                                                                     |
 | *Dataset parameters*         |                                            |                                                                     |
-| dataset.format               | Format of the dataset.                     | 3D U-Net: .npz<br>ResNet-50: .tfrecord<br>Cosmoflow: .tfrecord      |
-| dataset.num_samples_per_file |                                            | 3D U-Net: 1<br>ResNet-50: 1251<br>Cosmoflow: 1                      |
+| dataset.format               | Format of the dataset.                     | FLUX.1: ???<br>RetinaNet: ???<br>DLRMv2: ???      |
+| dataset.num_samples_per_file |                                            | FLUX.1: ???<br>RetinaNet: ???<br>DLRMv2: ???                      |
 |                              |                                            |                                                                     |
 | *Reader parameters*          |                                            |                                                                     |
-| reader.data_loader           | Supported options: Tensorflow or PyTorch.  | 3D U-Net: PyTorch<br>ResNet-50: Tensorflow<br>Cosmoflow: Tensorflow |
+| reader.data_loader           | PyTorch  | PyTorch |
 
 
 #### OPEN: num_samples_per_file
