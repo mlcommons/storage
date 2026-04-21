@@ -117,6 +117,7 @@ class Loader:
                                 for timestamp in list_dir(run_path):
                                     timestamp_path = os.path.join(run_path, timestamp)
                                     summary_path = os.path.join(timestamp_path, "summary.json")
+                                    metadata_path = self.find_metadata_path(timestamp_path)
                                     metadata_file = self.load_single_log(metadata_path, "Metadata")
                                     run_file = self.load_single_log(summary_path, "Summary")
                                     run_files.append((run_file, metadata_file, timestamp))

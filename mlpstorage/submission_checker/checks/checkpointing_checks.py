@@ -149,7 +149,7 @@ class CheckpointingCheck(BaseCheck):
                     if num_processes != 8:
                         self.log.error(
                             "CLOSED submission with model %s in subset mode requires %d processes, got %d",
-                            model_key,
+                            model_name,
                             8,
                             num_processes
                         )

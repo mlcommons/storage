@@ -12,7 +12,6 @@ class BaseCheck(ABC):
         self.log = log
         self.path = path
         self.name = "base checks"
-        pass
 
     def run_checks(self):
         """

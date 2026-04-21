@@ -43,6 +43,7 @@ class TrainingCheck(BaseCheck):
             self.run_data_matches_datasize,
             self.accelerator_utilization_check,
             self.single_host_simulated_accelerators,
+            self.single_host_client_limit,
             self.identical_accelerators_per_node,
             self.closed_submission_checksum,
             self.closed_submission_parameters,

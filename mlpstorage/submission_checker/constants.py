@@ -19,7 +19,7 @@ PARSER_MAP = {
 
 DATAGEN_REQUIRED_FILES = {
     "v2.0": [r"training_datagen\.stdout.log", r"training_datagen.stderr\.log", r".*output\.json$", r".*per_epoch_stats\.json$", r".*summary\.json$", r"dlio\.log"],
-    "v3.0": [r"training_datagen\.stdout.log", r"training_datagen.stderr\.log", r".*output\.json$", r".*per_epoch_stats\.json$", r",*summary\.json$", r"dlio\.log"],
+    "v3.0": [r"training_datagen\.stdout.log", r"training_datagen.stderr\.log", r".*output\.json$", r".*per_epoch_stats\.json$", r".*summary\.json$", r"dlio\.log"],
     "default": [r"training_datagen\.stdout.log", r"training_datagen.stderr\.log", r".*output\.json$", r".*per_epoch_stats\.json$", r".*summary\.json$", r"dlio\.log"],
 }
 
@@ -42,9 +42,9 @@ RUN_REQUIRED_FOLDERS = {
 }
 
 CHECKPOINT_REQUIRED_FILES = {
-    "v2.0": [r"training_run\.stdout.log", r"training_run\.stderr.log", r".*output\.json", r".*per_epoch_stats\.json", r".*summary\.json", r"dlio\.log"],
-    "v3.0": [r"training_run\.stdout.log", r"training_run\.stderr.log", r".*output\.json", r".*per_epoch_stats\.json", r".*summary\.json", r"dlio\.log"],
-    "default": [r"training_run\.stdout.log", r"training_run\.stderr.log", r".*output\.json", r".*per_epoch_stats\.json", r".*summary\.json", r"dlio\.log"],
+    "v2.0": [r"checkpointing_run\.stdout\.log", r"checkpointing_run\.stderr\.log", r".*output\.json", r".*per_epoch_stats\.json", r".*summary\.json", r"dlio\.log"],
+    "v3.0": [r"checkpointing_run\.stdout\.log", r"checkpointing_run\.stderr\.log", r".*output\.json", r".*per_epoch_stats\.json", r".*summary\.json", r"dlio\.log"],
+    "default": [r"checkpointing_run\.stdout\.log", r"checkpointing_run\.stderr\.log", r".*output\.json", r".*per_epoch_stats\.json", r".*summary\.json", r"dlio\.log"],
 }
 
 CHECKPOINT_REQUIRED_FOLDERS = {

@@ -89,14 +89,10 @@ def main():
     checkers = [DirectoryCheck, TrainingCheck, CheckpointingCheck, VDBCheck, KVCacheCheck]
     # Main loop over all the submissions
     for logs in loader.load():
-        # TODO: Initialize checkers
-        checkers_pipe = []
         valid = True
-        #TODO: Run checks
         for checker in checkers:
             valid &= checker(log, config, logs)()
 
-        # TODO: Add results to summary
         if valid:
             exporter.add_result(logs)
         else:
