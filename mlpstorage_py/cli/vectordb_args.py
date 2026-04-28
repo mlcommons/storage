@@ -4,10 +4,10 @@ VectorDB benchmark CLI argument builder.
 This module defines the CLI arguments for the VectorDB benchmark,
 including datasize, datagen, and run commands.
 """
- 
+
 from mlpstorage_py.config import (
     VECTOR_DTYPES, DISTRIBUTIONS, VECTORDB_DEFAULT_RUNTIME,
-    VDB_INDEX_TYPES, VDB_BENCHMARK_MODES,
+    VDB_INDEX_TYPES, VDB_INDEX_TYPES_CLOSED, VDB_BENCHMARK_MODES, EXIT_CODE
 )
 from mlpstorage_py.cli.common_args import (
     HELP_MESSAGES,
@@ -16,7 +16,7 @@ from mlpstorage_py.cli.common_args import (
 )
  
  
-def add_vectordb_arguments(parser):
+def add_vectordb_arguments(parser, is_closed):
     """Add VectorDB benchmark arguments to the parser.
  
     Args:
@@ -79,12 +79,20 @@ def add_vectordb_arguments(parser):
         default=1_000_000,
         help=HELP_MESSAGES['num_vectors']
     )
-    datasize.add_argument(
-        '--index-type',
-        choices=VDB_INDEX_TYPES,
-        default="DISKANN",
-        help="Index type for storage estimation"
-    )
+    if is_closed:
+        datasize.add_argument(
+            '--index-type',
+            choices=VDB_INDEX_TYPES_CLOSED,
+            default="DISKANN",
+            help="Index type for storage estimation"
+        )
+    else:
+        datasize.add_argument(
+            '--index-type',
+            choices=VDB_INDEX_TYPES,
+            default="DISKANN",
+            help="Index type for storage estimation"
+        )
     datasize.add_argument(
         '--num-shards',
         type=int,
@@ -192,7 +200,15 @@ def add_vectordb_arguments(parser):
  
     # Add universal arguments to all subcommands
     for _parser in [datasize, datagen, run_benchmark]:
-        add_universal_arguments(_parser)
+        add_universal_arguments(_parser, True, is_closed)
  
     # Add time-series arguments to run command only
-    add_timeseries_arguments(run_benchmark)
+    add_timeseries_arguments(run_benchmark, is_closed)
+
+ 
+def validate_vectordb_arguments(args):
+    """Validate the whole set of args given that we're doing a vectordb benchmark
+    
+    Args:
+        args (argparse.Namespace): The parsed command-line arguments
+    """

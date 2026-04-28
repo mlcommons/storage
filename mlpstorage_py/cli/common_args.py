@@ -9,7 +9,7 @@ This module contains:
 """
 
 from mlpstorage_py.config import (
-    CHECKPOINT_RANKS_STRINGS, MODELS, ACCELERATORS, DEFAULT_HOSTS,
+    CHECKPOINT_RANKS_STRINGS, MODELS, ACCELERATORS, ACCELERATORS_CLOSED, DEFAULT_HOSTS,
     LLM_MODELS_STRINGS, MPI_CMDS, EXEC_TYPE, DEFAULT_RESULTS_DIR,
     VECTOR_DTYPES, DISTRIBUTIONS
 )
@@ -167,7 +167,7 @@ PROGRAM_DESCRIPTIONS = {
 }
 
 
-def add_universal_arguments(parser):
+def add_universal_arguments(parser, offer_object, is_closed):
     """Add arguments common to all benchmarks and commands.
 
     Args:
@@ -180,12 +180,19 @@ def add_universal_arguments(parser):
         default=DEFAULT_RESULTS_DIR,
         help=HELP_MESSAGES['results_dir']
     )
-    standard_args.add_argument(
-        '--loops',
-        type=int,
-        default=1,
-        help="Number of times to run the benchmark"
-    )
+
+    if is_closed:
+        parser.set_defaults(
+            loops=1
+        )
+    else:
+        standard_args.add_argument(
+            '--loops',
+            type=int,
+            default=1,
+            help="Number of times to run the benchmark"
+        )
+
     standard_args.add_argument(
         '--config-file', '-c',
         type=str,
@@ -193,35 +200,26 @@ def add_universal_arguments(parser):
     )
 
     # Create a mutually exclusive group for file/object options
-    access_proto = standard_args.add_mutually_exclusive_group(required=True)
-    access_proto.add_argument(
-        "--file",
-        action="store_true",
-        help="Use POSIX files as the data access method"
-    )
-    access_proto.add_argument(
-        "--object",
-        nargs="?",
-        type=str,
-        const="s3",
-        choices=["s3"],
-        help="Use the given Object API as the data access method, defaults to S3"
-    )
-
-    # Create a mutually exclusive group for closed/open options
-    submission_group = standard_args.add_mutually_exclusive_group()
-    submission_group.add_argument(
-        "--open",
-        action="store_false",
-        dest="closed",
-        default=False,
-        help="Run as an open submission"
-    )
-    submission_group.add_argument(
-        "--closed",
-        action="store_true",
-        help="Run as a closed submission"
-    )
+    if offer_object:
+        access_proto = standard_args.add_mutually_exclusive_group(required=True)
+        access_proto.add_argument(
+            "--file",
+            action="store_true",
+            help="Use POSIX files as the data access method"
+        )
+        access_proto.add_argument(
+            "--object",
+            nargs="?",
+            type=str,
+            const="s3",
+            choices=["s3"],
+            help="Use the given Object API as the data access method, defaults to S3"
+        )
+    else:
+        parser.set_defaults(
+            file=True,
+            object=False
+        )
 
     output_control = parser.add_argument_group("Output Control")
     output_control.add_argument(
@@ -239,11 +237,13 @@ def add_universal_arguments(parser):
         type=str,
         default="INFO"
     )
-    output_control.add_argument(
-        "--allow-invalid-params", "-aip",
-        action="store_true",
-        help="Do not fail on invalid parameters."
-    )
+
+    if not is_closed:
+        output_control.add_argument(
+            "--allow-invalid-params", "-aip",
+            action="store_true",
+            help="Do not fail on invalid parameters."
+        )
 
     view_only_args = parser.add_argument_group("View Only")
     view_only_args.add_argument(
@@ -266,7 +266,7 @@ def add_universal_arguments(parser):
     )
 
 
-def add_mpi_arguments(parser):
+def add_mpi_arguments(parser, is_closed):
     """Add MPI-related arguments.
 
     Args:
@@ -296,7 +296,7 @@ def add_mpi_arguments(parser):
     )
 
 
-def add_host_arguments(parser, required=False):
+def add_host_arguments(parser, is_closed, required=False):
     """Add host-related arguments common to distributed benchmarks.
 
     Args:
@@ -312,7 +312,7 @@ def add_host_arguments(parser, required=False):
     )
 
 
-def add_dlio_arguments(parser):
+def add_dlio_arguments(parser, is_closed):
     """Add DLIO-related arguments.
 
     Args:
@@ -323,16 +323,22 @@ def add_dlio_arguments(parser):
         type=str,
         help="Path to DLIO binary. Default is the same as mlpstorage binary path"
     )
-    parser.add_argument(
-        '--params', '-p',
-        nargs="+",
-        type=str,
-        action="append",
-        help=HELP_MESSAGES['params']
-    )
+
+    if is_closed:
+        parser.set_defaults(
+            params=''
+        )
+    else:
+        parser.add_argument(
+            '--params', '-p',
+            nargs="+",
+            type=str,
+            action="append",
+            help=HELP_MESSAGES['params']
+        )
 
 
-def add_timeseries_arguments(parser):
+def add_timeseries_arguments(parser, is_closed):
     """Add time-series collection arguments.
 
     These arguments control the collection of time-series host metrics
@@ -341,21 +347,22 @@ def add_timeseries_arguments(parser):
     Args:
         parser: Argparse parser to add arguments to.
     """
-    timeseries_group = parser.add_argument_group("Time-Series Collection")
-    timeseries_group.add_argument(
-        '--timeseries-interval',
-        type=float,
-        default=10.0,
-        help=HELP_MESSAGES['timeseries_interval']
-    )
-    timeseries_group.add_argument(
-        '--skip-timeseries',
-        action='store_true',
-        help=HELP_MESSAGES['skip_timeseries']
-    )
-    timeseries_group.add_argument(
-        '--max-timeseries-samples',
-        type=int,
-        default=3600,
-        help=HELP_MESSAGES['max_timeseries_samples']
-    )
+    if not is_closed:
+        timeseries_group = parser.add_argument_group("Time-Series Collection")
+        timeseries_group.add_argument(
+            '--timeseries-interval',
+            type=float,
+            default=10.0,
+            help=HELP_MESSAGES['timeseries_interval']
+        )
+        timeseries_group.add_argument(
+            '--skip-timeseries',
+            action='store_true',
+            help=HELP_MESSAGES['skip_timeseries']
+        )
+        timeseries_group.add_argument(
+            '--max-timeseries-samples',
+            type=int,
+            default=3600,
+            help=HELP_MESSAGES['max_timeseries_samples']
+        )

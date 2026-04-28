@@ -157,7 +157,7 @@ def create_sample_cluster_info(
     Returns:
         ClusterInformation instance with mock data.
     """
-    from mlpstorage.rules import ClusterInformation, HostInfo, HostMemoryInfo
+    from mlpstorage_py.rules import ClusterInformation, HostInfo, HostMemoryInfo
 
     if logger is None:
         logger = MagicMock()
@@ -275,8 +275,8 @@ def create_sample_benchmark_run_data(
     Returns:
         BenchmarkRunData instance.
     """
-    from mlpstorage.rules import BenchmarkRunData
-    from mlpstorage.config import BENCHMARK_TYPES
+    from mlpstorage_py.rules import BenchmarkRunData
+    from mlpstorage_py.config import BENCHMARK_TYPES
 
     # Map string to enum
     type_map = {

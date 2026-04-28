@@ -59,7 +59,7 @@ echo "Step 2: Verifying bucket is empty..."
 echo ""
 
 echo "Step 3: Running data generation..."
-DLIO_S3_IMPLEMENTATION=mlp mlpstorage training datagen \
+DLIO_S3_IMPLEMENTATION=mlp mlpstorage open training datagen \
   --model unet3d -np 1 -dd "${DATA_DIR}" \
   --param ${COMMON_PARAMS} ${s3_params}
 

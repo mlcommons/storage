@@ -59,7 +59,7 @@ echo ""
 
 echo "Step 3: Running data generation..."
 set +e  # s3dlio compat layer may still have issues — capture result rather than abort
-DLIO_S3_IMPLEMENTATION=mlp mlpstorage training datagen \
+DLIO_S3_IMPLEMENTATION=mlp mlpstorage open training datagen \
   --model unet3d -np 8 -dd "${DATA_DIR}" \
   --param ${COMMON_PARAMS} ${s3_params}
 
@@ -77,7 +77,7 @@ if [ $RESULT -eq 0 ]; then
     echo "Step 6: Running training..."
     set +e
     export DLIO_S3_IMPLEMENTATION=mlp
-    mlpstorage training run \
+    mlpstorage open training run \
       --model unet3d --allow-run-as-root --skip-validation \
       --num-accelerators 1 --accelerator-type h100 --client-host-memory-in-gb 512 \
       --param ${COMMON_PARAMS} ${s3_params} \

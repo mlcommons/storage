@@ -57,7 +57,7 @@ echo "Step 2: Data generation with s3dlio..."
 # Use storage.storage_library to select s3dlio
 s3_params="storage.storage_type=s3 storage.storage_library=s3dlio storage.storage_options.endpoint_url=${AWS_ENDPOINT_URL} storage.storage_options.access_key_id=${AWS_ACCESS_KEY_ID} storage.storage_options.secret_access_key=${AWS_SECRET_ACCESS_KEY} storage.storage_root=${S3_BUCKET} storage.storage_options.s3_force_path_style=true"
 
-mlpstorage training datagen \
+mlpstorage open training datagen \
   --model unet3d \
   --num-processes 1 \
   --params dataset.num_files_train=${NUM_FILES} \
@@ -78,7 +78,7 @@ echo "Step 3: Verify S3 data with s3-cli..."
 echo ""
 
 echo "Step 4: Training (5 epochs) with s3dlio..."
-timeout 300 mlpstorage training run \
+timeout 300 mlpstorage open training run \
   --model unet3d \
   --num-accelerators=1 \
   --accelerator-type=a100 \

@@ -5,12 +5,16 @@ This module defines the CLI arguments for the KV Cache benchmark,
 including run and datasize commands for LLM inference storage testing.
 """
 
+import sys
+
 from mlpstorage_py.config import (
     KVCACHE_MODELS,
+    KVCACHE_MODEL_DEFAULT,
     KVCACHE_PERFORMANCE_PROFILES,
     KVCACHE_GENERATION_MODES,
     KVCACHE_DEFAULT_DURATION,
     EXEC_TYPE,
+    EXIT_CODE,
 )
 from mlpstorage_py.cli.common_args import (
     HELP_MESSAGES,
@@ -63,7 +67,7 @@ KVCACHE_HELP_MESSAGES = {
 }
 
 
-def add_kvcache_arguments(parser):
+def add_kvcache_arguments(parser, is_closed):
     """Add KV Cache benchmark arguments to the parser.
 
     Args:
@@ -84,40 +88,48 @@ def add_kvcache_arguments(parser):
 
     # Add arguments to both run and datasize commands
     for _parser in [run_benchmark, datasize]:
-        _add_kvcache_model_arguments(_parser)
-        _add_kvcache_cache_arguments(_parser)
-        add_universal_arguments(_parser)
+        _add_kvcache_model_arguments(_parser, is_closed)
+        _add_kvcache_cache_arguments(_parser, is_closed)
+        add_universal_arguments(_parser, False, is_closed)
 
     # Run-specific arguments
-    _add_kvcache_run_arguments(run_benchmark)
-    _add_kvcache_optional_features(run_benchmark)
+    _add_kvcache_run_arguments(run_benchmark, is_closed)
+    _add_kvcache_optional_features(run_benchmark, is_closed)
 
     # Add distributed execution arguments to run command only
-    _add_kvcache_distributed_arguments(run_benchmark)
+    _add_kvcache_distributed_arguments(run_benchmark, is_closed)
 
 
-def _add_kvcache_model_arguments(parser):
+
+def _add_kvcache_model_arguments(parser, is_closed):
     """Add model configuration arguments.
 
     Args:
         parser: Argparse parser to add arguments to.
     """
-    model_group = parser.add_argument_group("Model Configuration")
-    model_group.add_argument(
-        '--model', '-m',
-        choices=KVCACHE_MODELS,
-        default='llama3.1-8b',
-        help=KVCACHE_HELP_MESSAGES['kvcache_model']
-    )
-    model_group.add_argument(
-        '--num-users', '-nu',
-        type=int,
-        default=100,
-        help=KVCACHE_HELP_MESSAGES['num_users']
-    )
+    if is_closed:
+        # Hardcode the default values into the namespace without presenting CLI options
+        parser.set_defaults(
+            model=KVCACHE_MODEL_DEFAULT,
+            num_users=100
+        )
+    else:
+        model_group = parser.add_argument_group("Model Configuration")
+        model_group.add_argument(
+            '--model', '-m',
+            choices=KVCACHE_MODELS,
+            default='llama3.1-8b',
+            help=KVCACHE_HELP_MESSAGES['kvcache_model']
+        )
+        model_group.add_argument(
+            '--num-users', '-nu',
+            type=int,
+            default=100,
+            help=KVCACHE_HELP_MESSAGES['num_users']
+        )
 
 
-def _add_kvcache_cache_arguments(parser):
+def _add_kvcache_cache_arguments(parser, is_closed):
     """Add cache tier configuration arguments.
 
     Args:
@@ -125,25 +137,31 @@ def _add_kvcache_cache_arguments(parser):
     """
     cache_group = parser.add_argument_group("Cache Configuration")
     cache_group.add_argument(
-        '--gpu-mem-gb',
-        type=float,
-        default=16.0,
-        help=KVCACHE_HELP_MESSAGES['gpu_mem_gb']
-    )
-    cache_group.add_argument(
-        '--cpu-mem-gb',
-        type=float,
-        default=32.0,
-        help=KVCACHE_HELP_MESSAGES['cpu_mem_gb']
-    )
-    cache_group.add_argument(
         '--cache-dir',
         type=str,
         help=KVCACHE_HELP_MESSAGES['cache_dir']
     )
+    if is_closed:
+        cache_group.set_defaults(
+            gpu_mem_gb=16.0,
+            cpu_mem_gb=32.0
+        )
+    else:
+        cache_group.add_argument(
+            '--gpu-mem-gb',
+            type=float,
+            default=16.0,
+            help=KVCACHE_HELP_MESSAGES['gpu_mem_gb']
+        )
+        cache_group.add_argument(
+            '--cpu-mem-gb',
+            type=float,
+            default=32.0,
+            help=KVCACHE_HELP_MESSAGES['cpu_mem_gb']
+        )
 
 
-def _add_kvcache_run_arguments(parser):
+def _add_kvcache_run_arguments(parser, is_closed):
     """Add run-specific arguments.
 
     Args:
@@ -151,77 +169,94 @@ def _add_kvcache_run_arguments(parser):
     """
     run_group = parser.add_argument_group("Run Configuration")
     run_group.add_argument(
-        '--duration', '-d',
-        type=int,
-        default=KVCACHE_DEFAULT_DURATION,
-        help=KVCACHE_HELP_MESSAGES['duration']
-    )
-    run_group.add_argument(
-        '--generation-mode',
-        choices=KVCACHE_GENERATION_MODES,
-        default='realistic',
-        help=KVCACHE_HELP_MESSAGES['generation_mode']
-    )
-    run_group.add_argument(
-        '--performance-profile',
-        choices=KVCACHE_PERFORMANCE_PROFILES,
-        default='latency',
-        help=KVCACHE_HELP_MESSAGES['performance_profile']
+        '--kvcache-bin-path',
+        type=str,
+        help=KVCACHE_HELP_MESSAGES['kvcache_bin_path']
     )
     run_group.add_argument(
         '--seed',
         type=int,
         help=KVCACHE_HELP_MESSAGES['seed']
     )
-    run_group.add_argument(
-        '--kvcache-bin-path',
-        type=str,
-        help=KVCACHE_HELP_MESSAGES['kvcache_bin_path']
-    )
 
+    if is_closed:
+        run_group.set_defaults(
+            duration=KVCACHE_DEFAULT_DURATION,
+            generation_mode='realistic',
+            performance_profile='latency'
+        )
+    else:
+        run_group.add_argument(
+            '--duration', '-d',
+            type=int,
+            default=KVCACHE_DEFAULT_DURATION,
+            help=KVCACHE_HELP_MESSAGES['duration']
+        )
+        run_group.add_argument(
+            '--generation-mode',
+            choices=KVCACHE_GENERATION_MODES,
+            default='realistic',
+            help=KVCACHE_HELP_MESSAGES['generation_mode']
+        )
+        run_group.add_argument(
+            '--performance-profile',
+            choices=KVCACHE_PERFORMANCE_PROFILES,
+            default='latency',
+            help=KVCACHE_HELP_MESSAGES['performance_profile']
+        )
 
-def _add_kvcache_optional_features(parser):
+def _add_kvcache_optional_features(parser, is_closed):
     """Add optional feature flags.
 
     Args:
         parser: Argparse parser to add arguments to.
     """
     features_group = parser.add_argument_group("Optional Features")
-    features_group.add_argument(
-        '--disable-multi-turn',
-        action='store_true',
-        help=KVCACHE_HELP_MESSAGES['disable_multi_turn']
-    )
-    features_group.add_argument(
-        '--disable-prefix-caching',
-        action='store_true',
-        help=KVCACHE_HELP_MESSAGES['disable_prefix_caching']
-    )
-    features_group.add_argument(
-        '--enable-rag',
-        action='store_true',
-        help=KVCACHE_HELP_MESSAGES['enable_rag']
-    )
-    features_group.add_argument(
-        '--rag-num-docs',
-        type=int,
-        default=10,
-        help=KVCACHE_HELP_MESSAGES['rag_num_docs']
-    )
-    features_group.add_argument(
-        '--enable-autoscaling',
-        action='store_true',
-        help=KVCACHE_HELP_MESSAGES['enable_autoscaling']
-    )
-    features_group.add_argument(
-        '--autoscaler-mode',
-        choices=['qos', 'predictive'],
-        default='qos',
-        help=KVCACHE_HELP_MESSAGES['autoscaler_mode']
-    )
+    if is_closed:
+        features_group.set_defaults(
+                disable_multi_turn=False,
+                disable_prefix_caching=False,
+                enable_rag=True,
+                rag_num_docs=10,
+                enable_autoscaling=True,
+                autoscaler_mode='qos'
+        )
+    else:
+            features_group.add_argument(
+                '--disable-multi-turn',
+                action='store_true',
+                help=KVCACHE_HELP_MESSAGES['disable_multi_turn']
+            )
+            features_group.add_argument(
+                '--disable-prefix-caching',
+                action='store_true',
+                help=KVCACHE_HELP_MESSAGES['disable_prefix_caching']
+            )
+            features_group.add_argument(
+                '--enable-rag',
+                action='store_true',
+                help=KVCACHE_HELP_MESSAGES['enable_rag']
+            )
+            features_group.add_argument(
+                '--rag-num-docs',
+                type=int,
+                default=10,
+                help=KVCACHE_HELP_MESSAGES['rag_num_docs']
+            )
+            features_group.add_argument(
+                '--enable-autoscaling',
+                action='store_true',
+                help=KVCACHE_HELP_MESSAGES['enable_autoscaling']
+            )
+            features_group.add_argument(
+                '--autoscaler-mode',
+                choices=['qos', 'predictive'],
+                default='qos',
+                help=KVCACHE_HELP_MESSAGES['autoscaler_mode']
+            )
 
 
-def _add_kvcache_distributed_arguments(parser):
+def _add_kvcache_distributed_arguments(parser, is_closed):
     """Add distributed execution arguments for multi-host benchmarking.
 
     Args:
@@ -242,10 +277,28 @@ def _add_kvcache_distributed_arguments(parser):
     )
 
     # Add host arguments from common_args
-    add_host_arguments(parser)
+    add_host_arguments(parser, is_closed)
 
     # Add MPI arguments from common_args
-    add_mpi_arguments(parser)
+    add_mpi_arguments(parser, is_closed)
 
     # Add time-series arguments
-    add_timeseries_arguments(parser)
+    add_timeseries_arguments(parser, is_closed)
+
+
+def validate_kvcache_arguments(args):
+    """Validate the whole set of args given that we're doing a kvcache benchmark
+    
+    Args:
+        args (argparse.Namespace): The parsed command-line arguments
+    """
+    error_messages = []
+
+    if args.data_access_protocol != 'file':
+        error_messages.append("KVCache only supports POSIX file storage, ie: --object= is not supported")
+
+    if error_messages:
+        for msg in error_messages:
+            print(msg)
+
+        sys.exit(EXIT_CODE.INVALID_ARGUMENTS)

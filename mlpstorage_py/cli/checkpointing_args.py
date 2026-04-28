@@ -5,7 +5,9 @@ This module defines the CLI arguments for the checkpointing benchmark,
 including datasize and run commands.
 """
 
-from mlpstorage_py.config import DEFAULT_HOSTS, EXEC_TYPE
+import sys
+
+from mlpstorage_py.config import DEFAULT_HOSTS, EXEC_TYPE, LLM_MODELS, LLM_MODELS_CLOSED, EXIT_CODE
 from mlpstorage_py.cli.common_args import (
     HELP_MESSAGES,
     add_universal_arguments,
@@ -16,7 +18,7 @@ from mlpstorage_py.cli.common_args import (
 )
 
 
-def add_checkpointing_arguments(parser):
+def add_checkpointing_arguments(parser, is_closed):
     """Add checkpointing benchmark arguments to the parser.
 
     Args:
@@ -37,8 +39,7 @@ def add_checkpointing_arguments(parser):
 
     # Common arguments for both datasize and run
     for _parser in [datasize, run_benchmark]:
-        add_host_arguments(_parser)
-
+        add_host_arguments(_parser, is_closed)
         _parser.add_argument(
             '--client-host-memory-in-gb', '-cm',
             type=int,
@@ -48,53 +49,89 @@ def add_checkpointing_arguments(parser):
 
         # Model argument - using help text with choices instead of choices param
         # to avoid very long help output
-        _parser.add_argument(
-            '--model', '-m',
-            required=True,
-            help=HELP_MESSAGES['llm_model']
-        )
+        if is_closed:
+            _parser.add_argument(
+                '--model', '-m',
+                choices=LLM_MODELS_CLOSED,
+                required=True,
+                help=HELP_MESSAGES['llm_model']
+            )
 
-        _parser.add_argument(
-            '--num-checkpoints-read', '-ncr',
-            type=int,
-            default=10,
-            help=HELP_MESSAGES['num_checkpoints']
-        )
+        else:
+            _parser.add_argument(
+                '--model', '-m',
+                choices=LLM_MODELS,
+                required=True,
+                help=HELP_MESSAGES['llm_model']
+            )
 
-        _parser.add_argument(
-            '--num-checkpoints-write', '-ncw',
-            type=int,
-            default=10,
-            help=HELP_MESSAGES['num_checkpoints']
-        )
+        if is_closed:
+            parser.set_defaults(
+                num_checkpoints_read=10,
+                num_checkpoints_write=10
+            )
+        else:
+            _parser.add_argument(
+                '--num-checkpoints-read', '-ncr',
+                type=int,
+                default=10,
+                help=HELP_MESSAGES['num_checkpoints']
+            )
 
-        _parser.add_argument(
-            '--num-processes', '-np',
-            type=int,
-            required=True,
-            help=HELP_MESSAGES['num_checkpoint_accelerators']
-        )
+            _parser.add_argument(
+                '--num-checkpoints-write', '-ncw',
+                type=int,
+                default=10,
+                help=HELP_MESSAGES['num_checkpoints']
+            )
 
-        _parser.add_argument(
-            "--checkpoint-folder", '-cf',
-            type=str,
-            required=True,
-            help=HELP_MESSAGES['checkpoint_folder']
-        )
+            add_dlio_arguments(_parser, is_closed)
 
-        add_dlio_arguments(_parser)
+            # Add exec-type and MPI arguments to both datasize and run
+            _parser.add_argument(
+                '--exec-type', '-et',
+                type=EXEC_TYPE,
+                choices=list(EXEC_TYPE),
+                default=EXEC_TYPE.MPI,
+                help=HELP_MESSAGES['exec_type']
+            )
+            add_mpi_arguments(_parser, is_closed)
 
-        # Add exec-type and MPI arguments to both datasize and run
-        _parser.add_argument(
-            '--exec-type', '-et',
-            type=EXEC_TYPE,
-            choices=list(EXEC_TYPE),
-            default=EXEC_TYPE.MPI,
-            help=HELP_MESSAGES['exec_type']
-        )
-        add_mpi_arguments(_parser)
+    run_benchmark.add_argument(
+        '--num-processes', '-np',
+        type=int,
+        required=True,
+        help=HELP_MESSAGES['num_checkpoint_accelerators']
+    )
 
-        add_universal_arguments(_parser)
+    run_benchmark.add_argument(
+        "--checkpoint-folder", '-cf',
+        type=str,
+        required=True,
+        help=HELP_MESSAGES['checkpoint_folder']
+    )
+
+    add_universal_arguments(_parser, True, is_closed)
 
     # Add time-series arguments to run command only
-    add_timeseries_arguments(run_benchmark)
+    add_timeseries_arguments(run_benchmark, is_closed)
+
+
+def validate_checkpointing_arguments(args):
+    """Validate the whole set of args given that we're doing a checkpointing benchmark
+    
+    Args:
+        args (argparse.Namespace): The parsed command-line arguments
+    """
+    error_messages = []
+
+    if args.model not in LLM_MODELS:
+        error_messages.append("Invalid LLM model. Supported models are: {}".format(", ".join(LLM_MODELS)))
+    if args.num_checkpoints_read < 0 or args.num_checkpoints_write < 0:
+        error_messages.append("Number of checkpoints read and write must be non-negative")
+
+    if error_messages:
+        for msg in error_messages:
+            print(msg)
+
+        sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
