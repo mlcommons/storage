@@ -90,7 +90,10 @@ def add_kvcache_arguments(parser, is_closed):
     for _parser in [run_benchmark, datasize]:
         _add_kvcache_model_arguments(_parser, is_closed)
         _add_kvcache_cache_arguments(_parser, is_closed)
-        add_universal_arguments(_parser, False, is_closed)
+        if _parser == run_benchmark:
+            add_universal_arguments(_parser, True, False, is_closed)
+        else:
+            add_universal_arguments(_parser, False, False, is_closed)
 
     # Run-specific arguments
     _add_kvcache_run_arguments(run_benchmark, is_closed)

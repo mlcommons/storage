@@ -35,7 +35,7 @@ def add_reports_arguments(parser, is_closed):
         help=HELP_MESSAGES['output_dir']
     )
 
-    add_universal_arguments(reportgen, True, is_closed)
+    add_universal_arguments(reportgen, True, True, is_closed)
 
 
 def add_history_arguments(parser, is_closed):
@@ -77,4 +77,4 @@ def add_history_arguments(parser, is_closed):
     )
 
     for _parser in [history, rerun]:
-        add_universal_arguments(_parser, True, is_closed)
+        add_universal_arguments(_parser, True, True, is_closed)

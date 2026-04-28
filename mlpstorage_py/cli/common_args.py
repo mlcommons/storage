@@ -167,19 +167,28 @@ PROGRAM_DESCRIPTIONS = {
 }
 
 
-def add_universal_arguments(parser, offer_object, is_closed):
+def add_universal_arguments(parser, req_results, offer_object, is_closed):
     """Add arguments common to all benchmarks and commands.
 
     Args:
         parser: Argparse parser to add arguments to.
     """
     standard_args = parser.add_argument_group("Standard Arguments")
-    standard_args.add_argument(
-        '--results-dir', '-rd',
-        type=str,
-        default=DEFAULT_RESULTS_DIR,
-        help=HELP_MESSAGES['results_dir']
-    )
+    if req_results:
+        standard_args.add_argument(
+            '--results-dir', '-rd',
+            type=str,
+            required=True,
+            default=DEFAULT_RESULTS_DIR,
+            help=HELP_MESSAGES['results_dir']
+        )
+    else:
+        standard_args.add_argument(
+            '--results-dir', '-rd',
+            type=str,
+            default=DEFAULT_RESULTS_DIR,
+            help=HELP_MESSAGES['results_dir']
+        )
 
     if is_closed:
         parser.set_defaults(
@@ -200,13 +209,13 @@ def add_universal_arguments(parser, offer_object, is_closed):
     )
 
     # Create a mutually exclusive group for file/object options
+    access_proto = standard_args.add_mutually_exclusive_group(required=True)
+    access_proto.add_argument(
+        "--file",
+        action="store_true",
+        help="Use POSIX files as the data access method"
+    )
     if offer_object:
-        access_proto = standard_args.add_mutually_exclusive_group(required=True)
-        access_proto.add_argument(
-            "--file",
-            action="store_true",
-            help="Use POSIX files as the data access method"
-        )
         access_proto.add_argument(
             "--object",
             nargs="?",
@@ -217,7 +226,6 @@ def add_universal_arguments(parser, offer_object, is_closed):
         )
     else:
         parser.set_defaults(
-            file=True,
             object=False
         )
 

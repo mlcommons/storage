@@ -57,6 +57,7 @@ def parse_arguments():
         print(f"Note: running in a 'closed' configuration, some options are limited or forced to default values")
     else:
         print(f"Note: running in an 'open' configuration, all options are available")
+    print(f"ARGV=", sys.argv)
 
     # Note: Added usage string to document the new positional argument
     parser = argparse.ArgumentParser(
