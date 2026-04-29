@@ -101,7 +101,7 @@ KVCACHE_MODELS = [
     'tiny-1b',
     'mistral-7b',
     'llama2-7b',
-    KVCACHE_MODEL_DEFAULT,
+    'llama3.1-8b',
     'llama3.1-70b-instruct',
 ]
 

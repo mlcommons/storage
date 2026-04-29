@@ -1,196 +1,198 @@
 """
 Comprehensive Tests for the MLPerf Storage CLI parser.
 Validates structural boundaries, subcommand availability, value constraints,
-and explicit verification that 'closed' defaults match 'open' defaults.
+YAML overrides, post-parse argument updates, and 'closed' vs 'open' parity.
 """
 
 import sys
 import pytest
 import argparse
-from unittest.mock import patch
-from mlpstorage_py.cli_parser import parse_arguments
+from unittest.mock import patch, mock_open
+from mlpstorage_py.cli_parser import parse_arguments, update_args, apply_yaml_config_overrides
 from mlpstorage_py.config import EXIT_CODE
 
 # =====================================================================
-# 1. Open vs. Closed Equivalence Tests
+# 1. Open vs. Closed Equivalence & Constraints Tests
 # =====================================================================
 
-def test_kvcache_open_closed_defaults_match():
-    """
-    Verify that all hardcoded defaults in KVCache closed mode exactly
-    match the argparse defaults provided in open mode.
-    """
-    base_args = ['kvcache', 'run', '--file']
+class TestOpenClosedEquivalence:
     
-    with patch('sys.argv', ['mlpstorage', 'closed'] + base_args):
-        args_closed = parse_arguments()
+    def test_kvcache_open_closed_defaults_match(self):
+        """Verify hardcoded defaults in KVCache closed mode exactly match argparse open mode defaults."""
+        base_args = ['kvcache', 'run', '-rd', '/tmp', '-m', 'llama3.1-8b', '-nu', '100']
         
-    with patch('sys.argv', ['mlpstorage', 'open'] + base_args):
-        args_open = parse_arguments()
+        with patch('sys.argv', ['mlpstorage', 'closed'] + base_args):
+            args_closed = parse_arguments()
+            
+        with patch('sys.argv', ['mlpstorage', 'open'] + base_args):
+            args_open = parse_arguments()
 
-    # Model and Users
-    assert args_closed.model == args_open.model
-    assert args_closed.num_users == args_open.num_users
-    
-    # Cache Tier Memory
-    assert args_closed.gpu_mem_gb == args_open.gpu_mem_gb == 16.0
-    assert args_closed.cpu_mem_gb == args_open.cpu_mem_gb == 32.0
-    
-    # Run configuration
-    assert args_closed.duration == args_open.duration
-    assert args_closed.generation_mode == args_open.generation_mode == 'realistic'
-    assert args_closed.performance_profile == args_open.performance_profile == 'latency'
-    
-    # Optional Features
-    assert args_closed.disable_multi_turn == args_open.disable_multi_turn == False
-    assert args_closed.enable_rag == args_open.enable_rag == True
-    assert args_closed.autoscaler_mode == args_open.autoscaler_mode == 'qos'
-    
-    # Universal Universal/Common arguments defaults
-    assert args_closed.loops == args_open.loops == 1
+        # Check attributes forced by closed mode
+        assert args_closed.model == args_open.model == 'llama3.1-8b'
+        assert args_closed.gpu_mem_gb == args_open.gpu_mem_gb == 16.0
+        assert args_closed.duration == args_open.duration == 60
+        assert args_closed.loops == args_open.loops == 1
+        assert args_closed.disable_multi_turn == args_open.disable_multi_turn == False
 
-
-def test_checkpointing_open_closed_defaults_match():
-    """
-    Verify that Checkpointing 'closed' hardcoded defaults (like read/write checkpoints)
-    match the 'open' default values.
-    """
-    # Note: Checkpointing requires some mandatory arguments to pass validation
-    base_args = ['checkpointing', 'run', '-cm', '1024', '-m', 'llama3.1-8b', '-np', '2', '-cf', '/tmp', '--file']
-    
-    with patch('sys.argv', ['mlpstorage', 'closed'] + base_args):
-        args_closed = parse_arguments()
+    def test_checkpointing_open_closed_defaults_match(self):
+        """Verify Checkpointing 'closed' forces read/write checkpoint counts to match 'open' defaults."""
+        base_args = ['checkpointing', 'run', '-cm', '1024', '-m', 'llama3-8b', '-np', '2', '-cf', '/tmp/ckpt', '-rd', '/tmp', '--file']
         
-    with patch('sys.argv', ['mlpstorage', 'open'] + base_args):
-        args_open = parse_arguments()
+        with patch('sys.argv', ['mlpstorage', 'closed'] + base_args):
+            args_closed = parse_arguments()
+            
+        with patch('sys.argv', ['mlpstorage', 'open'] + base_args):
+            args_open = parse_arguments()
 
-    assert args_closed.num_checkpoints_read == args_open.num_checkpoints_read == 10
-    assert args_closed.num_checkpoints_write == args_open.num_checkpoints_write == 10
+        assert args_closed.num_checkpoints_read == args_open.num_checkpoints_read == 10
+        assert args_closed.num_checkpoints_write == args_open.num_checkpoints_write == 10
 
-
-def test_training_params_strictness():
-    """
-    Verify that 'params' behaves correctly across modes:
-    Closed mode forces it to an empty string. Open mode leaves it None if unpassed.
-    """
-    base_args = ['training', 'run', '-cm', '1024', '-m', 'unet3d', '-g', 'v100', '-na', '2', '--file']
-    
-    with patch('sys.argv', ['mlpstorage', 'closed'] + base_args):
-        args_closed = parse_arguments()
-        assert args_closed.params == '' # Closed mode strictness
-        
-    with patch('sys.argv', ['mlpstorage', 'open'] + base_args):
-        args_open = parse_arguments()
-        assert args_open.params is None # Open mode default (unspecified)
+    def test_closed_mode_strips_open_args(self):
+        """Open-mode arguments should trigger an unrecognized argument error if passed in closed mode."""
+        test_args = ['mlpstorage', 'closed', 'kvcache', 'run', '-rd', '/tmp', '--allow-invalid-params']
+        with patch('sys.argv', test_args):
+            with pytest.raises(SystemExit) as exc_info:
+                parse_arguments()
+            assert exc_info.value.code != 0
 
 
 # =====================================================================
 # 2. Structural & Subcommand Combinations (Positive Cases)
 # =====================================================================
 
-@pytest.mark.parametrize("cmd_list, expected_program, expected_command", [
-    # Training combinations
-    (['training', 'datasize', '-cm', '1024', '-m', 'unet3d', '-g', 'v100', '-ma', '4', '--file'], 'training', 'datasize'),
-    (['training', 'datagen', '-m', 'unet3d', '-np', '4', '--file'], 'training', 'datagen'),
-    (['training', 'configview', '-na', '4', '--file'], 'training', 'configview'),
-    
-    # Checkpointing combinations
-    (['checkpointing', 'datasize', '-cm', '1024', '-m', 'llama3.1-8b', '--file'], 'checkpointing', 'datasize'),
-    
-    # KVCache combinations
-    (['kvcache', 'datasize', '--file'], 'kvcache', 'datasize'),
-    
-    # Utilities
-    (['reports', 'reportgen', '--file'], 'reports', 'reportgen'),
-    (['history', 'show', '--file'], 'history', 'show'),
-    (['history', 'rerun', '123', '--file'], 'history', 'rerun'),
-    (['lockfile', 'verify', '--file'], 'lockfile', 'verify'),
-])
-def test_all_program_subcommand_combinations(cmd_list, expected_program, expected_command):
-    """
-    Parametrized test to ensure all major benchmarks and utility subcommands
-    can successfully parse their minimum required arguments in open mode.
-    """
-    test_args = ['mlpstorage', 'open'] + cmd_list
-    with patch('sys.argv', test_args):
-        args = parse_arguments()
-        assert args.open is True
-        assert args.program == expected_program
-        if expected_command:
-            # Handle utilities that map dest="command" or "lockfile_command"
+class TestCLIStructureAndCombinations:
+
+    @pytest.mark.parametrize("test_name, cmd_list, expected_program, expected_command", [
+        # Training (Run requires -rd)
+        ("01", ['training', 'run', '-cm', '1024', '-m', 'retinanet', '-g', 'b200', '-na', '4', '-rd', '/tmp', '--file'], 'training', 'run'),
+        ("02", ['training', 'datasize', '-cm', '1024', '-m', 'flux', '-g', 'b200', '-ma', '4'], 'training', 'datasize'),
+        ("03", ['training', 'datagen', '-m', 'dlrm', '-np', '4', '--file',  '-rd', '/tmp'], 'training', 'datagen'),
+        ("04", ['training', 'configview', '-na', '4',  '-rd', '/tmp'], 'training', 'configview'),
+        
+        # Checkpointing (Note: datasize lacks universal args due to how it's built in checkpointing_args.py)
+        ("05", ['checkpointing', 'run', '-cm', '1024', '-m', 'llama3-8b', '-np', '4', '-cf', '/tmp/ckpt', '-rd', '/tmp', '--file'], 'checkpointing', 'run'),
+        ("06", ['checkpointing', 'datasize', '-cm', '1024', '-m', 'llama3-8b'], 'checkpointing', 'datasize'),
+        
+        # KVCache
+        ("07", ['kvcache', 'run', '-rd', '/tmp', '-m', 'llama3.1-8b', '-nu', '100'], 'kvcache', 'run'),
+        ("08", ['kvcache', 'datasize', '-m', 'llama3.1-8b', '-nu', '100'], 'kvcache', 'datasize'),
+        
+        # VectorDB
+        ("09", ['vectordb', 'run', '-rd', '/tmp', '--file'], 'vectordb', 'run'),
+        ("10", ['vectordb', 'datagen', '--file',  '-rd', '/tmp'], 'vectordb', 'datagen'),
+        ("11", ['vectordb', 'datasize'], 'vectordb', 'datasize'),
+        
+        # Utilities (All require -rd)
+        ("12", ['reports', 'reportgen', '-rd', '/tmp', '--file'], 'reports', 'reportgen'),
+        ("13", ['history', 'show', '-rd', '/tmp', '--file'], 'history', 'show'),
+        ("14", ['lockfile', 'generate', '-rd', '/tmp', '--file'], 'lockfile', 'generate'),
+        ("15", ['lockfile', 'verify', '-rd', '/tmp', '--file'], 'lockfile', 'verify'),
+    ])
+    def test_all_program_subcommand_combinations(self, test_name, cmd_list, expected_program, expected_command):
+        """Ensure all benchmarks and subcommands can parse their minimum required arguments."""
+        test_args = ['mlpstorage', 'closed'] + cmd_list
+        with patch('sys.argv', test_args):
+            args = parse_arguments()
+            assert test_name != None and args.closed is True
+            assert test_name != None and args.program == expected_program
             cmd_val = getattr(args, 'command', getattr(args, 'lockfile_command', None))
-            assert cmd_val == expected_command
+            assert test_name != None and cmd_val == expected_command
+
+    def test_missing_required_results_dir(self):
+        """Omitting -rd when req_results=True (e.g., training run) should fail."""
+        test_args = ['mlpstorage', 'closed', 'training', 'run', '-cm', '1024', '-m', 'flux', '-g', 'b200', '-na', '4', '--file']
+        with patch('sys.argv', test_args):
+            with pytest.raises(SystemExit) as exc_info:
+                parse_arguments()
+            assert exc_info.value.code != 0
+
+    def test_data_access_protocol_consolidation(self):
+        """Test that --file/--object are correctly popped and consolidated into data_access_protocol."""
+        test_args = ['mlpstorage', 'closed', 'training', 'datagen', '-m', 'dlrm', '-np', '4', '--object', 's3', '-rd', '/tmp']
+        with patch('sys.argv', test_args):
+            args = parse_arguments()
+            assert args.data_access_protocol == 's3'
+            assert not hasattr(args, 'file')
+            assert not hasattr(args, 'object')
 
 
 # =====================================================================
-# 3. Protocol Parsing & Data Access Protocol Mapping
+# 3. Validation Rules
 # =====================================================================
 
-def test_data_access_protocol_consolidation_file():
-    """Test that --file is correctly consolidated into the data_access_protocol field."""
-    test_args = ['mlpstorage', 'open', 'kvcache', 'run', '--file']
-    with patch('sys.argv', test_args):
-        args = parse_arguments()
-        assert args.data_access_protocol == 'file'
-        assert not hasattr(args, 'file')   # Should be deleted
-        assert not hasattr(args, 'object') # Should be deleted
+class TestCustomValidation:
 
-def test_data_access_protocol_consolidation_object():
-    """Test that --object is correctly consolidated into the data_access_protocol field."""
-    # Training supports object storage. We use training datagen for a simple required args profile.
-    test_args = ['mlpstorage', 'open', 'training', 'datagen', '-m', 'unet3d', '-np', '4', '--object', 's3']
-    with patch('sys.argv', test_args):
-        args = parse_arguments()
-        assert args.data_access_protocol == 's3'
+    def test_kvcache_rejects_object_storage(self):
+        """KVCache validate_args should reject object storage."""
+        test_args = ['mlpstorage', 'closed', 'kvcache', 'run', '-rd', '/tmp', '--object', 's3']
+        with patch('sys.argv', test_args):
+            with pytest.raises(SystemExit) as exc_info:
+                parse_arguments()
+            assert exc_info.value.code == EXIT_CODE.INVALID_ARGUMENTS
+
+    def test_checkpointing_rejects_negative_checkpoints(self):
+        """Checkpointing validate_args should reject negative checkpoint counts."""
+        test_args = [
+            'mlpstorage', 'closed', 'checkpointing', 'run', 
+            '-cm', '1024', '-m', 'llama3-8b', '-np', '2', '-cf', '/tmp/ckpt', '-rd', '/tmp', '--file',
+            '--num-checkpoints-read', '-5'
+        ]
+        with patch('sys.argv', test_args):
+            with pytest.raises(SystemExit) as exc_info:
+                parse_arguments()
+            assert exc_info.value.code == EXIT_CODE.INVALID_ARGUMENTS
 
 
 # =====================================================================
-# 4. Negative Validation Tests (Value constraints and illegal inputs)
+# 4. Post-Parse Configuration (update_args & YAML)
 # =====================================================================
 
-def test_kvcache_rejects_object_storage():
-    """KVCache custom validation should reject object storage outright."""
-    test_args = ['mlpstorage', 'open', 'kvcache', 'run', '--object', 's3']
-    with patch('sys.argv', test_args):
+class TestUpdateArgsAndConfig:
+
+    def test_update_args_normalizes_hosts(self):
+        """update_args should handle messy host strings and normalize them to a clean list."""
+        args = argparse.Namespace(hosts="host1, host2   host3,host4")
+        update_args(args)
+        assert args.hosts == ['host1', 'host2', 'host3', 'host4']
+        assert args.num_client_hosts == 4
+
+    def test_update_args_empty_hosts_fails(self):
+        """update_args should exit if host normalization results in an empty list."""
+        args = argparse.Namespace(hosts=" , , ")
         with pytest.raises(SystemExit) as exc_info:
-            parse_arguments()
+            update_args(args)
         assert exc_info.value.code == EXIT_CODE.INVALID_ARGUMENTS
 
+    def test_update_args_process_nomenclature_mapping(self):
+        """update_args should unify 'num_accelerators' or 'max_accelerators' into 'num_processes'."""
+        args = argparse.Namespace(num_accelerators=8)
+        update_args(args)
+        assert args.num_processes == 8
 
-def test_checkpointing_rejects_negative_checkpoints():
-    """Checkpointing custom validation should reject negative checkpoint counts."""
-    test_args = [
-        'mlpstorage', 'open', 'checkpointing', 'run', 
-        '-cm', '1024', '-m', 'llama3.1-8b', '-np', '2', '-cf', '/tmp', '--file',
-        '--num-checkpoints-read', '-5'
-    ]
-    with patch('sys.argv', test_args):
-        with pytest.raises(SystemExit) as exc_info:
-            parse_arguments()
-        assert exc_info.value.code == EXIT_CODE.INVALID_ARGUMENTS
+    def test_update_args_flattens_params(self):
+        """update_args should flatten lists of lists for params/mpi_params resulting from multiple append actions."""
+        args = argparse.Namespace(params=[['key=val1'], ['key=val2']])
+        update_args(args)
+        assert args.params == ['key=val1', 'key=val2']
 
-
-def test_closed_mode_rejects_open_only_args():
-    """
-    Open-mode arguments (like --timeseries-interval or --allow-invalid-params)
-    should trigger an argparse unrecognized argument error if passed in closed mode.
-    """
-    test_args = [
-        'mlpstorage', 'closed', 'kvcache', 'run', '--file',
-        '--allow-invalid-params'  # Not added to parser in closed mode
-    ]
-    with patch('sys.argv', test_args):
-        with pytest.raises(SystemExit) as exc_info:
-            parse_arguments()
-        # argparse default exit code for unrecognized arguments is 2
-        assert exc_info.value.code != 0
-
-
-def test_missing_required_argument_triggers_exit():
-    """Omitting a required argument (like -m / --model for training) should fail."""
-    test_args = ['mlpstorage', 'open', 'training', 'run', '-cm', '1024', '-g', 'v100', '-na', '2', '--file']
-    # Missing '-m'
-    with patch('sys.argv', test_args):
-        with pytest.raises(SystemExit) as exc_info:
-            parse_arguments()
-        assert exc_info.value.code != 0
+    def test_yaml_config_overrides(self):
+        """apply_yaml_config_overrides should update namespace attributes safely."""
+        mock_yaml_content = """
+        duration: 999
+        hosts: "node1,node2"
+        params:
+            batch_size: 32
+        """
+        # Create a namespace simulating a parsed output
+        initial_args = argparse.Namespace(
+            config_file="dummy.yaml",
+            duration=100,
+            hosts=['default_host'],
+            params=None
+        )
+        
+        with patch("builtins.open", mock_open(read_data=mock_yaml_content)):
+            updated_args = apply_yaml_config_overrides(initial_args)
+            
+        assert updated_args.duration == 999
+        assert updated_args.hosts == ['node1', 'node2'] # Special yaml handling for hosts

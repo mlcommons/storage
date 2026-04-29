@@ -199,11 +199,9 @@ def add_vectordb_arguments(parser, is_closed):
     )
  
     # Add universal arguments to all subcommands
-    for _parser in [datasize, datagen, run_benchmark]:
-        if _parser == run_benchmark:
-            add_universal_arguments(_parser, True, False, is_closed)
-        else:
-            add_universal_arguments(_parser, False, False, is_closed)
+    add_universal_arguments(datasize, False, False, False, is_closed)
+    add_universal_arguments(datagen, True, True, True, is_closed)
+    add_universal_arguments(run_benchmark, True, True, True, is_closed)
  
     # Add time-series arguments to run command only
     add_timeseries_arguments(run_benchmark, is_closed)

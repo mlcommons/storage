@@ -90,10 +90,9 @@ def add_kvcache_arguments(parser, is_closed):
     for _parser in [run_benchmark, datasize]:
         _add_kvcache_model_arguments(_parser, is_closed)
         _add_kvcache_cache_arguments(_parser, is_closed)
-        if _parser == run_benchmark:
-            add_universal_arguments(_parser, True, False, is_closed)
-        else:
-            add_universal_arguments(_parser, False, False, is_closed)
+
+    add_universal_arguments(run_benchmark, False, True, False, is_closed)
+    add_universal_arguments(datasize, False, False, False, is_closed)
 
     # Run-specific arguments
     _add_kvcache_run_arguments(run_benchmark, is_closed)
@@ -110,26 +109,19 @@ def _add_kvcache_model_arguments(parser, is_closed):
     Args:
         parser: Argparse parser to add arguments to.
     """
-    if is_closed:
-        # Hardcode the default values into the namespace without presenting CLI options
-        parser.set_defaults(
-            model=KVCACHE_MODEL_DEFAULT,
-            num_users=100
-        )
-    else:
-        model_group = parser.add_argument_group("Model Configuration")
-        model_group.add_argument(
-            '--model', '-m',
-            choices=KVCACHE_MODELS,
-            default='llama3.1-8b',
-            help=KVCACHE_HELP_MESSAGES['kvcache_model']
-        )
-        model_group.add_argument(
-            '--num-users', '-nu',
-            type=int,
-            default=100,
-            help=KVCACHE_HELP_MESSAGES['num_users']
-        )
+    model_group = parser.add_argument_group("Model Configuration")
+    model_group.add_argument(
+        '--model', '-m',
+        choices=KVCACHE_MODELS,
+        required=True,
+        help=KVCACHE_HELP_MESSAGES['kvcache_model']
+    )
+    model_group.add_argument(
+        '--num-users', '-nu',
+        type=int,
+        required=True,
+        help=KVCACHE_HELP_MESSAGES['num_users']
+    )
 
 
 def _add_kvcache_cache_arguments(parser, is_closed):
@@ -225,38 +217,38 @@ def _add_kvcache_optional_features(parser, is_closed):
                 autoscaler_mode='qos'
         )
     else:
-            features_group.add_argument(
-                '--disable-multi-turn',
-                action='store_true',
-                help=KVCACHE_HELP_MESSAGES['disable_multi_turn']
-            )
-            features_group.add_argument(
-                '--disable-prefix-caching',
-                action='store_true',
-                help=KVCACHE_HELP_MESSAGES['disable_prefix_caching']
-            )
-            features_group.add_argument(
-                '--enable-rag',
-                action='store_true',
-                help=KVCACHE_HELP_MESSAGES['enable_rag']
-            )
-            features_group.add_argument(
-                '--rag-num-docs',
-                type=int,
-                default=10,
-                help=KVCACHE_HELP_MESSAGES['rag_num_docs']
-            )
-            features_group.add_argument(
-                '--enable-autoscaling',
-                action='store_true',
-                help=KVCACHE_HELP_MESSAGES['enable_autoscaling']
-            )
-            features_group.add_argument(
-                '--autoscaler-mode',
-                choices=['qos', 'predictive'],
-                default='qos',
-                help=KVCACHE_HELP_MESSAGES['autoscaler_mode']
-            )
+        features_group.add_argument(
+            '--disable-multi-turn',
+            action='store_true',
+            help=KVCACHE_HELP_MESSAGES['disable_multi_turn']
+        )
+        features_group.add_argument(
+            '--disable-prefix-caching',
+            action='store_true',
+            help=KVCACHE_HELP_MESSAGES['disable_prefix_caching']
+        )
+        features_group.add_argument(
+            '--enable-rag',
+            action='store_true',
+            help=KVCACHE_HELP_MESSAGES['enable_rag']
+        )
+        features_group.add_argument(
+            '--rag-num-docs',
+            type=int,
+            default=10,
+            help=KVCACHE_HELP_MESSAGES['rag_num_docs']
+        )
+        features_group.add_argument(
+            '--enable-autoscaling',
+            action='store_true',
+            help=KVCACHE_HELP_MESSAGES['enable_autoscaling']
+        )
+        features_group.add_argument(
+            '--autoscaler-mode',
+            choices=['qos', 'predictive'],
+            default='qos',
+            help=KVCACHE_HELP_MESSAGES['autoscaler_mode']
+        )
 
 
 def _add_kvcache_distributed_arguments(parser, is_closed):

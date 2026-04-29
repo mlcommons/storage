@@ -140,10 +140,11 @@ def add_training_arguments(parser, is_closed):
             help="Filesystem location for data"
         )
         add_dlio_arguments(_parser, is_closed)
-        if _parser == run_benchmark:
-            add_universal_arguments(_parser, True, True, is_closed)
-        else:
-            add_universal_arguments(_parser, False, True, is_closed)
+
+    add_universal_arguments(datasize, False, False, False, is_closed)
+    add_universal_arguments(datagen, True, True, True, is_closed)
+    add_universal_arguments(run_benchmark, True, True, True, is_closed)
+    add_universal_arguments(configview, False, True, True, is_closed)
 
     # Add time-series arguments to run command only
     add_timeseries_arguments(run_benchmark, is_closed)

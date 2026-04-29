@@ -167,7 +167,7 @@ PROGRAM_DESCRIPTIONS = {
 }
 
 
-def add_universal_arguments(parser, req_results, offer_object, is_closed):
+def add_universal_arguments(parser, req_fileobj, req_results, offer_object, is_closed):
     """Add arguments common to all benchmarks and commands.
 
     Args:
@@ -191,7 +191,7 @@ def add_universal_arguments(parser, req_results, offer_object, is_closed):
         )
 
     if is_closed:
-        parser.set_defaults(
+        standard_args.set_defaults(
             loops=1
         )
     else:
@@ -208,24 +208,30 @@ def add_universal_arguments(parser, req_results, offer_object, is_closed):
         help="Path to YAML file with argument overrides"
     )
 
-    # Create a mutually exclusive group for file/object options
-    access_proto = standard_args.add_mutually_exclusive_group(required=True)
-    access_proto.add_argument(
-        "--file",
-        action="store_true",
-        help="Use POSIX files as the data access method"
-    )
-    if offer_object:
+    if req_fileobj:
+        # Create a mutually exclusive group for file/object options
+        access_proto = standard_args.add_mutually_exclusive_group(required=True)
         access_proto.add_argument(
-            "--object",
-            nargs="?",
-            type=str,
-            const="s3",
-            choices=["s3"],
-            help="Use the given Object API as the data access method, defaults to S3"
+            "--file",
+            action="store_true",
+            help="Use POSIX files as the data access method"
         )
+        if offer_object:
+            access_proto.add_argument(
+                "--object",
+                nargs="?",
+                type=str,
+                const="s3",
+                choices=["s3"],
+                help="Use the given Object API as the data access method, defaults to S3"
+            )
+        else:
+            access_proto.set_defaults(
+                object=False
+            )
     else:
-        parser.set_defaults(
+        standard_args.set_defaults(
+            file=True,
             object=False
         )
 
@@ -246,7 +252,11 @@ def add_universal_arguments(parser, req_results, offer_object, is_closed):
         default="INFO"
     )
 
-    if not is_closed:
+    if is_closed:
+        output_control.set_defaults(
+            allow_invalid_params=False
+        )
+    else:
         output_control.add_argument(
             "--allow-invalid-params", "-aip",
             action="store_true",

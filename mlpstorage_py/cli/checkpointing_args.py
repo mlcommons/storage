@@ -66,7 +66,7 @@ def add_checkpointing_arguments(parser, is_closed):
             )
 
         if is_closed:
-            parser.set_defaults(
+            _parser.set_defaults(
                 num_checkpoints_read=10,
                 num_checkpoints_write=10
             )
@@ -111,7 +111,8 @@ def add_checkpointing_arguments(parser, is_closed):
         help=HELP_MESSAGES['checkpoint_folder']
     )
 
-    add_universal_arguments(_parser, True, True, is_closed)
+    add_universal_arguments(run_benchmark, True, True, True, is_closed)
+    add_universal_arguments(datasize, False, False, True, is_closed)
 
     # Add time-series arguments to run command only
     add_timeseries_arguments(run_benchmark, is_closed)
