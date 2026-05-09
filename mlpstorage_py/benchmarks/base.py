@@ -442,15 +442,22 @@ class Benchmark(BenchmarkInterface, abc.ABC):
             mpi_bin = getattr(self.args, 'mpi_bin', 'mpirun')
             allow_run_as_root = getattr(self.args, 'allow_run_as_root', False)
             timeout = getattr(self.args, 'cluster_collection_timeout', 60)
+            ssh_username = getattr(self.args, 'ssh_username', None)
+            shared_staging_dir = getattr(self.args, 'shared_staging_dir', None)
 
-            # Collect cluster info
+            # Collect cluster info. ``results_dir`` is required by
+            # ``collect_cluster_info`` for staging the helper script under
+            # ``<results_dir>/collector-staging/`` (see issue #363).
             collected_data = collect_cluster_info(
                 hosts=self.args.hosts,
                 mpi_bin=mpi_bin,
                 logger=self.logger,
+                results_dir=self.run_result_output,
                 allow_run_as_root=allow_run_as_root,
                 timeout_seconds=timeout,
-                fallback_to_local=True
+                fallback_to_local=True,
+                shared_staging_dir=shared_staging_dir,
+                ssh_username=ssh_username,
             )
 
             # Create ClusterInformation from collected data
