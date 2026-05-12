@@ -294,6 +294,24 @@ class Benchmark(BenchmarkInterface, abc.ABC):
 
             return stdout, stderr, return_code
 
+    @staticmethod
+    def _apply_dotted_overrides(params, overrides):
+        """Apply override_parameters (dotted keys) into a nested params dict.
+
+        Fixes #365: makes metadata['parameters'] reflect the effective
+        run configuration (YAML defaults + CLI overrides), which is what
+        the submission_checker reads.
+        """
+        import copy
+        out = copy.deepcopy(params)
+        for dotted, value in (overrides or {}).items():
+            parts = dotted.split('.')
+            cur = out
+            for p in parts[:-1]:
+                cur = cur.setdefault(p, {})
+            cur[parts[-1]] = value
+        return out
+
     @property
     def metadata(self) -> Dict[str, Any]:
         """Generate metadata dict capturing the benchmark run configuration.
@@ -322,9 +340,16 @@ class Benchmark(BenchmarkInterface, abc.ABC):
             'result_dir': self.run_result_output,
         }
 
-        # Parameters - prefer combined_params if available (includes YAML + overrides)
+        # Parameters - YAML defaults with CLI overrides applied (fixes #365).
+        # combined_params from process_dlio_params() does not fold CLI
+        # overrides into nested keys (e.g. checkpoint.num_checkpoints_*),
+        # so the submission_checker (which reads from `parameters`)
+        # under-counts two-phase submissions. Apply override_parameters
+        # here so `parameters` reflects the effective run config;
+        # `override_parameters` is still emitted unchanged for audit.
         if hasattr(self, 'combined_params'):
-            metadata['parameters'] = self.combined_params
+            metadata['parameters'] = self._apply_dotted_overrides(
+                self.combined_params, getattr(self, 'params_dict', {}))
         else:
             metadata['parameters'] = {}
 
