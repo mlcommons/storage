@@ -231,14 +231,15 @@ nvtx = [
 
 [[package]]
 name = "dgen-py"
-version = "0.2.3"
+version = "0.2.4"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "zstandard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/ad/9f/e04c2c79bd91937593d79bb480c83c67141922da26ba39cff6d5f38e1673/dgen_py-0.2.3.tar.gz", hash = "sha256:fbebb1fc6b24f77abc78baaec82218c6377c1a84d8caf2f055899c1cee050ecd", size = 208444 }
+sdist = { url = "https://files.pythonhosted.org/packages/2c/ee/f839357750c2229643abf2627b43d0f12d6984e79ba6891522a3aabc52b6/dgen_py-0.2.4.tar.gz", hash = "sha256:a1820092a1ac4a793ceda1db30de66339b7a75fd8e609f6cb6be84c31ecdb625", size = 217909 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/55/42/b24dd7f7794b3a999290fa461d745caf9e1bad07643caf912f575b833b10/dgen_py-0.2.3-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:44eb5b802cf5cb721c76e30d1e94cbf86cc9d64dab44caef127f82fe6f253d6d", size = 392290 },
+    { url = "https://files.pythonhosted.org/packages/2b/91/2dae75d696c0f9e380acc7bcda09ccddb70d27455dab59e0c90424fe5881/dgen_py-0.2.4-cp312-cp312-manylinux_2_28_aarch64.whl", hash = "sha256:e49af6efdbd11860f24ce804bd1a1b3b6b71a1f5f5de55b33977f14ad9bc41ab", size = 394488 },
+    { url = "https://files.pythonhosted.org/packages/a9/54/2f7d900bee5be6177a3c7b25fe50699217c722efa0fc2f05a4366bb3cfec/dgen_py-0.2.4-cp312-cp312-manylinux_2_28_x86_64.whl", hash = "sha256:8acba9dfc8512e9dcfa1b4496d11b8511a35c7a4611290f769792a250e61a4f7", size = 404759 },
 ]
 
 [[package]]
@@ -562,7 +563,7 @@ requires-dist = [
     { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "pyyaml", specifier = ">=6.0" },
     { name = "rich", specifier = ">=13.0" },
-    { name = "s3dlio", specifier = ">=0.9.95" },
+    { name = "s3dlio", path = "../s3dlio/target/wheels/s3dlio-0.9.100-cp312-cp312-manylinux_2_39_x86_64.whl" },
     { name = "s3torchconnector", specifier = ">=1.5.0" },
     { name = "tabulate", marker = "extra == 'vectordb'", specifier = ">=0.9" },
 ]
@@ -1127,15 +1128,32 @@ wheels = [
 
 [[package]]
 name = "s3dlio"
-version = "0.9.95"
-source = { registry = "https://pypi.org/simple" }
+version = "0.9.100"
+source = { path = "../s3dlio/target/wheels/s3dlio-0.9.100-cp312-cp312-manylinux_2_39_x86_64.whl" }
 dependencies = [
     { name = "numpy" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/13/bf/b17bf94e1fd7c58b2f93d53192b61271f14538b847d98fd40ef2cc652d61/s3dlio-0.9.95.tar.gz", hash = "sha256:55f79071d244cccf7a49714c33c024639a24723dd88c7cac629c63daa89d0d96", size = 1481201 }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/7c/c3/502a898baa514cf796f11572508f3a78a93574d45ce7d36bcd34e2e7fe40/s3dlio-0.9.95-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:93d4f6d929e743a74428d4a6e944fbb85bd6a9cfffbdc36d6635e89f0919a5ba", size = 10258346 },
-    { url = "https://files.pythonhosted.org/packages/91/4f/d394679708a4fb7c0f362076b7f92a0933201d258a90b6b28f0529dacf98/s3dlio-0.9.95-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:9dd5f1d71c3655346a879a5c3e49142c3d916a6df3505a823f983b0b1abb5bd5", size = 10613865 },
+    { filename = "s3dlio-0.9.100-cp312-cp312-manylinux_2_39_x86_64.whl", hash = "sha256:d58ab03d91247152e872bfc796a72b8d1adf4aef77280fd7b71173caf7d026c9" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "h5py", marker = "extra == 'dev'", specifier = ">=3.0.0" },
+    { name = "h5py", marker = "extra == 'hdf5'", specifier = ">=3.0.0" },
+    { name = "jax", marker = "extra == 'all'", specifier = ">=0.4.0" },
+    { name = "jax", marker = "extra == 'jax'", specifier = ">=0.4.0" },
+    { name = "jaxlib", marker = "extra == 'all'", specifier = ">=0.4.0" },
+    { name = "jaxlib", marker = "extra == 'jax'", specifier = ">=0.4.0" },
+    { name = "maturin", marker = "extra == 'dev'", specifier = ">=1.0.0" },
+    { name = "numpy", specifier = ">=2.0.0" },
+    { name = "patchelf", marker = "extra == 'dev'", specifier = ">=0.17.0" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8.0.0" },
+    { name = "pytest-asyncio", marker = "extra == 'dev'", specifier = ">=0.23.0" },
+    { name = "tensorflow", marker = "extra == 'all'", specifier = ">=2.16.0" },
+    { name = "tensorflow", marker = "extra == 'tensorflow'", specifier = ">=2.16.0" },
+    { name = "torch", marker = "extra == 'all'", specifier = ">=2.0.0" },
+    { name = "torch", marker = "extra == 'torch'", specifier = ">=2.0.0" },
 ]
 
 [[package]]
