@@ -88,6 +88,6 @@ explicit = true
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
 torchaudio = [{ index = "pytorch-cpu" }]
-dlio-benchmark = { git = "https://github.com/russfellows/dlio_benchmark.git", branch = "feat/parquet-dgen-streaming" }
+dlio-benchmark = { path = "../dlio_benchmark", editable = true }
 # NOTE: remove the s3dlio entry below once s3dlio>=0.9.100 is published to PyPI.
 s3dlio = { path = "../s3dlio/target/wheels/s3dlio-0.9.100-cp312-cp312-manylinux_2_39_x86_64.whl" }

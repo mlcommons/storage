@@ -245,7 +245,7 @@ wheels = [
 [[package]]
 name = "dlio-benchmark"
 version = "3.0.1"
-source = { git = "https://github.com/russfellows/dlio_benchmark.git?branch=feat%2Fparquet-dgen-streaming#842fb9b0bd9d26c773433b4d0805922040206b50" }
+source = { editable = "../dlio_benchmark" }
 dependencies = [
     { name = "dgen-py" },
     { name = "h5py" },
@@ -260,9 +260,50 @@ dependencies = [
     { name = "pydftracer" },
     { name = "pyyaml" },
     { name = "s3dlio" },
+    { name = "s3torchconnector" },
     { name = "tensorflow" },
     { name = "torch" },
     { name = "typing-extensions" },
+]
+
+[package.metadata]
+requires-dist = [
+    { name = "aistore", marker = "extra == 'aistore'" },
+    { name = "dftracer", marker = "extra == 'test'", specifier = ">=2.0.1" },
+    { name = "dgen-py", specifier = ">=0.2.4" },
+    { name = "h5py", specifier = ">=3.11.0" },
+    { name = "hydra-core", specifier = ">=1.3.2" },
+    { name = "mpi4py", specifier = ">=3.1.4" },
+    { name = "numpy", specifier = ">=1.23.5" },
+    { name = "nvidia-dali-cuda120", marker = "extra == 'dali'", specifier = ">=1.34.0" },
+    { name = "omegaconf", specifier = ">=2.2.0" },
+    { name = "pandas", specifier = ">=1.5.1" },
+    { name = "pillow", specifier = ">=9.3.0" },
+    { name = "psutil", specifier = ">=5.9.8" },
+    { name = "pyarrow", specifier = ">=21.0.0" },
+    { name = "pyarrow", marker = "extra == 'parquet'", specifier = ">=12.0.0" },
+    { name = "pydftracer", specifier = ">=2.0.2" },
+    { name = "pydftracer", marker = "extra == 'dftracer'", specifier = ">=2.0.2" },
+    { name = "pytest", marker = "extra == 'test'" },
+    { name = "pytest-timeout", marker = "extra == 'test'" },
+    { name = "pytest-xdist", marker = "extra == 'test'" },
+    { name = "pyyaml", specifier = ">=6.0.0" },
+    { name = "s3dlio", path = "../s3dlio/target/wheels/s3dlio-0.9.100-cp312-cp312-manylinux_2_39_x86_64.whl" },
+    { name = "s3torchconnector", specifier = ">=1.5.0" },
+    { name = "s3torchconnector", marker = "extra == 's3'" },
+    { name = "tensorflow", specifier = ">=2.20.0" },
+    { name = "tensorflow", marker = "extra == 'tensorflow'", specifier = ">=2.13.1" },
+    { name = "torch", specifier = ">=2.8.0" },
+    { name = "torch", marker = "extra == 'torch'", specifier = ">=2.2.0" },
+    { name = "torchaudio", marker = "extra == 'torch'" },
+    { name = "torchvision", marker = "extra == 'torch'" },
+    { name = "typing-extensions", specifier = ">=4.15.0" },
+]
+
+[package.metadata.requires-dev]
+dev = [
+    { name = "pytest", specifier = ">=8.4.2" },
+    { name = "pytest-timeout", specifier = ">=2.4.0" },
 ]
 
 [[package]]
@@ -548,8 +589,8 @@ vectordb = [
 
 [package.metadata]
 requires-dist = [
-    { name = "dlio-benchmark", git = "https://github.com/russfellows/dlio_benchmark.git?branch=feat%2Fparquet-dgen-streaming" },
-    { name = "dlio-benchmark", marker = "extra == 'full'", git = "https://github.com/russfellows/dlio_benchmark.git?branch=feat%2Fparquet-dgen-streaming" },
+    { name = "dlio-benchmark", editable = "../dlio_benchmark" },
+    { name = "dlio-benchmark", marker = "extra == 'full'", editable = "../dlio_benchmark" },
     { name = "minio", specifier = ">=7.2.20" },
     { name = "numpy", marker = "extra == 'vectordb'", specifier = ">=1.24" },
     { name = "packaging", specifier = ">=21.0" },

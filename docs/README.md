@@ -30,6 +30,8 @@ mlp-storage hosts **four benchmark workloads**:
 | Set up object storage (S3 / MinIO / Azure / GCS) | [Object_Storage.md](Object_Storage.md) |
 | Install and configure an object storage library | [Object_Storage_Library_Setup.md](Object_Storage_Library_Setup.md) |
 | Compare object storage libraries (s3dlio, minio, s3torchconnector) | [STORAGE_LIBRARIES.md](STORAGE_LIBRARIES.md) |
+| Understand map-style vs. iterable DataLoader tradeoffs for S3 | [DATALOADER_ARCHITECTURE.md](DATALOADER_ARCHITECTURE.md) |
+| Benchmark NVMe with O_DIRECT (bypass page cache) | [DATALOADER_ARCHITECTURE.md — O_DIRECT section](DATALOADER_ARCHITECTURE.md#o_direct-local-storage-two-independent-paths) |
 | Understand AIStore gaps, reader/checkpoint issues, rationalization options | [dlio_benchmark/docs/AIStore_Analysis.md](../dlio_benchmark/docs/AIStore_Analysis.md) |
 | Test streaming checkpointing | [Streaming-Chkpt-Guide.md](Streaming-Chkpt-Guide.md) |
 | Configure multi-endpoint / load-balanced object storage | [MULTI_ENDPOINT_GUIDE.md](MULTI_ENDPOINT_GUIDE.md) |
@@ -204,6 +206,28 @@ Parquet format support via two new DLIO reader classes: `ParquetReader`
 (local/NFS filesystem, pyarrow native, row-group LRU cache) and
 `ParquetReaderS3Iterable` (S3 object storage, byte-range GETs, all three
 object storage libraries). Includes YAML config examples and unit test commands.
+
+#### [DATALOADER_ARCHITECTURE.md](DATALOADER_ARCHITECTURE.md)
+
+Architecture and tradeoff analysis for **map-style vs. iterable-style data loaders** on both
+object storage and local NVMe. Two major topics:
+
+**Part 1 — Map-style vs. iterable on S3** (implemented via `TorchIterableDatasetSimple`):
+Explains why the conventional "iterable is better for large datasets" advice originates from
+spinning-disk seek patterns and does *not* transfer directly to S3. Covers the real argument
+for iterable on object storage (pipeline depth: 64 in-flight GETs per worker, up to 256 total),
+the tradeoffs (shuffling, worker partitioning, prefetch memory), and current implementation
+status for NPZ/NPY/JPEG/PNG workloads.
+
+**Part 2 — O_DIRECT on local NVMe** ([two independent paths](DATALOADER_ARCHITECTURE.md#o_direct-local-storage-two-independent-paths)):
+Why O_DIRECT is required for accurate NVMe benchmarking (page cache bypass). Detailed comparison
+of both available O_DIRECT mechanisms:
+- `odirect: true` — legacy Python `os.open + os.readv`, map-style, 1 read/worker (baseline)
+- `storage_library: direct` — Rust/Tokio `libc::O_DIRECT`, iterable-style, 64 reads/worker
+
+Includes a full 12-property comparison table and guidance on when to use each path (and why
+keeping both enables a direct comparison isolating I/O concurrency depth and GIL contention).
+**Essential reading before any DataLoader refactor or NVMe benchmarking run.**
 
 ---
 

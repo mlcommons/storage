@@ -21,13 +21,20 @@
 | Parameter | Value |
 |-----------|-------|
 | Host | 24 vCPU VM (with hyperthreading), 48 GB RAM |
-| Object storage | s3-ultra (localhost:9000, loopback) |
+| Object storage | s3-ultra (`localhost:9000`, co-located on test host) |
 | Dataset | 500 Parquet files, ~595 MiB each, 6 row groups × 99 MiB |
 | Samples/file | 288 (batch_size=48) |
 | `computation_time` | 0.05 s (fixed — stress I/O, not compute) |
 | `coalesce_rgs` | 1 (99 MiB per GET) |
 | `prefetch_workers` | 2 |
 | Model config | flux\_b200.yaml |
+
+> **⚠️ Co-located test configuration.** The s3-ultra storage server and all benchmark processes run on the
+> **same** 24 vCPU / 48 GB RAM host, sharing CPU cores, memory, and the loopback network interface.
+> In a real deployment the storage target would be a dedicated remote system, and the CPU/memory
+> pressure that limits scaling here (particularly at NP ≥ 4) would not apply to the test processes.
+> The resource constraints described in this document are a property of this co-located setup, not
+> of the storage technology itself.
 
 ## Results
 
@@ -57,15 +64,20 @@
 
 ## CPU Constraint Threshold
 
-On this 24 vCPU (hyperthreaded) host, the practical CPU budget is:
+On this 24 vCPU (hyperthreaded) host, the practical CPU budget **shared between the benchmark
+processes and the co-located s3-ultra server** is:
 
 > **NP × RT ≤ 8 — sufficient CPU; NP × RT > 8 — CPU constrained**
 
 All combinations at or below NP×RT=8 ran with high AU (91–97%) and consistent throughput.
 Combinations above that threshold showed either degraded AU or outright failure:
 
-- **NP=4, RT=8 (NP×RT=32)** and **NP=8, RT=4 (NP×RT=32)**: AU dropped; more threads competing for 24 vCPUs than the host can efficiently schedule.
-- **NP=8, RT=8 (NP×RT=64)**: OOM. 8 MPI ranks × 8 DataLoader workers × 2 prefetch buffers × 99 MiB/GET ≈ 12+ GB I/O buffer pressure on a 48 GB host, combined with Python process overhead per rank — the kernel OOM killer fired.
+- **NP=4, RT=8 (NP×RT=32)** and **NP=8, RT=4 (NP×RT=32)**: AU dropped; more threads competing for 24 vCPUs than the host can efficiently schedule — and s3-ultra is consuming a share of those vCPUs on the same machine.
+- **NP=8, RT=8 (NP×RT=64)**: OOM. 8 MPI ranks × 8 DataLoader workers × 2 prefetch buffers × 99 MiB/GET ≈ 12+ GB I/O buffer pressure on a 48 GB host, combined with Python process overhead per rank and s3-ultra's own memory footprint — the kernel OOM killer fired.
+
+**In a real deployment** with s3-ultra on a dedicated remote server, all 24 vCPUs and 48 GB RAM
+would be available exclusively to the benchmark processes, and these specific constraints would
+not apply.
 
 ## Key Observations
 
@@ -75,7 +87,11 @@ Combinations above that threshold showed either degraded AU or outright failure:
 
 3. **NP=8 makes storage the clear bottleneck.** AU falls to 57–61% — ranks are spending ~40% of their time waiting for I/O. Peak observed throughput was ~9,356 MiB/s (NP=8, RT=4). RT=4 outperforms RT=1 and RT=2 here because more concurrent reader threads help overlap I/O with the pipeline.
 
-4. **On a system with more CPU cores and more RAM**, the configurations with higher NP×RT products may perform considerably better. This host is a limiting factor for those combinations, not the storage stack.
+4. **The co-located setup is the limiting factor at high NP×RT, not the storage stack itself.**
+   s3-ultra and the benchmark processes share the same CPU and memory. On a system where s3-ultra
+   is deployed on a dedicated remote server, the full host resources would be available to the
+   benchmark, and the configurations with higher NP×RT products would be expected to perform
+   significantly better.
 
 ## Impact of `computation_time` on AU and Throughput
 

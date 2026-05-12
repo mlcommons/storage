@@ -13,13 +13,14 @@ dataset:
   data_folder: data/dlrm/
   format: parquet
   num_files_train: 1024        # Number of training files to generate
-  num_samples_per_file: 4718592    # Samples per parquet file
+  num_samples_per_file: 1536000    # Samples per parquet file (250 RGs × 6144 → ~3.1 MiB footer, under s3-ultra 4 MiB limit)
   record_length_bytes: 761
   compression: none          # Options: snappy, gzip, lz4, zstd, none
   
   # Parquet-specific configuration
   parquet:
-    row_group_size: 8192
+    use_s3dlio_gen: true
+    row_group_size: 6144  # Match batch_size for optimal caching
     read_mode: row_group
     
     columns:
