@@ -93,3 +93,8 @@ torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
 torchaudio = [{ index = "pytorch-cpu" }]
 dlio-benchmark = { git = "https://github.com/russfellows/dlio_benchmark.git", rev = "3667a0e802043c6ca27c898cd37ed4fa9b8724bf" }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

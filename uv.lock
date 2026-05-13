@@ -499,6 +499,11 @@ vectordb = [
     { name = "tabulate", marker = "sys_platform == 'linux'" },
 ]
 
+[package.dev-dependencies]
+dev = [
+    { name = "pytest", marker = "sys_platform == 'linux'" },
+]
+
 [package.metadata]
 requires-dist = [
     { name = "dlio-benchmark", git = "https://github.com/russfellows/dlio_benchmark.git?rev=3667a0e802043c6ca27c898cd37ed4fa9b8724bf" },
@@ -520,6 +525,9 @@ requires-dist = [
     { name = "s3torchconnector", specifier = ">=1.5.0" },
     { name = "tabulate", marker = "extra == 'vectordb'", specifier = ">=0.9" },
 ]
+
+[package.metadata.requires-dev]
+dev = [{ name = "pytest", specifier = ">=9.0.2" }]
 
 [[package]]
 name = "mpi4py"

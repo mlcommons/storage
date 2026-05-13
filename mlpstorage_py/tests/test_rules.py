@@ -11,7 +11,7 @@ import pytest
 import logging
 from unittest.mock import MagicMock, patch
 
-from mlpstorage_py.rules import ClusterInformation, BenchmarkRun, BenchmarkResult
+from mlpstorage_py.rules import ClusterInformation, BenchmarkRun, BenchmarkResult, DLIOResultParser
 
 
 class MockLogger:
@@ -211,7 +211,11 @@ class TestBenchmarkRunSystemInfoFallback:
             'overrides.yaml': ['workload=training_gpu']
         }
 
-        benchmark_run = BenchmarkRun(benchmark_result=mock_benchmark_result, logger=mock_logger)
+        with patch.object(DLIOResultParser, '_load_summary',
+                          return_value=mock_benchmark_result.summary), \
+             patch.object(DLIOResultParser, '_load_hydra_configs',
+                          return_value=mock_benchmark_result.hydra_configs):
+            benchmark_run = BenchmarkRun(benchmark_result=mock_benchmark_result, logger=mock_logger)
 
         assert benchmark_run.system_info is not None
         assert benchmark_run.system_info.total_memory_bytes == 256 * 1024 * 1024 * 1024
@@ -246,7 +250,11 @@ class TestBenchmarkRunSystemInfoFallback:
             'overrides.yaml': ['workload=training_gpu']
         }
 
-        benchmark_run = BenchmarkRun(benchmark_result=mock_benchmark_result, logger=mock_logger)
+        with patch.object(DLIOResultParser, '_load_summary',
+                          return_value=mock_benchmark_result.summary), \
+             patch.object(DLIOResultParser, '_load_hydra_configs',
+                          return_value=mock_benchmark_result.hydra_configs):
+            benchmark_run = BenchmarkRun(benchmark_result=mock_benchmark_result, logger=mock_logger)
 
         # Should use DLIO summary data (128GB), not metadata (256GB)
         expected_bytes = 128 * 1024 * 1024 * 1024
@@ -274,7 +282,11 @@ class TestBenchmarkRunSystemInfoFallback:
             'overrides.yaml': ['workload=training_gpu']
         }
 
-        benchmark_run = BenchmarkRun(benchmark_result=mock_benchmark_result, logger=mock_logger)
+        with patch.object(DLIOResultParser, '_load_summary',
+                          return_value=mock_benchmark_result.summary), \
+             patch.object(DLIOResultParser, '_load_hydra_configs',
+                          return_value=mock_benchmark_result.hydra_configs):
+            benchmark_run = BenchmarkRun(benchmark_result=mock_benchmark_result, logger=mock_logger)
 
         assert benchmark_run.system_info is None
 
