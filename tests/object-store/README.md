@@ -58,6 +58,8 @@ tests/object-store/
 │   sweep_unet3d_np.sh      UNet3D:    NP scaling (1, 2, 4)
 │
 └── old-archive/            deprecated scripts kept for reference — not maintained
+
+Performance results and analysis live in docs/ (see Performance Results below).
 ```
 
 ### Four model types, one generator + one benchmark each
@@ -306,6 +308,22 @@ curl -v https://your-minio-host:9000/
 
 ---
 
+## Performance Results
+
+Current benchmark results are in `docs/` — these are the authoritative numbers,
+updated as new sweeps are run:
+
+| Model | Results doc |
+|---|---|
+| DLRM | [docs/DLRM_NP_Scaling_Results.md](../../docs/DLRM_NP_Scaling_Results.md) |
+| Flux | [docs/Flux_NP_ReadThreads_Scaling_Results.md](../../docs/Flux_NP_ReadThreads_Scaling_Results.md) |
+| RetinaNet | [docs/RetinaNet_NP_Scaling_Results.md](../../docs/RetinaNet_NP_Scaling_Results.md) |
+| UNet3D | [docs/UNet3D_NP_Scaling_Results.md](../../docs/UNet3D_NP_Scaling_Results.md) |
+
+Sweep runs also write timestamped results to `results/<model>_np_sweep/<timestamp>/`.
+
+---
+
 ## Adding More Libraries
 
 Runtime parameters — library, bucket, endpoint, credentials — all flow from
@@ -313,7 +331,7 @@ environment variables. To test a new storage library:
 
 1. Add it to `mlpstorage_py/storage/` and register it in `obj_store_lib.py`
 2. Set `STORAGE_LIBRARY=<new-library>` in `.env`
-3. Run `run_datagen.sh` and `run_training.sh` without changing any test script
+3. Run the relevant benchmark script with `STORAGE_LIBRARY=<new-library>`
 
 ---
 
