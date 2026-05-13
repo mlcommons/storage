@@ -745,7 +745,11 @@ class DLIOResultParser:
                     override_parameters[p[len('++workload.'):]] = v
 
         system_info = ClusterInformation.from_dlio_summary_json(summary, self.logger)
-
+        # Fallback to metadata cluster_information when DLIO summary lacks system info
+        if system_info is None and metadata:
+            ci_data = metadata.get('cluster_information')
+            if ci_data:
+                system_info = ClusterInformation.from_dict(ci_data, self.logger)
         return BenchmarkRunData(
             benchmark_type=benchmark_type,
             model=model,
@@ -890,7 +894,8 @@ class BenchmarkRun:
             self._data = BenchmarkInstanceExtractor.extract(benchmark_instance)
         elif benchmark_result:
             parser = DLIOResultParser(logger=logger)
-            self._data = parser.parse(benchmark_result.benchmark_result_root_dir)
+            metadata = getattr(benchmark_result, 'metadata', None)
+            self._data = parser.parse(benchmark_result.benchmark_result_root_dir, metadata=metadata)
 
         self._run_id = RunID(
             program=self._data.benchmark_type.name if self._data.benchmark_type else "",
