@@ -18,7 +18,7 @@ from unittest.mock import patch, MagicMock
 from pathlib import Path
 
 # Import argument builders from cli package
-from mlpstorage.cli import (
+from mlpstorage_py.cli import (
     add_training_arguments,
     add_checkpointing_arguments,
     add_vectordb_arguments,
@@ -30,14 +30,14 @@ from mlpstorage.cli import (
     PROGRAM_DESCRIPTIONS,
 )
 # Import parser functions from cli_parser module
-from mlpstorage.cli_parser import (
+from mlpstorage_py.cli_parser import (
     validate_args,
     update_args,
     apply_yaml_config_overrides,
     help_messages,
     prog_descriptions,
 )
-from mlpstorage.config import MODELS, ACCELERATORS, LLM_MODELS, EXEC_TYPE
+from mlpstorage_py.config import MODELS, ACCELERATORS, LLM_MODELS, EXEC_TYPE
 
 
 class TestHelpMessages:
@@ -616,7 +616,7 @@ class TestUpdateArgs:
     
     def test_num_client_hosts_zero_is_preserved(self):
         """Regression: --num-client-hosts 0 must not be re-derived from len(hosts)."""
-        args = Namespace(hosts=['h1', 'h2', 'h3'], num_client_hosts=0)
+        args = argparse.Namespace(hosts=['h1', 'h2', 'h3'], num_client_hosts=0)
         update_args(args)
         assert args.num_client_hosts == 0
 

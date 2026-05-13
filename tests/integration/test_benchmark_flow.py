@@ -56,11 +56,11 @@ class TestTrainingBenchmarkFlow:
 
         # Import here to avoid import errors if dependencies missing
         try:
-            from mlpstorage.benchmarks.dlio import TrainingBenchmark
+            from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
         except ImportError:
             pytest.skip("DLIO dependencies not available")
 
-        with patch('mlpstorage.benchmarks.base.ClusterInformation') as mock_ci:
+        with patch('mlpstorage_py.benchmarks.base.ClusterInformation') as mock_ci:
             mock_ci.return_value = MagicMock()
             mock_ci.return_value.total_memory_bytes = 256 * 1024**3
             mock_ci.return_value.host_info_list = []
@@ -82,11 +82,11 @@ class TestTrainingBenchmarkFlow:
         training_args.results_dir = str(tmp_path)
 
         try:
-            from mlpstorage.benchmarks.dlio import TrainingBenchmark
+            from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
         except ImportError:
             pytest.skip("DLIO dependencies not available")
 
-        with patch('mlpstorage.benchmarks.base.ClusterInformation') as mock_ci:
+        with patch('mlpstorage_py.benchmarks.base.ClusterInformation') as mock_ci:
             mock_ci.return_value = MagicMock()
             mock_ci.return_value.total_memory_bytes = 256 * 1024**3
             mock_ci.return_value.host_info_list = []
@@ -126,13 +126,13 @@ class TestCheckpointingBenchmarkFlow:
         checkpointing_args.results_dir = str(tmp_path)
 
         try:
-            from mlpstorage.benchmarks.dlio import CheckpointingBenchmark
+            from mlpstorage_py.benchmarks.dlio import CheckpointingBenchmark
         except ImportError:
             pytest.skip("DLIO dependencies not available")
 
         logger = MockLogger()
 
-        with patch('mlpstorage.benchmarks.base.ClusterInformation') as mock_ci:
+        with patch('mlpstorage_py.benchmarks.base.ClusterInformation') as mock_ci:
             mock_ci.return_value = MagicMock()
             mock_ci.return_value.total_memory_bytes = 512 * 1024**3
             mock_ci.return_value.host_info_list = []
@@ -164,14 +164,14 @@ class TestBenchmarkWithMockExecutor:
         training_args.what_if = False
 
         try:
-            from mlpstorage.benchmarks.dlio import TrainingBenchmark
+            from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
         except ImportError:
             pytest.skip("DLIO dependencies not available")
 
         # Configure executor to return success for DLIO
         mock_executor.add_response('dlio_benchmark', 'Success', '', 0)
 
-        with patch('mlpstorage.benchmarks.base.ClusterInformation') as mock_ci:
+        with patch('mlpstorage_py.benchmarks.base.ClusterInformation') as mock_ci:
             mock_ci.return_value = MagicMock()
             mock_ci.return_value.total_memory_bytes = 256 * 1024**3
             mock_ci.return_value.host_info_list = []
@@ -214,11 +214,11 @@ class TestBenchmarkWithMockCollector:
         mock_collector.set_hosts(num_hosts=2, memory_gb=256, cpu_cores=64)
 
         try:
-            from mlpstorage.benchmarks.dlio import TrainingBenchmark
+            from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
         except ImportError:
             pytest.skip("DLIO dependencies not available")
 
-        with patch('mlpstorage.benchmarks.base.ClusterInformation') as mock_ci:
+        with patch('mlpstorage_py.benchmarks.base.ClusterInformation') as mock_ci:
             # Make ClusterInformation use our mock data
             mock_ci.return_value = MagicMock()
             mock_ci.return_value.total_memory_bytes = 2 * 256 * 1024**3
@@ -252,11 +252,11 @@ class TestMetadataGeneration:
         training_args.what_if = True
 
         try:
-            from mlpstorage.benchmarks.dlio import TrainingBenchmark
+            from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
         except ImportError:
             pytest.skip("DLIO dependencies not available")
 
-        with patch('mlpstorage.benchmarks.base.ClusterInformation') as mock_ci:
+        with patch('mlpstorage_py.benchmarks.base.ClusterInformation') as mock_ci:
             mock_ci.return_value = MagicMock()
             mock_ci.return_value.total_memory_bytes = 256 * 1024**3
             mock_ci.return_value.host_info_list = []
@@ -278,7 +278,7 @@ class TestValidationIntegration:
 
     def test_benchmark_run_can_be_verified(self, tmp_path):
         """Completed benchmark run can be loaded and verified."""
-        from mlpstorage.config import PARAM_VALIDATION
+        from mlpstorage_py.config import PARAM_VALIDATION
 
         # Create a mock result directory with metadata
         result_dir = tmp_path / "training" / "unet3d" / "run" / "20250115_120000"
@@ -321,8 +321,8 @@ class TestValidationIntegration:
 
         # Load and verify the run
         try:
-            from mlpstorage.rules import BenchmarkRun, BenchmarkVerifier
-            from mlpstorage.mlps_logging import setup_logging
+            from mlpstorage_py.rules import BenchmarkRun, BenchmarkVerifier
+            from mlpstorage_py.mlps_logging import setup_logging
 
             logger = setup_logging(name='test')
 
@@ -361,8 +361,8 @@ class TestVerificationFlowIntegration:
         TrainingRunRulesChecker.__init__ called super().__init__() before
         setting self.benchmark_run.
         """
-        from mlpstorage.rules import BenchmarkRun, BenchmarkVerifier, BenchmarkRunData
-        from mlpstorage.config import BENCHMARK_TYPES, PARAM_VALIDATION
+        from mlpstorage_py.rules import BenchmarkRun, BenchmarkVerifier, BenchmarkRunData
+        from mlpstorage_py.config import BENCHMARK_TYPES, PARAM_VALIDATION
 
         # Create a sample benchmark run
         run_data = create_sample_benchmark_run_data(
@@ -385,8 +385,8 @@ class TestVerificationFlowIntegration:
 
     def test_verifier_can_verify_checkpointing_benchmark_run(self, mock_logger):
         """BenchmarkVerifier can verify a checkpointing benchmark run end-to-end."""
-        from mlpstorage.rules import BenchmarkRun, BenchmarkVerifier, BenchmarkRunData
-        from mlpstorage.config import BENCHMARK_TYPES, PARAM_VALIDATION
+        from mlpstorage_py.rules import BenchmarkRun, BenchmarkVerifier, BenchmarkRunData
+        from mlpstorage_py.config import BENCHMARK_TYPES, PARAM_VALIDATION
 
         run_data = create_sample_benchmark_run_data(
             benchmark_type='checkpointing',
@@ -412,7 +412,7 @@ class TestVerificationFlowIntegration:
 
     def test_verifier_runs_all_checks(self, mock_logger):
         """BenchmarkVerifier runs all check methods and collects issues."""
-        from mlpstorage.rules import BenchmarkRun, BenchmarkVerifier
+        from mlpstorage_py.rules import BenchmarkRun, BenchmarkVerifier
 
         run_data = create_sample_benchmark_run_data(
             benchmark_type='training',
@@ -442,7 +442,7 @@ class TestDependencyValidationIntegration:
     @pytest.fixture
     def training_args(self, tmp_path):
         """Create training benchmark args with valid temp directories."""
-        from mlpstorage.config import EXEC_TYPE
+        from mlpstorage_py.config import EXEC_TYPE
 
         # Create data directory in temp path
         data_dir = tmp_path / "data"
@@ -468,15 +468,15 @@ class TestDependencyValidationIntegration:
             return None
 
         with patch('shutil.which', side_effect=mock_which):
-            with patch('mlpstorage.benchmarks.base.ClusterInformation') as mock_ci:
+            with patch('mlpstorage_py.benchmarks.base.ClusterInformation') as mock_ci:
                 mock_ci.return_value = MagicMock()
                 mock_ci.return_value.total_memory_bytes = 256 * 1024**3
                 mock_ci.return_value.host_info_list = []
 
-                from mlpstorage.errors import DependencyError
+                from mlpstorage_py.errors import DependencyError
 
                 with pytest.raises(DependencyError) as exc_info:
-                    from mlpstorage.benchmarks.dlio import TrainingBenchmark
+                    from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
                     TrainingBenchmark(training_args, logger=MockLogger())
 
                 # Error should mention DLIO and how to install
@@ -491,15 +491,15 @@ class TestDependencyValidationIntegration:
             return None
 
         with patch('shutil.which', side_effect=mock_which):
-            with patch('mlpstorage.benchmarks.base.ClusterInformation') as mock_ci:
+            with patch('mlpstorage_py.benchmarks.base.ClusterInformation') as mock_ci:
                 mock_ci.return_value = MagicMock()
                 mock_ci.return_value.total_memory_bytes = 256 * 1024**3
                 mock_ci.return_value.host_info_list = []
 
-                from mlpstorage.errors import DependencyError
+                from mlpstorage_py.errors import DependencyError
 
                 with pytest.raises(DependencyError) as exc_info:
-                    from mlpstorage.benchmarks.dlio import TrainingBenchmark
+                    from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
                     TrainingBenchmark(training_args, logger=MockLogger())
 
                 # Error should mention MPI
@@ -511,12 +511,12 @@ class TestDependencyValidationIntegration:
 
         # Even with no executables found, what-if mode should succeed
         with patch('shutil.which', return_value=None):
-            with patch('mlpstorage.benchmarks.base.ClusterInformation') as mock_ci:
+            with patch('mlpstorage_py.benchmarks.base.ClusterInformation') as mock_ci:
                 mock_ci.return_value = MagicMock()
                 mock_ci.return_value.total_memory_bytes = 256 * 1024**3
                 mock_ci.return_value.host_info_list = []
 
-                from mlpstorage.benchmarks.dlio import TrainingBenchmark
+                from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
 
                 # Should not raise DependencyError
                 benchmark = TrainingBenchmark(training_args, logger=MockLogger())
@@ -541,12 +541,12 @@ class TestDependencyValidationIntegration:
             return None  # DLIO not in PATH
 
         with patch('shutil.which', side_effect=mock_which):
-            with patch('mlpstorage.benchmarks.base.ClusterInformation') as mock_ci:
+            with patch('mlpstorage_py.benchmarks.base.ClusterInformation') as mock_ci:
                 mock_ci.return_value = MagicMock()
                 mock_ci.return_value.total_memory_bytes = 256 * 1024**3
                 mock_ci.return_value.host_info_list = []
 
-                from mlpstorage.benchmarks.dlio import TrainingBenchmark
+                from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
 
                 # Should find DLIO in custom path
                 benchmark = TrainingBenchmark(training_args, logger=MockLogger())

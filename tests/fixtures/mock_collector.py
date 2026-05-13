@@ -9,7 +9,7 @@ logic that depends on cluster information.
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from mlpstorage.interfaces.collector import (
+from mlpstorage_py.interfaces.collector import (
     ClusterCollectorInterface,
     CollectionResult,
 )

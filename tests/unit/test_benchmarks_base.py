@@ -16,8 +16,8 @@ import pytest
 from unittest.mock import MagicMock, patch, PropertyMock
 from argparse import Namespace
 
-from mlpstorage.benchmarks.base import Benchmark
-from mlpstorage.config import BENCHMARK_TYPES, PARAM_VALIDATION, EXEC_TYPE
+from mlpstorage_py.benchmarks.base import Benchmark
+from mlpstorage_py.config import BENCHMARK_TYPES, PARAM_VALIDATION, EXEC_TYPE
 
 
 class ConcreteBenchmark(Benchmark):
@@ -52,7 +52,7 @@ class TestBenchmarkInit:
         """Should create output directory."""
         basic_args.results_dir = str(tmp_path / "results")
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             output_dir = str(tmp_path / "results" / "output")
             mock_gen.return_value = output_dir
 
@@ -65,7 +65,7 @@ class TestBenchmarkInit:
         basic_args.results_dir = str(tmp_path)
         mock_logger = MagicMock()
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             benchmark = ConcreteBenchmark(basic_args, logger=mock_logger)
 
@@ -75,7 +75,7 @@ class TestBenchmarkInit:
         """Should use provided run_datetime."""
         basic_args.results_dir = str(tmp_path)
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             benchmark = ConcreteBenchmark(basic_args, run_datetime="20250115_120000")
 
@@ -86,7 +86,7 @@ class TestBenchmarkInit:
         basic_args.results_dir = str(tmp_path)
         basic_args.debug = True
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             benchmark = ConcreteBenchmark(basic_args)
 
@@ -96,7 +96,7 @@ class TestBenchmarkInit:
         """Should initialize CommandExecutor."""
         basic_args.results_dir = str(tmp_path)
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             benchmark = ConcreteBenchmark(basic_args)
 
@@ -121,7 +121,7 @@ class TestBenchmarkMetadata:
             accelerator_type='h100'
         )
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             return ConcreteBenchmark(args, run_datetime="20250115_120000")
 
@@ -194,7 +194,7 @@ class TestBenchmarkWriteMetadata:
             accelerator_type='h100'
         )
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             return ConcreteBenchmark(args, run_datetime="20250115_120000")
@@ -233,7 +233,7 @@ class TestBenchmarkExecuteCommand:
             accelerator_type='h100'
         )
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             return ConcreteBenchmark(args, run_datetime="20250115_120000")
@@ -303,14 +303,14 @@ class TestBenchmarkVerifyBenchmark:
             allow_invalid_params=False
         )
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             return ConcreteBenchmark(args, run_datetime="20250115_120000")
 
     def test_returns_true_for_closed_verification(self, benchmark):
         """Should return True for CLOSED verification."""
-        with patch('mlpstorage.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
+        with patch('mlpstorage_py.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
             mock_verifier = MagicMock()
             mock_verifier.verify.return_value = PARAM_VALIDATION.CLOSED
             mock_verifier_class.return_value = mock_verifier
@@ -322,7 +322,7 @@ class TestBenchmarkVerifyBenchmark:
 
     def test_exits_for_invalid_verification(self, benchmark):
         """Should exit for INVALID verification."""
-        with patch('mlpstorage.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
+        with patch('mlpstorage_py.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
             mock_verifier = MagicMock()
             mock_verifier.verify.return_value = PARAM_VALIDATION.INVALID
             mock_verifier_class.return_value = mock_verifier
@@ -334,7 +334,7 @@ class TestBenchmarkVerifyBenchmark:
         """Should allow invalid params with --allow-invalid-params."""
         benchmark.args.allow_invalid_params = True
 
-        with patch('mlpstorage.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
+        with patch('mlpstorage_py.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
             mock_verifier = MagicMock()
             mock_verifier.verify.return_value = PARAM_VALIDATION.INVALID
             mock_verifier_class.return_value = mock_verifier
@@ -348,7 +348,7 @@ class TestBenchmarkVerifyBenchmark:
         benchmark.args.closed = True
         benchmark.args.open = False
 
-        with patch('mlpstorage.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
+        with patch('mlpstorage_py.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
             mock_verifier = MagicMock()
             mock_verifier.verify.return_value = PARAM_VALIDATION.OPEN
             mock_verifier_class.return_value = mock_verifier
@@ -367,7 +367,7 @@ class TestBenchmarkVerifyBenchmark:
         benchmark.args.closed = False
         benchmark.args.open = True
 
-        with patch('mlpstorage.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
+        with patch('mlpstorage_py.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
             mock_verifier = MagicMock()
             mock_verifier.verify.return_value = PARAM_VALIDATION.OPEN
             mock_verifier_class.return_value = mock_verifier
@@ -398,12 +398,12 @@ class TestBenchmarkVerifyBenchmark:
             allow_invalid_params=False
         )
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ConcreteBenchmark(args, run_datetime="20250115_120000")
 
-        with patch('mlpstorage.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
+        with patch('mlpstorage_py.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
             mock_verifier = MagicMock()
             mock_verifier.verify.return_value = PARAM_VALIDATION.OPEN
             mock_verifier_class.return_value = mock_verifier
@@ -432,7 +432,7 @@ class TestBenchmarkRun:
             accelerator_type='h100'
         )
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             return ConcreteBenchmark(args, run_datetime="20250115_120000")
@@ -458,7 +458,7 @@ class TestBenchmarkRun:
             # Fallback for any additional calls
             return 105.0 + call_count[0]
 
-        import mlpstorage.benchmarks.base as base_module
+        import mlpstorage_py.benchmarks.base as base_module
         original_time = base_module.time
 
         class MockTime:
@@ -507,7 +507,7 @@ class TestBenchmarkGenerateOutputLocation:
         )
 
         # Create a valid benchmark first
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ConcreteBenchmark(args)
@@ -532,7 +532,7 @@ class TestBenchmarkGenerateOutputLocation:
             accelerator_type='h100'
         )
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             benchmark = ConcreteBenchmark(args, run_datetime="20250115_120000")
             mock_gen.reset_mock()
@@ -562,14 +562,14 @@ class TestBenchmarkIntegration:
             allow_invalid_params=False
         )
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             output_dir = tmp_path / "training" / "run" / "unet3d" / "20250115_120000"
             mock_gen.return_value = str(output_dir)
 
             benchmark = ConcreteBenchmark(args, run_datetime="20250115_120000")
 
         # Verify benchmark
-        with patch('mlpstorage.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
+        with patch('mlpstorage_py.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
             mock_verifier = MagicMock()
             mock_verifier.verify.return_value = PARAM_VALIDATION.CLOSED
             mock_verifier_class.return_value = mock_verifier
@@ -623,7 +623,7 @@ class TestBenchmarkValidation:
                 call_order.append('run')
                 return 0
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = TrackingBenchmark(basic_args)
@@ -646,7 +646,7 @@ class TestBenchmarkValidation:
             def _run(self):
                 return 0
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = CustomValidationBenchmark(basic_args)
@@ -657,7 +657,7 @@ class TestBenchmarkValidation:
 
     def test_validation_error_prevents_run(self, basic_args, tmp_path):
         """Should propagate validation errors and prevent _run from executing."""
-        from mlpstorage.errors import DependencyError
+        from mlpstorage_py.errors import DependencyError
 
         basic_args.results_dir = str(tmp_path)
         run_called = []
@@ -672,7 +672,7 @@ class TestBenchmarkValidation:
                 run_called.append('run')
                 return 0
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = FailingValidationBenchmark(basic_args)
@@ -686,7 +686,7 @@ class TestBenchmarkValidation:
         """Base class _validate_environment should be a no-op (pass)."""
         basic_args.results_dir = str(tmp_path)
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ConcreteBenchmark(basic_args)
@@ -696,7 +696,7 @@ class TestBenchmarkValidation:
 
     def test_validation_error_preserves_type(self, basic_args, tmp_path):
         """Should preserve the specific error type from validation."""
-        from mlpstorage.errors import ConfigurationError
+        from mlpstorage_py.errors import ConfigurationError
 
         basic_args.results_dir = str(tmp_path)
 
@@ -709,7 +709,7 @@ class TestBenchmarkValidation:
             def _run(self):
                 return 0
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ConfigErrorBenchmark(basic_args)
@@ -749,7 +749,7 @@ class TestBenchmarkCollectionSelection:
         defaults.update(kwargs)
         args = Namespace(**defaults)
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ConcreteBenchmark(args, logger=mock_logger, run_datetime='20260124_120000')
@@ -851,10 +851,10 @@ class TestBenchmarkClusterSnapshots:
         logger.verboser = MagicMock()
         return logger
 
-    @patch('mlpstorage.benchmarks.base.SSHClusterCollector')
+    @patch('mlpstorage_py.benchmarks.base.SSHClusterCollector')
     def test_collect_cluster_start_uses_ssh(self, mock_ssh_collector_class, tmp_path, mock_logger):
         """Test that _collect_cluster_start uses SSH when appropriate."""
-        from mlpstorage.rules.models import ClusterInformation
+        from mlpstorage_py.rules.models import ClusterInformation
 
         # Setup mock collector
         mock_collector = MagicMock()
@@ -882,7 +882,7 @@ class TestBenchmarkClusterSnapshots:
             cluster_collection_timeout=60,
         )
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             with patch.object(ClusterInformation, 'from_mpi_collection') as mock_from_mpi:
@@ -899,10 +899,10 @@ class TestBenchmarkClusterSnapshots:
                 assert hasattr(benchmark, '_cluster_info_start')
                 assert benchmark._collection_method == 'ssh'
 
-    @patch('mlpstorage.benchmarks.base.SSHClusterCollector')
+    @patch('mlpstorage_py.benchmarks.base.SSHClusterCollector')
     def test_collect_cluster_end_creates_snapshots(self, mock_ssh_collector_class, tmp_path, mock_logger):
         """Test that _collect_cluster_end creates ClusterSnapshots."""
-        from mlpstorage.rules.models import ClusterInformation, ClusterSnapshots
+        from mlpstorage_py.rules.models import ClusterInformation, ClusterSnapshots
 
         # Setup mock collector
         mock_collector = MagicMock()
@@ -930,7 +930,7 @@ class TestBenchmarkClusterSnapshots:
             cluster_collection_timeout=60,
         )
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             with patch.object(ClusterInformation, 'from_mpi_collection') as mock_from_mpi:
@@ -980,7 +980,7 @@ class TestBenchmarkClusterSnapshots:
             what_if=True,
         )
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = TrackingBenchmark(args, logger=mock_logger, run_datetime='20260124_120000')
@@ -992,7 +992,7 @@ class TestBenchmarkClusterSnapshots:
 
     def test_metadata_includes_cluster_snapshots(self, tmp_path, mock_logger):
         """Test that metadata property includes cluster_snapshots when available."""
-        from mlpstorage.rules.models import ClusterSnapshots
+        from mlpstorage_py.rules.models import ClusterSnapshots
 
         args = Namespace(
             debug=False,
@@ -1005,7 +1005,7 @@ class TestBenchmarkClusterSnapshots:
             what_if=True,
         )
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ConcreteBenchmark(args, logger=mock_logger, run_datetime='20260124_120000')
@@ -1034,7 +1034,7 @@ class TestBenchmarkClusterSnapshots:
             hosts=None,  # No hosts = no collection
         )
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ConcreteBenchmark(args, logger=mock_logger, run_datetime='20260124_120000')
@@ -1083,7 +1083,7 @@ class TestTimeSeriesCollectionIntegration:
         defaults.update(kwargs)
         args = Namespace(**defaults)
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ConcreteBenchmark(args, logger=mock_logger, run_datetime='20260124_120000')
@@ -1133,7 +1133,7 @@ class TestTimeSeriesCollectionIntegration:
 
     def test_start_timeseries_multihost_with_hosts(self, tmp_path, mock_logger):
         """Should use MultiHostTimeSeriesCollector when hosts are provided."""
-        from mlpstorage.cluster_collector import MultiHostTimeSeriesCollector
+        from mlpstorage_py.cluster_collector import MultiHostTimeSeriesCollector
 
         benchmark = self._create_benchmark(
             tmp_path, mock_logger,
@@ -1151,7 +1151,7 @@ class TestTimeSeriesCollectionIntegration:
 
     def test_start_timeseries_singlehost_without_hosts(self, tmp_path, mock_logger):
         """Should use TimeSeriesCollector when no hosts provided."""
-        from mlpstorage.cluster_collector import TimeSeriesCollector
+        from mlpstorage_py.cluster_collector import TimeSeriesCollector
 
         benchmark = self._create_benchmark(
             tmp_path, mock_logger,
@@ -1201,7 +1201,7 @@ class TestTimeSeriesCollectionIntegration:
 
     def test_write_timeseries_creates_file(self, tmp_path, mock_logger):
         """write_timeseries_data should create JSON file."""
-        from mlpstorage.rules.models import TimeSeriesData, TimeSeriesSample
+        from mlpstorage_py.rules.models import TimeSeriesData, TimeSeriesSample
 
         benchmark = self._create_benchmark(tmp_path, mock_logger)
 
@@ -1248,7 +1248,7 @@ class TestTimeSeriesCollectionIntegration:
 
     def test_metadata_includes_timeseries_reference(self, tmp_path, mock_logger):
         """metadata property should include time-series data reference (HOST-04)."""
-        from mlpstorage.rules.models import TimeSeriesData, TimeSeriesSample
+        from mlpstorage_py.rules.models import TimeSeriesData, TimeSeriesSample
 
         benchmark = self._create_benchmark(tmp_path, mock_logger)
         benchmark.run_result_output = str(tmp_path)
@@ -1417,14 +1417,14 @@ class TestBenchmarkProgress:
         defaults.update(kwargs)
         args = Namespace(**defaults)
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ConcreteBenchmark(args, logger=mock_logger, run_datetime='20260125_120000')
 
         return benchmark
 
-    @patch('mlpstorage.benchmarks.base.create_stage_progress')
+    @patch('mlpstorage_py.benchmarks.base.create_stage_progress')
     def test_run_shows_stage_progress(self, mock_stage_progress, tmp_path, mock_logger):
         """run() should use create_stage_progress with expected stages."""
         benchmark = self._create_benchmark(tmp_path, mock_logger)
@@ -1451,20 +1451,20 @@ class TestBenchmarkProgress:
         # Verify advance_stage was called 4 times (once per stage)
         assert mock_advance.call_count == 4
 
-    @patch('mlpstorage.progress.is_interactive_terminal', return_value=False)
+    @patch('mlpstorage_py.progress.is_interactive_terminal', return_value=False)
     def test_run_non_interactive_logs_stages(self, mock_is_interactive, tmp_path, mock_logger):
         """run() should log stages in non-interactive mode via logger.status fallback."""
         benchmark = self._create_benchmark(tmp_path, mock_logger)
 
         benchmark.run()
 
-        # In non-interactive mode, create_stage_progress calls logger.status for each stage
-        # Verify at least one stage was logged via status()
-        status_calls = [call for call in mock_logger.status.call_args_list]
+        # In non-interactive mode, create_stage_progress calls logger.info for each stage
+        # Verify at least one stage was logged via info()
+        status_calls = [call for call in mock_logger.info.call_args_list]
         stage_logged = any('Stage' in str(call) for call in status_calls)
         assert stage_logged, f"Expected stage log messages, got: {status_calls}"
 
-    @patch('mlpstorage.benchmarks.base.progress_context')
+    @patch('mlpstorage_py.benchmarks.base.progress_context')
     def test_cluster_collection_shows_spinner(self, mock_progress_context, tmp_path, mock_logger):
         """_collect_cluster_start should use progress_context with spinner (total=None)."""
         benchmark = self._create_benchmark(
@@ -1491,7 +1491,7 @@ class TestBenchmarkProgress:
         call_kwargs = mock_progress_context.call_args[1]
         assert call_kwargs.get('total') is None
 
-    @patch('mlpstorage.benchmarks.base.progress_context')
+    @patch('mlpstorage_py.benchmarks.base.progress_context')
     def test_cluster_collection_updates_description_ssh(self, mock_progress_context, tmp_path, mock_logger):
         """_collect_cluster_start should update description to show SSH collection method."""
         benchmark = self._create_benchmark(
@@ -1516,7 +1516,7 @@ class TestBenchmarkProgress:
         # Verify set_desc was called with "Collecting via SSH..."
         mock_set_desc.assert_called_with("Collecting via SSH...")
 
-    @patch('mlpstorage.benchmarks.base.progress_context')
+    @patch('mlpstorage_py.benchmarks.base.progress_context')
     def test_cluster_collection_updates_description_mpi(self, mock_progress_context, tmp_path, mock_logger):
         """_collect_cluster_start should update description to show MPI collection method."""
         benchmark = self._create_benchmark(
@@ -1541,7 +1541,7 @@ class TestBenchmarkProgress:
         # Verify set_desc was called with "Collecting via MPI..."
         mock_set_desc.assert_called_with("Collecting via MPI...")
 
-    @patch('mlpstorage.benchmarks.base.create_stage_progress')
+    @patch('mlpstorage_py.benchmarks.base.create_stage_progress')
     def test_run_progress_cleanup_on_exception(self, mock_stage_progress, tmp_path, mock_logger):
         """Stage progress context should properly exit even when _run() raises exception."""
         # Track whether __exit__ was called
@@ -1570,7 +1570,7 @@ class TestBenchmarkProgress:
             skip_timeseries=True,
         )
 
-        with patch('mlpstorage.benchmarks.base.generate_output_location') as mock_gen:
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ExceptionRaisingBenchmark(args, logger=mock_logger, run_datetime='20260125_120000')
@@ -1581,7 +1581,7 @@ class TestBenchmarkProgress:
         # Verify the context manager's __exit__ was called (cleanup happened)
         assert len(exit_called) == 1
 
-    @patch('mlpstorage.benchmarks.base.progress_context')
+    @patch('mlpstorage_py.benchmarks.base.progress_context')
     def test_end_cluster_collection_shows_spinner(self, mock_progress_context, tmp_path, mock_logger):
         """_collect_cluster_end should use progress_context with spinner."""
         benchmark = self._create_benchmark(

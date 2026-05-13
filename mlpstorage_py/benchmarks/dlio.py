@@ -118,6 +118,101 @@ class DLIOBenchmark(Benchmark, abc.ABC):
     def config_name(self, config_name):
         self._config_name = config_name
 
+    def _apply_object_storage_params(self):
+        """When --object is used, load .env and inject required DLIO storage params.
+
+        The following params are injected into self.params_dict (only if not already
+        set by the user via --params):
+          storage.storage_type          = 's3'
+          storage.storage_root          = $BUCKET
+          storage.storage_options.storage_library = $STORAGE_LIBRARY
+          storage.s3_force_path_style   = 'true'  (when AWS_ENDPOINT_URL is set)
+
+        Credentials (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) and the endpoint
+        (AWS_ENDPOINT_URL) are read directly from the environment by obj_store_lib.py
+        and do not need to be passed as DLIO params.  We load .env here so that
+        the parent process environment is populated before mpirun spawns workers.
+        """
+        protocol = getattr(self.args, 'data_access_protocol', None)
+        if protocol is None or protocol == 'file':
+            return  # file mode or flag not supplied: nothing to do
+
+        # Load .env into the process environment.  Values already set in the shell
+        # take priority (override=False is the default).
+        try:
+            from dotenv import load_dotenv
+
+            # Locate the .env file: CWD first, then relative to the script directory.
+            env_file_cwd = os.path.abspath('.env')
+            env_file_script = os.path.normpath(
+                os.path.join(os.path.dirname(sys.argv[0]), '..', '.env')
+            )
+
+            if os.path.exists(env_file_cwd):
+                self.logger.info(f'--object mode: loading credentials from {env_file_cwd}')
+                load_dotenv(env_file_cwd)
+            elif os.path.exists(env_file_script):
+                self.logger.info(f'--object mode: loading credentials from {env_file_script}')
+                load_dotenv(env_file_script)
+            else:
+                # Try dotenv's own upward search as a last resort
+                found = load_dotenv()  # returns True if a file was found and loaded
+                if found:
+                    self.logger.info(
+                        '--object mode: loaded credentials from .env file found by directory search'
+                    )
+                else:
+                    raise FileNotFoundError(
+                        '--object mode requires a .env file with object storage credentials, '
+                        'but no .env file was found in the current directory '
+                        f'({os.getcwd()}) or the script directory. '
+                        'Create a .env file (see .env.example) or export the required '
+                        'environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, '
+                        'AWS_ENDPOINT_URL, BUCKET, STORAGE_LIBRARY) before running.'
+                    )
+        except ImportError:
+            self.logger.warning(
+                'python-dotenv not installed; .env file will not be loaded automatically. '
+                'Ensure AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, '
+                'BUCKET, and STORAGE_LIBRARY are set in the environment.'
+            )
+
+        bucket = os.environ.get('BUCKET', '')
+        storage_library = os.environ.get('STORAGE_LIBRARY', 's3dlio')
+        endpoint_url = os.environ.get('AWS_ENDPOINT_URL', '')
+        # STORAGE_URI_SCHEME controls the URI prefix used by s3dlio:
+        #   s3     — standard S3 (requires endpoint + credentials)
+        #   direct — O_DIRECT filesystem via s3dlio (BUCKET is the base path, no HTTP)
+        #   file   — buffered filesystem via s3dlio (BUCKET is the base path, no HTTP)
+        uri_scheme = os.environ.get('STORAGE_URI_SCHEME', 's3').rstrip(':/')
+
+        if not bucket:
+            raise ValueError(
+                'BUCKET environment variable is required for --object mode. '
+                'Set it in .env or export it before running mlpstorage.'
+            )
+
+        # Inject params; respect any value the user already supplied via --params
+        if 'storage.storage_type' not in self.params_dict:
+            self.params_dict['storage.storage_type'] = 's3'
+        if 'storage.storage_root' not in self.params_dict:
+            self.params_dict['storage.storage_root'] = bucket
+        if 'storage.storage_options.storage_library' not in self.params_dict:
+            self.params_dict['storage.storage_options.storage_library'] = storage_library
+        if 'storage.storage_options.uri_scheme' not in self.params_dict:
+            self.params_dict['storage.storage_options.uri_scheme'] = uri_scheme
+        # Force path-style addressing for non-AWS S3 endpoints (MinIO, s3-ultra, VAST, Ceph…)
+        # Not applicable for direct:// or file:// — those don't use HTTP at all.
+        is_http_scheme = uri_scheme not in ('direct', 'file')
+        if is_http_scheme and endpoint_url and 'storage.s3_force_path_style' not in self.params_dict:
+            self.params_dict['storage.s3_force_path_style'] = 'true'
+
+        self.logger.info(
+            f'--object mode: injected storage params '
+            f'(storage_type=s3, storage_root={bucket}, library={storage_library}, '
+            f'uri_scheme={uri_scheme}, force_path_style={is_http_scheme and bool(endpoint_url)})'
+        )
+
     def process_dlio_params(self, config_file):
         params_dict = dict() if not self.args.params else {k: v for k, v in (item.split("=") for item in self.args.params)}
         yaml_params = read_config_from_file(os.path.join(self.DLIO_CONFIG_PATH, "workload", config_file))
@@ -199,6 +294,10 @@ class TrainingBenchmark(DLIOBenchmark):
         self.config_name = f"{under_model}_{config_suffix}"
 
         self.params_dict, self.yaml_params, self.combined_params = self.process_dlio_params(self.config_file)
+
+        # Inject object storage params before add_datadir_param (which reads storage_type
+        # from params_dict to decide whether to create local directories).
+        self._apply_object_storage_params()
 
         if self.args.command not in ("datagen", "datasize"):
             self.verify_benchmark()

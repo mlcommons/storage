@@ -35,7 +35,6 @@ storage:
   storage_options:
     # Credentials come from environment variables — NEVER hardcode in YAML.
     # Before running: source /path/to/.env  (sets AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY)
-    region: us-east-1
 
 reader: 
   data_loader: pytorch

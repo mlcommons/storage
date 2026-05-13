@@ -47,7 +47,7 @@ echo ""
 if python -c "import dgen_py" 2>/dev/null; then
     echo "✅ dgen-py is available (version $(python -c 'import dgen_py; print(dgen_py.__version__)' 2>/dev/null))"
 else
-    echo "❌ dgen-py not available - install with: pip install dgen-py"
+    echo "❌ dgen-py not available - install with: uv sync"
     exit 1
 fi
 

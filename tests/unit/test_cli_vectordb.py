@@ -11,8 +11,8 @@ Tests cover:
 import argparse
 import pytest
 
-from mlpstorage.cli.vectordb_args import add_vectordb_arguments
-from mlpstorage.config import VECTOR_DTYPES, DISTRIBUTIONS
+from mlpstorage_py.cli.vectordb_args import add_vectordb_arguments
+from mlpstorage_py.config import VECTOR_DTYPES, DISTRIBUTIONS
 
 
 class TestVectorDBSubcommands:

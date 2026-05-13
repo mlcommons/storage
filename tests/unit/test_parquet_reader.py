@@ -484,14 +484,20 @@ class TestParquetReaderS3Iterable:
         assert (self.FILENAME, NUM_GROUPS - 1) in reader._rg_cache
 
     def test_get_sample_caches_row_group(self):
-        """Second call to get_sample for same row group must not re-fetch."""
+        """Second call to get_sample for same row group must not re-fetch.
+
+        The cache stores compressed_bytes (an int), not a pyarrow Table.
+        Verify the cache entry exists and is an int after the first call,
+        and that the value is unchanged after a second call on the same RG.
+        """
         reader = self._make_reader()
         reader.open_file_map[self.FILENAME] = reader.open(self.FILENAME)
         reader.get_sample(self.FILENAME, 0)
-        table_first, _ = reader._rg_cache[(self.FILENAME, 0)]
+        cached_first = reader._rg_cache[(self.FILENAME, 0)]
+        assert isinstance(cached_first, int), "cache must store compressed byte count (int)"
         reader.get_sample(self.FILENAME, 1)   # same row group 0
-        table_second, _ = reader._rg_cache[(self.FILENAME, 0)]
-        assert table_first is table_second    # same object, not re-fetched
+        cached_second = reader._rg_cache[(self.FILENAME, 0)]
+        assert cached_first == cached_second  # same value, not re-fetched
 
     def test_get_sample_all_samples_find_correct_rg(self):
         reader = self._make_reader(row_group_cache_size=NUM_GROUPS + 1)
@@ -501,32 +507,47 @@ class TestParquetReaderS3Iterable:
             reader.get_sample(self.FILENAME, sample_idx)
             assert (self.FILENAME, expected_rg) in reader._rg_cache
 
-    # ── LRU cache eviction ────────────────────────────────────────────────────
+    # ── cache growth (no LRU eviction within an epoch) ─────────────────────────
 
-    def test_lru_eviction_bounded_by_cache_size(self):
-        """Cache must never exceed row_group_cache_size entries."""
-        cache_limit = 2
-        reader = self._make_reader(row_group_cache_size=cache_limit)
+    def test_cache_grows_as_rgs_are_accessed(self):
+        """One cache entry is added per unique row group accessed; none are evicted.
+
+        The old implementation had an LRU eviction policy bounded by
+        row_group_cache_size.  The new implementation keeps byte counts (ints)
+        for every row group accessed this epoch and never evicts them during
+        the epoch — eviction happens only at finalize().  row_group_cache_size
+        in storage_options is silently ignored.
+        """
+        reader = self._make_reader(row_group_cache_size=2)  # limit is ignored
         reader.open_file_map[self.FILENAME] = reader.open(self.FILENAME)
         for sample_idx in range(TOTAL_ROWS):
             reader.get_sample(self.FILENAME, sample_idx)
-            assert len(reader._rg_cache) <= cache_limit
+        # All NUM_GROUPS row groups must be in the cache — nothing was evicted
+        for rg in range(NUM_GROUPS):
+            assert (self.FILENAME, rg) in reader._rg_cache
 
-    def test_lru_least_recently_used_is_evicted(self):
-        """After filling cache, the first RG loaded should be evicted for a new one."""
-        # cache_size=2, RGs are 0,1,2; access 0 then 1 then 2 → 0 should be gone
-        reader = self._make_reader(row_group_cache_size=2)
+    def test_all_rg_entries_persist_within_epoch(self):
+        """After accessing all row groups, every entry survives until finalize()."""
+        reader = self._make_reader(row_group_cache_size=2)  # limit is ignored
         reader.open_file_map[self.FILENAME] = reader.open(self.FILENAME)
         reader.get_sample(self.FILENAME, 0)                            # loads RG 0
         reader.get_sample(self.FILENAME, ROWS_PER_GROUP)               # loads RG 1
-        reader.get_sample(self.FILENAME, ROWS_PER_GROUP * 2)           # loads RG 2 → evicts RG 0
-        assert (self.FILENAME, 0) not in reader._rg_cache
+        reader.get_sample(self.FILENAME, ROWS_PER_GROUP * 2)           # loads RG 2
+        # All three must still be present — no LRU eviction within an epoch
+        assert (self.FILENAME, 0) in reader._rg_cache
         assert (self.FILENAME, 1) in reader._rg_cache
         assert (self.FILENAME, 2) in reader._rg_cache
 
     # ── close() ──────────────────────────────────────────────────────────────
 
-    def test_close_evicts_file_cache_entries(self):
+    def test_close_does_not_evict_rg_cache(self):
+        """close() is intentionally a no-op for _rg_cache.
+
+        In ON_DEMAND mode DLIO calls close() after every single sample.
+        Evicting on close would force a full row-group re-fetch for every
+        subsequent sample on the same file.  Byte counts must survive close()
+        and are only cleared by finalize() at epoch boundary.
+        """
         reader = self._make_reader()
         reader.open_file_map[self.FILENAME] = reader.open(self.FILENAME)
         reader.get_sample(self.FILENAME, 0)
@@ -534,12 +555,12 @@ class TestParquetReaderS3Iterable:
         assert len(reader._rg_cache) == 2
 
         reader.close(self.FILENAME)
-        # All entries for this filename must be gone
+        # Entries must still be present after close()
         remaining = [k for k in reader._rg_cache if k[0] == self.FILENAME]
-        assert remaining == []
+        assert len(remaining) == 2
 
-    def test_close_does_not_evict_other_files(self):
-        """Closing one file must leave other files' row groups in cache."""
+    def test_close_preserves_all_files_rg_cache(self):
+        """Closing one file leaves all files' byte-count entries intact."""
         reader = self._make_reader(row_group_cache_size=8)
         other = "other.parquet"
         reader.open_file_map[self.FILENAME] = reader.open(self.FILENAME)
@@ -549,7 +570,8 @@ class TestParquetReaderS3Iterable:
         reader.get_sample(other, 0)
         reader.close(self.FILENAME)
 
-        assert (self.FILENAME, 0) not in reader._rg_cache
+        # Both files' entries survive close() — eviction happens only at finalize()
+        assert (self.FILENAME, 0) in reader._rg_cache
         assert (other, 0) in reader._rg_cache
 
     # ── capability methods ────────────────────────────────────────────────────
@@ -581,20 +603,32 @@ class TestParquetReaderS3Iterable:
 
     # ── column filtering ──────────────────────────────────────────────────────
 
-    def test_column_filtering_restricts_output(self):
-        """When columns=['feature1'] only that column is read from the row group."""
+    def test_column_filtering_records_byte_count(self):
+        """Column filtering is passed to read_row_group; byte count is still cached.
+
+        The old tests checked table.column_names, but the new implementation
+        discards the pyarrow Table immediately after measuring its byte count.
+        We verify instead that:
+        - _columns is wired to the columns option, and
+        - get_sample() succeeds and stores an int byte count in _rg_cache.
+        """
         reader = self._make_reader(columns=["feature1"])
+        assert reader._columns == ["feature1"]
         reader.open_file_map[self.FILENAME] = reader.open(self.FILENAME)
         reader.get_sample(self.FILENAME, 0)
-        table, _ = reader._rg_cache[(self.FILENAME, 0)]
-        assert table.column_names == ["feature1"]
+        cached = reader._rg_cache[(self.FILENAME, 0)]
+        assert isinstance(cached, int)
+        assert cached > 0  # some bytes were read
 
     def test_no_column_filter_reads_all(self):
+        """With columns=None, _columns is None and the byte count is still cached."""
         reader = self._make_reader(columns=None)
+        assert reader._columns is None
         reader.open_file_map[self.FILENAME] = reader.open(self.FILENAME)
         reader.get_sample(self.FILENAME, 0)
-        table, _ = reader._rg_cache[(self.FILENAME, 0)]
-        assert set(table.column_names) == set(COLUMNS)
+        cached = reader._rg_cache[(self.FILENAME, 0)]
+        assert isinstance(cached, int)
+        assert cached > 0
 
 
 # ─────────────────────────────────────────────────────────────────────────────

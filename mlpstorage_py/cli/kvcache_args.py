@@ -17,6 +17,7 @@ from mlpstorage_py.cli.common_args import (
     add_universal_arguments,
     add_host_arguments,
     add_mpi_arguments,
+    add_storage_type_arguments,
     add_timeseries_arguments,
 )
 
@@ -87,6 +88,7 @@ def add_kvcache_arguments(parser):
         _add_kvcache_model_arguments(_parser)
         _add_kvcache_cache_arguments(_parser)
         add_universal_arguments(_parser)
+        add_storage_type_arguments(_parser)
 
     # Run-specific arguments
     _add_kvcache_run_arguments(run_benchmark)

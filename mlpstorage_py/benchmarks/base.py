@@ -565,15 +565,16 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         host_count = len(hosts) if hosts else 1
 
         self.logger.debug(f"Collecting cluster info ({host_count} host{'s' if host_count != 1 else ''})...")
-        
-        if self._should_use_ssh_collection():
-            self.logger.debug("Collecting via SSH...")
-            self._cluster_info_start = self._collect_via_ssh()
-            self._collection_method = 'ssh'
-        else:
-            self.logger.debug("Collecting via MPI...")
-            self._cluster_info_start = self._collect_cluster_information()
-            self._collection_method = 'mpi'
+
+        with progress_context("Collecting cluster info...", total=None) as (_, set_desc):
+            if self._should_use_ssh_collection():
+                set_desc("Collecting via SSH...")
+                self._cluster_info_start = self._collect_via_ssh()
+                self._collection_method = 'ssh'
+            else:
+                set_desc("Collecting via MPI...")
+                self._cluster_info_start = self._collect_cluster_information()
+                self._collection_method = 'mpi'
 
         if self._cluster_info_start:
             self.logger.debug(f'Collected start cluster info via {self._collection_method}')
@@ -589,13 +590,14 @@ class Benchmark(BenchmarkInterface, abc.ABC):
             return
 
         self.logger.debug("Collecting end cluster info...")
-        
-        if self._collection_method == 'ssh':
-            self.logger.debug("Collecting via SSH...")
-            self._cluster_info_end = self._collect_via_ssh()
-        else:
-            self.logger.debug("Collecting via MPI...")
-            self._cluster_info_end = self._collect_cluster_information()
+
+        with progress_context("Collecting cluster info...", total=None) as (_, set_desc):
+            if self._collection_method == 'ssh':
+                set_desc("Collecting via SSH...")
+                self._cluster_info_end = self._collect_via_ssh()
+            else:
+                set_desc("Collecting via MPI...")
+                self._cluster_info_end = self._collect_cluster_information()
 
         if self._cluster_info_end:
             self.logger.debug(f'Collected end cluster info via {self._collection_method}')

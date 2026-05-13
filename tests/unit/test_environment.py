@@ -15,7 +15,7 @@ import pytest
 import subprocess
 from unittest.mock import patch, MagicMock
 
-from mlpstorage.environment import (
+from mlpstorage_py.environment import (
     OSInfo,
     detect_os,
     get_install_instruction,
@@ -372,8 +372,8 @@ class TestValidateSshConnectivity:
     def test_raises_validation_issue_when_ssh_not_found(self):
         """Should raise ValidationIssue when SSH binary not found."""
         with patch('shutil.which', return_value=None):
-            with patch('mlpstorage.environment.detect_os') as mock_detect:
-                with patch('mlpstorage.environment.get_install_instruction') as mock_hint:
+            with patch('mlpstorage_py.environment.detect_os') as mock_detect:
+                with patch('mlpstorage_py.environment.get_install_instruction') as mock_hint:
                     mock_detect.return_value = OSInfo(
                         system='Linux', release='5.4.0', machine='x86_64',
                         distro_id='ubuntu', distro_name='Ubuntu', distro_version='22.04'
@@ -392,8 +392,8 @@ class TestValidateSshConnectivity:
     def test_validation_issue_has_os_specific_install_command(self):
         """Should include OS-specific install command in ValidationIssue."""
         with patch('shutil.which', return_value=None):
-            with patch('mlpstorage.environment.detect_os') as mock_detect:
-                with patch('mlpstorage.environment.get_install_instruction') as mock_hint:
+            with patch('mlpstorage_py.environment.detect_os') as mock_detect:
+                with patch('mlpstorage_py.environment.get_install_instruction') as mock_hint:
                     # Mock RHEL system
                     mock_detect.return_value = OSInfo(
                         system='Linux', release='4.18.0', machine='x86_64',

@@ -546,7 +546,8 @@ def generate_mpi_prefix_cmd(
         prefix += " --bind-to none --map-by node"
     else:
         # Single-host: optimize for NUMA domains
-        prefix += " --bind-to none --map-by socket"
+        # Disable VADER shared-memory transport — causes segfaults on some kernels
+        prefix += " --bind-to none --map-by socket --mca btl ^vader"
 
     if oversubscribe:
         prefix += " --oversubscribe"

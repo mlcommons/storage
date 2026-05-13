@@ -8,6 +8,7 @@ benchmark suite, with comprehensive error handling and user-friendly
 messaging.
 """
 
+import os
 import signal
 import sys
 import traceback
@@ -214,6 +215,18 @@ def run_benchmark(args, run_datetime):
         )
 
     benchmark = benchmark_class(args, run_datetime=run_datetime, logger=logger)
+
+    # Warn if the user is relying on the temp-dir default for results.
+    # Results stored in /tmp (or equivalent) are wiped on reboot.
+    _results_dir = getattr(args, 'results_dir', DEFAULT_RESULTS_DIR)
+    if _results_dir == DEFAULT_RESULTS_DIR and not os.environ.get('MLPERF_RESULTS_DIR'):
+        logger.warning(
+            f"Results directory not specified. Writing results to the system temp directory: "
+            f"{DEFAULT_RESULTS_DIR}. These results will NOT persist across a reboot. "
+            f"Use --results-dir <path> or set the MLPERF_RESULTS_DIR environment variable "
+            f"to save results permanently."
+        )
+
     ret_code = EXIT_CODE.SUCCESS
 
     try:

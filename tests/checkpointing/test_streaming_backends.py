@@ -10,7 +10,7 @@ import os
 import time
 import argparse
 
-from mlpstorage.checkpointing import StreamingCheckpointing
+from mlpstorage_py.checkpointing import StreamingCheckpointing
 
 
 def run_backend(backend: str, uri: str, size_gb: float, max_in_flight: int):

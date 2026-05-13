@@ -131,7 +131,10 @@ ALLOW_RUN_AS_ROOT = True
 
 MAX_NUM_FILES_TRAIN = 128*1024
 
-DEFAULT_RESULTS_DIR = os.path.join(tempfile.gettempdir(), f"mlperf_storage_results")
+DEFAULT_RESULTS_DIR = os.environ.get(
+    "MLPERF_RESULTS_DIR",
+    os.path.join(tempfile.gettempdir(), "mlperf_storage_results"),
+)
 
 import enum
 

@@ -300,6 +300,45 @@ def add_mpi_arguments(parser):
     )
 
 
+def add_storage_type_arguments(parser):
+    """Add --file / --object storage-type selector to a subcommand parser.
+
+    This group is optional (neither flag is required at parse time), so it can
+    be safely added to every benchmark subparser — VectorDB, KV-cache, training,
+    and checkpointing alike.  Benchmarks that do not yet use object storage
+    simply ignore the flags; those that do can check ``args.file`` /
+    ``args.object``.
+
+    When --object is passed the runtime reads S3 credentials and endpoint from
+    .env (AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
+    AWS_REGION, BUCKET, STORAGE_LIBRARY).  --file expects a local path
+    reachable on every participating host.
+
+    Args:
+        parser: Argparse subcommand parser to add arguments to.
+    """
+    storage_group = parser.add_argument_group("Storage Type")
+    access_proto = storage_group.add_mutually_exclusive_group(required=False)
+    access_proto.add_argument(
+        "--file",
+        action="store_true",
+        help="Use POSIX files as the data access method"
+    )
+    access_proto.add_argument(
+        "--object",
+        nargs="?",
+        type=str,
+        const="s3",
+        choices=["s3"],
+        help=(
+            "Use the given Object API as the data access method, defaults to S3. "
+            "S3 credentials and endpoint are read from environment variables or "
+            "a .env file (AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID, "
+            "AWS_SECRET_ACCESS_KEY, AWS_REGION, BUCKET, STORAGE_LIBRARY)."
+        ),
+    )
+
+
 def add_host_arguments(parser, required=False):
     """Add host-related arguments common to distributed benchmarks.
 

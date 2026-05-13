@@ -12,8 +12,8 @@ Tests cover:
 import argparse
 import pytest
 
-from mlpstorage.cli.kvcache_args import add_kvcache_arguments
-from mlpstorage.config import EXEC_TYPE, KVCACHE_MODELS
+from mlpstorage_py.cli.kvcache_args import add_kvcache_arguments
+from mlpstorage_py.config import EXEC_TYPE, KVCACHE_MODELS
 
 
 class TestKVCacheSubcommands:

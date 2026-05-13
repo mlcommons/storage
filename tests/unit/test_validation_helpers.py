@@ -16,13 +16,13 @@ import pytest
 from argparse import Namespace
 from unittest.mock import patch, MagicMock
 
-from mlpstorage.validation_helpers import (
+from mlpstorage_py.validation_helpers import (
     validate_benchmark_environment,
     _requires_mpi,
     _is_distributed_run,
     _requires_dlio,
 )
-from mlpstorage.errors import DependencyError, MPIError, ConfigurationError
+from mlpstorage_py.errors import DependencyError, MPIError, ConfigurationError
 
 
 class TestRequiresMpi:
@@ -135,8 +135,8 @@ class TestValidateBenchmarkEnvironment:
         # Should not raise any exception
         validate_benchmark_environment(args)
 
-    @patch('mlpstorage.validation_helpers.check_mpi_with_hints')
-    @patch('mlpstorage.validation_helpers.check_dlio_with_hints')
+    @patch('mlpstorage_py.validation_helpers.check_mpi_with_hints')
+    @patch('mlpstorage_py.validation_helpers.check_dlio_with_hints')
     def test_collects_multiple_errors(self, mock_dlio, mock_mpi):
         """Should collect multiple errors before raising."""
         # Mock both checks to fail
@@ -164,7 +164,7 @@ class TestValidateBenchmarkEnvironment:
         error_calls = [c for c in mock_logger.error.call_args_list]
         assert len(error_calls) >= 2  # At least 2 errors logged
 
-    @patch('mlpstorage.validation_helpers.check_mpi_with_hints')
+    @patch('mlpstorage_py.validation_helpers.check_mpi_with_hints')
     def test_checks_mpi_for_distributed_runs(self, mock_mpi):
         """Should check MPI for distributed runs with multiple hosts."""
         mock_mpi.side_effect = DependencyError("MPI not found", dependency="mpirun")
@@ -182,7 +182,7 @@ class TestValidateBenchmarkEnvironment:
         assert "MPI" in str(exc_info.value) or "mpirun" in str(exc_info.value)
         mock_mpi.assert_called_once()
 
-    @patch('mlpstorage.validation_helpers.check_mpi_with_hints')
+    @patch('mlpstorage_py.validation_helpers.check_mpi_with_hints')
     def test_skips_mpi_for_single_host(self, mock_mpi):
         """Should NOT check for MPI on single localhost run."""
         args = Namespace(
@@ -197,7 +197,7 @@ class TestValidateBenchmarkEnvironment:
         # MPI check should NOT have been called
         mock_mpi.assert_not_called()
 
-    @patch('mlpstorage.validation_helpers.check_dlio_with_hints')
+    @patch('mlpstorage_py.validation_helpers.check_dlio_with_hints')
     def test_checks_dlio_for_training(self, mock_dlio):
         """Should check DLIO for training benchmarks."""
         mock_dlio.side_effect = DependencyError("DLIO not found", dependency="dlio_benchmark")
@@ -216,7 +216,7 @@ class TestValidateBenchmarkEnvironment:
         assert "DLIO" in str(exc_info.value) or "dlio" in str(exc_info.value)
         mock_dlio.assert_called_once()
 
-    @patch('mlpstorage.validation_helpers.check_dlio_with_hints')
+    @patch('mlpstorage_py.validation_helpers.check_dlio_with_hints')
     def test_checks_dlio_for_checkpointing(self, mock_dlio):
         """Should check DLIO for checkpointing benchmarks."""
         mock_dlio.side_effect = DependencyError("DLIO not found", dependency="dlio_benchmark")
@@ -234,7 +234,7 @@ class TestValidateBenchmarkEnvironment:
         assert "DLIO" in str(exc_info.value) or "dlio" in str(exc_info.value)
         mock_dlio.assert_called_once()
 
-    @patch('mlpstorage.validation_helpers.check_dlio_with_hints')
+    @patch('mlpstorage_py.validation_helpers.check_dlio_with_hints')
     def test_skips_dlio_for_kvcache(self, mock_dlio):
         """Should NOT check DLIO for kvcache benchmarks."""
         args = Namespace(
@@ -249,8 +249,8 @@ class TestValidateBenchmarkEnvironment:
         # DLIO check should NOT have been called
         mock_dlio.assert_not_called()
 
-    @patch('mlpstorage.validation_helpers.validate_ssh_connectivity')
-    @patch('mlpstorage.validation_helpers.check_ssh_available')
+    @patch('mlpstorage_py.validation_helpers.validate_ssh_connectivity')
+    @patch('mlpstorage_py.validation_helpers.check_ssh_available')
     def test_checks_ssh_for_remote_hosts(self, mock_ssh_available, mock_ssh_conn):
         """Should check SSH connectivity for remote hosts."""
         mock_ssh_available.return_value = '/usr/bin/ssh'
@@ -265,7 +265,7 @@ class TestValidateBenchmarkEnvironment:
             results_dir='/tmp'
         )
 
-        from mlpstorage.environment import ValidationIssue
+        from mlpstorage_py.environment import ValidationIssue
         with pytest.raises(ValidationIssue) as exc_info:
             validate_benchmark_environment(args)
 
@@ -273,8 +273,8 @@ class TestValidateBenchmarkEnvironment:
         mock_ssh_available.assert_called_once()
         mock_ssh_conn.assert_called_once_with(['remote-host'])
 
-    @patch('mlpstorage.validation_helpers.validate_ssh_connectivity')
-    @patch('mlpstorage.validation_helpers.check_ssh_available')
+    @patch('mlpstorage_py.validation_helpers.validate_ssh_connectivity')
+    @patch('mlpstorage_py.validation_helpers.check_ssh_available')
     def test_skip_remote_checks_flag(self, mock_ssh_available, mock_ssh_conn):
         """Should skip SSH checks when skip_remote_checks=True."""
         args = Namespace(
@@ -299,7 +299,7 @@ class TestValidateBenchmarkEnvironment:
             results_dir='/tmp'
         )
 
-        from mlpstorage.errors import FileSystemError
+        from mlpstorage_py.errors import FileSystemError
         with pytest.raises(FileSystemError):
             validate_benchmark_environment(args)
 
@@ -314,13 +314,13 @@ class TestValidateBenchmarkEnvironment:
         )
 
         # Suppress DLIO check since we're testing param validation
-        with patch('mlpstorage.validation_helpers.check_dlio_with_hints'):
+        with patch('mlpstorage_py.validation_helpers.check_dlio_with_hints'):
             with pytest.raises(ConfigurationError) as exc_info:
                 validate_benchmark_environment(args)
 
             assert 'model' in str(exc_info.value).lower()
 
-    @patch('mlpstorage.validation_helpers.check_dlio_with_hints')
+    @patch('mlpstorage_py.validation_helpers.check_dlio_with_hints')
     def test_logger_receives_all_errors(self, mock_dlio):
         """Should log all errors to the logger."""
         mock_dlio.side_effect = DependencyError("DLIO not found", dependency="dlio_benchmark")
@@ -370,7 +370,7 @@ class TestValidateBenchmarkEnvironmentEdgeCases:
 
     def test_mpi_bin_custom_path(self):
         """Should use custom mpi_bin if provided."""
-        with patch('mlpstorage.validation_helpers.check_mpi_with_hints') as mock_mpi:
+        with patch('mlpstorage_py.validation_helpers.check_mpi_with_hints') as mock_mpi:
             mock_mpi.return_value = '/custom/mpirun'
 
             args = Namespace(
@@ -387,7 +387,7 @@ class TestValidateBenchmarkEnvironmentEdgeCases:
 
     def test_dlio_bin_path_custom(self):
         """Should pass custom dlio_bin_path to check."""
-        with patch('mlpstorage.validation_helpers.check_dlio_with_hints') as mock_dlio:
+        with patch('mlpstorage_py.validation_helpers.check_dlio_with_hints') as mock_dlio:
             mock_dlio.return_value = '/custom/dlio_benchmark'
 
             args = Namespace(
@@ -405,7 +405,7 @@ class TestValidateBenchmarkEnvironmentEdgeCases:
 
     def test_hosts_with_slots_format(self):
         """Should handle host:slots format correctly."""
-        with patch('mlpstorage.validation_helpers.check_mpi_with_hints') as mock_mpi:
+        with patch('mlpstorage_py.validation_helpers.check_mpi_with_hints') as mock_mpi:
             mock_mpi.return_value = '/usr/bin/mpirun'
 
             args = Namespace(
@@ -420,8 +420,8 @@ class TestValidateBenchmarkEnvironmentEdgeCases:
             # MPI should be checked since we have remote hosts
             mock_mpi.assert_called_once()
 
-    @patch('mlpstorage.validation_helpers.validate_ssh_connectivity')
-    @patch('mlpstorage.validation_helpers.check_ssh_available')
+    @patch('mlpstorage_py.validation_helpers.validate_ssh_connectivity')
+    @patch('mlpstorage_py.validation_helpers.check_ssh_available')
     def test_partial_ssh_failures(self, mock_ssh_available, mock_ssh_conn):
         """Should report all SSH failures, not just first."""
         mock_ssh_available.return_value = '/usr/bin/ssh'
@@ -440,7 +440,7 @@ class TestValidateBenchmarkEnvironmentEdgeCases:
 
         mock_logger = MagicMock()
 
-        from mlpstorage.environment import ValidationIssue
+        from mlpstorage_py.environment import ValidationIssue
         with pytest.raises(ValidationIssue):
             validate_benchmark_environment(args, logger=mock_logger)
 

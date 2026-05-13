@@ -26,6 +26,7 @@ from mlpstorage_py.cli.common_args import (
     HELP_MESSAGES,
     PROGRAM_DESCRIPTIONS,
     add_universal_arguments,
+    add_storage_type_arguments,
     add_mpi_arguments,
     add_host_arguments,
     add_dlio_arguments,

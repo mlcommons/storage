@@ -203,14 +203,20 @@ def get_runs_files(results_dir: str, logger=None) -> List:
 
     if not os.path.exists(results_dir):
         if logger:
-            logger.error(f"Results directory not found: {results_dir}")
+            logger.warning(f"Results directory not found: {results_dir}")
         return runs
 
     # Walk the directory tree looking for run directories
     for root, dirs, files in os.walk(results_dir):
         # Check if this directory contains a summary.json (DLIO run) or metadata file
         has_summary = 'summary.json' in files
-        has_metadata = any(f.endswith('_metadata.json') for f in files)
+        metadata_files = [f for f in files if f.endswith('_metadata.json')]
+        has_metadata = len(metadata_files) == 1
+
+        if len(metadata_files) > 1:
+            if logger:
+                logger.warning(f"Skipping {root}: multiple metadata files found ({len(metadata_files)})")
+            continue
 
         if has_summary or has_metadata:
             try:

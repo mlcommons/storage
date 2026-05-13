@@ -33,6 +33,7 @@ mlp-storage hosts **four benchmark workloads**:
 | Understand AIStore gaps, reader/checkpoint issues, rationalization options | [dlio_benchmark/docs/AIStore_Analysis.md](../dlio_benchmark/docs/AIStore_Analysis.md) |
 | Test streaming checkpointing | [Streaming-Chkpt-Guide.md](Streaming-Chkpt-Guide.md) |
 | Configure multi-endpoint / load-balanced object storage | [MULTI_ENDPOINT_GUIDE.md](MULTI_ENDPOINT_GUIDE.md) |
+| Complete object storage settings reference (`--object` flag, `.env`, env vars) | [OBJECT_STORAGE_GUIDE.md](OBJECT_STORAGE_GUIDE.md) |
 | Understand the system architecture | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Add a new workload or benchmark | [ADDING_BENCHMARKS.md](ADDING_BENCHMARKS.md) |
 
@@ -178,6 +179,14 @@ Multi-endpoint load balancing for object storage: comma-separated URI lists,
 template expansion, file-based endpoint lists, and MPI rank-based distribution.
 Compares native multi-endpoint (s3dlio) vs. MPI rank selection across all three
 object storage libraries.
+
+#### [OBJECT_STORAGE_GUIDE.md](OBJECT_STORAGE_GUIDE.md)
+
+Comprehensive reference for every setting required to run `mlpstorage` training
+benchmarks against S3-compatible object storage using `s3dlio`. Covers `.env`
+credential setup, `BUCKET` / `STORAGE_LIBRARY` / `AWS_ENDPOINT_URL` environment
+variables, URI schemes (s3/direct/file), multi-endpoint configuration, and the
+`--object` CLI flag.
 
 #### [Streaming-Chkpt-Guide.md](Streaming-Chkpt-Guide.md)
 

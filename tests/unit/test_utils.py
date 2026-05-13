@@ -17,7 +17,7 @@ import pytest
 from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
-from mlpstorage.utils import (
+from mlpstorage_py.utils import (
     MLPSJsonEncoder,
     is_valid_datetime_format,
     get_datetime_from_timestamp,
@@ -27,7 +27,7 @@ from mlpstorage.utils import (
     remove_nan_values,
     generate_mpi_prefix_cmd,
 )
-from mlpstorage.config import MPIRUN, MPIEXEC
+from mlpstorage_py.config import MPIRUN, MPIEXEC
 
 
 class TestMLPSJsonEncoder:
@@ -586,7 +586,7 @@ class TestCommandExecutor:
     @pytest.fixture
     def executor(self):
         """Create a CommandExecutor instance."""
-        from mlpstorage.utils import CommandExecutor
+        from mlpstorage_py.utils import CommandExecutor
         logger = MagicMock(spec=logging.Logger)
         return CommandExecutor(logger=logger)
 

@@ -9,6 +9,7 @@ from mlpstorage_py.config import MODELS, ACCELERATORS, DEFAULT_HOSTS, EXEC_TYPE
 from mlpstorage_py.cli.common_args import (
     HELP_MESSAGES,
     add_universal_arguments,
+    add_storage_type_arguments,
     add_mpi_arguments,
     add_host_arguments,
     add_dlio_arguments,
@@ -121,6 +122,7 @@ def add_training_arguments(parser):
         )
         add_dlio_arguments(_parser)
         add_universal_arguments(_parser)
+        add_storage_type_arguments(_parser)
 
     # Add time-series arguments to run command only
     add_timeseries_arguments(run_benchmark)

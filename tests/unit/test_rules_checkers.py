@@ -13,8 +13,8 @@ Tests cover:
 import pytest
 from unittest.mock import MagicMock, patch
 
-from mlpstorage.config import PARAM_VALIDATION, BENCHMARK_TYPES, UNET
-from mlpstorage.rules import (
+from mlpstorage_py.config import PARAM_VALIDATION, BENCHMARK_TYPES, UNET
+from mlpstorage_py.rules import (
     Issue,
     RunID,
     RulesChecker,
@@ -766,7 +766,7 @@ class TestTrainingSubmissionRulesChecker:
 
     def test_supported_models_includes_training_models(self, mock_logger):
         """TrainingSubmissionRulesChecker has correct supported models."""
-        from mlpstorage.config import MODELS
+        from mlpstorage_py.config import MODELS
 
         # Create empty checker to check class attribute
         checker = TrainingSubmissionRulesChecker([], logger=mock_logger)

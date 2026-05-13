@@ -6,7 +6,7 @@ import time
 import pytest
 from unittest.mock import MagicMock, patch, Mock
 
-from mlpstorage.cluster_collector import (
+from mlpstorage_py.cluster_collector import (
     parse_proc_vmstat,
     parse_proc_mounts,
     parse_proc_cgroups,
@@ -19,7 +19,7 @@ from mlpstorage.cluster_collector import (
     TimeSeriesCollector,
     MultiHostTimeSeriesCollector,
 )
-from mlpstorage.interfaces.collector import CollectionResult
+from mlpstorage_py.interfaces.collector import CollectionResult
 
 
 class TestParseProcVmstat:
@@ -319,7 +319,7 @@ class TestCollectLocalSystemInfo:
 
     def test_includes_vmstat(self):
         """Test that collect_local_system_info includes vmstat data."""
-        from mlpstorage.cluster_collector import collect_local_system_info
+        from mlpstorage_py.cluster_collector import collect_local_system_info
 
         info = collect_local_system_info()
         assert 'vmstat' in info
@@ -331,7 +331,7 @@ class TestCollectLocalSystemInfo:
 
     def test_includes_mounts(self):
         """Test that collect_local_system_info includes mounts data."""
-        from mlpstorage.cluster_collector import collect_local_system_info
+        from mlpstorage_py.cluster_collector import collect_local_system_info
 
         info = collect_local_system_info()
         assert 'mounts' in info
@@ -346,7 +346,7 @@ class TestCollectLocalSystemInfo:
 
     def test_includes_cgroups(self):
         """Test that collect_local_system_info includes cgroups data."""
-        from mlpstorage.cluster_collector import collect_local_system_info
+        from mlpstorage_py.cluster_collector import collect_local_system_info
 
         info = collect_local_system_info()
         assert 'cgroups' in info
@@ -499,7 +499,7 @@ class TestSSHClusterCollector:
         assert result.collection_method == 'local'
         assert len(result.data) == 1
 
-    @patch('mlpstorage.cluster_collector.collect_local_system_info')
+    @patch('mlpstorage_py.cluster_collector.collect_local_system_info')
     def test_collect_from_localhost_uses_direct_collection(self, mock_local, collector):
         """Test that localhost uses direct collection, not SSH."""
         mock_local.return_value = {'hostname': 'localhost', 'meminfo': {}}
@@ -507,7 +507,7 @@ class TestSSHClusterCollector:
         mock_local.assert_called_once()
         assert result['hostname'] == 'localhost'
 
-    @patch('mlpstorage.cluster_collector.collect_local_system_info')
+    @patch('mlpstorage_py.cluster_collector.collect_local_system_info')
     def test_collect_from_127_uses_direct_collection(self, mock_local, collector):
         """Test that 127.0.0.1 uses direct collection, not SSH."""
         mock_local.return_value = {'hostname': 'localhost', 'meminfo': {}}
@@ -614,7 +614,7 @@ class TestSSHClusterCollector:
         assert 'error' in result
         assert 'Network unreachable' in result['error']
 
-    @patch('mlpstorage.cluster_collector.SSHClusterCollector._collect_from_single_host')
+    @patch('mlpstorage_py.cluster_collector.SSHClusterCollector._collect_from_single_host')
     def test_collect_parallel_execution(self, mock_collect_single, mock_logger):
         """Test that collect uses parallel execution."""
         collector = SSHClusterCollector(
@@ -632,7 +632,7 @@ class TestSSHClusterCollector:
         assert result.collection_method == 'ssh'
         assert len(result.data) == 3
 
-    @patch('mlpstorage.cluster_collector.SSHClusterCollector._collect_from_single_host')
+    @patch('mlpstorage_py.cluster_collector.SSHClusterCollector._collect_from_single_host')
     def test_collect_returns_success_when_all_succeed(self, mock_collect_single, mock_logger):
         """Test collect returns success when all hosts succeed."""
         collector = SSHClusterCollector(
@@ -646,7 +646,7 @@ class TestSSHClusterCollector:
         assert result.success is True
         assert len(result.errors) == 0
 
-    @patch('mlpstorage.cluster_collector.SSHClusterCollector._collect_from_single_host')
+    @patch('mlpstorage_py.cluster_collector.SSHClusterCollector._collect_from_single_host')
     def test_collect_returns_success_with_partial_failure(self, mock_collect_single, mock_logger):
         """Test collect returns success if majority of hosts succeed."""
         collector = SSHClusterCollector(
@@ -667,7 +667,7 @@ class TestSSHClusterCollector:
         assert len(result.errors) == 1
         assert len(result.data) == 3
 
-    @patch('mlpstorage.cluster_collector.SSHClusterCollector._collect_from_single_host')
+    @patch('mlpstorage_py.cluster_collector.SSHClusterCollector._collect_from_single_host')
     def test_collect_returns_error_list(self, mock_collect_single, mock_logger):
         """Test collect includes errors in result."""
         collector = SSHClusterCollector(
@@ -904,7 +904,7 @@ class TestTimeSeriesSampleDataclass:
 
     def test_create_with_required_fields(self):
         """Can create sample with just timestamp and hostname."""
-        from mlpstorage.rules.models import TimeSeriesSample
+        from mlpstorage_py.rules.models import TimeSeriesSample
 
         sample = TimeSeriesSample(
             timestamp='2026-01-24T12:00:00Z',
@@ -916,7 +916,7 @@ class TestTimeSeriesSampleDataclass:
 
     def test_to_dict_excludes_none(self):
         """to_dict should exclude None values."""
-        from mlpstorage.rules.models import TimeSeriesSample
+        from mlpstorage_py.rules.models import TimeSeriesSample
 
         sample = TimeSeriesSample(
             timestamp='2026-01-24T12:00:00Z',
@@ -932,7 +932,7 @@ class TestTimeSeriesSampleDataclass:
 
     def test_from_dict_roundtrip(self):
         """Can roundtrip through to_dict/from_dict."""
-        from mlpstorage.rules.models import TimeSeriesSample
+        from mlpstorage_py.rules.models import TimeSeriesSample
 
         original = TimeSeriesSample(
             timestamp='2026-01-24T12:00:00Z',
@@ -955,7 +955,7 @@ class TestTimeSeriesDataDataclass:
 
     def test_create_with_fields(self):
         """Can create TimeSeriesData with all fields."""
-        from mlpstorage.rules.models import TimeSeriesSample, TimeSeriesData
+        from mlpstorage_py.rules.models import TimeSeriesSample, TimeSeriesData
 
         sample = TimeSeriesSample(
             timestamp='2026-01-24T12:00:00Z',
@@ -978,7 +978,7 @@ class TestTimeSeriesDataDataclass:
 
     def test_to_dict_serializes_samples(self):
         """to_dict should serialize nested samples."""
-        from mlpstorage.rules.models import TimeSeriesSample, TimeSeriesData
+        from mlpstorage_py.rules.models import TimeSeriesSample, TimeSeriesData
 
         sample = TimeSeriesSample(
             timestamp='2026-01-24T12:00:00Z',
@@ -1005,7 +1005,7 @@ class TestTimeSeriesDataDataclass:
 
     def test_from_dict_roundtrip(self):
         """Can roundtrip TimeSeriesData through to_dict/from_dict."""
-        from mlpstorage.rules.models import TimeSeriesSample, TimeSeriesData
+        from mlpstorage_py.rules.models import TimeSeriesSample, TimeSeriesData
 
         sample = TimeSeriesSample(
             timestamp='2026-01-24T12:00:00Z',

@@ -11,45 +11,72 @@ object storage via s3dlio, minio, or s3torchconnector).
 
 ---
 
+## ⚡ Recent Benchmark Results — April 26, 2026
+
+Full end-to-end MLPerf Storage benchmark results on all four supported training and
+checkpointing workloads, tested on both POSIX NVMe and S3-compatible object storage
+(via [s3-ultra](../s3-ultra/) fake S3 server over loopback).
+
+**Host:** loki-russ · **MPI ranks:** 4 · **Accelerator profile:** B200
+
+| Workload | POSIX NVMe | AU% | S3 Object | AU% | Details |
+|----------|-----------|:---:|-----------|:---:|---------|
+| **RetinaNet** (250K × 323 KB JPEG, batch 24) | 1,866 s/s | **92.8%** ✅ | 1,919 s/s | **95.4%** ✅ | [RetinaNet_test_results.md](RetinaNet_test_results.md) |
+| **Flux** (130 Parquet × 256 samples) | 141 s/s | **99.7%** ✅ | 121 s/s | **85.4%** ⚠️ | [Flux_test_results.md](Flux_test_results.md) |
+| **DLRM** (64 Parquet × 1M samples) | 389K s/s | **0.48%** ❌ | 106K s/s | **0.11%** ❌ | [DLRM_test_results.md](DLRM_test_results.md) |
+| **Checkpointing** (llama3-8b, NP=4) | write **1.416 GiB/s** | — | write **2.213 GiB/s** | — | [Checkpoint_test_results.md](Checkpoint_test_results.md) |
+
+> **RetinaNet:** b200 AU target ≥ 85% — both POSIX and S3 pass comfortably. Results include
+> O_DIRECT verification; see full file for T1–T4 breakdown and bug-fix history.
+>
+> **Flux:** POSIX meets the ≥ 90% AU target; S3 at 85.4% falls slightly short due to
+> per-request latency overhead on loopback HTTP. Real object storage would close this gap.
+>
+> **DLRM:** AU target is 70%, but both runs fail due to near-zero compute time (0.375 ms/step) —
+> the workload is overwhelmingly I/O bound. A production submission requires high-bandwidth
+> parallel storage to sustain the ~9 MB/step demand at accelerator speed.
+>
+> **Checkpointing:** No AU metric; throughput shows S3 multipart write (32 MB parts, 16 in-flight)
+> **exceeds** local NVMe write speed thanks to pipelining. Read is network-limited at 8.4 GiB/s.
+
+---
+
 ## Quick Start for New Users
 
-### Step 1 — Clone and set up the virtual environment
+### Step 1 — Clone and set up the environment
 
 ```bash
-git clone https://github.com/russfellows/mlc-storage.git mlp-storage
+git clone https://github.com/mlcommons/storage.git mlp-storage
 cd mlp-storage
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e ".[test]"
+uv sync
 ```
 
-The `[test]` extra installs `pytest`, `pytest-cov`, and `pytest-mock` in addition to
-the core package. The package itself is installed in editable mode (`-e`) so changes
-to `mlpstorage/` source files are reflected immediately without reinstalling.
+[`uv`](https://docs.astral.sh/uv/) creates and manages the virtual environment
+automatically — no manual `venv` or `pip` steps required. If `uv` is not installed:
 
-> **Already cloned / returning user?**
+```bash
+curl -LsSf https://astral.sh/uv/install.sh | sh
+```
+
+To include test and full extras:
+
+```bash
+uv sync --all-extras
+```
+
+> **Already cloned / returning user?** Just run `uv sync` again after pulling — it
+> is idempotent and fast. It updates the environment to match `uv.lock` automatically.
 >
-> Always activate the venv first, then reinstall to pick up any dependency or version
-> changes since your last pull:
+> Confirm the installed version:
 > ```bash
-> source .venv/bin/activate
-> pip install -e ".[test]"
-> ```
-> This is fast (seconds) if nothing changed, and critical if `pyproject.toml` has
-> been updated — for example after a version bump or a new dependency was added.
-> Skipping it can leave `mlpstorage.__version__` and package metadata reporting
-> the old version, and new dependencies missing.
->
-> Confirm the installed version matches the repo:
-> ```bash
-> python -c "import mlpstorage; print(mlpstorage.VERSION)"
+> uv run python -c "import mlpstorage_py; print(mlpstorage_py.VERSION)"
 > # Should print: 3.0.0
 > ```
 
 ### Step 2 — Run the unit tests (no infrastructure required)
 
 ```bash
-pytest tests/unit/
+uv run pytest tests/unit/
 ```
 
 Expected output: all tests pass in a few seconds. No MinIO, no MPI, no GPU required.
@@ -59,8 +86,7 @@ These tests mock all external dependencies.
 ==================== XX passed in X.XXs ====================
 ```
 
-If you see import errors, make sure the virtual environment is active and the package
-is installed (`pip install -e ".[test]"`).
+If you see import errors, run `uv sync --all-extras` and retry.
 
 ### Step 3 — (Optional) Run integration tests with object storage
 
@@ -228,7 +254,9 @@ pytest tests/unit/test_benchmarks_kvcache.py -v
 | `test_cli_kvcache.py` | CLI argument parsing — KV cache model and cache configuration |
 | `test_cli_vectordb.py` | CLI argument parsing — VectorDB run/datagen subcommands |
 | `test_cluster_collector.py` | Cluster metric collection |
-| `test_config.py` | Config module, environment variable handling |
+| `test_config.py` | Config module, env var handling, `DEFAULT_RESULTS_DIR` env-var override |
+| `test_dlio_object_storage.py` | `DLIOBenchmark._apply_object_storage_params()` — `.env` loading, param injection, error cases |
+| `test_main_warnings.py` | `run_benchmark()` tempdir warning — fires/suppresses correctly |
 | `test_dependency_check.py` | Dependency checking logic |
 | `test_environment.py` | Environment detection and validation |
 | `test_history.py` | `HistoryTracker` — run history file management |
@@ -379,6 +407,10 @@ python tests/object-store/test_s3dlio_direct.py    # zero-copy direct I/O path
 
 - **[Object_Perf_Results.md](object-store/Object_Perf_Results.md)** — Full benchmark
   results: native API throughput, DLIO streaming checkpoint (16 GB / 100 GB), MPI sweep
+- **[bench-results-retinanet-20260425.md](object-store/bench-results-retinanet-20260425.md)** — April 25, 2026: write_threads sweep for RetinaNet on s3-ultra (loopback), NP=1
+- **[s3ultra-test-results-20260425.md](object-store/s3ultra-test-results-20260425.md)** — April 25, 2026: s3-ultra end-to-end test results
+- **[scaling-analysis-2026-04-25.md](object-store/scaling-analysis-2026-04-25.md)** — April 25, 2026: NP scaling analysis across storage backends
+- **[NPZ-OPTIMIZATION-ANALYSIS.md](object-store/NPZ-OPTIMIZATION-ANALYSIS.md)** — NPZ read optimization analysis
 - **[dlio_mpi_object_results.md](object-store/dlio_mpi_object_results.md)** — March 20, 2026: DLIO + MPI scaling results (UNet3D h100 profile, ~23.5 GB dataset, NP=1/2/4)
 - **[s3dlio_performance_analysis.md](object-store/s3dlio_performance_analysis.md)** — March 20, 2026 HISTORICAL: root-cause analysis of s3dlio performance (6 findings; most resolved in v0.9.84)
 - **[S3library_review_21-Mar.md](object-store/S3library_review_21-Mar.md)** — March 21, 2026: prefetch fairness review across all three libraries (analysis only; no code changes)
