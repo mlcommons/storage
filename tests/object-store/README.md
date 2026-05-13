@@ -8,6 +8,25 @@ embedded in any script or config file.
 
 ---
 
+## Recommended Hardware
+
+**Linux only** — macOS and Windows are not supported.
+
+These are minimum requirements per `NP` (number of simulated accelerators).
+Running below spec will likely cause OOM crashes:
+
+| NP | CPU cores (incl. threads) | RAM |
+|:---:|---:|---:|
+| 1 | 8 | 16 GB |
+| 2 | 16 | 32 GB |
+| 4 | 32 | 64 GB |
+| 8 | 64 | 128 GB |
+
+NP scales linearly — each doubling of NP requires 2× the CPU and RAM.
+You may be able to run some workloads below these numbers, but OOM crashes are expected.
+
+---
+
 ## Structure
 
 ```
