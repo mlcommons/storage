@@ -76,9 +76,6 @@ results/
 # Test scripts and helpers not part of the benchmark suite
 test_s3dlio_gen_direct.py
 
-# Sweep scripts (local benchmarking, not part of suite)
-sweep_flux.sh
-
 # Hydra runtime output (created in cwd when running workloads with hydra config)
 hydra_log/
 
