@@ -84,10 +84,12 @@ name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
+[tool.uv]
+# s3dlio only ships Linux wheels — restrict resolution to Linux.
+environments = ["sys_platform == 'linux'"]
+
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
 torchaudio = [{ index = "pytorch-cpu" }]
-dlio-benchmark = { path = "../dlio_benchmark", editable = true }
-# NOTE: remove the s3dlio entry below once s3dlio>=0.9.100 is published to PyPI.
-s3dlio = { path = "../s3dlio/target/wheels/s3dlio-0.9.100-cp312-cp312-manylinux_2_39_x86_64.whl" }
+dlio-benchmark = { git = "https://github.com/russfellows/dlio_benchmark.git", rev = "3667a0e802043c6ca27c898cd37ed4fa9b8724bf" }
