@@ -579,6 +579,61 @@ class TestGenerateMpiPrefixCmd:
         # 7 processes across 3 hosts: 3, 2, 2 distribution
         assert '-n 7' in result
 
+    def test_mpi_btl_auto_by_default_single_host(self, mock_logger):
+        """No --mca btl flag is added in auto mode (default)."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=None,
+            logger=mock_logger
+        )
+        assert '--mca btl' not in result
+
+    def test_mpi_btl_tcp_single_host(self, mock_logger):
+        """--mca btl tcp,self is added when mpi_btl='tcp'."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=None,
+            logger=mock_logger,
+            mpi_btl='tcp'
+        )
+        assert '--mca btl tcp,self' in result
+
+    def test_mpi_btl_vader_single_host(self, mock_logger):
+        """--mca btl vader,self is added when mpi_btl='vader'."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=None,
+            logger=mock_logger,
+            mpi_btl='vader'
+        )
+        assert '--mca btl vader,self' in result
+
+    def test_mpi_btl_not_applied_for_multihost(self, mock_logger):
+        """--mca btl flags are never applied for multi-host runs."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1', 'host2'],
+            num_processes=8,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=None,
+            logger=mock_logger,
+            mpi_btl='tcp'
+        )
+        assert '--mca btl' not in result
+
 
 class TestCommandExecutor:
     """Tests for CommandExecutor class."""

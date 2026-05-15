@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlpstorage"
-version = "2.0.0b1"
+version = "3.0.2"
 description = "MLPerf Storage Benchmark Suite"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -21,8 +21,8 @@ dependencies = [
     "dlio-benchmark", # Required dependency
     "minio>=7.2.20",
     "s3torchconnector>=1.5.0",
-    "s3dlio>=0.9.95",
     "python-dotenv>=1.0.0",
+    "s3dlio>=0.9.100",
 ]
 
 [project.optional-dependencies]
@@ -84,8 +84,17 @@ name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
+[tool.uv]
+# s3dlio only ships Linux wheels — restrict resolution to Linux.
+environments = ["sys_platform == 'linux'"]
+
 [tool.uv.sources]
-dlio-benchmark = { git = "https://github.com/russfellows/dlio_benchmark.git", branch = "feat/parquet-dgen-streaming" }
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
 torchaudio = [{ index = "pytorch-cpu" }]
+dlio-benchmark = { git = "https://github.com/russfellows/dlio_benchmark.git", rev = "21c0723de897add728158943d369abd4b333f7dc" }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

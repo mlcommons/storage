@@ -267,7 +267,8 @@ class DLIOBenchmark(Benchmark, abc.ABC):
             self.logger.debug(f'Generating MPI Command with binary "{self.args.mpi_bin}"')
             mpi_prefix = generate_mpi_prefix_cmd(self.args.mpi_bin, self.args.hosts, self.args.num_processes,
                                                  self.args.oversubscribe, self.args.allow_run_as_root,
-                                                 self.args.mpi_params, self.logger)
+                                                 self.args.mpi_params, self.logger,
+                                                 mpi_btl=getattr(self.args, 'mpi_btl', 'auto'))
             cmd = f"{mpi_prefix} {cmd}"
 
         return cmd

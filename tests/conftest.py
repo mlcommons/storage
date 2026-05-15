@@ -12,6 +12,7 @@ used across all test modules without requiring DLIO to be installed.
 collect_ignore_glob = [
     "integration/test_s3_connectivity.py",  # argparse.parse_args() at module level
     "integration/test_compat_runtime.py",   # full S3 smoke-test at module level
+    "integration/test_dlio_storage.py",     # standalone script; StorageType.S3DLIO not in installed package
 ]
 
 import json

@@ -2,9 +2,104 @@
 
 Tests for S3-compatible object storage backends used by `mlpstorage` and `dlio_benchmark`.
 
-All tests read credentials and runtime configuration from a `.env` file at the
+All scripts read credentials and runtime configuration from a `.env` file at the
 **project root** (`mlp-storage/.env`) — no credentials or site-specific values are
-embedded in any test script or config file.
+embedded in any script or config file.
+
+---
+
+## Recommended Hardware
+
+**Linux only** — macOS and Windows are not supported.
+
+These are minimum requirements per `NP` (number of simulated accelerators).
+Running below spec will likely cause OOM crashes:
+
+| NP | CPU cores (incl. threads) | RAM |
+|:---:|---:|---:|
+| 1 | 8 | 16 GB |
+| 2 | 16 | 32 GB |
+| 4 | 32 | 64 GB |
+| 8 | 64 | 128 GB |
+
+NP scales linearly — each doubling of NP requires 2× the CPU and RAM.
+You may be able to run some workloads below these numbers, but OOM crashes are expected.
+
+---
+
+## Structure
+
+```
+tests/object-store/
+│
+├── — Data Generators (run once, before benchmarking) ——————————————
+│   gen_retinanet_jpeg.sh   generate 50k JPEG files for RetinaNet (~15 GiB)
+│   gen_unet3d_npz.sh       generate 7,200 NPZ files for UNet3D   (~984 GiB)
+│                           (DLRM and Flux generate data inline via run_*_bench.sh)
+│
+├── — Benchmark Runners ————————————————————————————————————————————
+│   run_dlrm_bench.sh       DLRM:      Parquet, NP=1..8, prints AU + throughput
+│   run_flux_bench.sh       Flux:      Parquet, NP=1..8, prints AU + throughput
+│   test_retinanet.sh       RetinaNet: JPEG,    NP=1..4, smoke test + benchmark
+│   test_unet3d.sh          UNet3D:    NPZ,     NP=1..4, smoke test + benchmark
+│
+├── — Checkpointing ————————————————————————————————————————————————
+│   run_checkpointing.sh    LLaMA 3 8B checkpoint write + read (s3dlio/minio/s3torch)
+│
+├── — Utilities ————————————————————————————————————————————————————
+│   run_cleanup.sh          delete all objects written by tests above
+│   show_results.sh         print throughput summary from results/dlrm/
+│
+├── sweeps/                 NP and compute-time scaling studies (run after smoke tests)
+│   sweep_dlrm_compute.sh   DLRM:      computation_time sweep at NP=1
+│   sweep_dlrm_np.sh        DLRM:      NP scaling (1, 2, 4, 8)
+│   sweep_flux.sh           Flux:      NP × read_threads scaling
+│   sweep_retinanet_np.sh   RetinaNet: NP scaling (1, 2, 4)
+│   sweep_unet3d_np.sh      UNet3D:    NP scaling (1, 2, 4)
+│
+└── old-archive/            deprecated scripts kept for reference — not maintained
+
+Performance results and analysis live in docs/ (see Performance Results below).
+```
+
+### Four model types, one generator + one benchmark each
+
+| Model | Format | Generator | Benchmark |
+|---|---|---|---|
+| **DLRM** | Parquet | *(inline in run_dlrm_bench.sh)* | `run_dlrm_bench.sh` |
+| **Flux** | Parquet | *(inline in run_flux_bench.sh)* | `run_flux_bench.sh` |
+| **RetinaNet** | JPEG | `gen_retinanet_jpeg.sh` | `test_retinanet.sh` |
+| **UNet3D** | NPZ | `gen_unet3d_npz.sh` | `test_unet3d.sh` |
+
+**Checkpointing** is a separate workflow (`run_checkpointing.sh`) — it tests LLaMA 3 8B
+checkpoint write + read and is independent of the four model types above.
+
+---
+
+## Quick Start
+
+```bash
+# 1. Install dependencies
+cd /path/to/mlp-storage
+uv sync
+
+# 2. Create .env with your credentials (see Credential Setup below)
+cp .env.example .env
+
+# 3a. DLRM or Flux — data is generated inline, just run the benchmark
+NP=1 bash tests/object-store/run_dlrm_bench.sh
+NP=1 bash tests/object-store/run_flux_bench.sh
+
+# 3b. RetinaNet or UNet3D — generate data first, then benchmark
+bash tests/object-store/gen_retinanet_jpeg.sh
+bash tests/object-store/test_retinanet.sh
+
+bash tests/object-store/gen_unet3d_npz.sh
+bash tests/object-store/test_unet3d.sh
+
+# 3c. Checkpointing
+bash tests/object-store/run_checkpointing.sh
+```
 
 ---
 
@@ -66,96 +161,6 @@ Create your bucket in MinIO (or your S3-compatible store) before running tests:
 # Verify bucket is reachable
 uv run python -c "import s3dlio; print(s3dlio.list('s3://your-bucket/', recursive=False))"
 ```
-
----
-
-## Tests
-
-Four shell scripts cover the complete test workflow. All runtime parameters come
-from `.env` (or environment variables) — no editing of scripts or config files is needed.
-
-```
-run_datagen.sh       — generate training dataset (run once)
-run_training.sh      — run training benchmark (run as many times as needed)
-run_checkpointing.sh — write + read LLaMA 3 8B checkpoints
-run_cleanup.sh       — delete all objects written by the tests above
-```
-
----
-
-### `run_datagen.sh` — Data generation
-
-Generates a synthetic training dataset and writes it to the object store.  Run
-this **once** before using `run_training.sh`.  The dataset can be reused for
-multiple training runs without re-generating.
-
-```bash
-cd /path/to/mlp-storage
-
-# s3dlio (default) — BUCKET auto-defaults to mlp-s3dlio
-bash tests/object-store/run_datagen.sh
-
-# minio — BUCKET auto-defaults to mlp-minio
-STORAGE_LIBRARY=minio bash tests/object-store/run_datagen.sh
-
-# s3torchconnector — BUCKET auto-defaults to mlp-s3torch
-STORAGE_LIBRARY=s3torchconnector bash tests/object-store/run_datagen.sh
-
-# Override bucket name explicitly
-BUCKET=my-bucket STORAGE_LIBRARY=s3dlio bash tests/object-store/run_datagen.sh
-
-# 8 parallel MPI processes for faster generation
-NP=8 bash tests/object-store/run_datagen.sh
-```
-
-**Runtime parameters:**
-
-| Variable | Default | Description |
-|---|---|---|
-| `BUCKET` | auto-derived | `mlp-s3dlio` / `mlp-minio` / `mlp-s3torch` based on `STORAGE_LIBRARY`; set explicitly to override |
-| `STORAGE_LIBRARY` | `s3dlio` | `s3dlio`, `minio`, or `s3torchconnector` |
-| `MODEL` | `unet3d` | mlpstorage model name |
-| `NP` | `1` | MPI process count for generation |
-| `DATA_DIR` | `test-run/` | Object prefix for the dataset |
-| `S3_PROFILE` | *(unset)* | AWS credential profile for s3torchconnector (default: `mlp-minio`) |
-
----
-
-### `run_training.sh` — Training
-
-Reads the dataset generated by `run_datagen.sh` and runs the MLPerf Storage
-training benchmark.  Can be run repeatedly against the same dataset.
-
-**DATA_DIR and MODEL must match what was used during datagen.**
-
-```bash
-cd /path/to/mlp-storage
-
-# s3dlio (default) — BUCKET auto-defaults to mlp-s3dlio
-bash tests/object-store/run_training.sh
-
-# minio, 8 simulated accelerators — BUCKET auto-defaults to mlp-minio
-STORAGE_LIBRARY=minio NP=8 bash tests/object-store/run_training.sh
-
-# s3torchconnector — BUCKET auto-defaults to mlp-s3torch
-STORAGE_LIBRARY=s3torchconnector bash tests/object-store/run_training.sh
-
-# bert model (must have been generated with MODEL=bert)
-MODEL=bert bash tests/object-store/run_training.sh
-```
-
-**Runtime parameters:**
-
-| Variable | Default | Description |
-|---|---|---|
-| `BUCKET` | auto-derived | `mlp-s3dlio` / `mlp-minio` / `mlp-s3torch` based on `STORAGE_LIBRARY`; set explicitly to override |
-| `STORAGE_LIBRARY` | `s3dlio` | `s3dlio`, `minio`, or `s3torchconnector` |
-| `MODEL` | `unet3d` | mlpstorage model name (must match datagen) |
-| `NP` | `1` | Number of simulated accelerators |
-| `DATA_DIR` | `test-run/` | Object prefix (must match datagen) |
-| `ACCELERATOR_TYPE` | `h100` | Accelerator to simulate (`h100`, `a100`, `b200`, `mi355`) |
-| `CLIENT_MEMORY_GB` | `512` | Client host memory in GB |
-| `S3_PROFILE` | *(unset)* | AWS credential profile for s3torchconnector (default: `mlp-minio`) |
 
 ---
 
@@ -303,6 +308,22 @@ curl -v https://your-minio-host:9000/
 
 ---
 
+## Performance Results
+
+Current benchmark results are in `docs/` — these are the authoritative numbers,
+updated as new sweeps are run:
+
+| Model | Results doc |
+|---|---|
+| DLRM | [docs/DLRM_NP_Scaling_Results.md](../../docs/DLRM_NP_Scaling_Results.md) |
+| Flux | [docs/Flux_NP_ReadThreads_Scaling_Results.md](../../docs/Flux_NP_ReadThreads_Scaling_Results.md) |
+| RetinaNet | [docs/RetinaNet_NP_Scaling_Results.md](../../docs/RetinaNet_NP_Scaling_Results.md) |
+| UNet3D | [docs/UNet3D_NP_Scaling_Results.md](../../docs/UNet3D_NP_Scaling_Results.md) |
+
+Sweep runs also write timestamped results to `results/<model>_np_sweep/<timestamp>/`.
+
+---
+
 ## Adding More Libraries
 
 Runtime parameters — library, bucket, endpoint, credentials — all flow from
@@ -310,13 +331,18 @@ environment variables. To test a new storage library:
 
 1. Add it to `mlpstorage_py/storage/` and register it in `obj_store_lib.py`
 2. Set `STORAGE_LIBRARY=<new-library>` in `.env`
-3. Run `run_datagen.sh` and `run_training.sh` without changing any test script
+3. Run the relevant benchmark script with `STORAGE_LIBRARY=<new-library>`
 
 ---
 
 ## Archived Tests
 
-Older per-library scripts (dlio\_s3dlio\_\*.sh, dlio\_minio\_\*.sh, etc.),
-per-library Python tests, library benchmark scripts, and historical result
-documents are preserved in `tests/object-store/old-archive/` for reference.
-They are **not maintained**.
+Older scripts and historical results are preserved in `tests/object-store/old-archive/`
+for reference. They are **not maintained** and may not work with current code.
+
+Notable reference files:
+- `test_s3dlio_direct.py`, `test_s3dlio_formats.py` — raw s3dlio API patterns
+- `test_s3lib_get_bench.py`, `test_direct_write_comparison.py` — library comparison methodology
+- `S3library_review_21-Mar.md` — analysis of library concurrency models
+- `bench_npz_build.py`, `bench_parquet_rg_flux.py` — format serialization benchmarks
+- `run_datagen.sh`, `run_training.sh` — old generic multi-model wrappers (replaced by model-specific scripts)

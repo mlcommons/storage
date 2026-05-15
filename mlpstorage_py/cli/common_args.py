@@ -292,6 +292,18 @@ def add_mpi_arguments(parser):
         action="store_true"
     )
     mpi_options.add_argument(
+        '--mpi-btl',
+        choices=['auto', 'vader', 'tcp'],
+        default='auto',
+        help=(
+            "MPI Byte Transport Layer for single-host runs. "
+            "'auto' lets OpenMPI select automatically (default; works on most systems). "
+            "'vader' forces POSIX shared-memory transport (fast; may fail in containers or as root). "
+            "'tcp' forces TCP loopback transport (universally compatible; recommended for containers "
+            "and root environments). Has no effect on multi-host runs."
+        )
+    )
+    mpi_options.add_argument(
         '--mpi-params',
         nargs="+",
         type=str,

@@ -158,3 +158,171 @@ cd /home/eval/Documents/Code/mlp-storage && uv run mlpstorage training run \
   Even NVMe may struggle to meet AU ≥ 90% at 12,288 samples/step × ~761 bytes = ~9.1 MB/step × 1302 steps/epoch ≈ 11.8 GB must be read at accelerator speed.
 - Parquet footer cache (`_pf_cache`) active in `parquet_reader.py` — same fix as Flux.
 - S3 row-group reads via byte-range GET using `parquet_reader_s3_iterable.py`.
+
+---
+
+## Direct DLIO Benchmark — Reader Library Comparison (2026-05-07)
+
+> These tests bypass `mlpstorage` and run `dlio_benchmark` directly to isolate storage library performance.
+>
+> **AU formula** (from `statscounter.py`):
+> `AU = (metric_steps × computation_time_per_step) / metric_window_wall_time`
+> where `metric_steps = total_steps − 1` (first step excluded by default `metric_exclude_start_steps=1`).
+> AU represents the fraction of time the simulated accelerator is computing vs. waiting for I/O.
+
+### Test Configuration
+
+| Parameter | Value |
+|-----------|-------|
+| Date | 2026-05-07 |
+| Benchmark | `dlio_benchmark.main` (direct, no `mlpstorage` wrapper) |
+| S3 server | s3-ultra at `127.0.0.1:9200` (synthetic, ~40 GB/s capable) |
+| S3 credentials | `minioadmin/minioadmin` |
+| File storage | `/mnt/test/dlrm/train/*.parquet` |
+| Dataset | 64 × ~971 MiB Parquet files, **~60.5 GiB total** |
+| Row groups / file | 123 RGs @ ~8 MiB/RG compressed |
+| DataLoader workers | 8 |
+| Prefetch threads/worker | 64 |
+| Prefetch window | 64 RGs |
+| I/O pattern | Sliding-window RG prefetch (`TorchIterableDataset`) |
+| Epochs | 1 |
+| Batch size | 2,048 samples |
+| Computation time | 0.770 ms/step |
+| `read_threads` | 8 |
+
+### Per-Worker I/O Timing (`[io_timing]` lines)
+
+| Reader | Data/worker | Per-worker elapsed | Per-worker throughput |
+|--------|------------|--------------------|-----------------------|
+| S3 + s3torchconnector | 7.562 GiB | ~63 s | ~121–131 MiB/s |
+| S3 + s3dlio | 7.562 GiB | ~48.5 s | ~159–160 MiB/s |
+| File posix (buffered) | 7.562 GiB | ~58–63 s | ~121–131 MiB/s |
+| File direct:// (O_DIRECT) | 7.562 GiB | ~49–51 s | ~151–158 MiB/s |
+
+### Epoch Results (NP=1, Single Rank)
+
+| Reader | Epoch wall time | Aggregate throughput (60.5 GiB) | AU (raw) | AU (corrected) |
+|--------|-----------------|---------------------------------|----------|----------------|
+| S3 + s3torchconnector | 107.79 s | ~575 MiB/s (~603 MB/s) | 22.3% | 35.7% |
+| **S3 + s3dlio** | **76.07 s** | **~814 MiB/s (~854 MB/s)** | **31.6%** | **50.6%** |
+| File posix (buffered) | 95.23 s | ~650 MiB/s (~682 MB/s) | 25.3% | 40.5% |
+| File direct:// (O_DIRECT) | 80.41 s | ~770 MiB/s (~808 MB/s) | 30.0% | 48.0% |
+| Dry-run (simulate, no I/O) | 38.51 s | — | 62.5% | 100% |
+
+> **AU (raw)** = `(steps − 1) × 0.000770031 s / epoch_wall_time` = `24.06 s / epoch_wall_time`.
+> Dry-run measured at 38.51 s → AU_dry = 24.06 / 38.51 = **62.5%** (framework overhead ceiling).
+> **AU (corrected)** = `AU_raw / AU_dry_run` — normalizes out unavoidable DataLoader/framework overhead,
+> expressing how much of the *achievable* compute time was actually utilized. 100% = no I/O stall beyond framework floor.
+> Aggregate throughput = 60.5 GiB ÷ epoch wall time (all 8 workers run in parallel).
+
+### Key Findings
+
+- **s3dlio is 41.7% faster than s3torchconnector** on S3 (76s vs 108s epoch; ~160 vs ~126 MiB/s per worker). Both use byte-range GETs; s3dlio benefits from its Rust async runtime vs CRT thread pool under this workload.
+- **File direct:// (O_DIRECT) is the fastest file reader** at 80.4s — slightly faster than s3dlio S3 and 15% faster than posix. O_DIRECT bypasses the page cache and exercises the NVMe bandwidth directly.
+- **File posix is comparable to s3torchconnector** (95s vs 108s), suggesting both are similarly bounded by concurrency or I/O queue depth.
+- **Dry-run floor is ~38.5s** — pure PyTorch DataLoader/compute overhead with no I/O. All configurations add meaningful I/O time on top.
+- DLIO's built-in I/O metric should be ignored — it reports ~0.84 MiB/s because it counts `get_sample()` calls × `record_length` (1024 bytes), not actual bytes transferred. Use `[io_timing]` lines for true throughput.
+
+### Run Commands
+
+```bash
+cd /home/eval/Documents/Code/dlio_benchmark
+
+# S3 + s3torchconnector
+AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin AWS_ENDPOINT_URL=http://127.0.0.1:9200 \
+  uv run python -m dlio_benchmark.main workload=dlrm_s3dlio_s3 \
+  ++workload.storage.storage_options.storage_library=s3torchconnector
+
+# S3 + s3dlio
+AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin AWS_ENDPOINT_URL=http://127.0.0.1:9200 \
+  uv run python -m dlio_benchmark.main workload=dlrm_s3dlio_s3 \
+  ++workload.storage.storage_options.storage_library=s3dlio
+
+# File direct:// (O_DIRECT via s3dlio)
+uv run python -m dlio_benchmark.main workload=dlrm_s3dlio_file \
+  ++workload.storage.storage_options.storage_library=direct
+
+# File posix (buffered)
+uv run python -m dlio_benchmark.main workload=dlrm_s3dlio_file
+
+# Dry-run (simulate, no I/O)
+uv run python -m dlio_benchmark.main workload=dlrm_s3dlio_file \
+  ++workload.storage.storage_options.simulate_io=true
+```
+
+---
+
+## Multi-Rank MPI Scaling — S3 + s3dlio (2026-05-07)
+
+> Same `dlrm_s3dlio_s3` workload as above, launched via `mpirun` to simulate multiple accelerator ranks.
+> All ranks share the same s3-ultra instance (127.0.0.1:9200). Each rank reads an equal share of the 64 files.
+
+### Configuration
+
+| Parameter | Value |
+|-----------|-------|
+| Date | 2026-05-07 |
+| Storage library | s3dlio |
+| S3 server | s3-ultra at `127.0.0.1:9200` |
+| Config | `dlrm_s3dlio_s3.yaml` (64 files, 2048 batch, 0.770031 ms compute) |
+| DataLoader workers/rank | 8 |
+| Prefetch threads/worker | 64 |
+
+### Dry-Run Baselines (framework overhead only, `simulate_io=true`)
+
+| NP | Dry-run epoch | Compute budget/rank | AU_dry (raw) |
+|----|--------------|--------------------|--------------|
+| 1 | 36.35 s | 24.06 s | 66.2% |
+| 2 | 20.61 s | 12.03 s | 58.4% |
+| 4 | 9.65 s | 6.01 s | 62.3% |
+
+> AU_dry drops at NP=2 because fewer steps per rank means less compute time relative to fixed per-rank DataLoader startup overhead.
+
+### Results
+
+| NP (MPI ranks) | Files/rank | Steps/rank | Epoch wall time | Aggregate throughput | AU (raw) | AU (corrected) |
+|----------------|-----------|-----------|-----------------|---------------------|----------|----------------|
+| 1 | 64 | 31,248 | 81.65 s | 759 MiB/s (796 MB/s) | 29.5% | 44.6% |
+| 2 | 32 | 15,625 | 56.67 s | 1,094 MiB/s (1,147 MB/s) | 21.2% | 36.3% |
+| 4 | 16 | 7,812 | 49.57 s | 1,250 MiB/s (1,311 MB/s) | 12.1% | 19.4% |
+
+> **Aggregate throughput** = 60.5 GiB ÷ epoch wall time (all NP ranks run in parallel on same dataset).
+>
+> **AU (raw)** = `(steps_per_rank − 1) × 0.000770031 s / epoch_wall_time`:
+> - NP=1: 24.06 / 81.65 = **29.5%** &nbsp; NP=2: 12.03 / 56.67 = **21.2%** &nbsp; NP=4: 6.01 / 49.57 = **12.1%**
+>
+> **AU (corrected)** = `AU_raw / AU_dry` using per-NP dry-run baselines above:
+> - NP=1: 29.5% / 66.2% = **44.6%** &nbsp; NP=2: 21.2% / 58.4% = **36.3%** &nbsp; NP=4: 12.1% / 62.3% = **19.4%**
+
+### Key Findings
+
+- **Throughput scales super-linearly** going from NP=1 to NP=2 (+44%), then flattens NP=2→NP=4 (+14%). Multiple ranks issue concurrent GETs that better saturate s3-ultra's async runtime.
+- **Raw AU decreases with more ranks**: each rank processes fewer steps (less compute time) while epoch wall time doesn't shrink proportionally. This is expected and not a storage deficiency.
+- **Corrected AU also decreases with NP** (44.6% → 36.3% → 19.4%): at NP=4, even the dry-run baseline is tighter (only 9.65s epoch), so the I/O stall takes a larger share of the available time. The benchmark is genuinely becoming more I/O-limited per rank as NP scales on a shared single-node server.
+- **Epoch wall time compresses** as NP increases (81.65 → 56.67 → 49.57 s), but with diminishing returns as all ranks compete for the same single-node S3 server.
+- On a real multi-node deployment with dedicated S3 bandwidth per node, both throughput and corrected AU would scale more linearly.
+
+### Run Commands
+
+```bash
+cd /home/eval/Documents/Code/dlio_benchmark
+export AWS_ACCESS_KEY_ID=minioadmin AWS_SECRET_ACCESS_KEY=minioadmin AWS_ENDPOINT_URL=http://127.0.0.1:9200
+
+# NP=1
+mpirun -n 1 -host 127.0.0.1:1 --bind-to none --map-by socket --mca btl ^vader --allow-run-as-root \
+  .venv/bin/dlio_benchmark workload=dlrm_s3dlio_s3 \
+  ++workload.storage.storage_options.storage_library=s3dlio \
+  --config-dir=dlio_benchmark/configs
+
+# NP=2
+mpirun -n 2 -host 127.0.0.1:2 --bind-to none --map-by socket --mca btl ^vader --allow-run-as-root \
+  .venv/bin/dlio_benchmark workload=dlrm_s3dlio_s3 \
+  ++workload.storage.storage_options.storage_library=s3dlio \
+  --config-dir=dlio_benchmark/configs
+
+# NP=4
+mpirun -n 4 -host 127.0.0.1:4 --bind-to none --map-by socket --mca btl ^vader --allow-run-as-root \
+  .venv/bin/dlio_benchmark workload=dlrm_s3dlio_s3 \
+  ++workload.storage.storage_options.storage_library=s3dlio \
+  --config-dir=dlio_benchmark/configs
+```

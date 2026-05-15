@@ -472,7 +472,8 @@ def generate_mpi_prefix_cmd(
     oversubscribe: bool,
     allow_run_as_root: bool,
     params: Optional[List[str]],
-    logger: logging.Logger
+    logger: logging.Logger,
+    mpi_btl: str = "auto",
 ) -> str:
     """Generate MPI command prefix for distributed execution.
 
@@ -487,6 +488,11 @@ def generate_mpi_prefix_cmd(
         allow_run_as_root: Allow running MPI as root user.
         params: Additional MPI parameters to append.
         logger: Logger instance for debug output.
+        mpi_btl: Byte Transport Layer for single-host runs. 'auto' lets
+            OpenMPI select automatically (default). 'vader' forces POSIX
+            shared-memory transport. 'tcp' forces TCP loopback (most
+            compatible; recommended for containers/root). Ignored for
+            multi-host runs.
 
     Returns:
         MPI command prefix string ready for command execution.
@@ -544,10 +550,18 @@ def generate_mpi_prefix_cmd(
     if len(unique_hosts) > 1:
         # Multi-host: prioritize even distribution across nodes
         prefix += " --bind-to none --map-by node"
+        logger.info("MPI BTL transport: auto (multi-host run; transport managed by network fabric)")
     else:
         # Single-host: optimize for NUMA domains
-        # Disable VADER shared-memory transport — causes segfaults on some kernels
-        prefix += " --bind-to none --map-by socket --mca btl ^vader"
+        prefix += " --bind-to none --map-by socket"
+        if mpi_btl == "vader":
+            prefix += " --mca btl vader,self"
+            logger.info("MPI BTL transport: vader (POSIX shared-memory)")
+        elif mpi_btl == "tcp":
+            prefix += " --mca btl tcp,self"
+            logger.info("MPI BTL transport: tcp (TCP loopback; recommended for containers/root)")
+        else:  # auto
+            logger.info("MPI BTL transport: auto (OpenMPI default selection)")
 
     if oversubscribe:
         prefix += " --oversubscribe"

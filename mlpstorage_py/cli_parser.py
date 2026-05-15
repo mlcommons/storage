@@ -115,13 +115,20 @@ def parse_arguments():
     if hasattr(parsed_args, 'config_file') and parsed_args.config_file:
         parsed_args = apply_yaml_config_overrides(parsed_args)
 
-    # Consolidate the data access protocol into a single field
-    if parsed_args.file:
-        parsed_args.data_access_protocol = "file"
-    else:
-        parsed_args.data_access_protocol = parsed_args.object
-    del parsed_args.file
-    del parsed_args.object
+    # Consolidate the data access protocol into a single field.
+    # The --file / --object flags are only defined on benchmark subcommands
+    # that call add_storage_type_arguments() (training, checkpointing,
+    # vectordb, kvcache). Other subcommands (reports, history, lockfile)
+    # do not define them, so guard the consolidation on attribute presence.
+    if hasattr(parsed_args, "file") or hasattr(parsed_args, "object"):
+        if getattr(parsed_args, "file", False):
+            parsed_args.data_access_protocol = "file"
+        else:
+            parsed_args.data_access_protocol = getattr(parsed_args, "object", None)
+        # Clean up the raw flags so downstream code uses data_access_protocol.
+        for _attr in ("file", "object"):
+            if hasattr(parsed_args, _attr):
+                delattr(parsed_args, _attr)
 
     """
     print(f"Arguments found: {parsed_args}")

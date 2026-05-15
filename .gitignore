@@ -63,3 +63,23 @@ env-fast
 
 # TLS certificates — local only, never commit (paths to certs are in .env)
 .certs/
+
+# Benchmark simulation output files
+sim_*.tsv
+sim_*.tsv.zst
+
+# Sweep run logs and results (local benchmark output)
+sweep_logs/
+sweep_flux_master.log
+results/
+
+# Test scripts and helpers not part of the benchmark suite
+test_s3dlio_gen_direct.py
+
+# Hydra runtime output (created in cwd when running workloads with hydra config)
+hydra_log/
+
+# Timestamped sweep run logs written to repo root by sweep_*.sh scripts
+sweep_unet3d_*.log
+sweep_dlrm_*.log
+sweep_flux_*.log
