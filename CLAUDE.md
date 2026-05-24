@@ -164,3 +164,17 @@ From `mlpstorage/config.py`:
 - LLM models (checkpointing): `llama3-8b`, `llama3-70b`, `llama3-405b`, `llama3-1t`
 - Accelerators: `h100`, `a100`
 - Submission categories: `CLOSED`, `OPEN`
+
+## GSD Workflow
+
+This project uses Get Shit Done (GSD) for structured development. Planning artifacts live in `.planning/`.
+
+### Phase Commands
+
+```bash
+/gsd-discuss-phase N    # Discuss approach and clarify before planning
+/gsd-plan-phase N       # Generate execution plan for phase N
+/gsd-execute-phase N    # Execute the plan for phase N
+/gsd-transition         # Complete phase, update PROJECT.md and STATE.md
+/gsd-progress           # Check current progress
+/gsd-explore            # Open-ended Socratic ideation session

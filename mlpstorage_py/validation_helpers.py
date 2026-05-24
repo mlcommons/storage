@@ -150,7 +150,7 @@ def _validate_required_params(args) -> List[Exception]:
             ))
 
     # KV Cache specific requirements
-    if program == 'kvcache':
+    if program == 'kvcache' and command != 'validate':
         if not getattr(args, 'model', None):
             errors.append(ConfigurationError(
                 "Missing required parameter: model for kvcache",

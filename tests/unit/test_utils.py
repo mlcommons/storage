@@ -634,6 +634,80 @@ class TestGenerateMpiPrefixCmd:
         )
         assert '--mca btl' not in result
 
+    def test_processes_per_node_injects_npernode(self, mock_logger):
+        """--npernode N appears in prefix when processes_per_node is set."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=None,
+            logger=mock_logger,
+            processes_per_node=2,
+        )
+        assert '--npernode 2' in result
+
+    def test_processes_per_node_none_omits_npernode(self, mock_logger):
+        """--npernode absent when processes_per_node=None (default)."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=None,
+            logger=mock_logger,
+            processes_per_node=None,
+        )
+        assert '--npernode' not in result
+
+    def test_processes_per_node_combined_with_params(self, mock_logger):
+        """--npernode and custom params both appear."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=['--mca orte_abort_on_non_zero_status 0'],
+            logger=mock_logger,
+            processes_per_node=2,
+        )
+        assert '--npernode 2' in result
+        assert '--mca orte_abort_on_non_zero_status 0' in result
+
+    def test_processes_per_node_multihost(self, mock_logger):
+        """--npernode appears with multi-host invocation alongside --map-by node."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1', 'host2'],
+            num_processes=8,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=None,
+            logger=mock_logger,
+            processes_per_node=4,
+        )
+        assert '--npernode 4' in result
+        assert '--map-by node' in result
+
+    def test_processes_per_node_position_before_bind_to(self, mock_logger):
+        """--npernode appears before --bind-to in the generated string."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=None,
+            logger=mock_logger,
+            processes_per_node=2,
+        )
+        npernode_idx = result.index('--npernode')
+        bindto_idx = result.index('--bind-to')
+        assert npernode_idx < bindto_idx
+
 
 class TestCommandExecutor:
     """Tests for CommandExecutor class."""

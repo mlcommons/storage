@@ -474,6 +474,7 @@ def generate_mpi_prefix_cmd(
     params: Optional[List[str]],
     logger: logging.Logger,
     mpi_btl: str = "auto",
+    processes_per_node: Optional[int] = None,
 ) -> str:
     """Generate MPI command prefix for distributed execution.
 
@@ -493,6 +494,9 @@ def generate_mpi_prefix_cmd(
             shared-memory transport. 'tcp' forces TCP loopback (most
             compatible; recommended for containers/root). Ignored for
             multi-host runs.
+        processes_per_node: Number of MPI processes per node. When not None,
+            injects ``--npernode N`` into the prefix after the host list and
+            before bind/map directives. Default None (no injection).
 
     Returns:
         MPI command prefix string ready for command execution.
@@ -503,10 +507,11 @@ def generate_mpi_prefix_cmd(
 
     Example:
         >>> prefix = generate_mpi_prefix_cmd(
-        ...     'mpirun', ['host1', 'host2'], 8, False, False, None, logger
+        ...     'mpirun', ['host1', 'host2'], 8, False, False, None, logger,
+        ...     processes_per_node=4
         ... )
         >>> prefix
-        'mpirun -n 8 -host host1:4,host2:4 --bind-to none --map-by node'
+        'mpirun -n 8 -host host1:4,host2:4 --npernode 4 --bind-to none --map-by node'
     """
     # Check if we got slot definitions with the hosts
     slots_configured = any(":" in host for host in hosts)
@@ -540,6 +545,9 @@ def generate_mpi_prefix_cmd(
         prefix = f"{MPI_EXEC_BIN} -n {num_processes} -host {','.join(hosts)}"
     else:
         raise ValueError(f"Unsupported MPI command: {mpi_cmd}")
+
+    if processes_per_node is not None:
+        prefix += f" --npernode {processes_per_node}"
 
     # CPU scheduling optimizations for I/O workloads
     unique_hosts: Set[str] = set()

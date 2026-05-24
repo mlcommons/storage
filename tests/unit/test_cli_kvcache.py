@@ -308,3 +308,82 @@ class TestKVCacheOptionalFeatures:
         for mode in ['qos', 'predictive']:
             args = parser.parse_args(['run', '--autoscaler-mode', mode])
             assert args.autoscaler_mode == mode
+
+
+class TestKVCacheValidateSubcommand:
+    """Tests for kvcache validate subcommand arguments."""
+
+    @pytest.fixture
+    def parser(self):
+        parser = argparse.ArgumentParser()
+        add_kvcache_arguments(parser)
+        return parser
+
+    def test_validate_subcommand_exists(self, parser):
+        args = parser.parse_args(['validate', '--cache-dir', '/tmp/kv'])
+        assert args.command == 'validate'
+
+    def test_cache_dir_required(self, parser):
+        with pytest.raises(SystemExit):
+            parser.parse_args(['validate'])
+
+    def test_npernode_default_is_1(self, parser):
+        args = parser.parse_args(['validate', '--cache-dir', '/tmp/kv'])
+        assert args.npernode == 1
+
+    def test_npernode_accepts_value(self, parser):
+        args = parser.parse_args(['validate', '--cache-dir', '/tmp/kv', '--npernode', '4'])
+        assert args.npernode == 4
+
+    def test_seed_default_is_42(self, parser):
+        args = parser.parse_args(['validate', '--cache-dir', '/tmp/kv'])
+        assert args.seed == 42
+
+    def test_trials_default_is_3(self, parser):
+        args = parser.parse_args(['validate', '--cache-dir', '/tmp/kv'])
+        assert args.trials == 3
+
+    def test_trials_accepts_value(self, parser):
+        args = parser.parse_args(['validate', '--cache-dir', '/tmp/kv', '--trials', '5'])
+        assert args.trials == 5
+
+    def test_inter_option_delay_default_is_20(self, parser):
+        args = parser.parse_args(['validate', '--cache-dir', '/tmp/kv'])
+        assert args.inter_option_delay == 20
+
+    def test_inter_option_delay_accepts_value(self, parser):
+        args = parser.parse_args(['validate', '--cache-dir', '/tmp/kv',
+                                   '--inter-option-delay', '5'])
+        assert args.inter_option_delay == 5
+
+    def test_what_if_accepted_on_validate(self, parser):
+        args = parser.parse_args(['validate', '--cache-dir', '/tmp/kv', '--what-if'])
+        assert args.what_if is True
+
+    def test_hosts_inherited_from_add_host_arguments(self, parser):
+        args = parser.parse_args(['validate', '--cache-dir', '/tmp/kv',
+                                   '--hosts', 'node1', 'node2'])
+        assert args.hosts == ['node1', 'node2']
+
+    def test_mpi_bin_inherited_from_add_mpi_arguments(self, parser):
+        args = parser.parse_args(['validate', '--cache-dir', '/tmp/kv',
+                                   '--mpi-bin', 'mpiexec'])
+        assert args.mpi_bin == 'mpiexec'
+
+    def test_validate_no_model_argument(self, parser):
+        args = parser.parse_args(['validate', '--cache-dir', '/tmp/kv'])
+        assert not hasattr(args, 'model')
+
+    def test_config_default_is_none(self, parser):
+        args = parser.parse_args(['validate', '--cache-dir', '/tmp/kv'])
+        assert args.config is None
+
+    def test_config_argument_accepted(self, parser):
+        args = parser.parse_args(['validate', '--cache-dir', '/tmp/kv',
+                                   '--config', '/path/to/config.yaml'])
+        assert args.config == '/path/to/config.yaml'
+
+    def test_kvcache_bin_path_accepted(self, parser):
+        args = parser.parse_args(['validate', '--cache-dir', '/tmp/kv',
+                                   '--kvcache-bin-path', '/opt/kv-cache.py'])
+        assert args.kvcache_bin_path == '/opt/kv-cache.py'

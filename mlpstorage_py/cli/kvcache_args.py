@@ -97,6 +97,17 @@ def add_kvcache_arguments(parser):
     # Add distributed execution arguments to run command only
     _add_kvcache_distributed_arguments(run_benchmark)
 
+    # Validate subcommand
+    validate = kvcache_subparsers.add_parser(
+        "validate",
+        help="Run the MLPerf KV Cache validation sequence."
+    )
+    _add_kvcache_validate_arguments(validate)
+    add_universal_arguments(validate)
+    add_host_arguments(validate)
+    add_mpi_arguments(validate)
+    add_timeseries_arguments(validate)
+
 
 def _add_kvcache_model_arguments(parser):
     """Add model configuration arguments.
@@ -251,3 +262,58 @@ def _add_kvcache_distributed_arguments(parser):
 
     # Add time-series arguments
     add_timeseries_arguments(parser)
+
+
+def _add_kvcache_validate_arguments(parser):
+    """Add validate-specific arguments for the MLPerf KV Cache validation sequence.
+
+    Args:
+        parser: Argparse parser to add arguments to.
+    """
+    validate_group = parser.add_argument_group("Validate Configuration")
+    validate_group.add_argument(
+        '--npernode', '--num-processes-per-client',
+        dest='npernode',
+        type=int,
+        default=1,
+        help="Number of kv-cache instances per client host."
+    )
+    validate_group.add_argument(
+        '--seed',
+        type=int,
+        default=42,
+        help="Base seed for reproducibility. Effective seed = base_seed + rank."
+    )
+    validate_group.add_argument(
+        '--cache-dir',
+        type=str,
+        required=True,
+        help="Base directory for NVMe cache tier. Per-rank subdir created automatically."
+    )
+    validate_group.add_argument(
+        '--trials',
+        type=int,
+        default=3,
+        help="Number of sequential trial runs per option (MLPerf requires 3-5)."
+    )
+    validate_group.add_argument(
+        '--inter-option-delay',
+        type=int,
+        default=20,
+        help="Seconds to wait between options."
+    )
+    validate_group.add_argument(
+        '--kvcache-bin-path',
+        type=str,
+        default=None,
+        help="Path to kv-cache.py script. Auto-detected if not specified."
+    )
+    validate_group.add_argument(
+        '--config',
+        type=str,
+        default=None,
+        help=(
+            "Path to kv-cache config.yaml. Passed through to mlperf_wrapper.py --config. "
+            "Auto-detected from wrapper's directory if not specified."
+        )
+    )
