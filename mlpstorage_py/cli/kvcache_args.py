@@ -45,7 +45,7 @@ KVCACHE_HELP_MESSAGES = {
         "'latency' optimizes for response time, 'throughput' for requests/second."
     ),
     'kvcache_run': (
-        "Run the KV Cache benchmark simulating LLM inference storage workload."
+        "Run the MLPerf KV Cache benchmark sequence (options 1, 2, and 3 via mlperf_wrapper.py)."
     ),
     'kvcache_datasize': (
         "Calculate memory requirements for KV cache based on model and user count."
@@ -59,8 +59,25 @@ KVCACHE_HELP_MESSAGES = {
         "Autoscaler mode: 'qos' (quality of service based) or "
         "'predictive' (load prediction based)."
     ),
-    'seed': "Random seed for reproducible benchmark runs.",
+    'seed': (
+        "Base random seed (default 42). Effective seed per rank = base + rank. "
+        "OPEN submissions only — fixed at 42 in CLOSED."
+    ),
     'kvcache_bin_path': "Path to kv-cache.py script. Auto-detected if not specified.",
+    'npernode': "Number of kv-cache instances per client host (ranks per node).",
+    'trials': (
+        "Number of trial runs per option (default 3). "
+        "OPEN submissions only — fixed at 3 in CLOSED."
+    ),
+    'inter_option_delay': (
+        "Seconds to wait between options (default 20). "
+        "OPEN submissions only — fixed at 20 in CLOSED."
+    ),
+    'config': (
+        "Path to kv-cache config.yaml passed through to mlperf_wrapper.py. "
+        "Auto-detected from wrapper's directory if not specified. "
+        "OPEN submissions only — not valid in CLOSED."
+    ),
 }
 
 
@@ -93,20 +110,10 @@ def add_kvcache_arguments(parser):
     # Run-specific arguments
     _add_kvcache_run_arguments(run_benchmark)
     _add_kvcache_optional_features(run_benchmark)
+    _add_kvcache_mlperf_arguments(run_benchmark)
 
     # Add distributed execution arguments to run command only
     _add_kvcache_distributed_arguments(run_benchmark)
-
-    # Validate subcommand
-    validate = kvcache_subparsers.add_parser(
-        "validate",
-        help="Run the MLPerf KV Cache validation sequence."
-    )
-    _add_kvcache_validate_arguments(validate)
-    add_universal_arguments(validate)
-    add_host_arguments(validate)
-    add_mpi_arguments(validate)
-    add_timeseries_arguments(validate)
 
 
 def _add_kvcache_model_arguments(parser):
@@ -182,14 +189,54 @@ def _add_kvcache_run_arguments(parser):
         help=KVCACHE_HELP_MESSAGES['performance_profile']
     )
     run_group.add_argument(
-        '--seed',
-        type=int,
-        help=KVCACHE_HELP_MESSAGES['seed']
-    )
-    run_group.add_argument(
         '--kvcache-bin-path',
         type=str,
         help=KVCACHE_HELP_MESSAGES['kvcache_bin_path']
+    )
+
+
+def _add_kvcache_mlperf_arguments(parser):
+    """Add MLPerf sequence arguments for the KV Cache run command.
+
+    These arguments control the three-option MLPerf v3.0 benchmark sequence.
+    In CLOSED submissions, seed/trials/inter-option-delay are fixed to their
+    mandated defaults and --config is disallowed; the benchmark will hard-fail
+    if the user attempts to override them.
+
+    Args:
+        parser: Argparse parser to add arguments to.
+    """
+    mlperf_group = parser.add_argument_group("MLPerf Sequence Configuration")
+    mlperf_group.add_argument(
+        '--npernode', '--num-processes-per-client',
+        dest='npernode',
+        type=int,
+        default=1,
+        help=KVCACHE_HELP_MESSAGES['npernode']
+    )
+    mlperf_group.add_argument(
+        '--seed',
+        type=int,
+        default=None,
+        help=KVCACHE_HELP_MESSAGES['seed']
+    )
+    mlperf_group.add_argument(
+        '--trials',
+        type=int,
+        default=None,
+        help=KVCACHE_HELP_MESSAGES['trials']
+    )
+    mlperf_group.add_argument(
+        '--inter-option-delay',
+        type=int,
+        default=None,
+        help=KVCACHE_HELP_MESSAGES['inter_option_delay']
+    )
+    mlperf_group.add_argument(
+        '--config',
+        type=str,
+        default=None,
+        help=KVCACHE_HELP_MESSAGES['config']
     )
 
 
@@ -262,58 +309,3 @@ def _add_kvcache_distributed_arguments(parser):
 
     # Add time-series arguments
     add_timeseries_arguments(parser)
-
-
-def _add_kvcache_validate_arguments(parser):
-    """Add validate-specific arguments for the MLPerf KV Cache validation sequence.
-
-    Args:
-        parser: Argparse parser to add arguments to.
-    """
-    validate_group = parser.add_argument_group("Validate Configuration")
-    validate_group.add_argument(
-        '--npernode', '--num-processes-per-client',
-        dest='npernode',
-        type=int,
-        default=1,
-        help="Number of kv-cache instances per client host."
-    )
-    validate_group.add_argument(
-        '--seed',
-        type=int,
-        default=42,
-        help="Base seed for reproducibility. Effective seed = base_seed + rank."
-    )
-    validate_group.add_argument(
-        '--cache-dir',
-        type=str,
-        required=True,
-        help="Base directory for NVMe cache tier. Per-rank subdir created automatically."
-    )
-    validate_group.add_argument(
-        '--trials',
-        type=int,
-        default=3,
-        help="Number of sequential trial runs per option (MLPerf requires 3-5)."
-    )
-    validate_group.add_argument(
-        '--inter-option-delay',
-        type=int,
-        default=20,
-        help="Seconds to wait between options."
-    )
-    validate_group.add_argument(
-        '--kvcache-bin-path',
-        type=str,
-        default=None,
-        help="Path to kv-cache.py script. Auto-detected if not specified."
-    )
-    validate_group.add_argument(
-        '--config',
-        type=str,
-        default=None,
-        help=(
-            "Path to kv-cache config.yaml. Passed through to mlperf_wrapper.py --config. "
-            "Auto-detected from wrapper's directory if not specified."
-        )
-    )

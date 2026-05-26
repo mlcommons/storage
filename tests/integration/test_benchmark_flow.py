@@ -553,20 +553,21 @@ class TestDependencyValidationIntegration:
                 assert benchmark.base_command_path == str(dlio_exe)
 
 
-class TestKVCacheValidateIntegration:
-    """End-to-end integration tests for KVCacheBenchmark._execute_validate.
+class TestKVCacheRunIntegration:
+    """End-to-end integration tests for KVCacheBenchmark._execute_run.
 
     Uses a mocked _execute_command that writes synthetic rank files so the
-    full validate path (instantiation → _execute_validate → aggregation →
+    full run path (instantiation → _execute_run → aggregation →
     summary write) can be exercised without MPI or real kv-cache.py.
     """
 
     def _make_bm(self, tmp_path, what_if=False):
         import os
         from argparse import Namespace
+        from unittest.mock import MagicMock
         args = Namespace(
             debug=False, verbose=False, what_if=what_if, stream_log_level='INFO',
-            results_dir=str(tmp_path), command='validate',
+            results_dir=str(tmp_path), command='run',
             npernode=1, seed=42, cache_dir=str(tmp_path / 'cache'),
             trials=1, inter_option_delay=0,
             kvcache_bin_path=None, config=None,
@@ -579,7 +580,7 @@ class TestKVCacheValidateIntegration:
             num_processes=None, exec_type=None,
             closed=False, open=False,
         )
-        output_dir = str(tmp_path / 'validate_output')
+        output_dir = str(tmp_path / 'run_output')
         os.makedirs(output_dir, exist_ok=True)
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen, \
              patch('mlpstorage_py.benchmarks.kvcache.KVCacheBenchmark._collect_cluster_information',
@@ -587,10 +588,11 @@ class TestKVCacheValidateIntegration:
             mock_gen.return_value = output_dir
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             bm = KVCacheBenchmark(args, run_datetime='20260523_120000')
+        bm.write_cluster_info = MagicMock()
         return bm
 
-    def test_validate_all_options_mock_mpi_writes_summary(self, tmp_path):
-        """Full validate path: all three options run, summary JSON written with correct schema."""
+    def test_run_all_options_mock_mpi_writes_summary(self, tmp_path):
+        """Full run path: all three options run, summary JSON written with correct schema."""
         import re
         bm = self._make_bm(tmp_path, what_if=False)
 
@@ -605,18 +607,21 @@ class TestKVCacheValidateIntegration:
                     'summary': {
                         'cache_stats': {
                             'tier_storage_read_bandwidth_gbps': 1.5,
+                            'tier_storage_write_bandwidth_gbps': 0.5,
                             'storage_entries': 100,
                         },
                         'storage_io_latency_ms': {'p95': 12.0},
+                        'avg_throughput_tokens_per_sec': 100.0,
+                        'storage_throughput_tokens_per_sec': 50.0,
                     }
                 }))
             return ('', '', 0)
 
         with patch.object(bm, '_execute_command', side_effect=fake_execute), \
              patch.object(bm, 'write_metadata'):
-            bm._execute_validate()
+            bm._execute_run()
 
-        summary_files = list(Path(bm.run_result_output).glob('kvcache_validate_summary_*.json'))
+        summary_files = list(Path(bm.run_result_output).glob('kvcache_run_summary_*.json'))
         assert len(summary_files) == 1, f"Expected 1 summary file, found: {summary_files}"
 
         data = json.loads(summary_files[0].read_text())
@@ -624,17 +629,18 @@ class TestKVCacheValidateIntegration:
         assert 'options' in data
         options = data['options']
         assert '1' in options and '2' in options and '3' in options
-        assert pytest.approx(1.5) == options['1']['aggregated_bandwidth_gbps']
+        assert pytest.approx(1.5) == options['1']['aggregated_read_bandwidth_gbps']
+        assert pytest.approx(0.5) == options['1']['aggregated_write_bandwidth_gbps']
         assert 'partial_failure' in data
 
-    def test_validate_what_if_mode_skips_summary(self, tmp_path):
-        """With what_if=True, _execute_validate completes but writes no summary file."""
+    def test_run_what_if_mode_skips_summary(self, tmp_path):
+        """With what_if=True, _execute_run completes but writes no summary file."""
         bm = self._make_bm(tmp_path, what_if=True)
 
         with patch.object(bm, '_execute_command', return_value=('', '', 0)), \
              patch.object(bm, 'write_metadata'):
-            rc = bm._execute_validate()
+            rc = bm._execute_run()
 
-        summary_files = list(Path(bm.run_result_output).glob('kvcache_validate_summary_*.json'))
+        summary_files = list(Path(bm.run_result_output).glob('kvcache_run_summary_*.json'))
         assert summary_files == [], f"Expected no summary in what-if mode, found: {summary_files}"
         assert rc == 0

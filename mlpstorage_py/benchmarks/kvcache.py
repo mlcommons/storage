@@ -20,16 +20,12 @@ import os
 import sys
 import time
 from pathlib import Path
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, List
 
 from mlpstorage_py.benchmarks.base import Benchmark
 from mlpstorage_py.config import (
     BENCHMARK_TYPES,
-    EXEC_TYPE,
-    KVCACHE_MODELS,
     KVCACHE_DEFAULT_DURATION,
-    KVCACHE_PERFORMANCE_PROFILES,
-    KVCACHE_GENERATION_MODES,
 )
 from mlpstorage_py.interfaces import BenchmarkCommand
 from mlpstorage_py.utils import generate_mpi_prefix_cmd, MLPSJsonEncoder
@@ -95,7 +91,6 @@ class KVCacheBenchmark(Benchmark):
         self.command_method_map = {
             "run": self._execute_run,
             "datasize": self._execute_datasize,
-            "validate": self._execute_validate,
         }
 
         # Store key parameters
@@ -154,7 +149,7 @@ class KVCacheBenchmark(Benchmark):
 
     def _get_supported_commands(self) -> List[BenchmarkCommand]:
         """Return supported commands for KV Cache benchmark."""
-        return [BenchmarkCommand.RUN, BenchmarkCommand.DATASIZE, BenchmarkCommand.VALIDATE]
+        return [BenchmarkCommand.RUN, BenchmarkCommand.DATASIZE]
 
     def _run(self) -> int:
         """Execute the benchmark based on the command.
@@ -174,43 +169,119 @@ class KVCacheBenchmark(Benchmark):
             return 1
 
     def _execute_run(self) -> int:
-        """Execute the KV cache benchmark run.
+        """Execute the MLPerf v3.0 KV cache benchmark sequence across all three options.
 
-        Generates and executes the kv-cache.py command with configured
-        parameters, then processes the results.
+        Runs options 1, 2, and 3 sequentially via mpirun targeting mlperf_wrapper.py.
+        Each option runs `trials` times with `inter_option_delay` seconds between options.
+
+        In CLOSED submissions, seed, trials, inter-option-delay, and --config are fixed
+        to their mandated values; the run hard-fails if the user attempts to override them.
 
         Returns:
-            Exit code from benchmark execution.
+            Exit code (0 for success, non-zero for failure).
         """
-        # Verify benchmark parameters if running for submission (either
-        # --closed or --open). Previously only --closed triggered verification,
-        # so --open silently skipped it (related to #349).
-        if getattr(self.args, 'closed', False) or getattr(self.args, 'open', False):
-            self.verify_benchmark()
+        is_closed = getattr(self.args, 'closed', False)
 
-        # Build the command
-        cmd = self._build_kvcache_command()
+        # Enforce CLOSED submission restrictions — hard fail on illegal overrides
+        seed_arg = getattr(self.args, 'seed', None)
+        if is_closed and seed_arg is not None and seed_arg != 42:
+            self.logger.error(
+                f"--seed cannot be changed in a CLOSED submission (must be 42, got {seed_arg})"
+            )
+            return 1
 
-        self.logger.status(f"Running KV Cache benchmark for {self.duration}s...")
-        self.logger.status(f"Model: {self.model}, Users: {self.num_users}")
+        trials_arg = getattr(self.args, 'trials', None)
+        if is_closed and trials_arg is not None and trials_arg != 3:
+            self.logger.error(
+                f"--trials cannot be changed in a CLOSED submission (must be 3, got {trials_arg})"
+            )
+            return 1
 
-        # Execute the command
-        stdout, stderr, return_code = self._execute_command(
-            cmd,
-            output_file_prefix=f"kvcache_{self.run_datetime}",
-            print_stdout=True,
-            print_stderr=True
+        inter_option_delay_arg = getattr(self.args, 'inter_option_delay', None)
+        if is_closed and inter_option_delay_arg is not None and inter_option_delay_arg != 20:
+            self.logger.error(
+                f"--inter-option-delay cannot be changed in a CLOSED submission "
+                f"(must be 20, got {inter_option_delay_arg})"
+            )
+            return 1
+
+        config_arg = getattr(self.args, 'config', None)
+        if is_closed and config_arg is not None:
+            self.logger.error("--config is not valid in a CLOSED submission")
+            return 1
+
+        # Resolve effective values, applying mandated defaults
+        seed = seed_arg if seed_arg is not None else 42
+        trials = trials_arg if trials_arg is not None else 3
+        inter_option_delay = inter_option_delay_arg if inter_option_delay_arg is not None else 20
+        config = config_arg
+
+        hosts = getattr(self.args, 'hosts', None) or ['localhost']
+        npernode = getattr(self.args, 'npernode', 1)
+        total_ranks = npernode * len(hosts)
+        cache_dir = (
+            getattr(self.args, 'cache_dir', None)
+            or str(Path(self.run_result_output) / 'kvcache_cache')
         )
 
-        # Process results if successful
-        if return_code == 0:
-            self._process_results()
+        wrapper_path = Path(self.kvcache_bin_path).parent / 'mlperf_wrapper.py'
 
-        # Write metadata
+        mpi_prefix = generate_mpi_prefix_cmd(
+            mpi_cmd=getattr(self.args, 'mpi_bin', 'mpirun'),
+            hosts=hosts,
+            num_processes=total_ranks,
+            oversubscribe=getattr(self.args, 'oversubscribe', False),
+            allow_run_as_root=getattr(self.args, 'allow_run_as_root', False),
+            params=['--mca orte_abort_on_non_zero_status 0'],
+            logger=self.logger,
+            processes_per_node=npernode,
+        )
+
+        option_results = {}
+        for option in [1, 2, 3]:
+            trial_dirs = []
+
+            for trial in range(trials):
+                option_trial_dir = (
+                    Path(self.run_result_output) / f"option_{option}" / f"trial_{trial}"
+                )
+                option_trial_dir.mkdir(parents=True, exist_ok=True)
+
+                wrapper_cmd = (
+                    f"{mpi_prefix} {sys.executable} {wrapper_path}"
+                    f" --option {option}"
+                    f" --seed {seed}"
+                    f" --base-output-dir {option_trial_dir}"
+                    f" --cache-dir {cache_dir}"
+                )
+                if config:
+                    wrapper_cmd += f" --config {config}"
+
+                self.logger.status(f"Running option {option} trial {trial + 1}/{trials}...")
+                self._execute_command(
+                    wrapper_cmd,
+                    output_file_prefix=f"kvcache_opt{option}_trial{trial}_{self.run_datetime}",
+                    print_stdout=True,
+                    print_stderr=True,
+                )
+                trial_dirs.append(str(option_trial_dir))
+
+            if not getattr(self.args, 'what_if', False):
+                option_results[option] = self._aggregate_option_results(
+                    option, trial_dirs, total_ranks
+                )
+            else:
+                self.logger.info(f"what-if: skipping aggregation for option {option}")
+
+            if option < 3:
+                self._interruptible_sleep(inter_option_delay)
+
+        if not getattr(self.args, 'what_if', False):
+            self._write_run_summary(option_results, npernode, len(hosts), total_ranks, trials)
+
         self.write_metadata()
         self.write_cluster_info()
-
-        return return_code
+        return 0
 
     def _execute_datasize(self) -> int:
         """Calculate memory requirements for KV cache.
@@ -256,126 +327,6 @@ class KVCacheBenchmark(Benchmark):
 
         return 0
 
-    def _build_kvcache_command(self) -> str:
-        """Build the kv-cache.py command with parameters.
-
-        Constructs the full command line for executing kv-cache.py
-        with all configured parameters.
-
-        Returns:
-            Command string ready for execution.
-        """
-        cmd_parts = [
-            sys.executable,  # Use same Python interpreter
-            self.kvcache_bin_path,
-            f"--model {self.model}",
-            f"--num-users {self.num_users}",
-            f"--duration {self.duration}",
-            f"--gpu-mem-gb {self.gpu_mem_gb}",
-            f"--cpu-mem-gb {self.cpu_mem_gb}",
-            f"--generation-mode {self.generation_mode}",
-            f"--performance-profile {self.performance_profile}",
-        ]
-
-        # Add cache directory if specified
-        if self.cache_dir:
-            cmd_parts.append(f"--cache-dir {self.cache_dir}")
-        else:
-            # Use results directory for cache
-            cache_path = os.path.join(self.run_result_output, "kvcache_data")
-            cmd_parts.append(f"--cache-dir {cache_path}")
-
-        # Output file
-        output_file = os.path.join(
-            self.run_result_output,
-            f"kvcache_results_{self.run_datetime}.json"
-        )
-        cmd_parts.append(f"--output {output_file}")
-
-        # Optional features based on args
-        if getattr(self.args, 'disable_multi_turn', False):
-            cmd_parts.append("--disable-multi-turn")
-
-        if getattr(self.args, 'disable_prefix_caching', False):
-            cmd_parts.append("--disable-prefix-caching")
-
-        if getattr(self.args, 'enable_rag', False):
-            cmd_parts.append("--enable-rag")
-            rag_docs = getattr(self.args, 'rag_num_docs', 10)
-            cmd_parts.append(f"--rag-num-docs {rag_docs}")
-
-        if getattr(self.args, 'enable_autoscaling', False):
-            cmd_parts.append("--enable-autoscaling")
-            autoscaler_mode = getattr(self.args, 'autoscaler_mode', 'qos')
-            cmd_parts.append(f"--autoscaler-mode {autoscaler_mode}")
-
-        # Seed for reproducibility
-        seed = getattr(self.args, 'seed', None)
-        if seed is not None:
-            cmd_parts.append(f"--seed {seed}")
-
-        # Build the base command
-        cmd = " ".join(cmd_parts)
-
-        # Add MPI wrapper if distributed execution requested
-        exec_type = getattr(self.args, 'exec_type', None)
-        if exec_type == EXEC_TYPE.MPI:
-            hosts = getattr(self.args, 'hosts', None)
-            if hosts and len(hosts) > 0:
-                # Default num_processes to number of hosts if not specified
-                num_procs = self.num_processes or len(hosts)
-                mpi_prefix = generate_mpi_prefix_cmd(
-                    mpi_cmd=getattr(self.args, 'mpi_bin', 'mpirun'),
-                    hosts=hosts,
-                    num_processes=num_procs,
-                    oversubscribe=getattr(self.args, 'oversubscribe', False),
-                    allow_run_as_root=getattr(self.args, 'allow_run_as_root', False),
-                    params=getattr(self.args, 'mpi_params', None),
-                    logger=self.logger
-                )
-                cmd = f"{mpi_prefix} {cmd}"
-
-        return cmd
-
-    def _process_results(self):
-        """Process KV cache benchmark results.
-
-        Parses the output JSON file and extracts key metrics
-        for storage in metadata.
-        """
-        output_file = os.path.join(
-            self.run_result_output,
-            f"kvcache_results_{self.run_datetime}.json"
-        )
-
-        if not os.path.exists(output_file):
-            self.logger.warning(f"Results file not found: {output_file}")
-            return
-
-        try:
-            with open(output_file, 'r') as f:
-                results = json.load(f)
-
-            # Extract key metrics
-            self.metrics = {
-                'overall_passed': results.get('overall_passed', False),
-                'total_requests': results.get('total_requests', 0),
-                'avg_latency_ms': results.get('avg_latency_ms', 0),
-                'p99_latency_ms': results.get('p99_latency_ms', 0),
-                'throughput_req_per_sec': results.get('throughput_req_per_sec', 0),
-                'storage_throughput_mbps': results.get('storage_throughput_mbps', 0),
-                'cache_hit_rate': results.get('cache_hit_rate', 0),
-            }
-
-            self.logger.status(f"Benchmark passed: {self.metrics['overall_passed']}")
-            self.logger.info(f"Total requests: {self.metrics['total_requests']}")
-            self.logger.info(f"Average latency: {self.metrics['avg_latency_ms']:.2f} ms")
-            self.logger.info(f"P99 latency: {self.metrics['p99_latency_ms']:.2f} ms")
-            self.logger.info(f"Throughput: {self.metrics['throughput_req_per_sec']:.2f} req/s")
-
-        except Exception as e:
-            self.logger.warning(f"Failed to process results: {e}")
-
     def _interruptible_sleep(self, seconds: int) -> None:
         """Sleep in 1-second chunks, interruptible by Ctrl-C. Skipped in what-if mode."""
         if getattr(self.args, 'what_if', False):
@@ -395,13 +346,15 @@ class KVCacheBenchmark(Benchmark):
     ) -> dict:
         """Aggregate per-rank JSON results for one option across all trials.
 
-        Sums tier_storage_read_bandwidth_gbps across all rank output files (AGG-01).
-        Takes max storage_io_latency_ms.p95 across all rank output files (AGG-02).
-        Records missing files without crashing, sets partial_failure flag (AGG-03).
-        When storage_entries == 0, logs 'working set served from CPU tier' and
-        includes the 0 bandwidth in the sum (AGG-04).
+        Sums read/write bandwidth and token throughput across all rank files.
+        Takes max storage_io_latency_ms.p95. Records missing files without
+        crashing and sets partial_failure. When storage_entries == 0, logs
+        that the working set was served from the CPU tier.
         """
-        all_bandwidth = []
+        all_read_bw = []
+        all_write_bw = []
+        all_avg_throughput = []
+        all_storage_throughput = []
         all_p95_latency = []
         missing_files = []
         cpu_tier_flags = []
@@ -409,38 +362,37 @@ class KVCacheBenchmark(Benchmark):
         for trial_dir in trial_dirs:
             for rank_idx in range(expected_rank_count):
                 rank_dir = Path(trial_dir) / f"rank_{rank_idx}"
-                # Glob because each rank timestamps its own file independently
-                # (clock drift across ranks means timestamps differ — Phase 1 note)
-                matches = list(rank_dir.glob('kvcache_results_*.json'))
-                if not matches:
+                result_file = next(rank_dir.glob('kvcache_results_*.json'), None)
+                if result_file is None:
                     missing_files.append(str(rank_dir))
                     self.logger.warning(f"No result file in {rank_dir}")
                     continue
-                result_file = matches[-1]  # use latest if multiple
                 try:
                     with open(result_file) as f:
                         data = json.load(f)
                     summary = data.get('summary', {})
                     cache_stats = summary.get('cache_stats', {})
-                    storage_entries = cache_stats.get('storage_entries', None)
-                    if storage_entries == 0:
-                        # AGG-04: working set was served from CPU tier
+                    if cache_stats.get('storage_entries', None) == 0:
                         self.logger.info(
                             f"Rank {rank_idx} trial {trial_dir}: working set served from CPU tier"
                         )
                         cpu_tier_flags.append(str(result_file))
-                    # Include bandwidth regardless (0 is correct for CPU-tier)
-                    bw = cache_stats.get('tier_storage_read_bandwidth_gbps', 0.0)
-                    p95 = summary.get('storage_io_latency_ms', {}).get('p95', 0.0)
-                    all_bandwidth.append(bw)
-                    all_p95_latency.append(p95)
+                    # Include all values regardless (0 is correct for CPU-tier)
+                    all_read_bw.append(cache_stats.get('tier_storage_read_bandwidth_gbps', 0.0))
+                    all_write_bw.append(cache_stats.get('tier_storage_write_bandwidth_gbps', 0.0))
+                    all_avg_throughput.append(summary.get('avg_throughput_tokens_per_sec', 0.0))
+                    all_storage_throughput.append(summary.get('storage_throughput_tokens_per_sec', 0.0))
+                    all_p95_latency.append(summary.get('storage_io_latency_ms', {}).get('p95', 0.0))
                 except Exception as e:
                     self.logger.warning(f"Failed to parse {result_file}: {e}")
                     missing_files.append(str(result_file))
 
         return {
             'option': option,
-            'aggregated_bandwidth_gbps': sum(all_bandwidth),
+            'aggregated_read_bandwidth_gbps': sum(all_read_bw),
+            'aggregated_write_bandwidth_gbps': sum(all_write_bw),
+            'aggregated_avg_throughput_tokens_per_sec': sum(all_avg_throughput),
+            'aggregated_storage_throughput_tokens_per_sec': sum(all_storage_throughput),
             'aggregated_p95_latency_ms': max(all_p95_latency) if all_p95_latency else None,
             'rank_count': expected_rank_count,
             'trial_count': len(trial_dirs),
@@ -449,7 +401,7 @@ class KVCacheBenchmark(Benchmark):
             'cpu_tier_ranks': cpu_tier_flags,
         }
 
-    def _write_validate_summary(
+    def _write_run_summary(
         self,
         option_results: dict,
         npernode: int,
@@ -457,12 +409,7 @@ class KVCacheBenchmark(Benchmark):
         total_ranks: int,
         trials: int,
     ) -> None:
-        """Write aggregated validate summary JSON to run_result_output.
-
-        Satisfies AGG-05 (write to {run_result_output}/kvcache_validate_summary_{datetime}.json)
-        and AGG-06 (summary contains per-option bandwidth, P95 latency, trial_count,
-        rank_count, partial_failure flag, missing_files list).
-        """
+        """Write aggregated run summary JSON to run_result_output."""
         summary = {
             'schema_version': '1.0',
             'run_datetime': self.run_datetime,
@@ -475,106 +422,11 @@ class KVCacheBenchmark(Benchmark):
                 r.get('partial_failure', False) for r in option_results.values()
             ),
         }
-        summary_filename = f"kvcache_validate_summary_{self.run_datetime}.json"
+        summary_filename = f"kvcache_run_summary_{self.run_datetime}.json"
         summary_path = Path(self.run_result_output) / summary_filename
         with open(summary_path, 'w+') as fd:
             json.dump(summary, fd, indent=2, cls=MLPSJsonEncoder)
-        self.logger.status(f"Validate summary written to: {summary_path}")
-
-    def _execute_validate(self) -> int:
-        """Execute full MLPerf KV cache validation sequence across all three options.
-
-        Orchestrates the MLPerf v3.0 validate sequence:
-        - Runs options 1, 2, and 3 sequentially via mpirun targeting mlperf_wrapper.py
-        - Each option runs `trials` times
-        - Sleeps inter_option_delay seconds between options (skipped in --what-if)
-        - Aggregates per-rank JSON results after each option (skipped in --what-if)
-        - Writes summary JSON after all options complete (skipped in --what-if)
-        - Always calls write_metadata() regardless of what-if mode
-
-        Returns:
-            Exit code (0 for success).
-        """
-        # Step 1: Resolve run parameters
-        hosts = getattr(self.args, 'hosts', None) or ['localhost']
-        npernode = getattr(self.args, 'npernode', 1)
-        total_ranks = npernode * len(hosts)
-        trials = getattr(self.args, 'trials', 3)
-        inter_option_delay = getattr(self.args, 'inter_option_delay', 20)
-
-        # Step 2: Resolve mlperf_wrapper.py from kvcache_bin_path
-        # Both kv-cache.py and mlperf_wrapper.py live in kv_cache_benchmark/
-        wrapper_path = Path(self.kvcache_bin_path).parent / 'mlperf_wrapper.py'
-
-        # Step 3: Build MPI prefix (DIST-08: --mca orte_abort_on_non_zero_status 0)
-        mpi_prefix = generate_mpi_prefix_cmd(
-            mpi_cmd=getattr(self.args, 'mpi_bin', 'mpirun'),
-            hosts=hosts,
-            num_processes=total_ranks,
-            oversubscribe=getattr(self.args, 'oversubscribe', False),
-            allow_run_as_root=getattr(self.args, 'allow_run_as_root', False),
-            params=['--mca orte_abort_on_non_zero_status 0'],
-            logger=self.logger,
-            processes_per_node=npernode,
-        )
-
-        # Step 4: Outer option loop
-        option_results = {}
-        for option in [1, 2, 3]:
-            trial_dirs = []
-
-            # Inner trial loop
-            for trial in range(trials):
-                option_trial_dir = (
-                    Path(self.run_result_output) / f"option_{option}" / f"trial_{trial}"
-                )
-                option_trial_dir.mkdir(parents=True, exist_ok=True)
-
-                seed = getattr(self.args, 'seed', 42)
-                cache_dir = getattr(self.args, 'cache_dir', '')
-
-                # Build wrapper command (DIST-07: --seed, --base-output-dir, --cache-dir)
-                wrapper_cmd = (
-                    f"{mpi_prefix} {sys.executable} {wrapper_path}"
-                    f" --option {option}"
-                    f" --seed {seed}"
-                    f" --base-output-dir {option_trial_dir}"
-                    f" --cache-dir {cache_dir}"
-                )
-                config = getattr(self.args, 'config', None)
-                if config:
-                    wrapper_cmd += f" --config {config}"
-
-                self.logger.status(f"Validate option {option} trial {trial + 1}/{trials}...")
-                self._execute_command(
-                    wrapper_cmd,
-                    output_file_prefix=f"kvcache_validate_opt{option}_trial{trial}_{self.run_datetime}",
-                    print_stdout=True,
-                    print_stderr=True,
-                )
-                trial_dirs.append(str(option_trial_dir))
-
-            # Aggregate results after all trials for this option (skip in what-if)
-            if not getattr(self.args, 'what_if', False):
-                option_results[option] = self._aggregate_option_results(
-                    option, trial_dirs, total_ranks
-                )
-            else:
-                self.logger.info(f"what-if: skipping aggregation for option {option}")
-
-            # Inter-option sleep after options 1 and 2 (not after option 3)
-            if option < 3:
-                self._interruptible_sleep(inter_option_delay)
-
-        # Step 5: Write summary after all options (skip in what-if)
-        if not getattr(self.args, 'what_if', False):
-            self._write_validate_summary(
-                option_results, npernode, len(hosts), total_ranks, trials
-            )
-
-        # Step 6: Always write metadata
-        self.write_metadata()
-        return 0
+        self.logger.status(f"Run summary written to: {summary_path}")
 
     @property
     def metadata(self) -> Dict[str, Any]:
@@ -615,14 +467,5 @@ class KVCacheBenchmark(Benchmark):
         return base_metadata
 
     def generate_command(self, command: str) -> str:
-        """Generate the shell command to execute.
-
-        Args:
-            command: Command string ('run', 'datasize').
-
-        Returns:
-            Shell command string.
-        """
-        if command == 'run':
-            return self._build_kvcache_command()
+        """Generate the shell command to execute."""
         return ""
