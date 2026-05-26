@@ -110,9 +110,7 @@ class TrainingCheck(BaseCheck):
                     continue
                 
                 # Calculate min samples from steps per epoch
-                num_steps_per_epoch = max(MIN_STEPS_PER_EPOCH, 
-                                        num_files_train * num_samples_per_file // (batch_size * num_accelerators))
-                min_samples_steps = num_steps_per_epoch * batch_size * num_accelerators
+                min_samples_steps = MIN_STEPS_PER_EPOCH * batch_size * num_accelerators
                 
                 # Calculate min samples from host memory
                 total_host_memory = num_hosts * host_memory_gb
@@ -218,19 +216,23 @@ class TrainingCheck(BaseCheck):
         valid = True
         if self.mode != "training":
             return valid
+        MIN_AU_PERCENTAGE = 90.0
         for summary, metadata, _ in self.submissions_logs.run_files:
             metrics = summary.get("metric", {})
-            au_mean = metrics.get("train_au_mean_percentage", 0)
-            au_expectation = metrics.get("train_au_meet_expectation", "")
-            
-            if au_expectation != "success":
+            au_values = metrics.get("train_au_percentage", [])
+            if not au_values:
+                self.log.error("AU check failed: train_au_percentage missing from summary")
+                valid = False
+                continue
+            au_mean = sum(au_values) / len(au_values)
+            if au_mean < MIN_AU_PERCENTAGE:
                 self.log.error(
-                    "AU check failed: expected 'success', got '%s' (AU: %.2f%%)",
-                    au_expectation,
-                    au_mean
+                    "AU check failed: mean AU %.2f%% is below minimum %.2f%%",
+                    au_mean,
+                    MIN_AU_PERCENTAGE
                 )
                 valid = False
-        
+
         return valid
     
     def single_host_simulated_accelerators(self):

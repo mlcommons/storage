@@ -49,7 +49,7 @@ class JSONParser:
         return self.keys
 
     def __contains__(self, key):
-        return key in self.messages
+        return key in self.d
 
     def __repr__(self):
         return f"<SummaryParser path={self.path!r} keys={len(self.keys)}>"

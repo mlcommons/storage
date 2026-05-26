@@ -214,7 +214,7 @@ class DLIOBenchmark(Benchmark, abc.ABC):
         )
 
     def process_dlio_params(self, config_file):
-        params_dict = dict() if not self.args.params else {k: v for k, v in (item.split("=") for item in self.args.params)}
+        params_dict = dict() if not self.args.params else {k: v for k, v in (item.split("=", 1) for item in self.args.params)}
         yaml_params = read_config_from_file(os.path.join(self.DLIO_CONFIG_PATH, "workload", config_file))
         combined_params = update_nested_dict(yaml_params, create_nested_dict(params_dict))
 
@@ -239,7 +239,9 @@ class DLIOBenchmark(Benchmark, abc.ABC):
         if hasattr(self.args, "command"):
             output_file_prefix += f"_{self.args.command}"
 
-        self._execute_command(cmd, output_file_prefix=output_file_prefix)
+        _, _, return_code = self._execute_command(cmd, output_file_prefix=output_file_prefix)
+        if return_code != 0:
+            raise RuntimeError(f'DLIO exited with return code {return_code}')
 
     @abc.abstractmethod
     def add_workflow_to_cmd(self, cmd) -> str:
@@ -457,6 +459,7 @@ class CheckpointingBenchmark(DLIOBenchmark):
                 self.logger.error(f'Invalid command: {self.args.command}')
                 return EXIT_CODE.INVALID_ARGUMENTS
         except Exception as e:
+            self.logger.error(f'Checkpointing benchmark failed: {e}')
             return EXIT_CODE.FAILURE
         return EXIT_CODE.SUCCESS
 

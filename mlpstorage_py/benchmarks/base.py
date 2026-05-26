@@ -45,9 +45,8 @@ from typing import Tuple, Dict, Any, List, Optional, Callable, Set, TYPE_CHECKIN
 
 from functools import wraps
 
-from pyarrow.ipc import open_stream
 
-from mlpstorage_py.config import PARAM_VALIDATION, DATETIME_STR, MLPS_DEBUG, EXEC_TYPE
+from mlpstorage_py.config import PARAM_VALIDATION, DATETIME_STR, MLPS_DEBUG, EXEC_TYPE, EXIT_CODE
 from mlpstorage_py.debug import debug_tryer_wrapper
 from mlpstorage_py.interfaces import BenchmarkInterface, BenchmarkConfig, BenchmarkCommand
 from mlpstorage_py.mlps_logging import setup_logging, apply_logging_options
@@ -928,6 +927,7 @@ class Benchmark(BenchmarkInterface, abc.ABC):
             # Note: Stage progress remains visible showing elapsed time
             # during this phase. DLIO output flows through directly.
             start_time = time.time()
+            result = EXIT_CODE.FAILURE
             try:
                 result = self._run()
             finally:
