@@ -248,7 +248,7 @@ class NVMeBackend(StorageBackend):
             if self.base_path.exists():
                 if not self.base_path.is_dir():
                     raise NotADirectoryError(f"Cache path {self.base_path} exists but is not a directory.")
-                for entry in self.base_path.glob("*.npy"):
+                for entry in self.base_path.glob("*.bin"):
                     try:
                         entry.unlink()
                     except OSError:
@@ -263,21 +263,22 @@ class NVMeBackend(StorageBackend):
 
     def _get_path(self, key: str) -> Path:
         """Constructs the file path for a given cache key."""
-        return self.base_path / f"{key}.npy"
+        return self.base_path / f"{key}.bin"
 
     def write(self, key: str, data: np.ndarray) -> StorageBackend.IOTiming:
-        """Writes a NumPy array to a binary .npy file on disk."""
+        """Writes a NumPy array to a raw binary file on disk."""
         start = time.perf_counter()
         path = self._get_path(key)
 
+        raw = data.numpy() if hasattr(data, 'numpy') else data
         with open(path, 'wb') as f:
-            np.save(f, data, allow_pickle=False)
+            f.write(raw.tobytes())
             post_save = time.perf_counter()
             f.flush()
             os.fsync(f.fileno())
             post_fsync = time.perf_counter()
 
-        self.metadata[key] = {'shape': data.shape, 'dtype': str(data.dtype), 'size': data.nbytes}
+        self.metadata[key] = {'shape': list(data.shape), 'dtype': str(data.dtype), 'size': data.nbytes}
 
         host_time = post_save - start
         device_time = post_fsync - post_save
@@ -285,7 +286,7 @@ class NVMeBackend(StorageBackend):
         return StorageBackend.IOTiming(total=total, device=device_time, host=host_time)
 
     def read(self, key: str) -> Tuple[np.ndarray, StorageBackend.IOTiming]:
-        """Reads a .npy file from disk, dropping page cache first for accurate benchmarking."""
+        """Reads a raw binary file from disk, dropping page cache first for accurate benchmarking."""
         start = time.perf_counter()
         path = self._get_path(key)
 
@@ -304,9 +305,13 @@ class NVMeBackend(StorageBackend):
             pass
 
         pre_load = time.perf_counter()
-        data = np.load(path, allow_pickle=False)
+        with open(path, 'rb') as f:
+            raw = f.read()
         load_done = time.perf_counter()
-        data = np.array(data)
+        metadata = self.metadata.get(key, {})
+        expected_dtype = np.dtype(metadata.get('dtype', 'float32'))
+        expected_shape = tuple(metadata.get('shape', [-1]))
+        data = np.frombuffer(raw, dtype=expected_dtype).reshape(expected_shape)
         copy_done = time.perf_counter()
 
         device_time = load_done - pre_load
@@ -320,8 +325,8 @@ class NVMeBackend(StorageBackend):
         self.metadata.pop(key, None)
 
     def clear(self):
-        """Deletes all .npy files from the cache directory."""
-        for file in self.base_path.glob("*.npy"):
+        """Deletes all .bin files from the cache directory."""
+        for file in self.base_path.glob("*.bin"):
             file.unlink()
         self.metadata.clear()
 
