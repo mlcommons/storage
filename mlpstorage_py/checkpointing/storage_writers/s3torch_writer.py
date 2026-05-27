@@ -197,18 +197,17 @@ class S3TorchConnectorWriter(StorageWriter):
         print(f"[S3TorchWriter]   region={region}, endpoint={endpoint or 'AWS S3'}")
         print(f"[S3TorchWriter]   (multipart auto-managed by s3torchconnector)")
     
-    def write_chunk(self, buffer: memoryview, size: int) -> int:
+    def write_chunk(self, buffer: bytes, size: int) -> int:
         """Write chunk directly to S3 (streaming).
-        
+
         Args:
-            buffer: Memory buffer containing data to write
+            buffer: Bytes containing data to write
             size: Number of bytes to write from buffer
-            
+
         Returns:
             Number of bytes written
         """
-        data = bytes(buffer[:size])
-        self.writer.write(data)  # Stream directly to S3
+        self.writer.write(buffer)  # Stream directly to S3
         self.total_bytes += size
         elapsed = time.monotonic() - self._start_time
         written_gb = self.total_bytes / 1e9
