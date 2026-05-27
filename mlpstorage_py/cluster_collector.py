@@ -1537,9 +1537,10 @@ class MPIClusterCollector:
                 )
 
             if result.returncode != 0:
-                self.logger.warning(
-                    f"MPI collection returned non-zero exit code: "
-                    f"{result.returncode}\nstderr: {result.stderr}"
+                raise RuntimeError(
+                    f"MPI cluster collection failed (exit code {result.returncode}). "
+                    f"Partial data from {len(collected_data)} hosts was collected but cannot be trusted. "
+                    f"stderr: {result.stderr}"
                 )
 
             self.logger.info(
