@@ -177,7 +177,8 @@ class IntegratedBenchmark:
         self.results = {
             'requests_completed': 0, 'total_tokens_generated': 0,
             'total_storage_io_latency': 0.0, 'total_generation_latency': 0.0,
-            'end_to_end_latencies': [], 'storage_latencies': [], 'generation_latencies': [],
+            'end_to_end_latencies': [], 'system_e2e_latencies': [], 'service_latencies': [],
+            'storage_latencies': [], 'generation_latencies': [],
             'throughput_timeline': [], 'prefill_latencies': [], 'decode_latencies': [],
             'multi_turn_cache_hits': 0, 'multi_turn_cache_misses': 0,
             'seed': self.seed,
@@ -607,17 +608,15 @@ class IntegratedBenchmark:
                             )
                             storage_latency += write_latency
                     else:
-                        decode_batch_size = cfg('decode', 'batch_size', default=32)
-                        num_batched_reads = max(1, (request.generate_tokens + decode_batch_size - 1) // decode_batch_size)
-                        for _ in range(num_batched_reads):
-                            _, batch_read_latency = self.cache.access_cache(decode_key, InferencePhase.DECODE, cache_type)
-                            storage_latency += batch_read_latency
-                            decode_total_latency += batch_read_latency
+                        _, batch_read_latency = self.cache.access_cache(decode_key, InferencePhase.DECODE, cache_type)
+                        storage_latency += batch_read_latency
+                        decode_total_latency = batch_read_latency
 
                     with self.results_lock: self.results['decode_latencies'].append(decode_total_latency)
 
             # 6. Simulate token generation time.
             generation_latency = request.generate_tokens * GENERATION_TIMING[self.generation_mode]
+            request.storage_complete_time = time.perf_counter()
             if generation_latency > 0: time.sleep(generation_latency)
 
             request.complete_time = time.perf_counter()
@@ -628,9 +627,11 @@ class IntegratedBenchmark:
                 self.results['total_tokens_generated'] += request.generate_tokens
                 self.results['total_storage_io_latency'] += storage_latency
                 self.results['total_generation_latency'] += generation_latency
-                self.results['end_to_end_latencies'].append(request.total_latency_ms / 1000)
+                self.results['end_to_end_latencies'].append(request.storage_e2e_latency_ms / 1000)
+                self.results['system_e2e_latencies'].append(request.total_latency_ms / 1000)
                 self.results['storage_latencies'].append(storage_latency)
                 self.results['generation_latencies'].append(generation_latency)
+                self.results['service_latencies'].append(request.service_latency_ms)
 
                 if self.max_requests > 0 and self.results['requests_completed'] >= self.max_requests:
                     if self.stop_event:
@@ -1239,9 +1240,9 @@ class IntegratedBenchmark:
             threads.append(mon_thread)
             mon_thread.start()
 
-        benchmark_start = time.time()
+        benchmark_start = time.perf_counter()
         stop_event.wait(timeout=self.duration)
-        actual_duration = time.time() - benchmark_start
+        actual_duration = time.perf_counter() - benchmark_start
 
         stop_event.set()
         for thread in threads:
