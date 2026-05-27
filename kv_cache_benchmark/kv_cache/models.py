@@ -253,6 +253,7 @@ class InferenceRequest:
     submit_time: float = field(default_factory=time.perf_counter)
     start_time: float = 0
     complete_time: float = 0
+    storage_complete_time: float = 0
 
     # Conversation tracking for stateful workloads.
     conversation_id: Optional[str] = None
@@ -271,3 +272,17 @@ class InferenceRequest:
         if self.complete_time == 0:
             return 0
         return (self.complete_time - self.submit_time) * 1000
+
+    @property
+    def storage_e2e_latency_ms(self) -> float:
+        """Calculates storage-only end-to-end latency (excludes GPU simulation time)."""
+        if self.storage_complete_time == 0:
+            return 0
+        return (self.storage_complete_time - self.submit_time) * 1000
+
+    @property
+    def service_latency_ms(self) -> float:
+        """Calculates service latency (time from worker dequeue to completion, excludes queue wait)."""
+        if self.start_time == 0 or self.complete_time == 0:
+            return 0
+        return (self.complete_time - self.start_time) * 1000
