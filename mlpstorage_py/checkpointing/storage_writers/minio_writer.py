@@ -323,34 +323,33 @@ class MinIOStorageWriter(StorageWriter):
         rate = written_gb / elapsed if elapsed > 0 else 0.0
         print(f'\r[Writer] {written_gb:.2f} GB, {rate:.2f} GB/s   ', end='', flush=True)
     
-    def write_chunk(self, buffer: memoryview, size: int) -> int:
+    def write_chunk(self, buffer: bytes, size: int) -> int:
         """Write chunk, flushing parts as they fill up.
-        
+
         Args:
-            buffer: Memory buffer containing data to write
+            buffer: Bytes containing data to write
             size: Number of bytes to write from buffer
-            
+
         Returns:
             Number of bytes written
         """
-        data = bytes(buffer[:size])
         offset = 0
-        
+
         while offset < size:
             # Calculate how much we can add to current part
             remaining_in_part = self.part_size - self.part_buffer_size
             chunk_remaining = size - offset
             to_write = min(remaining_in_part, chunk_remaining)
-            
+
             # Add to part buffer
-            self.part_buffer.write(data[offset:offset + to_write])
+            self.part_buffer.write(buffer[offset:offset + to_write])
             self.part_buffer_size += to_write
             offset += to_write
-            
+
             # Flush if part is full
             if self.part_buffer_size >= self.part_size:
                 self._flush_part()
-        
+
         self.total_bytes += size
         return size
     
