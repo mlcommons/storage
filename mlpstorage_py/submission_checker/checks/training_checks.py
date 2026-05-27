@@ -101,21 +101,17 @@ class TrainingCheck(BaseCheck):
                 
                 # From summary
                 num_accelerators = summary.get("num_accelerators", 1)
-                num_hosts = summary.get("num_hosts", 1)
-                host_memory_gb = summary.get("host_memory_GB", [0])[0]
-                
+                total_host_memory = sum(summary.get("host_memory_GB", [0]))
+
                 if record_length == 0:
                     self.log.error("Record length is 0, cannot calculate dataset size")
                     valid = False
                     continue
-                
+
                 # Calculate min samples from steps per epoch
-                num_steps_per_epoch = max(MIN_STEPS_PER_EPOCH, 
-                                        num_files_train * num_samples_per_file // (batch_size * num_accelerators))
-                min_samples_steps = num_steps_per_epoch * batch_size * num_accelerators
-                
+                min_samples_steps = MIN_STEPS_PER_EPOCH * batch_size * num_accelerators
+
                 # Calculate min samples from host memory
-                total_host_memory = num_hosts * host_memory_gb
                 min_samples_memory = (total_host_memory * HOST_MEMORY_MULTIPLIER * 
                                     1024 * 1024 * 1024 / record_length)
                 
