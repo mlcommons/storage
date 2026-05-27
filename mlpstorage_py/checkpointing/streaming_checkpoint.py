@@ -157,8 +157,8 @@ class StreamingCheckpointing:
         print(f"Use dgen-py: {self.use_dgen}")
         print("=" * 80)
         
-        start_time = time.time()
-        
+        setup_start = time.time()
+
         # Create buffer pool
         buffers, buffer_names = self._create_buffer_pool()
         
@@ -205,7 +205,9 @@ class StreamingCheckpointing:
         )
         writer_proc.start()
         print(f"\n[Main] Writer process started (PID={writer_proc.pid})")
-        
+        pipeline_start = time.time()
+        setup_time = pipeline_start - setup_start
+
         try:
             # Producer loop
             print(f"[Main] Starting producer at {time.perf_counter():.3f}s")
@@ -249,7 +251,7 @@ class StreamingCheckpointing:
         if 'error' in stats:
             raise RuntimeError(f"Writer process error: {stats['error']}")
         
-        return self._format_results(stats, gen_time, time.time() - start_time, total_size_bytes)
+        return self._format_results(stats, gen_time, time.time() - pipeline_start, total_size_bytes, setup_time)
     
     def _create_buffer_pool(self):
         """Create shared memory buffer pool."""
@@ -392,6 +394,7 @@ class StreamingCheckpointing:
         total_io_time = 0.0
         chunks_written = 0
         _write_error = None  # Error from write loop, if any
+        io_wall_start = time.perf_counter()
 
         try:
             while written < total_size:
@@ -402,9 +405,12 @@ class StreamingCheckpointing:
                 buffer_idx, nbytes = item
                 shm = buffers[buffer_idx]
 
+                # Copy buffer outside timed window to avoid memcpy inflation
+                chunk_bytes = bytes(shm.buf[:nbytes])
+
                 # Time ONLY the I/O operation
                 io_start = time.perf_counter()
-                bytes_written = writer.write_chunk(shm.buf, nbytes)
+                bytes_written = writer.write_chunk(chunk_bytes, nbytes)
                 total_io_time += time.perf_counter() - io_start
 
                 written += bytes_written
@@ -434,6 +440,8 @@ class StreamingCheckpointing:
                 if _write_error is None:
                     _write_error = f"close() failed: {e}"
 
+            io_wall_end = time.perf_counter()
+
             # Force cleanup of storage-library resources.
             try:
                 del writer
@@ -444,6 +452,7 @@ class StreamingCheckpointing:
             # Build result dict — single put to stats_queue.
             result = {
                 'io_time': total_io_time,
+                'io_wall_time': io_wall_end - io_wall_start,
                 'close_time': close_time,
                 'total_bytes': written,
                 'chunks_written': chunks_written,
@@ -471,20 +480,26 @@ class StreamingCheckpointing:
             sys.stdout.flush()
             os._exit(exit_code)
     
-    def _format_results(self, stats, gen_time, total_time, total_size_bytes):
+    def _format_results(self, stats, gen_time, total_time, total_size_bytes, setup_time=0.0):
         """Format results for return."""
-        gen_throughput = (total_size_bytes / (1024**3)) / gen_time
-        io_throughput = (stats['total_bytes'] / (1024**3)) / stats['io_time']
-        
+        actual_bytes_gb = stats['total_bytes'] / (1024**3)
+        gen_throughput = actual_bytes_gb / gen_time
+        io_throughput = actual_bytes_gb / stats.get('io_wall_time', stats['io_time'])
+
+        if stats['total_bytes'] != total_size_bytes:
+            print(f"[Warning] Bytes written ({stats['total_bytes']}) != requested ({total_size_bytes}); throughput ratio uses actual bytes for both numerators.")
+
         # Calculate improved metrics
         throughput_ratio = gen_throughput / io_throughput
         pipeline_overhead = ((total_time - max(gen_time, stats['io_time'])) / total_time) * 100
         bottleneck = "I/O" if stats['io_time'] > gen_time else "Generation"
-        
+
         results = {
             'gen_time': gen_time,
-            'io_time': stats['io_time'],
+            'io_accumulated_time': stats['io_time'],
+            'io_wall_time': stats.get('io_wall_time', stats['io_time']),
             'close_time': stats.get('close_time', 0.0),
+            'setup_time': setup_time,
             'total_time': total_time,
             'total_bytes': stats['total_bytes'],
             'chunks': stats['chunks_written'],
@@ -495,13 +510,15 @@ class StreamingCheckpointing:
             'bottleneck': bottleneck,
             'backend_stats': stats.get('backend_stats', {})
         }
-        
+
         print("\n" + "=" * 80)
         print("RESULTS")
         print("=" * 80)
+        print(f"Setup:       {results['setup_time']:.4f}s (buffer pool + fork overhead)")
         print(f"Generation:  {results['gen_time']:.4f}s @ {results['gen_throughput_gbps']:.2f} GB/s")
-        print(f"I/O:         {results['io_time']:.4f}s @ {results['io_throughput_gbps']:.2f} GB/s")
-        print(f"  - write:   {results['io_time'] - results['close_time']:.4f}s")
+        print(f"I/O:         {results['io_wall_time']:.4f}s (wall) @ {results['io_throughput_gbps']:.2f} GB/s")
+        print(f"  - accumulated: {results['io_accumulated_time']:.4f}s (sum of per-chunk timers)")
+        print(f"  - write:   {results['io_accumulated_time'] - results['close_time']:.4f}s")
         print(f"  - close:   {results['close_time']:.4f}s (fsync/finalize)")
         print(f"Total:       {results['total_time']:.4f}s")
         print(f"")
@@ -510,7 +527,7 @@ class StreamingCheckpointing:
         print(f"Bottleneck: {results['bottleneck']}")
         print(f"Chunks: {results['chunks']}")
         print("=" * 80)
-        
+
         return results
 
     def load(
@@ -699,11 +716,13 @@ class StreamingCheckpointing:
                 io_time    = max(t  for _,  t, _ in results)
                 chunks     = sum(c  for _, _, c in results)
             finally:
+                all_backend_stats = []
                 for r in readers:
                     try:
-                        backend_stats = r.close()
+                        all_backend_stats.append(r.close())
                     except Exception:
                         pass
+                backend_stats = all_backend_stats
 
         total_time  = time.time() - wall_start
         io_gbps     = (total_read / 1024**3) / io_time if io_time > 0 else 0.0
