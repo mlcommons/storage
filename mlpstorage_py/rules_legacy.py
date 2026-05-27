@@ -1729,9 +1729,13 @@ def calculate_training_data_size(args, cluster_information, dataset_params, read
 
     # Required Minimum Dataset size is 5x the total client memory
     dataset_size_bytes = 5 * total_mem_bytes
-    file_size_bytes = dataset_params['num_samples_per_file'] * dataset_params['record_length_bytes']
-
-    min_num_files_by_bytes = dataset_size_bytes // file_size_bytes
+    record_length_bytes = dataset_params.get('record_length_bytes')
+    if not record_length_bytes:
+        logger.warning('record_length_bytes missing from dataset params (parquet?); skipping byte-based dataset size check')
+        file_size_bytes = 0
+    else:
+        file_size_bytes = dataset_params['num_samples_per_file'] * record_length_bytes
+    min_num_files_by_bytes = (dataset_size_bytes // file_size_bytes) if file_size_bytes else 0
     num_samples_by_bytes = min_num_files_by_bytes * dataset_params['num_samples_per_file']
     min_samples = 500 * num_processes * reader_params['batch_size']
     min_num_files_by_samples = min_samples // dataset_params['num_samples_per_file']
