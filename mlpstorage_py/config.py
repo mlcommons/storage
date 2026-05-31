@@ -147,7 +147,7 @@ class EXIT_CODE(enum.IntEnum):
     CONFIGURATION_ERROR = 5
     FAILURE = 6
     TIMEOUT = 7
-    # Add more as needed
+    INTERRUPTED = 8
     
     def __str__(self):
         return f"{self.name} ({self.value})"
