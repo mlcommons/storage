@@ -2,7 +2,7 @@
 Checkpointing benchmark CLI argument builder.
 
 This module defines the CLI arguments for the checkpointing benchmark,
-including datasize and run commands.
+including datasize, run, and configview commands.
 """
 
 import sys
@@ -19,11 +19,12 @@ from mlpstorage_py.cli.common_args import (
 )
 
 
-def add_checkpointing_arguments(parser, is_closed):
+def add_checkpointing_arguments(parser, mode):
     """Add checkpointing benchmark arguments to the parser.
 
     Args:
         parser: Argparse subparser for the checkpointing benchmark.
+        mode: Submission mode — one of 'closed', 'open', or 'whatif'.
     """
     checkpointing_subparsers = parser.add_subparsers(dest="command", required=True)
     parser.required = True
@@ -37,96 +38,129 @@ def add_checkpointing_arguments(parser, is_closed):
         "run",
         help=HELP_MESSAGES['checkpoint_run']
     )
+    configview = checkpointing_subparsers.add_parser(
+        "configview",
+        help=HELP_MESSAGES.get('configview', 'View final benchmark configuration')
+    )
 
-    # Common arguments for both datasize and run
-    for _parser in [datasize, run_benchmark]:
-        add_host_arguments(_parser, is_closed)
-        _parser.add_argument(
-            '--client-host-memory-in-gb', '-cm',
-            type=int,
-            required=True,
-            help=HELP_MESSAGES['client_host_mem_GB']
-        )
+    for cmd_name, cmd_parser in [("datasize", datasize), ("run", run_benchmark),
+                                  ("configview", configview)]:
+        _add_checkpointing_core_args(cmd_parser, cmd_name)
+        if mode in ("open", "whatif"):
+            _add_checkpointing_open_args(cmd_parser, cmd_name)
 
-        # Model argument - using help text with choices instead of choices param
-        # to avoid very long help output
-        if is_closed:
-            _parser.add_argument(
-                '--model', '-m',
-                choices=LLM_MODELS_CLOSED,
-                required=True,
-                help=HELP_MESSAGES['llm_model']
-            )
 
-        else:
-            _parser.add_argument(
-                '--model', '-m',
-                choices=LLM_MODELS,
-                required=True,
-                help=HELP_MESSAGES['llm_model']
-            )
+def _add_checkpointing_core_args(parser, command):
+    """Add core (closed/open/whatif) checkpointing arguments to a subcommand parser.
 
-        if is_closed:
-            _parser.set_defaults(
-                num_checkpoints_read=10,
-                num_checkpoints_write=10
-            )
-        else:
-            _parser.add_argument(
-                '--num-checkpoints-read', '-ncr',
-                type=int,
-                default=10,
-                help=HELP_MESSAGES['num_checkpoints']
-            )
+    Args:
+        parser: The subcommand parser to add arguments to.
+        command: The subcommand name ('datasize', 'run', 'configview').
+    """
+    # Set defaults for open-gated attrs so they always exist in the namespace
+    parser.set_defaults(
+        loops=1,
+        params='',
+        allow_invalid_params=False,
+        num_checkpoints_read=10,
+        num_checkpoints_write=10,
+    )
 
-            _parser.add_argument(
-                '--num-checkpoints-write', '-ncw',
-                type=int,
-                default=10,
-                help=HELP_MESSAGES['num_checkpoints']
-            )
+    add_host_arguments(parser)
 
-            add_dlio_arguments(_parser, is_closed)
+    parser.add_argument(
+        '--client-host-memory-in-gb', '-cm',
+        type=float,
+        required=True,
+        help=HELP_MESSAGES['client_host_mem_GB']
+    )
 
-            # Add exec-type and MPI arguments to both datasize and run
-            _parser.add_argument(
-                '--exec-type', '-et',
-                type=EXEC_TYPE,
-                choices=list(EXEC_TYPE),
-                default=EXEC_TYPE.MPI,
-                help=HELP_MESSAGES['exec_type']
-            )
-            add_mpi_arguments(_parser, is_closed)
+    # Model as --model flag (not positional) — checkpointing keeps flag style
+    parser.add_argument(
+        '--model', '-m',
+        choices=LLM_MODELS,
+        required=True,
+        help=HELP_MESSAGES['llm_model']
+    )
 
-    run_benchmark.add_argument(
+    parser.add_argument(
         '--num-processes', '-np',
         type=int,
         required=True,
         help=HELP_MESSAGES['num_checkpoint_accelerators']
     )
 
-<<<<<<< HEAD
-    run_benchmark.add_argument(
-        "--checkpoint-folder", '-cf',
-        type=str,
-        required=True,
-        help=HELP_MESSAGES['checkpoint_folder']
+    parser.add_argument(
+        '--exec-type', '-et',
+        type=EXEC_TYPE,
+        choices=list(EXEC_TYPE),
+        default=EXEC_TYPE.MPI,
+        help=HELP_MESSAGES['exec_type']
     )
 
-    add_universal_arguments(run_benchmark, True, True, True, is_closed)
-    add_universal_arguments(datasize, False, False, True, is_closed)
-=======
-        add_universal_arguments(_parser)
-        add_storage_type_arguments(_parser)
->>>>>>> origin/main
+    add_mpi_arguments(parser)
 
-    # Add time-series arguments to run command only
-    add_timeseries_arguments(run_benchmark, is_closed)
+    add_universal_arguments(parser, req_results=(command in ("run", "configview")))
+
+    # Storage type positional for run and configview — NOT datasize
+    if command in ("run", "configview"):
+        add_storage_type_arguments(parser, required=True)
+
+    # Checkpoint folder required for run only
+    if command == "run":
+        parser.add_argument(
+            '--checkpoint-folder', '-cf',
+            type=str,
+            required=True,
+            help=HELP_MESSAGES['checkpoint_folder']
+        )
+
+
+def _add_checkpointing_open_args(parser, command):
+    """Add open/whatif-only checkpointing arguments.
+
+    Args:
+        parser: The subcommand parser to add arguments to.
+        command: The subcommand name.
+    """
+    parser.add_argument(
+        '--num-checkpoints-read', '-ncr',
+        type=int,
+        default=10,
+        help=HELP_MESSAGES['num_checkpoints']
+    )
+    parser.add_argument(
+        '--num-checkpoints-write', '-ncw',
+        type=int,
+        default=10,
+        help=HELP_MESSAGES['num_checkpoints']
+    )
+    parser.add_argument(
+        '--loops',
+        type=int,
+        default=1,
+        help="Number of times to run the benchmark"
+    )
+    parser.add_argument(
+        '--allow-invalid-params', '-aip',
+        action='store_true',
+        help="Allow invalid DLIO parameters to be passed"
+    )
+    parser.add_argument(
+        '--params', '-p',
+        nargs="+",
+        action="append",
+        metavar="KEY=VALUE",
+        help=HELP_MESSAGES['params']
+    )
+    add_dlio_arguments(parser)
+    if command == "run":
+        add_timeseries_arguments(parser)
 
 
 def validate_checkpointing_arguments(args):
     """Validate the whole set of args given that we're doing a checkpointing benchmark
-    
+
     Args:
         args (argparse.Namespace): The parsed command-line arguments
     """
