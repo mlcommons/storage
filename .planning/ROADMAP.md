@@ -32,7 +32,7 @@ Refactor the `mlpstorage` CLI from a flag-gated `--open`/`--closed` design to a 
 Plans:
 **Wave 1**
 
-- [ ] 01-01-PLAN.md — Fix config.py constants (MODELS_CLOSED, MODELS_OPEN) + resolve common_args.py conflict markers and simplify all function signatures
+- [x] 01-01-PLAN.md — Fix config.py constants (MODELS_CLOSED, MODELS_OPEN) + resolve common_args.py conflict markers and simplify all function signatures
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -103,7 +103,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Core CLI Refactor | 0/5 | Planned | - |
+| 1. Core CLI Refactor | 1/5 | In Progress|  |
 | 2. Version Command | 0/1 | Not started | - |
 | 3. Help Behavior | 0/1 | Not started | - |
 | 4. Test Coverage | 0/1 | Not started | - |

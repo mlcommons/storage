@@ -10,13 +10,13 @@
 - [ ] **CLI-01**: `mlpstorage closed|open|whatif <benchmark> <model|algorithm> <command> [file|object] [OPTIONS]` parses correctly for all four benchmarks
 - [ ] **CLI-02**: `model`/`algorithm` positional appears BEFORE command in all benchmark branches
 - [ ] **CLI-03**: `file|object` storage positional appears AFTER command for datagen/run/configview; absent for datasize and all kvcache commands
-- [ ] **CLI-04**: `is_closed` parameter is eliminated from all arg-builder function signatures; mode is implicit in which parser branch is being built
+- [x] **CLI-04**: `is_closed` parameter is eliminated from all arg-builder function signatures; mode is implicit in which parser branch is being built
 - [ ] **CLI-05**: Three builder tiers are implemented: `_add_{cmd}_core_args` (all modes), `_add_{cmd}_open_args` (open+whatif), `_add_{cmd}_whatif_args` (whatif only)
 - [ ] **CLI-06**: Open-gated arguments (--loops, --allow-invalid-params, --timeseries-*, --params, etc.) are absent from closed branch help and raise an error if supplied in closed mode
-- [ ] **CLI-07**: `config.py` constants corrected: `MODELS_CLOSED = [unet3d, retinanet]`, `MODELS_OPEN = [unet3d, retinanet]` (new), `MODELS` (whatif) unchanged
+- [x] **CLI-07**: `config.py` constants corrected: `MODELS_CLOSED = [unet3d, retinanet]`, `MODELS_OPEN = [unet3d, retinanet]` (new), `MODELS` (whatif) unchanged
 - [ ] **CLI-08**: `reports`, `history`, `lockfile`, `version` remain top-level siblings (not nested under closed/open/whatif)
 - [ ] **CLI-09**: kvcache closed has no model positional; kvcache open/whatif has model positional from `KVCACHE_MODELS`
-- [ ] **CLI-10**: Merge conflicts in 5 files resolved as part of the refactor (HEAD side kept; `add_storage_type_arguments` integrated)
+- [x] **CLI-10**: Merge conflicts in 5 files resolved as part of the refactor (HEAD side kept; `add_storage_type_arguments` integrated)
 
 ### Version Command
 
@@ -52,13 +52,13 @@
 | CLI-01 | Phase 1 | Pending |
 | CLI-02 | Phase 1 | Pending |
 | CLI-03 | Phase 1 | Pending |
-| CLI-04 | Phase 1 | Pending |
+| CLI-04 | Phase 1 | Complete |
 | CLI-05 | Phase 1 | Pending |
 | CLI-06 | Phase 1 | Pending |
-| CLI-07 | Phase 1 | Pending |
+| CLI-07 | Phase 1 | Complete |
 | CLI-08 | Phase 1 | Pending |
 | CLI-09 | Phase 1 | Pending |
-| CLI-10 | Phase 1 | Pending |
+| CLI-10 | Phase 1 | Complete |
 | VER-01 | Phase 2 | Pending |
 | VER-02 | Phase 2 | Pending |
 | VER-03 | Phase 2 | Pending |
