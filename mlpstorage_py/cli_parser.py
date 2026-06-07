@@ -31,180 +31,120 @@ help_messages = HELP_MESSAGES
 prog_descriptions = PROGRAM_DESCRIPTIONS
 
 
+def _build_mode_branch(mode_parser, mode):
+    """Build the benchmark subparser tree for a given mode (closed/open/whatif).
+
+    Args:
+        mode_parser: The argparse subparser for this mode.
+        mode: One of 'closed', 'open', 'whatif'.
+    """
+    benchmarks = mode_parser.add_subparsers(dest="benchmark", required=True)
+
+    training_parser = benchmarks.add_parser(
+        "training",
+        help="Training benchmark (unet3d, retinanet)"
+    )
+    checkpointing_parser = benchmarks.add_parser(
+        "checkpointing",
+        help="Checkpointing benchmark (llama3-8b, llama3-70b, etc.)"
+    )
+    vectordb_parser = benchmarks.add_parser(
+        "vectordb",
+        help="Vector database benchmark (PREVIEW)"
+    )
+    kvcache_parser = benchmarks.add_parser(
+        "kvcache",
+        help="KV-cache benchmark for LLM inference"
+    )
+
+    add_training_arguments(training_parser, mode)
+    add_checkpointing_arguments(checkpointing_parser, mode)
+    add_vectordb_arguments(vectordb_parser, mode)
+    add_kvcache_arguments(kvcache_parser, mode)
+
+
 def parse_arguments():
     """Parse command-line arguments for MLPerf Storage benchmarks.
 
     Returns:
         argparse.Namespace: Parsed and validated arguments.
     """
-    # 1. Process the "open" / "closed" mode argument.
-    # It must be the first argument if present.
-    is_open = False
-    is_closed = False
-    
-    if len(sys.argv) > 1 and sys.argv[1] in ["open", "closed"]:
-        mode = sys.argv.pop(1)
-        if mode == "open":
-            is_open = True
-        else:
-            is_closed = True
-    else:
-        # Default to closed if neither is present
-        is_open = False
-        is_closed = True
-
-    if is_closed:
-        print(f"Note: running in a 'closed' configuration, some options are limited or forced to default values")
-    else:
-        print(f"Note: running in an 'open' configuration, all options are available")
-    print(f"ARGV=", sys.argv)
-
-    # Note: Added usage string to document the new positional argument
     parser = argparse.ArgumentParser(
-        prog="mlpstorage", 
-        usage="%(prog)s [open|closed] <program> [options]",
+        prog="mlpstorage",
         description="Script to launch the MLPerf Storage benchmark"
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
+    # NOTE: VERSION currently returns a wrong string (mlpstorage_py dist name bug).
+    # This will be fixed in Phase 2. Do not add logic here to work around it.
 
-    sub_programs = parser.add_subparsers(dest="program", required=True)
-    sub_programs.required = True
+    top = parser.add_subparsers(dest="mode", required=True)
 
-    # Create subparsers for each benchmark type
-    training_parsers = sub_programs.add_parser(
-        "training",
-        description=PROGRAM_DESCRIPTIONS['training'],
-        help="Training benchmark options"
-    )
-    checkpointing_parsers = sub_programs.add_parser(
-        "checkpointing",
-        description=PROGRAM_DESCRIPTIONS['checkpointing'],
-        help="Checkpointing benchmark options",
-        formatter_class=argparse.RawTextHelpFormatter
-    )
-    vectordb_parsers = sub_programs.add_parser(
-        "vectordb",
-        description=PROGRAM_DESCRIPTIONS['vectordb'],
-        help="VectorDB benchmark options"
-    )
-    kvcache_parsers = sub_programs.add_parser(
-        "kvcache",
-        description=PROGRAM_DESCRIPTIONS['kvcache'],
-        help="KV Cache benchmark options"
-    )
-    reports_parsers = sub_programs.add_parser(
-        "reports",
-        description=PROGRAM_DESCRIPTIONS.get('reports', ''),
-        help="Generate a report from benchmark results"
-    )
-    history_parsers = sub_programs.add_parser(
-        "history",
-        description=PROGRAM_DESCRIPTIONS.get('history', ''),
-        help="Display benchmark history"
-    )
-    lockfile_parsers = sub_programs.add_parser(
-        "lockfile",
-        description="Manage package lockfiles for reproducible environments",
-        help="Generate and verify package lockfiles"
-    )
+    # Three benchmark mode branches
+    for mode_name in ("closed", "open", "whatif"):
+        mode_parser = top.add_parser(
+            mode_name,
+            description=f"Run benchmarks in {mode_name} configuration",
+            help=f"{mode_name.capitalize()} submission mode"
+        )
+        _build_mode_branch(mode_parser, mode_name)
 
-    sub_programs_map = {
-        'training': training_parsers,
-        'checkpointing': checkpointing_parsers,
-        'vectordb': vectordb_parsers,
-        'kvcache': kvcache_parsers,
-        'reports': reports_parsers,
-        'history': history_parsers,
-        'lockfile': lockfile_parsers,
-    }
-
-    # Use existing argument builders
-    add_training_arguments(training_parsers, is_closed)
-    add_checkpointing_arguments(checkpointing_parsers, is_closed)
-    add_vectordb_arguments(vectordb_parsers, is_closed)
-    add_kvcache_arguments(kvcache_parsers, is_closed)
-    add_reports_arguments(reports_parsers, is_closed)
-    add_history_arguments(history_parsers, is_closed)
-    add_lockfile_arguments(lockfile_parsers, is_closed)
-
-    # Universal arguments are added within each argument builder now
-    # (except for top-level parsers that need them)
-
-    if len(sys.argv) == 1:
-        parser.print_help(sys.stderr)
-        sys.exit(1)
-
-    if len(sys.argv) == 2 and sys.argv[1] in sub_programs_map.keys():
-        sub_programs_map[sys.argv[1]].print_help(sys.stderr)
-        sys.exit(1)
+    # Utility siblings — top-level, not nested under modes
+    reports_parser = top.add_parser("reports", help="Generate a report from benchmark results")
+    history_parser = top.add_parser("history", help="Display benchmark history")
+    lockfile_parser = top.add_parser("lockfile", help="Generate and verify package lockfiles")
+    add_reports_arguments(reports_parser)
+    add_history_arguments(history_parser)
+    add_lockfile_arguments(lockfile_parser)
 
     parsed_args = parser.parse_args()
 
-    # 3. Record the requested attributes onto the parsed namespace
-    parsed_args.open = is_open
-    parsed_args.closed = is_closed
+    # NOTE: No post-parse consolidation for data_access_protocol here.
+    # add_storage_type_arguments() registers 'data_access_protocol' as a positional;
+    # argparse sets it directly to 'file'|'object'|None. The old --file/--object
+    # consolidation block is removed entirely.
 
     # Apply YAML config file overrides if specified
     if hasattr(parsed_args, 'config_file') and parsed_args.config_file:
         parsed_args = apply_yaml_config_overrides(parsed_args)
 
-    # Consolidate the data access protocol into a single field.
-    # The --file / --object flags are only defined on benchmark subcommands
-    # that call add_storage_type_arguments() (training, checkpointing,
-    # vectordb, kvcache). Other subcommands (reports, history, lockfile)
-    # do not define them, so guard the consolidation on attribute presence.
-    if hasattr(parsed_args, "file") or hasattr(parsed_args, "object"):
-        if getattr(parsed_args, "file", False):
-            parsed_args.data_access_protocol = "file"
-        else:
-            parsed_args.data_access_protocol = getattr(parsed_args, "object", None)
-        # Clean up the raw flags so downstream code uses data_access_protocol.
-        for _attr in ("file", "object"):
-            if hasattr(parsed_args, _attr):
-                delattr(parsed_args, _attr)
-
-    """
-    print(f"Arguments found: {parsed_args}")
-    """
     validate_args(parsed_args)
-
     return parsed_args
 
 
 def apply_yaml_config_overrides(args):
     """
     Apply overrides from a YAML config file to the parsed arguments.
-    
+
     Args:
         args (argparse.Namespace): The parsed command-line arguments
-        
+
     Returns:
         argparse.Namespace: The updated arguments with YAML overrides applied
     """
     import yaml
-    
+
     try:
         with open(args.config_file, 'r') as f:
             yaml_config = yaml.safe_load(f)
-        
+
         if not yaml_config:
             print(f"Warning: Config file {args.config_file} is empty or invalid")
             return args
-            
+
         # Convert args to a dictionary for easier manipulation
         args_dict = vars(args)
-        
+
         # Apply overrides from YAML
         for key, value in yaml_config.items():
             # Skip if the key doesn't exist in args
             if key not in args_dict:
                 print(f"Warning: Config file contains unknown parameter '{key}', skipping")
                 continue
-                
+
             # Skip if the value is None (to avoid overriding CLI args with None)
             if value is None:
                 continue
-                
+
             # Handle special cases for list arguments
             if isinstance(args_dict.get(key), list) and not isinstance(value, list):
                 if key == 'hosts':
@@ -220,10 +160,10 @@ def apply_yaml_config_overrides(args):
             else:
                 # Regular case - just override the value
                 args_dict[key] = value
-                
+
         # Convert back to Namespace
         return argparse.Namespace(**args_dict)
-        
+
     except FileNotFoundError:
         print(f"Error: Config file {args.config_file} not found")
         sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
@@ -240,18 +180,18 @@ logging_options = ['debug', 'verbose', 'stream_log_level']
 
 def validate_args(args):
     """Validate the whole set of args for the different arg suites
-    
+
     Args:
         args (argparse.Namespace): The parsed command-line arguments
     """
-    # Validate arguments using checkers from cli package
-    if args.program == 'training':
+    benchmark = getattr(args, 'benchmark', None)
+    if benchmark == 'training':
         validate_training_arguments(args)
-    if args.program == 'checkpointing':
+    if benchmark == 'checkpointing':
         validate_checkpointing_arguments(args)
-    if args.program == 'vectordb':
+    if benchmark == 'vectordb':
         validate_vectordb_arguments(args)
-    if args.program == 'kvcache':
+    if benchmark == 'kvcache':
         validate_kvcache_arguments(args)
 
 
@@ -316,4 +256,3 @@ if __name__ == "__main__":
     args = parse_arguments()
     import pprint
     pprint.pprint(vars(args))
-
