@@ -52,12 +52,14 @@ DLRM = "dlrm"
 RETINANET = "retinanet"
 FLUX = "flux"
 MODELS = [COSMOFLOW, RESNET, UNET, DLRM, RETINANET, FLUX]
+MODELS_CLOSED = [DLRM, RETINANET, FLUX]
 
 H100 = "h100"
 A100 = "a100"
 B200 = "b200"
 MI355 = "mi355"
 ACCELERATORS = [H100, A100, B200, MI355]
+ACCELERATORS_CLOSED = [B200, MI355]
 
 OPEN = "open"
 CLOSED = "closed"
@@ -68,6 +70,7 @@ LLAMA3_70B = 'llama3-70b'
 LLAMA3_405B = 'llama3-405b'
 LLAMA3_1T = 'llama3-1t'
 LLM_MODELS = [LLAMA3_70B, LLAMA3_405B, LLAMA3_1T, LLAMA3_8B]
+LLM_MODELS_CLOSED = LLM_MODELS
 
 LLM_SUBSET_PROCS = 8
 # Defined as (MinProcs, ZeroLevel, GPU per Data Parallel Instance, Closed GPU Count)
@@ -93,6 +96,7 @@ CHECKPOINT_RANKS_STRINGS = "\n    ".join(
 LLM_MODELS_STRINGS = "\n    ".join(LLM_MODELS)
 
 # KV Cache benchmark model configurations
+KVCACHE_MODEL_DEFAULT = 'llama3.1-8b'
 KVCACHE_MODELS = [
     'tiny-1b',
     'mistral-7b',
@@ -112,6 +116,7 @@ KVCACHE_DEFAULT_DURATION = 60
 
 # VDB Benchmark Configuration
 VDB_INDEX_TYPES = ["DISKANN", "HNSW", "AISAQ", "IVF_FLAT", "IVF_SQ8", "FLAT"]
+VDB_INDEX_TYPES_CLOSED = ["DISKANN", "HNSW", "AISAQ"]
 VDB_ORCHESTRATION_MODES = ["ssh", "mpi"]
 VDB_BENCHMARK_MODES = ["timed", "query_count", "sweep"]
 

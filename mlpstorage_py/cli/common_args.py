@@ -9,7 +9,7 @@ This module contains:
 """
 
 from mlpstorage_py.config import (
-    CHECKPOINT_RANKS_STRINGS, MODELS, ACCELERATORS, DEFAULT_HOSTS,
+    CHECKPOINT_RANKS_STRINGS, MODELS, ACCELERATORS, ACCELERATORS_CLOSED, DEFAULT_HOSTS,
     LLM_MODELS_STRINGS, MPI_CMDS, EXEC_TYPE, DEFAULT_RESULTS_DIR,
     VECTOR_DTYPES, DISTRIBUTIONS
 )
@@ -167,31 +167,75 @@ PROGRAM_DESCRIPTIONS = {
 }
 
 
-def add_universal_arguments(parser):
+def add_universal_arguments(parser, req_fileobj, req_results, offer_object, is_closed):
     """Add arguments common to all benchmarks and commands.
 
     Args:
         parser: Argparse parser to add arguments to.
     """
     standard_args = parser.add_argument_group("Standard Arguments")
-    standard_args.add_argument(
-        '--results-dir', '-rd',
-        type=str,
-        default=DEFAULT_RESULTS_DIR,
-        help=HELP_MESSAGES['results_dir']
-    )
-    standard_args.add_argument(
-        '--loops',
-        type=int,
-        default=1,
-        help="Number of times to run the benchmark"
-    )
+    if req_results:
+        standard_args.add_argument(
+            '--results-dir', '-rd',
+            type=str,
+            required=True,
+            default=DEFAULT_RESULTS_DIR,
+            help=HELP_MESSAGES['results_dir']
+        )
+    else:
+        standard_args.add_argument(
+            '--results-dir', '-rd',
+            type=str,
+            default=DEFAULT_RESULTS_DIR,
+            help=HELP_MESSAGES['results_dir']
+        )
+
+    if is_closed:
+        standard_args.set_defaults(
+            loops=1
+        )
+    else:
+        standard_args.add_argument(
+            '--loops',
+            type=int,
+            default=1,
+            help="Number of times to run the benchmark"
+        )
+
     standard_args.add_argument(
         '--config-file', '-c',
         type=str,
         help="Path to YAML file with argument overrides"
     )
 
+<<<<<<< HEAD
+    if req_fileobj:
+        # Create a mutually exclusive group for file/object options
+        access_proto = standard_args.add_mutually_exclusive_group(required=True)
+        access_proto.add_argument(
+            "--file",
+            action="store_true",
+            help="Use POSIX files as the data access method"
+        )
+        if offer_object:
+            access_proto.add_argument(
+                "--object",
+                nargs="?",
+                type=str,
+                const="s3",
+                choices=["s3"],
+                help="Use the given Object API as the data access method, defaults to S3"
+            )
+        else:
+            access_proto.set_defaults(
+                object=False
+            )
+    else:
+        standard_args.set_defaults(
+            file=True,
+            object=False
+        )
+=======
     # NOTE: --file / --object are intentionally NOT added here. They are
     # declared exclusively in ``add_storage_type_arguments`` and attached
     # only to benchmark subparsers (training, checkpointing, vectordb,
@@ -217,6 +261,7 @@ def add_universal_arguments(parser):
         default=False,
         help="Run as a closed submission"
     )
+>>>>>>> origin/main
 
     output_control = parser.add_argument_group("Output Control")
     output_control.add_argument(
@@ -234,11 +279,17 @@ def add_universal_arguments(parser):
         type=str,
         default="INFO"
     )
-    output_control.add_argument(
-        "--allow-invalid-params", "-aip",
-        action="store_true",
-        help="Do not fail on invalid parameters."
-    )
+
+    if is_closed:
+        output_control.set_defaults(
+            allow_invalid_params=False
+        )
+    else:
+        output_control.add_argument(
+            "--allow-invalid-params", "-aip",
+            action="store_true",
+            help="Do not fail on invalid parameters."
+        )
 
     view_only_args = parser.add_argument_group("View Only")
     view_only_args.add_argument(
@@ -261,7 +312,7 @@ def add_universal_arguments(parser):
     )
 
 
-def add_mpi_arguments(parser):
+def add_mpi_arguments(parser, is_closed):
     """Add MPI-related arguments.
 
     Args:
@@ -303,6 +354,9 @@ def add_mpi_arguments(parser):
     )
 
 
+<<<<<<< HEAD
+def add_host_arguments(parser, is_closed, required=False):
+=======
 def add_storage_type_arguments(parser):
     """Add --file / --object storage-type selector to a subcommand parser.
 
@@ -343,6 +397,7 @@ def add_storage_type_arguments(parser):
 
 
 def add_host_arguments(parser, required=False):
+>>>>>>> origin/main
     """Add host-related arguments common to distributed benchmarks.
 
     Args:
@@ -358,7 +413,7 @@ def add_host_arguments(parser, required=False):
     )
 
 
-def add_dlio_arguments(parser):
+def add_dlio_arguments(parser, is_closed):
     """Add DLIO-related arguments.
 
     Args:
@@ -369,16 +424,22 @@ def add_dlio_arguments(parser):
         type=str,
         help="Path to DLIO binary. Default is the same as mlpstorage binary path"
     )
-    parser.add_argument(
-        '--params', '-p',
-        nargs="+",
-        type=str,
-        action="append",
-        help=HELP_MESSAGES['params']
-    )
+
+    if is_closed:
+        parser.set_defaults(
+            params=''
+        )
+    else:
+        parser.add_argument(
+            '--params', '-p',
+            nargs="+",
+            type=str,
+            action="append",
+            help=HELP_MESSAGES['params']
+        )
 
 
-def add_timeseries_arguments(parser):
+def add_timeseries_arguments(parser, is_closed):
     """Add time-series collection arguments.
 
     These arguments control the collection of time-series host metrics
@@ -387,21 +448,22 @@ def add_timeseries_arguments(parser):
     Args:
         parser: Argparse parser to add arguments to.
     """
-    timeseries_group = parser.add_argument_group("Time-Series Collection")
-    timeseries_group.add_argument(
-        '--timeseries-interval',
-        type=float,
-        default=10.0,
-        help=HELP_MESSAGES['timeseries_interval']
-    )
-    timeseries_group.add_argument(
-        '--skip-timeseries',
-        action='store_true',
-        help=HELP_MESSAGES['skip_timeseries']
-    )
-    timeseries_group.add_argument(
-        '--max-timeseries-samples',
-        type=int,
-        default=3600,
-        help=HELP_MESSAGES['max_timeseries_samples']
-    )
+    if not is_closed:
+        timeseries_group = parser.add_argument_group("Time-Series Collection")
+        timeseries_group.add_argument(
+            '--timeseries-interval',
+            type=float,
+            default=10.0,
+            help=HELP_MESSAGES['timeseries_interval']
+        )
+        timeseries_group.add_argument(
+            '--skip-timeseries',
+            action='store_true',
+            help=HELP_MESSAGES['skip_timeseries']
+        )
+        timeseries_group.add_argument(
+            '--max-timeseries-samples',
+            type=int,
+            default=3600,
+            help=HELP_MESSAGES['max_timeseries_samples']
+        )

@@ -17,10 +17,10 @@ from mlpstorage_py.cli import (
     HELP_MESSAGES,
     PROGRAM_DESCRIPTIONS,
     add_universal_arguments,
-    add_training_arguments,
-    add_checkpointing_arguments,
-    add_vectordb_arguments,
-    add_kvcache_arguments,
+    add_training_arguments,      validate_training_arguments,
+    add_checkpointing_arguments, validate_checkpointing_arguments,
+    add_vectordb_arguments,      validate_vectordb_arguments,
+    add_kvcache_arguments,       validate_kvcache_arguments,
     add_reports_arguments,
     add_history_arguments,
     add_lockfile_arguments,
@@ -30,14 +30,43 @@ from mlpstorage_py.cli import (
 help_messages = HELP_MESSAGES
 prog_descriptions = PROGRAM_DESCRIPTIONS
 
+
 def parse_arguments():
     """Parse command-line arguments for MLPerf Storage benchmarks.
 
     Returns:
         argparse.Namespace: Parsed and validated arguments.
     """
-    parser = argparse.ArgumentParser(prog="mlpstorage", description="Script to launch the MLPerf Storage benchmark")
+    # 1. Process the "open" / "closed" mode argument.
+    # It must be the first argument if present.
+    is_open = False
+    is_closed = False
+    
+    if len(sys.argv) > 1 and sys.argv[1] in ["open", "closed"]:
+        mode = sys.argv.pop(1)
+        if mode == "open":
+            is_open = True
+        else:
+            is_closed = True
+    else:
+        # Default to closed if neither is present
+        is_open = False
+        is_closed = True
+
+    if is_closed:
+        print(f"Note: running in a 'closed' configuration, some options are limited or forced to default values")
+    else:
+        print(f"Note: running in an 'open' configuration, all options are available")
+    print(f"ARGV=", sys.argv)
+
+    # Note: Added usage string to document the new positional argument
+    parser = argparse.ArgumentParser(
+        prog="mlpstorage", 
+        usage="%(prog)s [open|closed] <program> [options]",
+        description="Script to launch the MLPerf Storage benchmark"
+    )
     parser.add_argument("--version", action="version", version=f"%(prog)s {VERSION}")
+
     sub_programs = parser.add_subparsers(dest="program", required=True)
     sub_programs.required = True
 
@@ -89,14 +118,14 @@ def parse_arguments():
         'lockfile': lockfile_parsers,
     }
 
-    # Add arguments using modular builders from cli package
-    add_training_arguments(training_parsers)
-    add_checkpointing_arguments(checkpointing_parsers)
-    add_vectordb_arguments(vectordb_parsers)
-    add_kvcache_arguments(kvcache_parsers)
-    add_reports_arguments(reports_parsers)
-    add_history_arguments(history_parsers)
-    add_lockfile_arguments(lockfile_parsers)
+    # Use existing argument builders
+    add_training_arguments(training_parsers, is_closed)
+    add_checkpointing_arguments(checkpointing_parsers, is_closed)
+    add_vectordb_arguments(vectordb_parsers, is_closed)
+    add_kvcache_arguments(kvcache_parsers, is_closed)
+    add_reports_arguments(reports_parsers, is_closed)
+    add_history_arguments(history_parsers, is_closed)
+    add_lockfile_arguments(lockfile_parsers, is_closed)
 
     # Universal arguments are added within each argument builder now
     # (except for top-level parsers that need them)
@@ -110,7 +139,11 @@ def parse_arguments():
         sys.exit(1)
 
     parsed_args = parser.parse_args()
-    
+
+    # 3. Record the requested attributes onto the parsed namespace
+    parsed_args.open = is_open
+    parsed_args.closed = is_closed
+
     # Apply YAML config file overrides if specified
     if hasattr(parsed_args, 'config_file') and parsed_args.config_file:
         parsed_args = apply_yaml_config_overrides(parsed_args)
@@ -133,9 +166,10 @@ def parse_arguments():
     """
     print(f"Arguments found: {parsed_args}")
     """
-
     validate_args(parsed_args)
+
     return parsed_args
+
 
 def apply_yaml_config_overrides(args):
     """
@@ -205,19 +239,20 @@ logging_options = ['debug', 'verbose', 'stream_log_level']
 
 
 def validate_args(args):
-    error_messages = []
-    # Add generic validations here. Workload specific validation is in the Benchmark classes
-    if args.program == "checkpointing":
-        if args.model not in LLM_MODELS:
-            error_messages.append("Invalid LLM model. Supported models are: {}".format(", ".join(LLM_MODELS)))
-        if args.num_checkpoints_read < 0 or args.num_checkpoints_write < 0:
-            error_messages.append("Number of checkpoints read and write must be non-negative")
-
-    if error_messages:
-        for msg in error_messages:
-            print(msg)
-
-        sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
+    """Validate the whole set of args for the different arg suites
+    
+    Args:
+        args (argparse.Namespace): The parsed command-line arguments
+    """
+    # Validate arguments using checkers from cli package
+    if args.program == 'training':
+        validate_training_arguments(args)
+    if args.program == 'checkpointing':
+        validate_checkpointing_arguments(args)
+    if args.program == 'vectordb':
+        validate_vectordb_arguments(args)
+    if args.program == 'kvcache':
+        validate_kvcache_arguments(args)
 
 
 def update_args(args):
