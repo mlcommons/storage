@@ -14,7 +14,7 @@
 - [ ] **CLI-05**: Three builder tiers are implemented: `_add_{cmd}_core_args` (all modes), `_add_{cmd}_open_args` (open+whatif), `_add_{cmd}_whatif_args` (whatif only)
 - [ ] **CLI-06**: Open-gated arguments (--loops, --allow-invalid-params, --timeseries-*, --params, etc.) are absent from closed branch help and raise an error if supplied in closed mode
 - [x] **CLI-07**: `config.py` constants corrected: `MODELS_CLOSED = [unet3d, retinanet]`, `MODELS_OPEN = [unet3d, retinanet]` (new), `MODELS` (whatif) unchanged
-- [ ] **CLI-08**: `reports`, `history`, `lockfile`, `version` remain top-level siblings (not nested under closed/open/whatif)
+- [x] **CLI-08**: `reports`, `history`, `lockfile`, `version` remain top-level siblings (not nested under closed/open/whatif)
 - [ ] **CLI-09**: kvcache closed has no model positional; kvcache open/whatif has model positional from `KVCACHE_MODELS`
 - [x] **CLI-10**: Merge conflicts in 5 files resolved as part of the refactor (HEAD side kept; `add_storage_type_arguments` integrated)
 
@@ -56,7 +56,7 @@
 | CLI-05 | Phase 1 | Pending |
 | CLI-06 | Phase 1 | Pending |
 | CLI-07 | Phase 1 | Complete |
-| CLI-08 | Phase 1 | Pending |
+| CLI-08 | Phase 1 | Complete |
 | CLI-09 | Phase 1 | Pending |
 | CLI-10 | Phase 1 | Complete |
 | VER-01 | Phase 2 | Pending |

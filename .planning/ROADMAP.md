@@ -36,9 +36,9 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-02-PLAN.md — Rewrite training_args.py and checkpointing_args.py with three-tier builder pattern; update benchmarks/dlio.py
+- [x] 01-02-PLAN.md — Rewrite training_args.py and checkpointing_args.py with three-tier builder pattern; update benchmarks/dlio.py
 - [ ] 01-03-PLAN.md — Rewrite vectordb_args.py and kvcache_args.py with three-tier builder pattern; update benchmarks/kvcache.py and vectordbbench.py
-- [ ] 01-04-PLAN.md — Simplify utility_args.py and lockfile_args.py signatures; update cli/__init__.py exports
+- [x] 01-04-PLAN.md — Simplify utility_args.py and lockfile_args.py signatures; update cli/__init__.py exports
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -103,7 +103,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Core CLI Refactor | 1/5 | In Progress|  |
+| 1. Core CLI Refactor | 3/5 | In Progress|  |
 | 2. Version Command | 0/1 | Not started | - |
 | 3. Help Behavior | 0/1 | Not started | - |
 | 4. Test Coverage | 0/1 | Not started | - |
