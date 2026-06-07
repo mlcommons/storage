@@ -39,8 +39,8 @@ class VectorDBBenchmark(Benchmark):
             os.path.join(self.config_path, f"{self.config_name}.yaml")
         )
  
-        # Validate VDB-specific dependencies (skip for what-if / datasize)
-        if not getattr(args, 'what_if', False) and self.command != 'datasize':
+        # Validate VDB-specific dependencies (skip for dry-run / datasize)
+        if not getattr(args, 'dry_run', False) and self.command != 'datasize':
             self._validate_vdb_dependencies()
  
         self.verify_benchmark()
@@ -207,8 +207,8 @@ class VectorDBBenchmark(Benchmark):
           timed / query_count  ->  vdbbench   (simple_bench.py)
           sweep                ->  enhanced-bench (enhanced_bench.py)
         """
-        mode = getattr(self.args, 'mode', 'timed')
- 
+        mode = getattr(self.args, 'benchmark_mode', 'timed')
+
         if mode == 'sweep':
             script = "enhanced-bench"
         else:
@@ -269,7 +269,7 @@ class VectorDBBenchmark(Benchmark):
                 'batch_size': getattr(self.args, 'batch_size', None),
                 'runtime': getattr(self.args, 'runtime', None),
                 'queries': getattr(self.args, 'queries', None),
-                'mode': getattr(self.args, 'mode', 'timed'),
+                'benchmark_mode': getattr(self.args, 'benchmark_mode', 'timed'),
             })
  
         return base_metadata

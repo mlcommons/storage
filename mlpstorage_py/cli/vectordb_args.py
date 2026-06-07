@@ -1,6 +1,6 @@
 """
 VectorDB benchmark CLI argument builder.
- 
+
 This module defines the CLI arguments for the VectorDB benchmark,
 including datasize, datagen, and run commands.
 """
@@ -15,21 +15,24 @@ from mlpstorage_py.cli.common_args import (
     add_storage_type_arguments,
     add_timeseries_arguments,
 )
- 
- 
-def add_vectordb_arguments(parser, is_closed):
+
+
+def add_vectordb_arguments(parser, mode):
     """Add VectorDB benchmark arguments to the parser.
- 
+
     Args:
         parser: Argparse subparser for the VectorDB benchmark.
+        mode: One of 'closed', 'open', or 'whatif'.
     """
+    index_choices = VDB_INDEX_TYPES_CLOSED if mode == "closed" else VDB_INDEX_TYPES
+
     vectordb_subparsers = parser.add_subparsers(
         dest="command",
         required=True,
         help="sub_commands"
     )
     parser.required = True
- 
+
     # ---- Subcommand parsers ----
     datasize = vectordb_subparsers.add_parser(
         'datasize',
@@ -43,181 +46,213 @@ def add_vectordb_arguments(parser, is_closed):
         'run',
         help=HELP_MESSAGES['vdb_run']
     )
- 
+
+    for cmd_name, cmd_parser in [("datasize", datasize), ("datagen", datagen), ("run", run_benchmark)]:
+        _add_vectordb_core_args(cmd_parser, cmd_name, index_choices)
+        if mode in ("open", "whatif"):
+            _add_vectordb_open_args(cmd_parser, cmd_name)
+
+
+def _add_vectordb_core_args(parser, command, index_choices):
+    """Add core VectorDB arguments shared across all modes.
+
+    Args:
+        parser: Argparse parser to add arguments to.
+        command: The subcommand name ('datasize', 'datagen', or 'run').
+        index_choices: Allowed index type choices based on mode.
+    """
+    # Set defaults for open-gated attrs so they always exist in namespace
+    parser.set_defaults(loops=1, params='', allow_invalid_params=False)
+
     # ---- Common arguments for datagen and run ----
-    for _parser in [datagen, run_benchmark]:
-        _parser.add_argument(
+    if command in ("datagen", "run"):
+        parser.add_argument(
             '--host', '-s',
             type=str,
             default="127.0.0.1",
             help=HELP_MESSAGES['db_ip_address']
         )
-        _parser.add_argument(
+        parser.add_argument(
             '--port', '-p',
             type=int,
             default=19530,
             help=HELP_MESSAGES['db_port']
         )
-        _parser.add_argument(
+        parser.add_argument(
             '--config'
         )
-        _parser.add_argument(
+        parser.add_argument(
             '--collection',
             type=str,
             help=HELP_MESSAGES['db_collection']
         )
- 
+
     # ---- Datasize arguments ----
-    datasize.add_argument(
-        '--dimension',
-        type=int,
-        default=1536,
-        help=HELP_MESSAGES['dimension']
-    )
-    datasize.add_argument(
-        '--num-vectors',
-        type=int,
-        default=1_000_000,
-        help=HELP_MESSAGES['num_vectors']
-    )
-    if is_closed:
-        datasize.add_argument(
+    if command == "datasize":
+        parser.add_argument(
+            '--dimension',
+            type=int,
+            default=1536,
+            help=HELP_MESSAGES['dimension']
+        )
+        parser.add_argument(
+            '--num-vectors',
+            type=int,
+            default=1_000_000,
+            help=HELP_MESSAGES['num_vectors']
+        )
+        parser.add_argument(
             '--index-type',
-            choices=VDB_INDEX_TYPES_CLOSED,
+            choices=index_choices,
             default="DISKANN",
             help="Index type for storage estimation"
         )
-    else:
-        datasize.add_argument(
-            '--index-type',
-            choices=VDB_INDEX_TYPES,
-            default="DISKANN",
-            help="Index type for storage estimation"
+        parser.add_argument(
+            '--num-shards',
+            type=int,
+            default=1,
+            help=HELP_MESSAGES['num_shards']
         )
-    datasize.add_argument(
-        '--num-shards',
-        type=int,
-        default=1,
-        help=HELP_MESSAGES['num_shards']
-    )
-    datasize.add_argument(
-        '--vector-dtype',
-        choices=VECTOR_DTYPES,
-        default="FLOAT_VECTOR",
-        help=HELP_MESSAGES['vector_dtype']
-    )
- 
+        parser.add_argument(
+            '--vector-dtype',
+            choices=VECTOR_DTYPES,
+            default="FLOAT_VECTOR",
+            help=HELP_MESSAGES['vector_dtype']
+        )
+
     # ---- Datagen specific arguments ----
-    datagen.add_argument(
-        '--dimension',
-        type=int,
-        default=1536,
-        help=HELP_MESSAGES['dimension']
-    )
-    datagen.add_argument(
-        '--num-shards',
-        type=int,
-        default=1,
-        help=HELP_MESSAGES['num_shards']
-    )
-    datagen.add_argument(
-        '--vector-dtype',
-        choices=VECTOR_DTYPES,
-        default="FLOAT_VECTOR",
-        help=HELP_MESSAGES['vector_dtype']
-    )
-    datagen.add_argument(
-        '--num-vectors',
-        type=int,
-        default=1_000_000,
-        help=HELP_MESSAGES['num_vectors']
-    )
-    datagen.add_argument(
-        '--distribution',
-        choices=DISTRIBUTIONS,
-        default="uniform",
-        help=HELP_MESSAGES['distribution']
-    )
-    datagen.add_argument(
-        '--batch-size',
-        type=int,
-        default=1_000,
-        help=HELP_MESSAGES['vdb_datagen_batch_size']
-    )
-    datagen.add_argument(
-        '--chunk-size',
-        type=int,
-        default=10_000,
-        help=HELP_MESSAGES['vdb_datagen_chunk_size']
-    )
-    datagen.add_argument(
-        "--force",
-        action="store_true",
-        help="Force recreate collection if it exists"
-    )
- 
+    if command == "datagen":
+        parser.add_argument(
+            '--dimension',
+            type=int,
+            default=1536,
+            help=HELP_MESSAGES['dimension']
+        )
+        parser.add_argument(
+            '--num-shards',
+            type=int,
+            default=1,
+            help=HELP_MESSAGES['num_shards']
+        )
+        parser.add_argument(
+            '--vector-dtype',
+            choices=VECTOR_DTYPES,
+            default="FLOAT_VECTOR",
+            help=HELP_MESSAGES['vector_dtype']
+        )
+        parser.add_argument(
+            '--num-vectors',
+            type=int,
+            default=1_000_000,
+            help=HELP_MESSAGES['num_vectors']
+        )
+        parser.add_argument(
+            '--distribution',
+            choices=DISTRIBUTIONS,
+            default="uniform",
+            help=HELP_MESSAGES['distribution']
+        )
+        parser.add_argument(
+            '--batch-size',
+            type=int,
+            default=1_000,
+            help=HELP_MESSAGES['vdb_datagen_batch_size']
+        )
+        parser.add_argument(
+            '--chunk-size',
+            type=int,
+            default=10_000,
+            help=HELP_MESSAGES['vdb_datagen_chunk_size']
+        )
+        parser.add_argument(
+            "--force",
+            action="store_true",
+            help="Force recreate collection if it exists"
+        )
+
     # ---- Run specific arguments ----
-    run_benchmark.add_argument(
-        '--num-query-processes',
+    if command == "run":
+        parser.add_argument(
+            '--num-query-processes',
+            type=int,
+            default=1,
+            help=HELP_MESSAGES['num_query_processes']
+        )
+        parser.add_argument(
+            '--batch-size',
+            type=int,
+            default=1,
+            help=HELP_MESSAGES['query_batch_size']
+        )
+        parser.add_argument(
+            '--report-count',
+            type=int,
+            default=100,
+            help=HELP_MESSAGES['vdb_report_count']
+        )
+        parser.add_argument(
+            '--benchmark-mode',
+            dest='benchmark_mode',
+            choices=VDB_BENCHMARK_MODES,
+            default='timed',
+            help="Benchmark mode: timed (simple_bench), query_count, or sweep (enhanced_bench)"
+        )
+
+        # End condition group for run
+        end_group = parser.add_argument_group(
+            "Provide an end condition of runtime (in seconds) or total number of "
+            "queries to execute. The default is to run for 60 seconds"
+        )
+        end_condition = end_group.add_mutually_exclusive_group()
+        end_condition.add_argument(
+            "--runtime",
+            type=int,
+            help="Run for a specific duration in seconds"
+        )
+        end_condition.add_argument(
+            "--queries",
+            type=int,
+            help="Run for a specific number of queries"
+        )
+
+    add_universal_arguments(parser, req_results=(command in ("datagen", "run")))
+
+    if command in ("datagen", "run"):
+        add_storage_type_arguments(parser, required=True)
+
+
+def _add_vectordb_open_args(parser, command):
+    """Add open/whatif-only VectorDB arguments.
+
+    Args:
+        parser: Argparse parser to add arguments to.
+        command: The subcommand name.
+    """
+    parser.add_argument(
+        '--loops',
         type=int,
         default=1,
-        help=HELP_MESSAGES['num_query_processes']
+        help="Number of times to repeat the benchmark run"
     )
-    run_benchmark.add_argument(
-        '--batch-size',
-        type=int,
-        default=1,
-        help=HELP_MESSAGES['query_batch_size']
+    parser.add_argument(
+        '--allow-invalid-params', '-aip',
+        action='store_true',
+        help="Allow parameters that would otherwise be flagged as invalid"
     )
-    run_benchmark.add_argument(
-        '--report-count',
-        type=int,
-        default=100,
-        help=HELP_MESSAGES['vdb_report_count']
+    parser.add_argument(
+        '--params',
+        nargs="+",
+        action="append",
+        metavar="KEY=VALUE",
+        help=HELP_MESSAGES['params']
     )
-    run_benchmark.add_argument(
-        '--mode',
-        choices=VDB_BENCHMARK_MODES,
-        default='timed',
-        help="Benchmark mode: timed (simple_bench), query_count, or sweep (enhanced_bench)"
-    )
- 
-    # End condition group for run
-    end_group = run_benchmark.add_argument_group(
-        "Provide an end condition of runtime (in seconds) or total number of "
-        "queries to execute. The default is to run for 60 seconds"
-    )
-    end_condition = end_group.add_mutually_exclusive_group()
-    end_condition.add_argument(
-        "--runtime",
-        type=int,
-        help="Run for a specific duration in seconds"
-    )
-    end_condition.add_argument(
-        "--queries",
-        type=int,
-        help="Run for a specific number of queries"
-    )
- 
-    # Add universal arguments to all subcommands
-<<<<<<< HEAD
-    add_universal_arguments(datasize, False, False, False, is_closed)
-    add_universal_arguments(datagen, True, True, True, is_closed)
-    add_universal_arguments(run_benchmark, True, True, True, is_closed)
- 
-=======
-    for _parser in [datasize, datagen, run_benchmark]:
-        add_universal_arguments(_parser)
-        add_storage_type_arguments(_parser)
+    if command == "run":
+        add_timeseries_arguments(parser)
 
->>>>>>> origin/main
-    # Add time-series arguments to run command only
-    add_timeseries_arguments(run_benchmark, is_closed)
 
- 
 def validate_vectordb_arguments(args):
     """Validate the whole set of args given that we're doing a vectordb benchmark
-    
+
     Args:
         args (argparse.Namespace): The parsed command-line arguments
     """
