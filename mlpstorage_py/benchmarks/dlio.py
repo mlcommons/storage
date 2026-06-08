@@ -34,8 +34,8 @@ class DLIOBenchmark(Benchmark, abc.ABC):
         self.per_host_mem_kB = None
         self.total_mem_kB = None
 
-        # Fail-fast dependency validation (skip for what-if mode)
-        if not getattr(args, 'what_if', False):
+        # Fail-fast dependency validation (skip for dry-run mode)
+        if not getattr(args, 'dry_run', False):
             self._validate_dependencies(args)
 
         if args.command != "datagen":
@@ -447,12 +447,21 @@ class CheckpointingBenchmark(DLIOBenchmark):
         # We're now using the workflow defined in the yaml file only
         return cmd
 
+    def _run_configview(self):
+        """Display the final DLIO config without executing."""
+        cmd = self.generate_dlio_command()
+        self.logger.status(f"Configuration view:\n{cmd}")
+        print(cmd)
+        return EXIT_CODE.SUCCESS
+
     def _run(self):
         try:
             if self.args.command == "run":
                 self.execute_command()
             elif self.args.command == "datasize":
                 self.datasize()
+            elif self.args.command == "configview":
+                return self._run_configview()
             else:
                 self.logger.error(f'Invalid command: {self.args.command}')
                 return EXIT_CODE.INVALID_ARGUMENTS
