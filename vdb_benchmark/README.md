@@ -2,6 +2,10 @@
 
 This tool benchmarks and compares vector database performance, with current support for Milvus (DiskANN, HNSW, AISAQ indexing).
 
+> The modular backend-agnostic runner is currently a standalone preview.
+> It is invoked with `python -m vdbbench.benchmark`.
+> The existing `./mlpstorage vectordb` command continues to use the Milvus-oriented scripts until the modular runner is integrated.
+
 ## Installation
 
 ### Clone the repository
