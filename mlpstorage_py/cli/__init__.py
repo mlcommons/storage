@@ -25,6 +25,7 @@ Usage:
 from mlpstorage_py.cli.common_args import (
     HELP_MESSAGES,
     PROGRAM_DESCRIPTIONS,
+    MLPStorageHelpFormatter,
     add_universal_arguments,
     add_storage_type_arguments,
     add_timeseries_arguments,
@@ -45,6 +46,7 @@ __all__ = [
     # Common
     'HELP_MESSAGES',
     'PROGRAM_DESCRIPTIONS',
+    'MLPStorageHelpFormatter',
     'add_universal_arguments',
     'add_storage_type_arguments',
     'add_timeseries_arguments',

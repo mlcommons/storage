@@ -8,11 +8,41 @@ This module contains:
 - Validation utilities
 """
 
+import argparse
+
 from mlpstorage_py.config import (
     CHECKPOINT_RANKS_STRINGS, MODELS, ACCELERATORS, ACCELERATORS_CLOSED, DEFAULT_HOSTS,
     LLM_MODELS_STRINGS, MPI_CMDS, EXEC_TYPE, DEFAULT_RESULTS_DIR,
     VECTOR_DTYPES, DISTRIBUTIONS
 )
+
+
+class MLPStorageHelpFormatter(argparse.HelpFormatter):
+    """Argparse formatter with two changes versus the default:
+
+    1. Required options are listed first (alphabetically), then optional options
+       (alphabetically), within each argument group.
+    2. Positional arguments are excluded from the one-line usage string — they
+       are already present in the command path the user typed, so repeating them
+       there is redundant.  Positionals still appear in the "positional arguments"
+       section of the full help text.
+    """
+
+    def _format_usage(self, usage, actions, groups, prefix):
+        opt_only = [a for a in actions if a.option_strings]
+        return super()._format_usage(usage, opt_only, groups, prefix)
+
+    def add_arguments(self, actions):
+        positionals = [a for a in actions if not a.option_strings]
+        required_opts = sorted(
+            [a for a in actions if a.option_strings and a.required],
+            key=lambda a: a.option_strings[0].lstrip('-').lower()
+        )
+        optional_opts = sorted(
+            [a for a in actions if a.option_strings and not a.required],
+            key=lambda a: a.option_strings[0].lstrip('-').lower()
+        )
+        super().add_arguments(positionals + required_opts + optional_opts)
 
 
 # Help messages dictionary - shared across all argument builders
