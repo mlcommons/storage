@@ -8,7 +8,7 @@ Refactor the `mlpstorage` CLI from a flag-gated `--open`/`--closed` design to a 
 
 - [x] **Phase 1: Core CLI Refactor** — Resolve merge conflicts + build three-branch positional parser, eliminating `is_closed`
 - [x] **Phase 2: Version Command** — Fix VERSION bug + implement `mlpstorage version` subcommand
-- [ ] **Phase 3: Help Behavior** — `--help_all` full tree output + context-sensitive `--help` at each positional level
+- [x] **Phase 3: Help Behavior** — `--help_all` full tree output + context-sensitive `--help` at each positional level (completed 2026-06-08)
 - [x] **Phase 4: Test Coverage** — Three-mode parser tests, open-gated arg validation, model/accelerator restriction tests (completed 2026-06-08)
 
 ## Phase Details
@@ -116,5 +116,5 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Core CLI Refactor | 5/5 | Done | 2026-06-08 |
 | 2. Version Command | 2/2 | Done | 2026-06-08 |
-| 3. Help Behavior | 0/1 | Not started | - |
+| 3. Help Behavior | 1/1 | Done | 2026-06-08 |
 | 4. Test Coverage | 1/1 | Complete   | 2026-06-08 |
