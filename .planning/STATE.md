@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: phase-3-plan-1-complete
-last_updated: "2026-06-08T15:16:57.063Z"
+status: phase-4-plan-1-complete
+last_updated: "2026-06-08T15:23:00Z"
 progress:
   total_phases: 4
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 9
-  completed_plans: 8
-  percent: 75
+  completed_plans: 9
+  percent: 100
 ---
 
 # Project State — as of 2026-06-08
 
-## Status: Phase 3 Plan 01 complete — help behavior implemented (--help_all, context-sensitive --help, bare mid-tree R-03-01 fix). 45 new tests, 110 baseline passing.
+## Status: Phase 4 Plan 01 complete — test_parser_modes.py with 47 tests covering TEST-01 through TEST-04 (parser mode structure, open-gated arg exclusion, model/accelerator restrictions, version dispatch).
 
 ## Phase 1 Complete — Core CLI Refactor (verified 2026-06-08)
 
@@ -52,6 +52,7 @@ See `.planning/phases/01-core-cli-refactor/01-VERIFICATION.md` for full report.
 - [x] Phase 2 Plan 01 — VERSION bug fixed; _resolve_version() with correct dist name + tomllib fallback; 3 regression tests
 - [x] Phase 2 Plan 02 — version subcommand wired; add_version_arguments() + version_parser + early-exit dispatch before HistoryTracker
 - [x] Phase 3 Plan 01 — help behavior: help_formatter.py (HELP_ALL_TEXT + get_context_help_tokens), pre-scan guard in parse_arguments(), 45 tests in test_help_behavior.py
+- [x] Phase 4 Plan 01 — test coverage: test_parser_modes.py (47 tests), TEST-01 through TEST-04 all complete
 
 ## Decisions accumulated
 

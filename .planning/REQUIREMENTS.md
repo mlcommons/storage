@@ -32,10 +32,10 @@
 
 ### Test Coverage
 
-- [ ] **TEST-01**: Unit tests for all three parser modes (closed/open/whatif) verify correct subparser structure
-- [ ] **TEST-02**: Open-gated args (--loops, --params, --timeseries-interval, etc.) are absent from closed parsers and present in open/whatif parsers
-- [ ] **TEST-03**: Model/accelerator choice restrictions verified per mode (closed: [unet3d, retinanet], whatif: full list)
-- [ ] **TEST-04**: `mlpstorage version` returns a non-empty string without raising an exception
+- [x] **TEST-01**: Unit tests for all three parser modes (closed/open/whatif) verify correct subparser structure
+- [x] **TEST-02**: Open-gated args (--loops, --params, --timeseries-interval, etc.) are absent from closed parsers and present in open/whatif parsers
+- [x] **TEST-03**: Model/accelerator choice restrictions verified per mode (closed: [unet3d, retinanet], whatif: full list)
+- [x] **TEST-04**: `mlpstorage version` returns a non-empty string without raising an exception
 
 ## Out of Scope
 
@@ -65,10 +65,10 @@
 | HELP-01 | Phase 3 | Pending |
 | HELP-02 | Phase 3 | Pending |
 | HELP-03 | Phase 3 | Pending |
-| TEST-01 | Phase 4 | Pending |
-| TEST-02 | Phase 4 | Pending |
-| TEST-03 | Phase 4 | Pending |
-| TEST-04 | Phase 4 | Pending |
+| TEST-01 | Phase 4 | Complete |
+| TEST-02 | Phase 4 | Complete |
+| TEST-03 | Phase 4 | Complete |
+| TEST-04 | Phase 4 | Complete |
 
 **Coverage:**
 - v1 requirements: 20 total
