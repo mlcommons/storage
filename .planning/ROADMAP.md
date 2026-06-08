@@ -102,11 +102,13 @@ Plans:
   3. `closed training` accepts only [unet3d, retinanet]; `whatif training` accepts [cosmoflow, resnet50, unet3d, dlrm, retinanet, flux]
   4. `closed training unet3d run file --accelerator-type h100` raises an error (h100 not in closed accelerators)
 
-**Plans**: TBD
+**Plans**: 1 plan in 1 wave
 
 Plans:
 
-- [ ] 04-01: Three-mode parser unit tests (closed/open/whatif structure and argument availability)
+**Wave 1**
+
+- [ ] 04-01-PLAN.md — Write tests/unit/test_parser_modes.py: all four test classes covering TEST-01 through TEST-04
 
 ## Progress
 
