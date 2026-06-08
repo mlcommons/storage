@@ -39,6 +39,7 @@ from mlpstorage_py.cli.vectordb_args import add_vectordb_arguments, validate_vec
 from mlpstorage_py.cli.kvcache_args import add_kvcache_arguments, validate_kvcache_arguments
 from mlpstorage_py.cli.utility_args import add_reports_arguments, add_history_arguments, add_version_arguments
 from mlpstorage_py.cli.lockfile_args import add_lockfile_arguments
+from mlpstorage_py.cli.help_formatter import HELP_ALL_TEXT, get_context_help_tokens
 
 __all__ = [
     # Common
@@ -64,4 +65,7 @@ __all__ = [
     'add_history_arguments',
     'add_version_arguments',
     'add_lockfile_arguments',
+    # Help text
+    'HELP_ALL_TEXT',
+    'get_context_help_tokens',
 ]
