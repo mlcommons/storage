@@ -138,8 +138,6 @@ power_device:
 #
 power_supply:
     unit_count:                 int( min=1 )        # Number of power supplies that look like this
-    vendor_name:                str( min=1 )        # The name of the vendor who supplies this power supply
-    model_name:                 str( min=1 )        # The vendor's model name for this power supply
-    power_capacity_watts:       int( min=1 )        # The total output capacity of the power supply
+    power_capacity_watts:       int( min=1 )        # The nameplate (regulatory rated) input power of the power supply
     efficiency:                 enum( 'Gold', 'Platinum', 'Titanium', 'Ruby' )
 
