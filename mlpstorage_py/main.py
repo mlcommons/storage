@@ -265,6 +265,12 @@ def _main_impl():
     global signal_received
 
     args = parse_arguments()
+
+    if args.mode == "version":
+        from mlpstorage_py import VERSION
+        print(VERSION)
+        sys.exit(0)
+
     if args.debug or MLPS_DEBUG:
         sys.excepthook = debugger_hook
 
