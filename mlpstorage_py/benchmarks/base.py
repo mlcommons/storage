@@ -262,9 +262,9 @@ class Benchmark(BenchmarkInterface, abc.ABC):
 
         self.__dict__.update({'executed_command': command})
 
-        if self.args.what_if:
-            self.logger.debug(f'Executing command in --what-if mode means no execution will be performed.')
-            log_message = f'What-if mode: \nCommand: {command}'
+        if getattr(self.args, 'dry_run', False):
+            self.logger.debug(f'Executing command in --dry-run mode means no execution will be performed.')
+            log_message = f'Dry-run mode: \nCommand: {command}'
             if self.debug:
                 log_message += f'\n\nParameters: \n{pprint.pformat(vars(self.args))}'
             self.logger.info(log_message)
@@ -657,8 +657,8 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         if hasattr(self.args, 'command') and self.args.command not in ('run',):
             return False
 
-        # Skip in what-if mode
-        if hasattr(self.args, 'what_if') and self.args.what_if:
+        # Skip in dry-run mode
+        if getattr(self.args, 'dry_run', False):
             return False
 
         return True
@@ -823,11 +823,12 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         # may not define one or both attributes. Neither flag set => warn and
         # skip formal verification (fixes #349: --open was previously
         # indistinguishable from "nothing passed").
-        closed_mode = getattr(self.args, 'closed', False)
-        open_mode = getattr(self.args, 'open', False)
+        mode = getattr(self.args, 'mode', None)
+        closed_mode = (mode == 'closed')
+        open_mode = (mode == 'open')
 
         if not closed_mode and not open_mode:
-            self.logger.warning(f'Running the benchmark without verification for open or closed configurations. These results are not valid for submission. Use --open or --closed to specify a configuration.')
+            self.logger.warning(f'Running the benchmark without verification for open or closed configurations. These results are not valid for submission. Use closed or open as the first positional argument to specify a configuration.')
             return True
         if not self.BENCHMARK_TYPE:
             raise ValueError(f'No benchmark specified. Unable to verify benchmark')

@@ -202,14 +202,14 @@ def run_benchmark(args, run_datetime):
         kvcache=KVCacheBenchmark,
     )
 
-    benchmark_class = program_switch_dict.get(args.program)
+    benchmark_class = program_switch_dict.get(args.benchmark)
     if not benchmark_class:
         available = list(program_switch_dict.keys())
         raise ConfigurationError(
-            f"Unsupported benchmark type: {args.program}",
-            parameter="program",
+            f"Unsupported benchmark type: {args.benchmark}",
+            parameter="benchmark",
             expected=available,
-            actual=args.program,
+            actual=args.benchmark,
             suggestion=f"Use one of: {', '.join(available)}",
             code=ErrorCode.CONFIG_INVALID_VALUE
         )
@@ -273,12 +273,12 @@ def _main_impl():
     datetime_str = DATETIME_STR
 
     hist = HistoryTracker(history_file=HISTFILE, logger=logger)
-    if args.program != "history":
+    if args.mode != "history":
         # Don't save history commands
         hist.add_entry(sys.argv, datetime_str=datetime_str)
 
     # Handle history command separately
-    if args.program == 'history':
+    if args.mode == 'history':
         new_args = hist.handle_history_command(args)
 
         # Check if we got new args back (not just an exit code)
@@ -286,7 +286,7 @@ def _main_impl():
             # We got an exit code, so return it
             return new_args
 
-        elif isinstance(new_args, object) and hasattr(new_args, 'program'):
+        elif isinstance(new_args, object) and hasattr(new_args, 'mode'):
             # Check if logging options have changed
             if (hasattr(new_args, 'debug') and new_args.debug != args.debug) or \
                (hasattr(new_args, 'verbose') and new_args.verbose != args.verbose) or \
@@ -299,10 +299,10 @@ def _main_impl():
             # If handle_history_command returned an exit code, return it
             return new_args
 
-    if args.program == "lockfile":
+    if args.mode == "lockfile":
         return handle_lockfile_command(args)
 
-    if args.program == "reports":
+    if args.mode == "reports":
         results_dir = args.results_dir if hasattr(args, 'results_dir') else DEFAULT_RESULTS_DIR
         report_generator = ReportGenerator(results_dir, args, logger=logger)
         return report_generator.generate_reports()

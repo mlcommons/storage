@@ -685,6 +685,7 @@ def _add_vectordb_open_args(parser, command):
         '--params',
         nargs="+",
         action="append",
+        default=None,  # Override set_defaults(params='') — append action requires list/None
         metavar="KEY=VALUE",
         help=HELP_MESSAGES['params']
     )

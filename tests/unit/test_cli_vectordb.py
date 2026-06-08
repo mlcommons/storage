@@ -22,7 +22,7 @@ class TestVectorDBSubcommands:
     def parser(self):
         """Create a parser with vectordb subcommands."""
         parser = argparse.ArgumentParser()
-        add_vectordb_arguments(parser)
+        add_vectordb_arguments(parser, 'open')
         return parser
 
     def test_run_subcommand_exists(self, parser):
@@ -48,7 +48,7 @@ class TestVectorDBCommonArguments:
     def parser(self):
         """Create a parser with vectordb subcommands."""
         parser = argparse.ArgumentParser()
-        add_vectordb_arguments(parser)
+        add_vectordb_arguments(parser, 'open')
         return parser
 
     def test_host_argument_default(self, parser):
@@ -113,7 +113,7 @@ class TestVectorDBDatagenArguments:
     def parser(self):
         """Create a parser with vectordb subcommands."""
         parser = argparse.ArgumentParser()
-        add_vectordb_arguments(parser)
+        add_vectordb_arguments(parser, 'open')
         return parser
 
     def test_dimension_argument_default(self, parser):
@@ -216,7 +216,7 @@ class TestVectorDBRunArguments:
     def parser(self):
         """Create a parser with vectordb subcommands."""
         parser = argparse.ArgumentParser()
-        add_vectordb_arguments(parser)
+        add_vectordb_arguments(parser, 'open')
         return parser
 
     def test_num_query_processes_argument_default(self, parser):
@@ -278,7 +278,7 @@ class TestVectorDBDatagenNoRunArgs:
     def parser(self):
         """Create a parser with vectordb subcommands."""
         parser = argparse.ArgumentParser()
-        add_vectordb_arguments(parser)
+        add_vectordb_arguments(parser, 'open')
         return parser
 
     def test_datagen_has_dimension(self, parser):
@@ -319,7 +319,7 @@ class TestVectorDBRunNoDatagenArgs:
     def parser(self):
         """Create a parser with vectordb subcommands."""
         parser = argparse.ArgumentParser()
-        add_vectordb_arguments(parser)
+        add_vectordb_arguments(parser, 'open')
         return parser
 
     def test_datagen_no_num_query_processes(self, parser):
@@ -350,7 +350,7 @@ class TestVectorDBFullCommandParsing:
     def parser(self):
         """Create a parser with vectordb subcommands."""
         parser = argparse.ArgumentParser()
-        add_vectordb_arguments(parser)
+        add_vectordb_arguments(parser, 'open')
         return parser
 
     def test_datagen_full_command(self, parser):
