@@ -21,7 +21,6 @@ from mlpstorage_py.cli.common_args import (
     add_universal_arguments,
     add_host_arguments,
     add_mpi_arguments,
-    add_storage_type_arguments,
     add_timeseries_arguments,
 )
 
@@ -85,11 +84,12 @@ KVCACHE_HELP_MESSAGES = {
 }
 
 
-def add_kvcache_arguments(parser, is_closed):
+def add_kvcache_arguments(parser, mode):
     """Add KV Cache benchmark arguments to the parser.
 
     Args:
         parser: Argparse subparser for the KV Cache benchmark.
+        mode: One of 'closed', 'open', or 'whatif'.
     """
     kvcache_subparsers = parser.add_subparsers(dest="command", required=True)
     parser.required = True
@@ -104,37 +104,32 @@ def add_kvcache_arguments(parser, is_closed):
         help=KVCACHE_HELP_MESSAGES['kvcache_datasize']
     )
 
-    # Add arguments to both run and datasize commands
+    # Add cache and universal arguments to both run and datasize commands.
+    # Architectural constraint: kvcache has no file/object storage type positional.
+    # Storage type args are intentionally absent from this builder.
     for _parser in [run_benchmark, datasize]:
-<<<<<<< HEAD
-        _add_kvcache_model_arguments(_parser, is_closed)
-        _add_kvcache_cache_arguments(_parser, is_closed)
-
-    add_universal_arguments(run_benchmark, False, True, False, is_closed)
-    add_universal_arguments(datasize, False, False, False, is_closed)
-
-    # Run-specific arguments
-    _add_kvcache_run_arguments(run_benchmark, is_closed)
-    _add_kvcache_optional_features(run_benchmark, is_closed)
-=======
-        _add_kvcache_model_arguments(_parser)
-        _add_kvcache_cache_arguments(_parser)
-        add_universal_arguments(_parser)
-        add_storage_type_arguments(_parser)
+        _add_kvcache_cache_arguments(_parser, mode)
+        add_universal_arguments(_parser, req_results=(_parser is run_benchmark))
 
     # Run-specific arguments
     _add_kvcache_run_arguments(run_benchmark)
-    _add_kvcache_optional_features(run_benchmark)
-    _add_kvcache_mlperf_arguments(run_benchmark)
->>>>>>> origin/main
+
+    if mode in ("open", "whatif"):
+        _add_kvcache_model_arguments(run_benchmark)
+        _add_kvcache_open_args(run_benchmark)
+        _add_kvcache_mlperf_arguments(run_benchmark)
+
+    _add_kvcache_optional_features(run_benchmark, mode)
 
     # Add distributed execution arguments to run command only
-    _add_kvcache_distributed_arguments(run_benchmark, is_closed)
+    _add_kvcache_distributed_arguments(run_benchmark)
 
 
+def _add_kvcache_model_arguments(parser):
+    """Add model configuration arguments (open/whatif only).
 
-def _add_kvcache_model_arguments(parser, is_closed):
-    """Add model configuration arguments.
+    In closed mode, there is no model positional — the model is fixed.
+    This function is only called for open and whatif branches.
 
     Args:
         parser: Argparse parser to add arguments to.
@@ -154,11 +149,15 @@ def _add_kvcache_model_arguments(parser, is_closed):
     )
 
 
-def _add_kvcache_cache_arguments(parser, is_closed):
+def _add_kvcache_cache_arguments(parser, mode):
     """Add cache tier configuration arguments.
+
+    In closed mode, gpu_mem_gb and cpu_mem_gb are fixed via set_defaults.
+    In open/whatif mode, they are exposed as arguments.
 
     Args:
         parser: Argparse parser to add arguments to.
+        mode: One of 'closed', 'open', or 'whatif'.
     """
     cache_group = parser.add_argument_group("Cache Configuration")
     cache_group.add_argument(
@@ -166,10 +165,26 @@ def _add_kvcache_cache_arguments(parser, is_closed):
         type=str,
         help=KVCACHE_HELP_MESSAGES['cache_dir']
     )
-    if is_closed:
+    if mode == "closed":
+        # Set defaults for all open-gated attrs so namespace attrs always exist
         cache_group.set_defaults(
             gpu_mem_gb=16.0,
-            cpu_mem_gb=32.0
+            cpu_mem_gb=32.0,
+            loops=1,
+            duration=KVCACHE_DEFAULT_DURATION,
+            generation_mode='realistic',
+            performance_profile='latency',
+            disable_multi_turn=False,
+            disable_prefix_caching=False,
+            enable_rag=True,
+            rag_num_docs=10,
+            enable_autoscaling=True,
+            autoscaler_mode='qos',
+            seed=42,
+            trials=3,
+            inter_option_delay=20,
+            allow_invalid_params=False,
+            params='',
         )
     else:
         cache_group.add_argument(
@@ -186,8 +201,8 @@ def _add_kvcache_cache_arguments(parser, is_closed):
         )
 
 
-def _add_kvcache_run_arguments(parser, is_closed):
-    """Add run-specific arguments.
+def _add_kvcache_run_arguments(parser):
+    """Add core run-specific arguments (shared across all modes).
 
     Args:
         parser: Argparse parser to add arguments to.
@@ -198,47 +213,50 @@ def _add_kvcache_run_arguments(parser, is_closed):
         type=str,
         help=KVCACHE_HELP_MESSAGES['kvcache_bin_path']
     )
+
+
+def _add_kvcache_open_args(parser):
+    """Add open/whatif-only KVCache run configuration arguments.
+
+    These arguments are only available in open and whatif submission modes.
+    In closed mode, their values are fixed via set_defaults in
+    _add_kvcache_cache_arguments.
+
+    Args:
+        parser: Argparse parser to add arguments to.
+    """
+    run_group = parser.add_argument_group("Open Run Configuration")
     run_group.add_argument(
-<<<<<<< HEAD
-        '--seed',
+        '--duration', '-d',
         type=int,
-        help=KVCACHE_HELP_MESSAGES['seed']
-=======
-        '--kvcache-bin-path',
-        type=str,
-        help=KVCACHE_HELP_MESSAGES['kvcache_bin_path']
->>>>>>> origin/main
+        default=KVCACHE_DEFAULT_DURATION,
+        help=KVCACHE_HELP_MESSAGES['duration']
+    )
+    run_group.add_argument(
+        '--generation-mode',
+        choices=KVCACHE_GENERATION_MODES,
+        default='realistic',
+        help=KVCACHE_HELP_MESSAGES['generation_mode']
+    )
+    run_group.add_argument(
+        '--performance-profile',
+        choices=KVCACHE_PERFORMANCE_PROFILES,
+        default='latency',
+        help=KVCACHE_HELP_MESSAGES['performance_profile']
+    )
+    run_group.add_argument(
+        '--loops',
+        type=int,
+        default=1,
+        help="Number of times to repeat the benchmark run"
+    )
+    run_group.add_argument(
+        '--allow-invalid-params', '-aip',
+        action='store_true',
+        help="Allow parameters that would otherwise be flagged as invalid"
     )
 
-    if is_closed:
-        run_group.set_defaults(
-            duration=KVCACHE_DEFAULT_DURATION,
-            generation_mode='realistic',
-            performance_profile='latency'
-        )
-    else:
-        run_group.add_argument(
-            '--duration', '-d',
-            type=int,
-            default=KVCACHE_DEFAULT_DURATION,
-            help=KVCACHE_HELP_MESSAGES['duration']
-        )
-        run_group.add_argument(
-            '--generation-mode',
-            choices=KVCACHE_GENERATION_MODES,
-            default='realistic',
-            help=KVCACHE_HELP_MESSAGES['generation_mode']
-        )
-        run_group.add_argument(
-            '--performance-profile',
-            choices=KVCACHE_PERFORMANCE_PROFILES,
-            default='latency',
-            help=KVCACHE_HELP_MESSAGES['performance_profile']
-        )
 
-<<<<<<< HEAD
-def _add_kvcache_optional_features(parser, is_closed):
-=======
 def _add_kvcache_mlperf_arguments(parser):
     """Add MLPerf sequence arguments for the KV Cache run command.
 
@@ -284,22 +302,25 @@ def _add_kvcache_mlperf_arguments(parser):
     )
 
 
-def _add_kvcache_optional_features(parser):
->>>>>>> origin/main
+def _add_kvcache_optional_features(parser, mode):
     """Add optional feature flags.
+
+    In closed mode, values are fixed via set_defaults.
+    In open/whatif mode, flags are registered as actual arguments.
 
     Args:
         parser: Argparse parser to add arguments to.
+        mode: One of 'closed', 'open', or 'whatif'.
     """
     features_group = parser.add_argument_group("Optional Features")
-    if is_closed:
+    if mode == "closed":
         features_group.set_defaults(
-                disable_multi_turn=False,
-                disable_prefix_caching=False,
-                enable_rag=True,
-                rag_num_docs=10,
-                enable_autoscaling=True,
-                autoscaler_mode='qos'
+            disable_multi_turn=False,
+            disable_prefix_caching=False,
+            enable_rag=True,
+            rag_num_docs=10,
+            enable_autoscaling=True,
+            autoscaler_mode='qos'
         )
     else:
         features_group.add_argument(
@@ -336,7 +357,7 @@ def _add_kvcache_optional_features(parser):
         )
 
 
-def _add_kvcache_distributed_arguments(parser, is_closed):
+def _add_kvcache_distributed_arguments(parser):
     """Add distributed execution arguments for multi-host benchmarking.
 
     Args:
@@ -357,24 +378,24 @@ def _add_kvcache_distributed_arguments(parser, is_closed):
     )
 
     # Add host arguments from common_args
-    add_host_arguments(parser, is_closed)
+    add_host_arguments(parser)
 
     # Add MPI arguments from common_args
-    add_mpi_arguments(parser, is_closed)
+    add_mpi_arguments(parser)
 
-    # Add time-series arguments
-    add_timeseries_arguments(parser, is_closed)
+    # Add time-series arguments (open/whatif modes only)
+    add_timeseries_arguments(parser)
 
 
 def validate_kvcache_arguments(args):
     """Validate the whole set of args given that we're doing a kvcache benchmark
-    
+
     Args:
         args (argparse.Namespace): The parsed command-line arguments
     """
     error_messages = []
 
-    if args.data_access_protocol != 'file':
+    if hasattr(args, 'data_access_protocol') and args.data_access_protocol != 'file':
         error_messages.append("KVCache only supports POSIX file storage, ie: --object= is not supported")
 
     if error_messages:
