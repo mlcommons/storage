@@ -20,9 +20,9 @@
 
 ### Version Command
 
-- [ ] **VER-01**: `mlpstorage version` prints the installed package version and exits 0
+- [x] **VER-01**: `mlpstorage version` prints the installed package version and exits 0
 - [x] **VER-02**: Version lookup uses distribution name `"mlpstorage"` (not `"mlpstorage_py"`); falls back to `tomllib`-based pyproject.toml parse if package not installed
-- [ ] **VER-03**: `mlpstorage version` is a top-level sibling of closed/open/whatif (not nested under them)
+- [x] **VER-03**: `mlpstorage version` is a top-level sibling of closed/open/whatif (not nested under them)
 
 ### Help Behavior
 
@@ -59,9 +59,9 @@
 | CLI-08 | Phase 1 | Complete |
 | CLI-09 | Phase 1 | Pending |
 | CLI-10 | Phase 1 | Complete |
-| VER-01 | Phase 2 | Pending |
+| VER-01 | Phase 2 | Complete |
 | VER-02 | Phase 2 | Complete |
-| VER-03 | Phase 2 | Pending |
+| VER-03 | Phase 2 | Complete |
 | HELP-01 | Phase 3 | Pending |
 | HELP-02 | Phase 3 | Pending |
 | HELP-03 | Phase 3 | Pending |

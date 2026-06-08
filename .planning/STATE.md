@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: phase-1-verified
-last_updated: "2026-06-08T02:00:44.981Z"
+status: phase-2-complete
+last_updated: "2026-06-08T02:05:47.770Z"
 progress:
   total_phases: 4
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 7
-  completed_plans: 6
-  percent: 29
+  completed_plans: 7
+  percent: 50
 ---
 
 # Project State — as of 2026-06-08
 
-## Status: Phase 2 Plan 01 complete (VERSION bug fixed). Ready for Phase 2 Plan 02 (version subcommand).
+## Status: Phase 2 complete — VERSION bug fixed (02-01) and version subcommand wired (02-02). Ready for Phase 3 (help behavior).
 
 ## Phase 1 Complete — Core CLI Refactor (verified 2026-06-08)
 
@@ -50,16 +50,22 @@ See `.planning/phases/01-core-cli-refactor/01-VERIFICATION.md` for full report.
 - [x] `.planning/` directory bootstrapped for GSD workflow
 - [x] Phase 1 Core CLI Refactor — all 5 plans executed and verified
 - [x] Phase 2 Plan 01 — VERSION bug fixed; _resolve_version() with correct dist name + tomllib fallback; 3 regression tests
+- [x] Phase 2 Plan 02 — version subcommand wired; add_version_arguments() + version_parser + early-exit dispatch before HistoryTracker
+
+## Decisions accumulated
+
+- Distribution name is 'mlpstorage' (not 'mlpstorage_py') for importlib.metadata lookup
+- Version early-exit placed immediately after parse_arguments() in _main_impl() — before args.debug access — to avoid AttributeError (version subparser has no --debug flag) while also satisfying HistoryTracker bypass constraint
 
 ## What is NOT done (implementation backlog)
 
-### P2 — Version command
+### P2 — Version command (COMPLETE)
 
 - [x] Fix `__init__.py` distribution name + add pyproject.toml fallback (02-01 complete)
 - [x] Write 3 regression tests (`tests/unit/test_version.py`) (02-01 complete)
-- Add `add_version_arguments()` to `utility_args.py`
-- Wire `version` subparser into `cli_parser.py`
-- Add dispatch in `main.py`
+- [x] Add `add_version_arguments()` to `utility_args.py` (02-02 complete)
+- [x] Wire `version` subparser into `cli_parser.py` (02-02 complete)
+- [x] Add dispatch in `main.py` (02-02 complete)
 
 ### P3 — Help behavior
 
@@ -78,4 +84,4 @@ None.
 
 ## Next GSD action
 
-Run `/gsd:execute-phase 2` Plan 02 to wire `mlpstorage version` subcommand into `utility_args.py`, `cli_parser.py`, and `main.py`.
+Run `/gsd:plan-phase 3` to plan Phase 3 (help behavior: --help_all intercept and context-sensitive --help).
