@@ -18,31 +18,37 @@ from mlpstorage_py.config import (
 
 
 class MLPStorageHelpFormatter(argparse.HelpFormatter):
-    """Argparse formatter with two changes versus the default:
+    """Argparse formatter for leaf-command help output.
 
-    1. Required options are listed first (alphabetically), then optional options
-       (alphabetically), within each argument group.
-    2. Positional arguments are excluded from the one-line usage string — they
-       are already present in the command path the user typed, so repeating them
-       there is redundant.  Positionals still appear in the "positional arguments"
-       section of the full help text.
+    Positionals (file|object, model, command) are already present in the
+    command path the user typed — the same way ``closed``, ``training``, and
+    ``run`` live in the _prog prefix and never appear again.  This formatter:
+
+    1. Excludes positionals from both the usage line and the detailed sections.
+    2. Lists required options before optional options (both alphabetically)
+       in the usage line and in every argument group.
     """
 
-    def _format_usage(self, usage, actions, groups, prefix):
-        opt_only = [a for a in actions if a.option_strings]
-        return super()._format_usage(usage, opt_only, groups, prefix)
-
-    def add_arguments(self, actions):
-        positionals = [a for a in actions if not a.option_strings]
-        required_opts = sorted(
+    @staticmethod
+    def _sort_opts(actions):
+        required = sorted(
             [a for a in actions if a.option_strings and a.required],
             key=lambda a: a.option_strings[0].lstrip('-').lower()
         )
-        optional_opts = sorted(
+        optional = sorted(
             [a for a in actions if a.option_strings and not a.required],
             key=lambda a: a.option_strings[0].lstrip('-').lower()
         )
-        super().add_arguments(positionals + required_opts + optional_opts)
+        return required + optional
+
+    def _format_usage(self, usage, actions, groups, prefix):
+        return super()._format_usage(
+            usage, self._sort_opts(actions), groups, prefix
+        )
+
+    def add_arguments(self, actions):
+        # Positionals are suppressed — they are already consumed in the command path.
+        super().add_arguments(self._sort_opts(actions))
 
 
 # Help messages dictionary - shared across all argument builders
