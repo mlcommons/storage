@@ -9,7 +9,7 @@ Provides arguments for:
 from mlpstorage_py.cli.common_args import add_universal_arguments
 
 
-def add_lockfile_arguments(parser, is_closed):
+def add_lockfile_arguments(parser):
     """Add lockfile subcommands to the parser.
 
     Args:
@@ -54,7 +54,7 @@ def add_lockfile_arguments(parser, is_closed):
         dest="generate_all",
         help="Generate both requirements.txt and requirements-full.txt",
     )
-    add_universal_arguments(generate_parser, True, True, True, is_closed)
+    add_universal_arguments(generate_parser, req_results=True)
 
     # Verify subcommand
     verify_parser = subparsers.add_parser(
@@ -83,6 +83,6 @@ def add_lockfile_arguments(parser, is_closed):
         action="store_true",
         help="Fail on any difference (default: fail only on version mismatch)",
     )
-    add_universal_arguments(verify_parser, True, True, True, is_closed)
+    add_universal_arguments(verify_parser, req_results=True)
 
     return parser
