@@ -73,7 +73,7 @@ source .venv/bin/activate
 export DLIO_S3_IMPLEMENTATION=mlp
 
 # Generate small test dataset
-mlpstorage training datagen \
+mlpstorage open training datagen \
   --model unet3d \
   --config test_configs/s3_test_mlp_s3dlio.yaml \
   --param dataset.num_files_train=10
@@ -103,7 +103,7 @@ mc ls local/test-bucket/dlio-test/train/
 ```bash
 export DLIO_S3_IMPLEMENTATION=mlp
 
-mlpstorage training datagen \
+mlpstorage open training datagen \
   --model unet3d \
   --config test_configs/s3_test_mlp_s3torchconnector.yaml \
   --param dataset.num_files_train=10
@@ -127,7 +127,7 @@ mc ls local/test-bucket/dlio-test/train/
 ```bash
 export DLIO_S3_IMPLEMENTATION=mlp
 
-mlpstorage training datagen \
+mlpstorage open training datagen \
   --model unet3d \
   --config test_configs/s3_test_mlp_minio.yaml \
   --param dataset.num_files_train=10
@@ -151,7 +151,7 @@ mc ls local/test-bucket/dlio-test/train/
 ```bash
 export DLIO_S3_IMPLEMENTATION=dpsi
 
-mlpstorage training datagen \
+mlpstorage open training datagen \
   --model unet3d \
   --config test_configs/s3_test_dpsi.yaml \
   --param dataset.num_files_train=10
@@ -183,7 +183,7 @@ mc ls local/test-bucket/dlio-test-dpsi/train/
 
 ```bash
 # Add --param workflow.train=true to test read performance
-mlpstorage training run \
+mlpstorage open training run \
   --model unet3d \
   --config test_configs/s3_test_mlp_s3dlio.yaml \
   --param workflow.generate_data=false \

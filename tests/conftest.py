@@ -1,5 +1,5 @@
 """
-Shared pytest fixtures for mlpstorage tests.
+Shared pytest fixtures for mlpstorage_py tests.
 
 These fixtures provide mock data, loggers, and test utilities that can be
 used across all test modules without requiring DLIO to be installed.
@@ -481,7 +481,7 @@ def mock_benchmark_instance(training_run_args, sample_training_parameters, sampl
 @pytest.fixture
 def clean_env(monkeypatch):
     """
-    Remove mlpstorage-related environment variables.
+    Remove mlpstorage_py-related environment variables.
 
     Usage:
         def test_check_env_default(clean_env):

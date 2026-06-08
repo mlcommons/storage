@@ -11,7 +11,7 @@ from mlpstorage_py.cli.common_args import (
 )
 
 
-def add_reports_arguments(parser):
+def add_reports_arguments(parser, is_closed):
     """Add reports command arguments to the parser.
 
     Args:
@@ -35,10 +35,10 @@ def add_reports_arguments(parser):
         help=HELP_MESSAGES['output_dir']
     )
 
-    add_universal_arguments(reportgen)
+    add_universal_arguments(reportgen, True, True, True, is_closed)
 
 
-def add_history_arguments(parser):
+def add_history_arguments(parser, is_closed):
     """Add history command arguments to the parser.
 
     Args:
@@ -77,4 +77,4 @@ def add_history_arguments(parser):
     )
 
     for _parser in [history, rerun]:
-        add_universal_arguments(_parser)
+        add_universal_arguments(_parser, True, True, True, is_closed)

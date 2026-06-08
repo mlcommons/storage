@@ -558,7 +558,7 @@ checkpoint read.  Aggregate throughput reported by `[METRIC]` lines from the ben
 cd /home/eval/Documents/Code/mlp-storage
 source .venv/bin/activate
 
-mlpstorage checkpointing run \
+mlpstorage open checkpointing run \
   --model llama3-8b --num-processes 8 \
   --client-host-memory-in-gb 64 \
   --num-checkpoints-write 1 --num-checkpoints-read 1 \
@@ -584,7 +584,7 @@ raw storage throughput.
 cd /home/eval/Documents/Code/mlp-storage
 source .venv/bin/activate
 
-mlpstorage checkpointing run \
+mlpstorage open checkpointing run \
   --model llama3-8b --num-processes 8 \
   --client-host-memory-in-gb 64 \
   --num-checkpoints-write 1 --num-checkpoints-read 1 \
