@@ -18,12 +18,12 @@ HELP_ALL_TEXT = """\
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
 SYNOPSIS
-  mlpstorage [closed|open|whatif] <benchmark> <model|algorithm> <command> [file|object] [OPTIONS]
+  mlpstorage <closed|open|whatif> <benchmark> <model|algorithm> <command> <file|object> [OPTIONS]
   mlpstorage (reports|history|lockfile|version) [subcommand] [OPTIONS]
 
-  [closed|open|whatif]  — required first positional for benchmark commands
+  <closed|open|whatif>  — required first positional for benchmark commands
   <model|algorithm>     — required second positional (see per-benchmark choices below)
-  [file|object]         — required storage selector for commands that touch storage
+  <file|object>         — required storage selector for commands that touch storage
                           (absent on datasize; absent on all kvcache commands)
 
 mlpstorage
@@ -150,9 +150,9 @@ TR_DATASIZE_CLOSED
     --max-accelerators/-ma N
     --accelerator-type/-g {b200,mi355}
     --client-host-memory-in-gb/-cm N
+    --data-dir/-dd PATH
   Optional:
     --num-client-hosts/-nc N        Derived from --hosts count if unset
-    --data-dir/-dd PATH
     --dlio-bin-path/-dp PATH
     --exec-type/-et {mpi,docker}    (default: mpi)
     --hosts/-s HOST...              (default: 127.0.0.1)
@@ -174,9 +174,9 @@ TR_DATAGEN_CLOSED
   Required:
     --num-processes/-np N
     --results-dir/-rd PATH
+    --data-dir/-dd PATH
     [storage positional: file | object]
   Optional:
-    --data-dir/-dd PATH
     --dlio-bin-path/-dp PATH
     --exec-type/-et {mpi,docker}    (default: mpi)
     --hosts/-s HOST...              (default: 127.0.0.1)
@@ -200,10 +200,10 @@ TR_RUN_CLOSED
     --client-host-memory-in-gb/-cm N
     --checkpoint-folder/-cf PATH
     --results-dir/-rd PATH
+    --data-dir/-dd PATH
     [storage positional: file | object]
   Optional:
     --num-client-hosts/-nc N
-    --data-dir/-dd PATH
     --dlio-bin-path/-dp PATH
     --exec-type/-et {mpi,docker}    (default: mpi)
     --hosts/-s HOST...              (default: 127.0.0.1)
@@ -226,9 +226,9 @@ TR_CONFIGVIEW_CLOSED
   Required:
     --num-accelerators/-na N
     --results-dir/-rd PATH
+    --data-dir/-dd PATH
     [storage positional: file | object]
   Optional:
-    --data-dir/-dd PATH
     --dlio-bin-path/-dp PATH
   + CORE_STD
 
