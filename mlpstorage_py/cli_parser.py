@@ -71,6 +71,31 @@ def parse_arguments():
     Returns:
         argparse.Namespace: Parsed and validated arguments.
     """
+    _argv = sys.argv[1:]
+
+    # HELP-01: --help_all — print full command tree and exit
+    if '--help_all' in _argv:
+        from mlpstorage_py.cli.help_formatter import HELP_ALL_TEXT
+        print(HELP_ALL_TEXT)
+        sys.exit(0)
+
+    # HELP-02 / HELP-03: context-sensitive help — bare, --help, AND incomplete paths
+    # R-03-01 fix: call get_context_help_tokens unconditionally (not gated on --help presence).
+    # Strip help flags first so they don't appear as positionals. Then strip all remaining
+    # option-style tokens (anything starting with '-') so that flags like '-cm 64' interspersed
+    # between positionals don't confuse the path lookup.
+    _help_flags = {'-h', '--help'}
+    _stripped = [a for a in _argv if a not in _help_flags]
+    _positionals = [a for a in _stripped if not a.startswith('-')]
+    from mlpstorage_py.cli.help_formatter import get_context_help_tokens
+    _msg = get_context_help_tokens(_positionals)
+    if _msg is not None:
+        # Fire for: bare invocation, --help at any level, AND bare incomplete paths
+        # (e.g., 'mlpstorage closed training' with no --help still shows "next: unet3d | retinanet")
+        print(_msg)
+        sys.exit(0)
+    # _msg is None → leaf level OR unrecognized token → fall through to argparse (HELP-03)
+
     parser = argparse.ArgumentParser(
         prog="mlpstorage",
         description="Script to launch the MLPerf Storage benchmark"
