@@ -37,7 +37,7 @@ from mlpstorage_py.cli.training_args import add_training_arguments, validate_tra
 from mlpstorage_py.cli.checkpointing_args import add_checkpointing_arguments, validate_checkpointing_arguments
 from mlpstorage_py.cli.vectordb_args import add_vectordb_arguments, validate_vectordb_arguments
 from mlpstorage_py.cli.kvcache_args import add_kvcache_arguments, validate_kvcache_arguments
-from mlpstorage_py.cli.utility_args import add_reports_arguments, add_history_arguments
+from mlpstorage_py.cli.utility_args import add_reports_arguments, add_history_arguments, add_version_arguments
 from mlpstorage_py.cli.lockfile_args import add_lockfile_arguments
 
 __all__ = [
@@ -62,5 +62,6 @@ __all__ = [
     # Utility argument builders
     'add_reports_arguments',
     'add_history_arguments',
+    'add_version_arguments',
     'add_lockfile_arguments',
 ]

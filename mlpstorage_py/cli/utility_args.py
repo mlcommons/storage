@@ -78,3 +78,11 @@ def add_history_arguments(parser):
 
     for _parser in [history, rerun]:
         add_universal_arguments(_parser, req_results=True)
+
+
+def add_version_arguments(parser):
+    """Add version command arguments to the parser.
+
+    No subcommands or flags — version is printed and the process exits in main.py.
+    """
+    pass
