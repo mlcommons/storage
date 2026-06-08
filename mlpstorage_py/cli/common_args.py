@@ -167,11 +167,12 @@ PROGRAM_DESCRIPTIONS = {
 }
 
 
-def add_universal_arguments(parser, req_fileobj, req_results, offer_object, is_closed):
+def add_universal_arguments(parser, req_results):
     """Add arguments common to all benchmarks and commands.
 
     Args:
         parser: Argparse parser to add arguments to.
+        req_results: Whether --results-dir is required.
     """
     standard_args = parser.add_argument_group("Standard Arguments")
     if req_results:
@@ -190,78 +191,11 @@ def add_universal_arguments(parser, req_fileobj, req_results, offer_object, is_c
             help=HELP_MESSAGES['results_dir']
         )
 
-    if is_closed:
-        standard_args.set_defaults(
-            loops=1
-        )
-    else:
-        standard_args.add_argument(
-            '--loops',
-            type=int,
-            default=1,
-            help="Number of times to run the benchmark"
-        )
-
     standard_args.add_argument(
         '--config-file', '-c',
         type=str,
         help="Path to YAML file with argument overrides"
     )
-
-<<<<<<< HEAD
-    if req_fileobj:
-        # Create a mutually exclusive group for file/object options
-        access_proto = standard_args.add_mutually_exclusive_group(required=True)
-        access_proto.add_argument(
-            "--file",
-            action="store_true",
-            help="Use POSIX files as the data access method"
-        )
-        if offer_object:
-            access_proto.add_argument(
-                "--object",
-                nargs="?",
-                type=str,
-                const="s3",
-                choices=["s3"],
-                help="Use the given Object API as the data access method, defaults to S3"
-            )
-        else:
-            access_proto.set_defaults(
-                object=False
-            )
-    else:
-        standard_args.set_defaults(
-            file=True,
-            object=False
-        )
-=======
-    # NOTE: --file / --object are intentionally NOT added here. They are
-    # declared exclusively in ``add_storage_type_arguments`` and attached
-    # only to benchmark subparsers (training, checkpointing, vectordb,
-    # kvcache). Adding them in both places would raise
-    # ``argparse.ArgumentError: argument --file: conflicting option string``
-    # the moment any subparser builder calls both functions — see issue #376.
-
-    # Create a mutually exclusive group for closed/open options.
-    # Both flags set their own independent boolean so downstream code can
-    # distinguish "--open passed", "--closed passed", and "neither passed".
-    submission_group = standard_args.add_mutually_exclusive_group()
-    submission_group.add_argument(
-        "--open",
-        action="store_true",
-        dest="open",
-        default=False,
-        help="Run as an open submission"
-    )
-    submission_group.add_argument(
-        "--closed",
-        action="store_true",
-        dest="closed",
-        default=False,
-        help="Run as a closed submission"
-    )
->>>>>>> origin/main
 
     output_control = parser.add_argument_group("Output Control")
     output_control.add_argument(
@@ -280,22 +214,11 @@ def add_universal_arguments(parser, req_fileobj, req_results, offer_object, is_c
         default="INFO"
     )
 
-    if is_closed:
-        output_control.set_defaults(
-            allow_invalid_params=False
-        )
-    else:
-        output_control.add_argument(
-            "--allow-invalid-params", "-aip",
-            action="store_true",
-            help="Do not fail on invalid parameters."
-        )
-
     view_only_args = parser.add_argument_group("View Only")
     view_only_args.add_argument(
-        "--what-if",
+        "--dry-run",
         action="store_true",
-        help="View the configuration that would execute and the associated command."
+        help="View the configuration that would execute and the associated command. Does not execute."
     )
 
     validation_args = parser.add_argument_group("Validation")
@@ -312,7 +235,7 @@ def add_universal_arguments(parser, req_fileobj, req_results, offer_object, is_c
     )
 
 
-def add_mpi_arguments(parser, is_closed):
+def add_mpi_arguments(parser):
     """Add MPI-related arguments.
 
     Args:
@@ -362,50 +285,32 @@ def add_mpi_arguments(parser, is_closed):
     )
 
 
-<<<<<<< HEAD
-def add_host_arguments(parser, is_closed, required=False):
-=======
-def add_storage_type_arguments(parser):
-    """Add --file / --object storage-type selector to a subcommand parser.
+def add_storage_type_arguments(parser, required=False):
+    """Add file|object storage-type positional to a subcommand parser.
 
-    This group is optional (neither flag is required at parse time), so it can
-    be safely added to every benchmark subparser — VectorDB, KV-cache, training,
-    and checkpointing alike.  Benchmarks that do not yet use object storage
-    simply ignore the flags; those that do can check ``args.file`` /
-    ``args.object``.
+    Registers 'data_access_protocol' as an optional positional with
+    choices=['file', 'object'], matching the CLI grammar:
+      mlpstorage closed training unet3d run file
 
-    When --object is passed the runtime reads S3 credentials and endpoint from
-    .env (AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY,
-    AWS_REGION, BUCKET, STORAGE_LIBRARY).  --file expects a local path
-    reachable on every participating host.
+    Commands that require storage type (datagen, run, configview) should
+    call this with required=True. Commands that forbid it (datasize) should
+    not call this function at all.
 
     Args:
-        parser: Argparse subcommand parser to add arguments to.
+        parser: Argparse subcommand parser to add the positional to.
+        required: Whether the positional is required. Defaults to False.
     """
-    storage_group = parser.add_argument_group("Storage Type")
-    access_proto = storage_group.add_mutually_exclusive_group(required=False)
-    access_proto.add_argument(
-        "--file",
-        action="store_true",
-        help="Use POSIX files as the data access method"
-    )
-    access_proto.add_argument(
-        "--object",
-        nargs="?",
-        type=str,
-        const="s3",
-        choices=["s3"],
-        help=(
-            "Use the given Object API as the data access method, defaults to S3. "
-            "S3 credentials and endpoint are read from environment variables or "
-            "a .env file (AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID, "
-            "AWS_SECRET_ACCESS_KEY, AWS_REGION, BUCKET, STORAGE_LIBRARY)."
-        ),
+    parser.add_argument(
+        "data_access_protocol",
+        nargs=None if required else "?",
+        choices=["file", "object"],
+        metavar="file|object",
+        default=None,
+        help="Storage access method: 'file' for POSIX filesystem, 'object' for S3-compatible object storage."
     )
 
 
 def add_host_arguments(parser, required=False):
->>>>>>> origin/main
     """Add host-related arguments common to distributed benchmarks.
 
     Args:
@@ -421,7 +326,7 @@ def add_host_arguments(parser, required=False):
     )
 
 
-def add_dlio_arguments(parser, is_closed):
+def add_dlio_arguments(parser):
     """Add DLIO-related arguments.
 
     Args:
@@ -432,46 +337,38 @@ def add_dlio_arguments(parser, is_closed):
         type=str,
         help="Path to DLIO binary. Default is the same as mlpstorage binary path"
     )
-
-    if is_closed:
-        parser.set_defaults(
-            params=''
-        )
-    else:
-        parser.add_argument(
-            '--params', '-p',
-            nargs="+",
-            type=str,
-            action="append",
-            help=HELP_MESSAGES['params']
-        )
+    # --params is intentionally not registered here; it moves to _add_{cmd}_open_args()
+    # in each benchmark builder. Closed-mode callers set: parser.set_defaults(params='')
 
 
-def add_timeseries_arguments(parser, is_closed):
+def add_timeseries_arguments(parser):
     """Add time-series collection arguments.
 
     These arguments control the collection of time-series host metrics
     during benchmark execution (HOST-04, HOST-05 requirements).
 
+    This function always adds all three timeseries arguments. It should
+    only be called from open/whatif tier builders — closed builders simply
+    do not call it, ensuring the arguments are absent in closed mode.
+
     Args:
         parser: Argparse parser to add arguments to.
     """
-    if not is_closed:
-        timeseries_group = parser.add_argument_group("Time-Series Collection")
-        timeseries_group.add_argument(
-            '--timeseries-interval',
-            type=float,
-            default=10.0,
-            help=HELP_MESSAGES['timeseries_interval']
-        )
-        timeseries_group.add_argument(
-            '--skip-timeseries',
-            action='store_true',
-            help=HELP_MESSAGES['skip_timeseries']
-        )
-        timeseries_group.add_argument(
-            '--max-timeseries-samples',
-            type=int,
-            default=3600,
-            help=HELP_MESSAGES['max_timeseries_samples']
-        )
+    timeseries_group = parser.add_argument_group("Time-Series Collection")
+    timeseries_group.add_argument(
+        '--timeseries-interval',
+        type=float,
+        default=10.0,
+        help=HELP_MESSAGES['timeseries_interval']
+    )
+    timeseries_group.add_argument(
+        '--skip-timeseries',
+        action='store_true',
+        help=HELP_MESSAGES['skip_timeseries']
+    )
+    timeseries_group.add_argument(
+        '--max-timeseries-samples',
+        type=int,
+        default=3600,
+        help=HELP_MESSAGES['max_timeseries_samples']
+    )
