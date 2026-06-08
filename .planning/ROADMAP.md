@@ -63,7 +63,7 @@ Plans:
 
 **Wave 1**
 
-- [ ] 02-01-PLAN.md — Fix VERSION bug in `__init__.py` (_resolve_version() with correct dist name + tomllib fallback) + write 3 regression tests
+- [x] 02-01-PLAN.md — Fix VERSION bug in `__init__.py` (_resolve_version() with correct dist name + tomllib fallback) + write 3 regression tests
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -111,6 +111,6 @@ Plans:
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Core CLI Refactor | 5/5 | Done | 2026-06-08 |
-| 2. Version Command | 0/2 | Not started | - |
+| 2. Version Command | 1/2 | In Progress|  |
 | 3. Help Behavior | 0/1 | Not started | - |
 | 4. Test Coverage | 0/1 | Not started | - |

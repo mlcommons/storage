@@ -3,18 +3,18 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: phase-1-verified
-last_updated: "2026-06-08T01:55:48.563Z"
+last_updated: "2026-06-08T02:00:44.981Z"
 progress:
   total_phases: 4
   completed_phases: 1
   total_plans: 7
-  completed_plans: 5
-  percent: 25
+  completed_plans: 6
+  percent: 29
 ---
 
 # Project State — as of 2026-06-08
 
-## Status: Phase 1 complete and verified. Ready for Phase 2.
+## Status: Phase 2 Plan 01 complete (VERSION bug fixed). Ready for Phase 2 Plan 02 (version subcommand).
 
 ## Phase 1 Complete — Core CLI Refactor (verified 2026-06-08)
 
@@ -49,16 +49,17 @@ See `.planning/phases/01-core-cli-refactor/01-VERIFICATION.md` for full report.
 - [x] Merge conflict analysis complete and resolved (8 blocks, HEAD side kept throughout)
 - [x] `.planning/` directory bootstrapped for GSD workflow
 - [x] Phase 1 Core CLI Refactor — all 5 plans executed and verified
+- [x] Phase 2 Plan 01 — VERSION bug fixed; _resolve_version() with correct dist name + tomllib fallback; 3 regression tests
 
 ## What is NOT done (implementation backlog)
 
 ### P2 — Version command
 
-- Fix `__init__.py` distribution name + add pyproject.toml fallback
+- [x] Fix `__init__.py` distribution name + add pyproject.toml fallback (02-01 complete)
+- [x] Write 3 regression tests (`tests/unit/test_version.py`) (02-01 complete)
 - Add `add_version_arguments()` to `utility_args.py`
 - Wire `version` subparser into `cli_parser.py`
 - Add dispatch in `main.py`
-- Write 3 regression tests (`tests/unit/test_version.py`)
 
 ### P3 — Help behavior
 
@@ -77,4 +78,4 @@ None.
 
 ## Next GSD action
 
-Run `/gsd:plan-phase 2` to implement the VERSION command fix and `mlpstorage version` subcommand.
+Run `/gsd:execute-phase 2` Plan 02 to wire `mlpstorage version` subcommand into `utility_args.py`, `cli_parser.py`, and `main.py`.
