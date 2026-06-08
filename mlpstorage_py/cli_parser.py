@@ -17,6 +17,7 @@ from mlpstorage_py.config import LLM_MODELS, VECTORDB_DEFAULT_RUNTIME, EXIT_CODE
 from mlpstorage_py.cli import (
     HELP_MESSAGES,
     PROGRAM_DESCRIPTIONS,
+    MLPStorageHelpFormatter,
     add_universal_arguments,
     add_training_arguments,      validate_training_arguments,
     add_checkpointing_arguments, validate_checkpointing_arguments,
@@ -31,6 +32,15 @@ from mlpstorage_py.cli import (
 # Backwards compatibility aliases
 help_messages = HELP_MESSAGES
 prog_descriptions = PROGRAM_DESCRIPTIONS
+
+
+def _apply_formatter(parser):
+    """Recursively set MLPStorageHelpFormatter on every parser in the subparser tree."""
+    parser.formatter_class = MLPStorageHelpFormatter
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            for subparser in action.choices.values():
+                _apply_formatter(subparser)
 
 
 def _build_mode_branch(mode_parser, mode):
@@ -124,6 +134,8 @@ def parse_arguments():
     add_history_arguments(history_parser)
     add_lockfile_arguments(lockfile_parser)
     add_version_arguments(version_parser)
+
+    _apply_formatter(parser)
 
     parsed_args = parser.parse_args()
 
