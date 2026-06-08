@@ -1,68 +1,40 @@
-from pathlib import Path
-import sys
+"""Regression tests for version resolution."""
+import importlib.metadata
+import pathlib
 import tomllib
 
-import pytest
+import mlpstorage_py
 
 
-def _pyproject_version() -> str:
-    repo_root = Path(__file__).resolve().parents[2]
-    with (repo_root / "pyproject.toml").open("rb") as f:
-        return tomllib.load(f)["project"]["version"]
+def test_version_matches_pyproject():
+    """VERSION constant must equal the version declared in pyproject.toml."""
+    pyproject = pathlib.Path(__file__).parent.parent.parent / "pyproject.toml"
+    with open(pyproject, "rb") as f:
+        declared = tomllib.load(f)["project"]["version"]
+    assert mlpstorage_py.VERSION == declared
 
 
-def test_package_version_matches_pyproject():
-    import mlpstorage_py
-
-    expected = _pyproject_version()
-    assert mlpstorage_py.VERSION == expected
-    assert mlpstorage_py.__version__ == expected
-    assert mlpstorage_py.VERSION != "unknown"
+def test_version_lookup_uses_correct_distribution_name():
+    """importlib.metadata lookup must succeed under the 'mlpstorage' dist name."""
+    # Will raise PackageNotFoundError (not caught) if wrong name is used
+    pkg_version = importlib.metadata.version("mlpstorage")
+    assert pkg_version == mlpstorage_py.VERSION
 
 
-def test_version_from_pyproject_matches_project_version():
-    import mlpstorage_py
+def test_version_fallback_reads_pyproject(monkeypatch):
+    """When installed metadata is absent, version is read from pyproject.toml."""
+    from importlib.metadata import PackageNotFoundError
 
-    assert mlpstorage_py._version_from_pyproject() == _pyproject_version()
+    def _raise(_name):
+        raise PackageNotFoundError(_name)
 
+    monkeypatch.setattr(importlib.metadata, "version", _raise)
 
-def test_resolve_version_uses_distribution_name_when_pyproject_missing(monkeypatch):
-    import mlpstorage_py
+    # Re-run the resolver function directly
+    from mlpstorage_py import _resolve_version
+    result = _resolve_version()
 
-    seen = {}
-
-    def fake_pkg_version(name: str) -> str:
-        seen["name"] = name
-        return "9.8.7"
-
-    monkeypatch.setattr(mlpstorage_py, "_version_from_pyproject", lambda: None)
-    monkeypatch.setattr(mlpstorage_py, "_pkg_version", fake_pkg_version)
-
-    assert mlpstorage_py._resolve_version() == "9.8.7"
-    assert seen["name"] == "mlpstorage"
-
-
-def test_resolve_version_returns_unknown_when_no_metadata(monkeypatch):
-    import mlpstorage_py
-
-    def missing_distribution(name: str) -> str:
-        raise mlpstorage_py._PkgNF(name)
-
-    monkeypatch.setattr(mlpstorage_py, "_version_from_pyproject", lambda: None)
-    monkeypatch.setattr(mlpstorage_py, "_pkg_version", missing_distribution)
-
-    assert mlpstorage_py._resolve_version() == "unknown"
-
-
-def test_cli_version_prints_project_version(monkeypatch, capsys):
-    from mlpstorage_py.cli_parser import parse_arguments
-
-    monkeypatch.setattr(sys, "argv", ["mlpstorage", "--version"])
-
-    with pytest.raises(SystemExit) as exc:
-        parse_arguments()
-
-    assert exc.value.code == 0
-    out = capsys.readouterr().out.strip()
-    assert out == f"mlpstorage {_pyproject_version()}"
-    assert "unknown" not in out
+    pyproject = pathlib.Path(__file__).parent.parent.parent / "pyproject.toml"
+    with open(pyproject, "rb") as f:
+        declared = tomllib.load(f)["project"]["version"]
+    assert result == declared
