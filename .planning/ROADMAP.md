@@ -82,11 +82,13 @@ Plans:
   4. `mlpstorage closed training unet3d` prints `next: datasize | datagen | run | configview`
   5. `mlpstorage closed training unet3d datasize` prints flags for `TR_DATASIZE_CLOSED`
 
-**Plans**: TBD
+**Plans**: 1 plan in 1 wave
 
 Plans:
 
-- [ ] 03-01: Implement `--help_all` pre-parse intercept and context-sensitive `--help` formatter
+**Wave 1**
+
+- [ ] 03-01-PLAN.md — Create help_formatter.py (HELP_ALL_TEXT + get_context_help_tokens()), add pre-scan guard to cli_parser.py, write test_help_behavior.py
 
 ### Phase 4: Test Coverage
 
