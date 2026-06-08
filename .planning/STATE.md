@@ -2,14 +2,14 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: unknown
-last_updated: "2026-06-07T23:20:00.000Z"
+status: phase-1-complete
+last_updated: "2026-06-08T00:39:04Z"
 progress:
   total_phases: 4
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 5
   completed_plans: 5
-  percent: 0
+  percent: 25
 ---
 
 # Project State — as of 2026-06-07
@@ -67,7 +67,18 @@ the GSD phase structure and beginning implementation.
 None.  All design questions were resolved in the prior conversation session.
 See `memory/open_questions.md` for the full list and resolutions.
 
+## Phase 1 Completion — 2026-06-08
+
+All 5 plans in Phase 1 (Core CLI Refactor) are complete:
+- 01-01: common_args.py conflict resolution + signature simplification
+- 01-02: training_args.py + checkpointing_args.py three-tier builder rewrite
+- 01-03: vectordb_args.py + kvcache_args.py three-tier builder rewrite
+- 01-04: utility_args.py + lockfile_args.py simplification + cli/__init__.py exports
+- 01-05: cli_parser.py three-branch positional rewrite + dispatch updates + test fixes
+
+The `mlpstorage` CLI now uses positional mode (`closed`/`open`/`whatif`) as the first argument,
+with benchmark name, model positional, command, and storage type positional following.
+
 ## Next GSD action
 
-Run `/gsd:plan-phase 1` to generate an execution plan for the P0+P1 work
-(merge conflict resolution + core parser refactor).
+Run `/gsd:plan-phase 2` to implement the VERSION command fix and `mlpstorage version` subcommand.

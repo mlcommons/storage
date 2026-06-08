@@ -6,7 +6,7 @@ Refactor the `mlpstorage` CLI from a flag-gated `--open`/`--closed` design to a 
 
 ## Phases
 
-- [ ] **Phase 1: Core CLI Refactor** — Resolve merge conflicts + build three-branch positional parser, eliminating `is_closed`
+- [x] **Phase 1: Core CLI Refactor** — Resolve merge conflicts + build three-branch positional parser, eliminating `is_closed`
 - [ ] **Phase 2: Version Command** — Fix VERSION bug + implement `mlpstorage version` subcommand
 - [ ] **Phase 3: Help Behavior** — `--help_all` full tree output + context-sensitive `--help` at each positional level
 - [ ] **Phase 4: Test Coverage** — Three-mode parser tests, open-gated arg validation, model/accelerator restriction tests
@@ -37,12 +37,12 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 01-02-PLAN.md — Rewrite training_args.py and checkpointing_args.py with three-tier builder pattern; update benchmarks/dlio.py
-- [ ] 01-03-PLAN.md — Rewrite vectordb_args.py and kvcache_args.py with three-tier builder pattern; update benchmarks/kvcache.py and vectordbbench.py
+- [x] 01-03-PLAN.md — Rewrite vectordb_args.py and kvcache_args.py with three-tier builder pattern; update benchmarks/kvcache.py and vectordbbench.py
 - [x] 01-04-PLAN.md — Simplify utility_args.py and lockfile_args.py signatures; update cli/__init__.py exports
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 01-05-PLAN.md — Rewrite cli_parser.py with three-branch positional structure; update main.py and base.py dispatch; fix unit tests
+- [x] 01-05-PLAN.md — Rewrite cli_parser.py with three-branch positional structure; update main.py and base.py dispatch; fix unit tests
 
 ### Phase 2: Version Command
 
