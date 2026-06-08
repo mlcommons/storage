@@ -27,15 +27,16 @@ from mlpstorage_py.cli.common_args import (
     PROGRAM_DESCRIPTIONS,
     add_universal_arguments,
     add_storage_type_arguments,
+    add_timeseries_arguments,
     add_mpi_arguments,
     add_host_arguments,
     add_dlio_arguments,
 )
 
-from mlpstorage_py.cli.training_args import add_training_arguments
-from mlpstorage_py.cli.checkpointing_args import add_checkpointing_arguments
-from mlpstorage_py.cli.vectordb_args import add_vectordb_arguments
-from mlpstorage_py.cli.kvcache_args import add_kvcache_arguments
+from mlpstorage_py.cli.training_args import add_training_arguments, validate_training_arguments
+from mlpstorage_py.cli.checkpointing_args import add_checkpointing_arguments, validate_checkpointing_arguments
+from mlpstorage_py.cli.vectordb_args import add_vectordb_arguments, validate_vectordb_arguments
+from mlpstorage_py.cli.kvcache_args import add_kvcache_arguments, validate_kvcache_arguments
 from mlpstorage_py.cli.utility_args import add_reports_arguments, add_history_arguments
 from mlpstorage_py.cli.lockfile_args import add_lockfile_arguments
 
@@ -44,14 +45,20 @@ __all__ = [
     'HELP_MESSAGES',
     'PROGRAM_DESCRIPTIONS',
     'add_universal_arguments',
+    'add_storage_type_arguments',
+    'add_timeseries_arguments',
     'add_mpi_arguments',
     'add_host_arguments',
     'add_dlio_arguments',
     # Benchmark argument builders
     'add_training_arguments',
+    'validate_training_arguments',
     'add_checkpointing_arguments',
+    'validate_checkpointing_arguments',
     'add_vectordb_arguments',
+    'validate_vectordb_arguments',
     'add_kvcache_arguments',
+    'validate_kvcache_arguments',
     # Utility argument builders
     'add_reports_arguments',
     'add_history_arguments',
