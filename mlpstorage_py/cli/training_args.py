@@ -180,6 +180,7 @@ def _add_training_open_args(parser, command):
         '--params', '-p',
         nargs="+",
         action="append",
+        default=None,  # Override set_defaults(params='') — append action requires list/None
         metavar="KEY=VALUE",
         help=HELP_MESSAGES['params']
     )
