@@ -138,13 +138,13 @@ def _add_kvcache_model_arguments(parser):
     model_group.add_argument(
         '--model', '-m',
         choices=KVCACHE_MODELS,
-        required=True,
+        default=KVCACHE_MODELS[0],
         help=KVCACHE_HELP_MESSAGES['kvcache_model']
     )
     model_group.add_argument(
         '--num-users', '-nu',
         type=int,
-        required=True,
+        default=100,
         help=KVCACHE_HELP_MESSAGES['num_users']
     )
 

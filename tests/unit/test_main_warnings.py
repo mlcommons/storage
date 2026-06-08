@@ -27,11 +27,11 @@ def _make_args(results_dir=None):
     """Return a minimal Namespace accepted by run_benchmark()."""
     from mlpstorage_py.config import DEFAULT_RESULTS_DIR
     return Namespace(
-        program='training',
+        benchmark='training',
         results_dir=results_dir if results_dir is not None else DEFAULT_RESULTS_DIR,
         verify_lockfile=None,   # skip lockfile validation branch
         skip_validation=True,   # skip environment validation branch
-        what_if=False,
+        dry_run=False,
     )
 
 
