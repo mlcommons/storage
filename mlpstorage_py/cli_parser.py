@@ -25,6 +25,7 @@ from mlpstorage_py.cli import (
     add_reports_arguments,
     add_history_arguments,
     add_lockfile_arguments,
+    add_version_arguments,
 )
 
 # Backwards compatibility aliases
@@ -93,9 +94,11 @@ def parse_arguments():
     reports_parser = top.add_parser("reports", help="Generate a report from benchmark results")
     history_parser = top.add_parser("history", help="Display benchmark history")
     lockfile_parser = top.add_parser("lockfile", help="Generate and verify package lockfiles")
+    version_parser = top.add_parser("version", description="Print the mlpstorage package version", help="Show installed package version and exit")
     add_reports_arguments(reports_parser)
     add_history_arguments(history_parser)
     add_lockfile_arguments(lockfile_parser)
+    add_version_arguments(version_parser)
 
     parsed_args = parser.parse_args()
 
@@ -185,6 +188,8 @@ def validate_args(args):
     Args:
         args (argparse.Namespace): The parsed command-line arguments
     """
+    if getattr(args, 'mode', None) == 'version':
+        return
     benchmark = getattr(args, 'benchmark', None)
     if benchmark == 'training':
         validate_training_arguments(args)
