@@ -15,17 +15,18 @@ Refactor the `mlpstorage` CLI from a flag-gated `--open`/`--closed` design to a 
 
 ### Phase 1: Core CLI Refactor
 
+**Status**: COMPLETE — verified 2026-06-08
 **Goal**: Rebuild the argument parser as three distinct branches (`closed`, `open`, `whatif`) with positional `model`/`algorithm` before command and `file|object` after command, eliminating `is_closed` throughout. Resolve all 8 merge conflict blocks as part of this rewrite (the conflicts are all in files being rewritten anyway).
 **Depends on**: Nothing (first phase)
 **Requirements**: CLI-01, CLI-02, CLI-03, CLI-04, CLI-05, CLI-06, CLI-07, CLI-08, CLI-09, CLI-10
 **Success Criteria** (what must be TRUE):
 
-  1. `mlpstorage closed training unet3d run file --help` shows closed-mode training flags without open-gated args
-  2. `mlpstorage open training unet3d run file --help` shows open-gated args (--loops, --params, --timeseries-*)
-  3. `mlpstorage whatif training cosmoflow run file --help` accepts whatif-only models
-  4. No `is_closed` parameter in any arg-builder function signature
-  5. All 8 merge conflict markers (`<<<<<<<`) are gone from all files
-  6. `pytest tests/unit -v` passes (existing tests not broken)
+  1. ✓ `mlpstorage closed training unet3d run file --help` shows closed-mode training flags without open-gated args
+  2. ✓ `mlpstorage open training unet3d run file --help` shows open-gated args (--loops, --params, --timeseries-*)
+  3. ✓ `mlpstorage whatif training cosmoflow run file --help` accepts whatif-only models
+  4. ✓ No `is_closed` parameter in any arg-builder function signature
+  5. ✓ All 8 merge conflict markers (`<<<<<<<`) are gone from all files
+  6. ✓ `pytest tests/unit -v` passes (existing tests not broken) — 110 passed
 
 **Plans**: 5 plans in 3 waves
 
@@ -56,11 +57,17 @@ Plans:
   3. When package is not installed (editable dev mode), version falls back to pyproject.toml parse via `tomllib`
   4. `pytest tests/unit/test_version.py -v` passes all 3 regression tests
 
-**Plans**: TBD
+**Plans**: 2 plans in 2 waves
 
 Plans:
 
-- [ ] 02-01: Fix VERSION bug in `__init__.py` and wire `version` into `cli_parser.py` and `main.py`
+**Wave 1**
+
+- [ ] 02-01-PLAN.md — Fix VERSION bug in `__init__.py` (_resolve_version() with correct dist name + tomllib fallback) + write 3 regression tests
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 02-02-PLAN.md — Wire `version` subparser into `cli_parser.py` and `main.py`; export `add_version_arguments` from `utility_args.py` and `cli/__init__.py`
 
 ### Phase 3: Help Behavior
 
@@ -103,7 +110,7 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Core CLI Refactor | 3/5 | In Progress|  |
-| 2. Version Command | 0/1 | Not started | - |
+| 1. Core CLI Refactor | 5/5 | Done | 2026-06-08 |
+| 2. Version Command | 0/2 | Not started | - |
 | 3. Help Behavior | 0/1 | Not started | - |
 | 4. Test Coverage | 0/1 | Not started | - |
