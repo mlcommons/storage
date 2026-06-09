@@ -27,9 +27,7 @@ system_under_test:
              power:
                 min_psus_active: 1
                 psus_configured:
-                    - vendor_name: Sparkle
-                      model_name: S100
-                      power_capacity_watts: 1800
+                    - power_capacity_watts: 1800
                       efficiency: Platinum
                       unit_count: 2
           networking:
@@ -64,9 +62,7 @@ system_under_test:
              power:
                 min_psus_active: 1
                 psus_configured:
-                    - vendor_name: Sparkle
-                      model_name: S100
-                      power_capacity_watts: 1800
+                    - power_capacity_watts: 1800
                       efficiency: Platinum
                       unit_count: 2
           networking:
@@ -104,9 +100,7 @@ system_under_test:
              power:
                 min_psus_active: 1
                 psus_configured:
-                    - vendor_name: Sparkle
-                      model_name: S100
-                      power_capacity_watts: 1800
+                    - power_capacity_watts: 1800
                       efficiency: Platinum
                       unit_count: 2
           networking:
