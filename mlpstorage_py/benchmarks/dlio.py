@@ -11,6 +11,7 @@ from mlpstorage_py.config import (CONFIGS_ROOT_DIR, BENCHMARK_TYPES, EXEC_TYPE, 
 from mlpstorage_py.dependency_check import validate_benchmark_dependencies
 from mlpstorage_py.rules import calculate_training_data_size, HostInfo, HostMemoryInfo, HostCPUInfo, ClusterInformation
 from mlpstorage_py.utils import (read_config_from_file, create_nested_dict, update_nested_dict, generate_mpi_prefix_cmd)
+from mlpstorage_py.storage_config import resolve_object_storage_config
 
 
 class DLIOBenchmark(Benchmark, abc.ABC):
@@ -177,14 +178,16 @@ class DLIOBenchmark(Benchmark, abc.ABC):
                 'BUCKET, and STORAGE_LIBRARY are set in the environment.'
             )
 
-        bucket = os.environ.get('BUCKET', '')
-        storage_library = os.environ.get('STORAGE_LIBRARY', 's3dlio')
-        endpoint_url = os.environ.get('AWS_ENDPOINT_URL', '')
+        _s3cfg = resolve_object_storage_config()
+        bucket = _s3cfg['bucket']
+        storage_library = _s3cfg['storage_library']
         # STORAGE_URI_SCHEME controls the URI prefix used by s3dlio:
         #   s3     — standard S3 (requires endpoint + credentials)
         #   direct — O_DIRECT filesystem via s3dlio (BUCKET is the base path, no HTTP)
         #   file   — buffered filesystem via s3dlio (BUCKET is the base path, no HTTP)
-        uri_scheme = os.environ.get('STORAGE_URI_SCHEME', 's3').rstrip(':/')
+        uri_scheme = _s3cfg['uri_scheme']
+        endpoint_url, _src = _s3cfg['endpoint']
+        endpoint_url = endpoint_url or ''  # preserve empty-string semantics downstream
 
         if not bucket:
             raise ValueError(
