@@ -1024,7 +1024,7 @@ class TestClosedEnforcement:
     @pytest.fixture
     def bm(self, tmp_path):
         bm = _make_run_benchmark(tmp_path)
-        bm.args.closed = True
+        bm.args.mode = 'closed'
         return bm
 
     def test_closed_seed_non_42_returns_1(self, bm):

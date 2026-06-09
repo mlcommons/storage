@@ -266,7 +266,7 @@ class KVCacheBenchmark(Benchmark):
                 )
                 trial_dirs.append(str(option_trial_dir))
 
-            if not getattr(self.args, 'dry_run', False):
+            if not getattr(self.args, 'what_if', False):
                 option_results[option] = self._aggregate_option_results(
                     option, trial_dirs, total_ranks
                 )
@@ -276,7 +276,7 @@ class KVCacheBenchmark(Benchmark):
             if option < 3:
                 self._interruptible_sleep(inter_option_delay)
 
-        if not getattr(self.args, 'dry_run', False):
+        if not getattr(self.args, 'what_if', False):
             self._write_run_summary(option_results, npernode, len(hosts), total_ranks, trials)
 
         self.write_metadata()
@@ -329,7 +329,7 @@ class KVCacheBenchmark(Benchmark):
 
     def _interruptible_sleep(self, seconds: int) -> None:
         """Sleep in 1-second chunks, interruptible by Ctrl-C. Skipped in what-if mode."""
-        if getattr(self.args, 'dry_run', False):
+        if getattr(self.args, 'what_if', False):
             return
         for _ in range(seconds):
             try:

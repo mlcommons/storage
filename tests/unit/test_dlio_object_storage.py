@@ -14,10 +14,16 @@ Changes under test:
 """
 
 import os
+import sys
 from argparse import Namespace
 from unittest.mock import MagicMock, patch, call
 
 import pytest
+
+# Stub optional heavy deps so this file can be collected in isolation
+for _dep in ('pyarrow', 'pyarrow.ipc', 'dotenv'):
+    if _dep not in sys.modules:
+        sys.modules[_dep] = MagicMock()
 
 from mlpstorage_py.benchmarks.dlio import DLIOBenchmark
 

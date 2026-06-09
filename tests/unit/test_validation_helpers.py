@@ -249,10 +249,12 @@ class TestValidateBenchmarkEnvironment:
         # DLIO check should NOT have been called
         mock_dlio.assert_not_called()
 
+    @patch('mlpstorage_py.validation_helpers.check_mpi_with_hints')
     @patch('mlpstorage_py.validation_helpers.validate_ssh_connectivity')
     @patch('mlpstorage_py.validation_helpers.check_ssh_available')
-    def test_checks_ssh_for_remote_hosts(self, mock_ssh_available, mock_ssh_conn):
+    def test_checks_ssh_for_remote_hosts(self, mock_ssh_available, mock_ssh_conn, mock_mpi):
         """Should check SSH connectivity for remote hosts."""
+        mock_mpi.return_value = None  # MPI succeeds
         mock_ssh_available.return_value = '/usr/bin/ssh'
         mock_ssh_conn.return_value = [
             ('remote-host', False, 'Connection refused')
@@ -273,10 +275,12 @@ class TestValidateBenchmarkEnvironment:
         mock_ssh_available.assert_called_once()
         mock_ssh_conn.assert_called_once_with(['remote-host'])
 
+    @patch('mlpstorage_py.validation_helpers.check_mpi_with_hints')
     @patch('mlpstorage_py.validation_helpers.validate_ssh_connectivity')
     @patch('mlpstorage_py.validation_helpers.check_ssh_available')
-    def test_skip_remote_checks_flag(self, mock_ssh_available, mock_ssh_conn):
+    def test_skip_remote_checks_flag(self, mock_ssh_available, mock_ssh_conn, mock_mpi):
         """Should skip SSH checks when skip_remote_checks=True."""
+        mock_mpi.return_value = None  # MPI succeeds
         args = Namespace(
             program='vectordb',
             command='run',
@@ -420,10 +424,12 @@ class TestValidateBenchmarkEnvironmentEdgeCases:
             # MPI should be checked since we have remote hosts
             mock_mpi.assert_called_once()
 
+    @patch('mlpstorage_py.validation_helpers.check_mpi_with_hints')
     @patch('mlpstorage_py.validation_helpers.validate_ssh_connectivity')
     @patch('mlpstorage_py.validation_helpers.check_ssh_available')
-    def test_partial_ssh_failures(self, mock_ssh_available, mock_ssh_conn):
+    def test_partial_ssh_failures(self, mock_ssh_available, mock_ssh_conn, mock_mpi):
         """Should report all SSH failures, not just first."""
+        mock_mpi.return_value = None  # MPI succeeds
         mock_ssh_available.return_value = '/usr/bin/ssh'
         mock_ssh_conn.return_value = [
             ('node1', False, 'Connection refused'),
