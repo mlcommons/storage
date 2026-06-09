@@ -45,6 +45,7 @@ Thumbs.db
 CLAUDE.md
 .roomodes
 LOCAL_BRANCH_NOTES.md
+.planning/
 
 # DLIO test artifacts — created in cwd when running dlio_benchmark tests
 output/
