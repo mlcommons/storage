@@ -22,10 +22,15 @@ jobs:
       with:
         python-version: ${{ matrix.python-version }}
 
+    - name: Set up uv
+      uses: astral-sh/setup-uv@v5
+      with:
+        version: "latest" # Resolves to the latest stable version automatically
+
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libopenmpi-dev openmpi-common uv
+        sudo apt-get install -y libopenmpi-dev openmpi-common
 
     - name: Install package and test dependencies
       run: |
