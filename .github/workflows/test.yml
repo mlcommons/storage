@@ -30,7 +30,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libopenmpi-dev openmpi-common
+        sudo apt-get install -y libopenmpi-dev openmpi-common openmpi-bin 
 
     - name: Install package and test dependencies
       run: uv sync # Automatically creates the environment and locks dependencies
