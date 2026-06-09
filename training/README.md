@@ -3,9 +3,8 @@ MLPerf® Storage is a benchmark suite to characterize the performance of storage
 
 - [Usage](#Usage)
   - [Workloads](#workloads)
-	  - [FLUX.1](#flux-1)
+    - [Unet3D](#unet3d)
     - [RetinaNet](#retinanet)
-    - [DLRMv2](#dlrmv2)
   - [Parameters](#parameters)
   	- [CLOSED](#closed)
   	- [OPEN](#open)
@@ -21,7 +20,7 @@ MLPerf® Storage is a benchmark suite to characterize the performance of storage
 ---
 
 # Usage
-The training category supports 3 models (FLUX.1, RetinaNet, DLRMv2).
+The training category supports 3 models (Unet3D, RetinaNet).
 The benchmark execution process requires these steps:
 1. Datasize - Calculate required number of samples for a given client configuration
 2. Datagen - Generate the required dataset
@@ -81,7 +80,7 @@ If the list of clients is passed in for this command the amount of memory is fou
 
 ```bash
 [root@localhost ]# mlpstorage training datasize --help
-usage: mlpstorage training datasize [-h] [--hosts HOSTS [HOSTS ...]] --model {FLUX.1,RetinaNet,DLRMv2}
+usage: mlpstorage training datasize [-h] [--hosts HOSTS [HOSTS ...]] --model {Unet3D,RetinaNet}
                                     --client-host-memory-in-gb CLIENT_HOST_MEMORY_IN_GB [--exec-type {mpi,docker}]
                                     [--mpi-bin {mpirun,mpiexec}] [--oversubscribe] [--allow-run-as-root]
                                     --max-accelerators MAX_ACCELERATORS --accelerator-type {b200,mi355}
@@ -96,7 +95,7 @@ optional arguments:
   --hosts HOSTS [HOSTS ...], -s HOSTS [HOSTS ...]
                         Space-separated list of IP addresses or hostnames of the participating hosts. Example: '--
                         hosts 192.168.1.1 192.168.1.2 192.168.1.3' or '--hosts host1 host2 host3'
-  --model {FLUX.1,RetinaNet,DLRMv2}, -m {FLUX.1,RetinaNet,DLRMv2}
+  --model {Unet3D,RetinaNet}, -m {Unet3D,RetinaNet}
                         Model to emulate. A specific model defines the sample size, sample container format, and data
                         rates for each supported accelerator.
   --client-host-memory-in-gb CLIENT_HOST_MEMORY_IN_GB, -cm CLIENT_HOST_MEMORY_IN_GB
@@ -160,7 +159,7 @@ mlpstorage training datasize -m retinanet --client-host-memory-in-gb 128 --max-a
 
 ```bash
 [root@localhost ]# mlpstorage training datagen --help
-usage: mlpstorage training datagen [-h] [--hosts HOSTS [HOSTS ...]] --model {flux1,dlrmv2,retinanet}
+usage: mlpstorage training datagen [-h] [--hosts HOSTS [HOSTS ...]] --model {unet3d,retinanet}
                                    [--exec-type {mpi,docker}] [--mpi-bin {mpirun,mpiexec}] [--oversubscribe]
                                    [--allow-run-as-root] --num-processes NUM_PROCESSES [--data-dir DATA_DIR]
                                    [--ssh-username SSH_USERNAME] [--params PARAMS [PARAMS ...]]
@@ -173,7 +172,7 @@ optional arguments:
   --hosts HOSTS [HOSTS ...], -s HOSTS [HOSTS ...]
                         Space-separated list of IP addresses or hostnames of the participating hosts. Example: '--
                         hosts 192.168.1.1 192.168.1.2 192.168.1.3' or '--hosts host1 host2 host3'
-  --model {flux1,dlrmv2,retinanet}, -m {flux1,dlrmv2,retinanet}
+  --model {unet3d,retinanet}, -m {unet3d,retinanet}
                         Model to emulate. A specific model defines the sample size, sample container format, and data
                         rates for each supported accelerator.
   --exec-type {mpi,docker}, -et {mpi,docker}
@@ -227,7 +226,7 @@ mlpstorage training datagen --hosts 10.117.61.121,10.117.61.165 --model retinane
 
 ```bash
 [root@localhost ]# mlpstorage training run --help
-usage: mlpstorage training run [-h] [--hosts HOSTS [HOSTS ...]] --model {flux1,dlrmv2,retinanet}
+usage: mlpstorage training run [-h] [--hosts HOSTS [HOSTS ...]] --model {unet3d,retinanet}
                                --client-host-memory-in-gb CLIENT_HOST_MEMORY_IN_GB [--exec-type {mpi,docker}]
                                [--mpi-bin {mpirun,mpiexec}] [--oversubscribe] [--allow-run-as-root] --num-accelerators
                                NUM_ACCELERATORS --accelerator-type {b200,mi355} --num-client-hosts NUM_CLIENT_HOSTS
@@ -240,7 +239,7 @@ optional arguments:
   --hosts HOSTS [HOSTS ...], -s HOSTS [HOSTS ...]
                         Space-separated list of IP addresses or hostnames of the participating hosts. Example: '--
                         hosts 192.168.1.1 192.168.1.2 192.168.1.3' or '--hosts host1 host2 host3'
-  --model {flux1,dlrmv2,retinanet}, -m {flux1,dlrmv2,retinanet}
+  --model {unet3d,retinanet}, -m {unet3d,retinanet}
                         Model to emulate. A specific model defines the sample size, sample container format, and data
                         rates for each supported accelerator.
   --client-host-memory-in-gb CLIENT_HOST_MEMORY_IN_GB, -cm CLIENT_HOST_MEMORY_IN_GB
@@ -370,34 +369,33 @@ Note: The `reportgen` script must be run in the launcher client host.
 
 ## Training Models
 Currently, the storage benchmark suite supports benchmarking of 3 deep learning workloads
-- Image generation using a FLUX.1 model 
+- Image classification using a Unet3D model 
 - Image recognition using a RetinaNet model
-- Recommendations using a DLRMv2 model
 
-### FLUX.1
+### unet3d
 
 Calculate minimum dataset size required for the benchmark run based on your client configuration
 
 ```bash
-mlpstorage training datasize --model retinanet --client-host-memory-in-gb 64 --num-client-hosts 1 --max-accelerators 4 --accelerator-type b200
+mlpstorage training datasize --model unet3d --client-host-memory-in-gb 64 --num-client-hosts 1 --max-accelerators 4 --accelerator-type b200
 ```
 
 Generate data for the benchmark run based on the minimum files
 
 ```bash
-mlpstorage training datagen --hosts 127.0.0.1 --num-processes 8 --model retinanet --data-dir retinanet_data --results-dir retinanet_results  --param dataset.num_files_train=42000
+mlpstorage training datagen --hosts 127.0.0.1 --num-processes 8 --model unet3d --data-dir unet3d_data --results-dir unet3d_results  --param dataset.num_files_train=42000
 ```
   
 Run the benchmark.
 
 ```bash
-mlpstorage training run --hosts 127.0.0.1 --num-client-hosts 1 --client-host-memory-in-gb 64 --num-accelerators 4 --accelerator-type b200 --model retinanet  --data-dir retinanet_data --results-dir retinanet_results --param dataset.num_files_train=42000
+mlpstorage training run --hosts 127.0.0.1 --num-client-hosts 1 --client-host-memory-in-gb 64 --num-accelerators 4 --accelerator-type b200 --model unet3d  --data-dir unet3d_data --results-dir unet3d_results --param dataset.num_files_train=42000
 ```
 
 All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
 
 ```bash 
-mlpstorage reports reportgen --results-dir retinanet_results
+mlpstorage reports reportgen --results-dir unet3d_results
 ```
 
 ### RetinaNet
@@ -405,51 +403,25 @@ mlpstorage reports reportgen --results-dir retinanet_results
 Calculate minimum dataset size required for the benchmark run based on your client configuration
 
 ```bash
- mlpstorage training datasize --model dlrmv2 --client-host-memory-in-gb 64 --num-client-hosts 1 --max-accelerators 16 --accelerator-type b200
+ mlpstorage training datasize --model retinanet --client-host-memory-in-gb 64 --num-client-hosts 1 --max-accelerators 16 --accelerator-type b200
 ```
 
 Generate data for the benchmark run
 
 ```bash
-mlpstorage training datagen --hosts 127.0.0.1 --num-processes 8 --model dlrmv2 --data-dir dlrmv2_data --results-dir dlrmv2_results  --param dataset.num_files_train=2557
+mlpstorage training datagen --hosts 127.0.0.1 --num-processes 8 --model retinanet --data-dir retinanet_data --results-dir retinanet_results  --param dataset.num_files_train=2557
 ```
   
 Run the benchmark.
 
 ```bash
-mlpstorage training run --hosts 127.0.0.1 --num-client-hosts 1  --client-host-memory-in-gb 64  --num-accelerators 16 --accelerator-type b200  --model dlrmv2  --data-dir dlrmv2_data --results-dir dlrmv2_results --param dataset.num_files_train=2557
+mlpstorage training run --hosts 127.0.0.1 --num-client-hosts 1  --client-host-memory-in-gb 64  --num-accelerators 16 --accelerator-type b200  --model retinanet  --data-dir retinanet_data --results-dir retinanet_results --param dataset.num_files_train=2557
 ```
 
 All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
 
 ```bash 
-mlpstorage reports reportgen --results-dir dlrmv2_results
-```
-
-### DLRMv2
-
-Calculate minimum dataset size required for the benchmark run based on your client configuration
-
-```bash
-mlpstorage training datasize --model flux1 --client-host-memory-in-gb 64 --num-client-hosts 1 --max-accelerators 16 --accelerator-type b200 
-```
-
-Generate data for the benchmark run
-
-```bash
-mlpstorage training datagen --hosts 127.0.0.1 --num-processes 8 --model flux1 --data-dir flux1_data --results-dir=flux1_results  --param dataset.num_files_train=121477
-```
-  
-Run the benchmark.
-
-```bash
-mlpstorage training run  --hosts 127.0.0.1 --num-client-hosts 1  --client-host-memory-in-gb 64 --num-accelerators 16  --accelerator-type b200  --model flux1 --data-dir flux1_data --results-dir flux1_results --param dataset.num_files_train=121477 
-```
-
-All results will be stored in the directory configured using `--results-dir`(or `-r`) argument. To generate the final report, run the following in the launcher client host. 
-
-```bash 
-mlpstorage reports reportgen --results-dir flux1_results
+mlpstorage reports reportgen --results-dir retinanet_results
 ```
 
 ## Parameters 
@@ -518,9 +490,8 @@ The benchmark suite provides workload [configurations](https://github.com/mlcomm
 
 | Area | Problem | Model | Data Loader | Dataset seed | Minimum AU% |
 | ---- | ------- | ----- | ----------- | ------------ | ----------- |
-| Vision | Image generation | FLUX.1 | PyTorch | ??? | 90% |
+| Vision | Image Classification | Unet3D | PyTorch | ??? | 90% |
 | Vision | Image Recognition | RetinaNet | PyTorch | ??? | 90% |
-| Recommender | Recommender | ??? | PyTorch | ??? | 90% |
 
 Table 1: Benchmark description
 
@@ -702,10 +673,6 @@ In addition to what can be changed in the CLOSED submission, the following param
 | Parameter                    | Description                                | Default                                                             |
 |------------------------------|--------------------------------------------|---------------------------------------------------------------------|
 | framework                    | The machine learning framework.            | PyTorch |
-|                              |                                            |                                                                     |
-| *Dataset parameters*         |                                            |                                                                     |
-| dataset.format               | Format of the dataset.                     | FLUX.1: ???<br>RetinaNet: ???<br>DLRMv2: ???      |
-| dataset.num_samples_per_file |                                            | FLUX.1: ???<br>RetinaNet: ???<br>DLRMv2: ???                      |
 |                              |                                            |                                                                     |
 | *Reader parameters*          |                                            |                                                                     |
 | reader.data_loader           | PyTorch  | PyTorch |

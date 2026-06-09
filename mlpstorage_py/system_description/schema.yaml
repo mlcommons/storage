@@ -1,0 +1,143 @@
+#
+# The root of the yaml tree.
+#
+# This describes the entire hardware and software configuration of the storage system under test,
+# the client computers running the benchmark code, and the network(s) that connect them.
+#
+# Note that power supplies need to be listed as either part of each chassis (node_description.power) and
+# part of the switches (switch_description.power), or if rack-level power is being used, at the solution
+# level (system_under_test.rack_power_supplies).
+#
+# Cloud deployments need to list cloud instances as "product nodes" and "clients", but do not need to
+# list switches, rack units, or power information.
+#
+system_under_test:
+    solution:
+        submission_name:            str( min=1 )    # ID's this submission versus your other submissions
+        friendly_description:       str( min=1 )    # Arbitrary text of your choice
+        architecture:
+            # For example: an NVMeoF product would be a "remote", "file", "block", "open_source", "in_box" solution,
+            #     with a standard filesystem like XFS layered over it and using the native linux NVMeoF driver
+            # For example: an NFS box would be a "remote", "file", "file", "open_source", "in_box" solution
+            # For example: Lustre would be a "remote", "file", "file", "closed_source", "installable" solution
+            storage_location:       enum( 'remote', 'local', 'remote_and_local' )
+            benchmark_API:          enum( 'file', 'object' )            # what the benchmark uses
+            product_API:            enum( 'file', 'object', 'block' )   # What the product supports
+            client_footprint:       enum( 'open_source', 'closed_source', 'n/a' )
+            client_installation:    enum( 'in_box', 'installable', 'n/a' )
+        capabilities:
+            # For example: an NVMeoF product would be a "true", "false", "true", "20" solution
+            # For example: an NFS box would be a "true", "true", "true", "0" solution
+            # For example: Lustre would be a "true", "true", "true", "0" solution
+            multi_host:             bool( )         # False is used for local storage
+            simultaneous_write:     bool( )         # Are simultaneous writes by multiple hosts supported?
+            simultaneous_read:      bool( )         # Are simultaneous reads by multiple hosts supported?
+            remap_time_in_seconds:  int( min=0 )    # Time required to go from writing to reading
+    deployment:                     enum( 'onprem', 'cloud' )
+    product_nodes:                  list( include( 'node_description' ), required=False )
+    product_switches:               list( include( 'switch_description' ), required=False )
+    total_rack_units:               int( min=0, required=False )        # Sum of all RU's, not including clients
+    rack_power_supplies:            list( include( 'power_device' ), required=False)
+    clients:                        list( include( 'node_description' ), required=True )
+
+---
+# 
+# This describes a computer system used as part of the storage solution or one acting as a client
+# to drive load onto the storage solution.
+#
+# Network ports are not required for "local" system architecture submissions (eg: a single NVMe drive).
+# 
+node_description:
+    friendly_description:       str( min=1 )        # Arbitrary text of your choice
+    quantity:                   int( min=1 )        # How many of this type of nodes are there?
+    chassis:
+        model_name:             str( min=1 )        # Name of the chassis (eg: R670) or cloud instance
+        rack_units:             int( min=1, required=False )    # Number of Rack U's this chassis consumes
+        cpu_model:              str( min=1 )        # Name of the CPU SKU (eg: Xeon ....)
+        cpu_qty:                int( min=1 )        # Number of sockets
+        cpu_cores:              int( min=1 )        # Number of cores in total across all sockets
+        memory_capacity:        int( min=1 )        # in GiB, eg: 256
+        power:                  include( 'power_device', required=False )
+    networking:                 list( include( 'network_port' ), required=False )
+    drives:                     list( include( 'drive_instance' ), required=False )
+    operating_system:
+        name:                   str( min=1 )        # Name of the OS or "firmware" your solution uses
+        version:                str( min=1 )        # Which version of that product was tested
+    environment:                list( include( 'key_value' ), required=False ) # Just non-default values
+    sysctl:                     list( include( 'key_value' ), required=False ) # Just non-default values
+
+---
+#
+# All non-default tunings for OS and BIOS need to be listed
+#
+key_value:
+    name:                       str( min=1 )        # The name of the tuning variable
+    value:                      str( min=1 )        # The value used for these test runs
+
+---
+#
+# This describes a NIC port configuration, the unit_count shows how many NIC ports are present and
+# configured this way.  If you have two different configurations, you would have two of these records.
+#
+network_port:
+    unit_count:                 int( min=1 )        # Number of ports that look like this
+    type:                       enum( 'ethernet', 'infiniband', 'other' )
+    speed:                      int( min=1 )        # in Gigabits/s
+    traffic:                    list( enum( 'management', 'data', 'metadata', 'backend' ), min=1 )
+
+---
+#
+# This describes a storage device configuration, eg: a single NVMe or a single HDD, etc.
+# The unit_count shows how many such drives are present and configured this way.
+# If you have more than one type or configuration of drives, you would have one of these
+# records per type or configuration.
+# NOTE: do NOT include boot drives unless they also contain solution-specific data or metadata.
+#
+drive_instance:
+    unit_count:                 int( min=1 )        # Number of drives that look like this
+    vendor_name:                str( min=1 )        # The name of the vendor who supplies this drive
+    model_name:                 str( min=1 )        # The vendor's model name for this drive
+    interface:                  enum( 'nvme', 'SAS', 'SATA', 'other' )
+    capacity_in_GB:             int( min=1 )        # in base 10 GB, not in GiB
+
+---
+#
+# This describes a "back end" network switch that was included as part of the storage solution that
+# was tested.  If the tested solution did not include any switches as part of the storages solution,
+# then none of these records is required.  Switches that are outside the storage solution and just/only
+# connect the client systems to the storage solution should not be included here.
+# The unit_count shows how many such switches are present and configured this way.
+# If you have more than one type or configuration of switches, you would have one of these
+# records per type or configuration.
+#
+switch_description:
+    unit_count:                 int( min=1 )        # Number of switches that look like this
+    vendor_name:                str( min=1 )        # The name of the vendor that built the switch
+    model_name:                 str( min=1 )        # The model number/name of the switch
+    ports:                      list( include( 'network_port' ), min=1 )
+    configuration:              list( include( 'key_value' ), required=False )  # Just non-default values
+    rack_units:                 int( min=1 )        # Number of Rack U's this switch consumes
+    power:                      include( 'power_device', required=False )
+
+---
+#
+# This represents the power configuration for a node or switch.  We need to know the number of
+# power supplies that are present in the chassis, plus the minimum number that are required to
+# keep the node or switch running.  There are many possible configurations:
+#   active/passive 1+1 -- one active and one standby
+#   active/active N+1  -- N in total but only 1 is needed to keep the gear running
+#   active/active N+M  -- N in total but only M are needed to keep the gear running
+#
+power_device:
+    min_psus_active:            int( min=1 )
+    psus_configured:            list( include( 'power_supply' ), min=1 )
+
+---
+#
+# Each individual power supply needs to be described
+#
+power_supply:
+    unit_count:                 int( min=1 )        # Number of power supplies that look like this
+    power_capacity_watts:       int( min=1 )        # The nameplate (regulatory rated) input power of the power supply
+    efficiency:                 enum( 'Gold', 'Platinum', 'Titanium', 'Ruby' )
+

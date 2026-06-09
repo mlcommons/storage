@@ -1,0 +1,88 @@
+system_under_test:
+    solution:
+        submission_name: remote_block_example
+        friendly_description: A generic example based upon a remote-block solution
+        architecture:
+            storage_location: remote
+            benchmark_API: file
+            product_API: block
+            client_footprint: closed_source
+            client_installation: installable
+        capabilities:
+            multi_host: true
+            simultaneous_write: false
+            simultaneous_read: true
+            remap_time_in_seconds: 15
+    deployment: "onprem"
+    product_nodes:
+        - friendly_description: Block Server
+          quantity: 1
+          chassis: 
+             model_name: Dell7680
+             rack_units: 1
+             cpu_model: XEON 90000
+             cpu_qty: 2
+             cpu_cores: 96
+             memory_capacity: 256
+             power:
+                min_psus_active: 1
+                psus_configured:
+                    - power_capacity_watts: 1800
+                      efficiency: Platinum
+                      unit_count: 2
+          networking:
+              - type: ethernet
+                speed: 100
+                traffic:
+                    - data
+                unit_count: 1
+          drives:
+              - vendor_name: Micron
+                model_name: X9000 TLC
+                interface: nvme
+                capacity_in_GB: 8000
+                unit_count: 8
+              - vendor_name: Micron
+                model_name: X1650 QLC
+                interface: nvme
+                capacity_in_GB: 24000
+                unit_count: 8
+          operating_system:
+             name: Rocky Linux
+             version: "9.5"
+          environment:
+              - name: foobar
+                value: "12"
+              - name: foobarbaz
+                value: "13"
+          sysctl:
+              - name: barfoo
+                value: "21"
+              - name: bazbarfoo
+                value: "31"
+    total_rack_units: 1
+    clients:
+        - friendly_description: Benchmark load system
+          quantity: 16
+          chassis: 
+             model_name: Dell7680
+             rack_units: 1
+             cpu_model: XEON 90000
+             cpu_qty: 2
+             cpu_cores: 96
+             memory_capacity: 256
+             power:
+                min_psus_active: 1
+                psus_configured:
+                    - power_capacity_watts: 1800
+                      efficiency: Platinum
+                      unit_count: 2
+          networking:
+             - type: ethernet
+               speed: 100
+               traffic:
+                   - data
+               unit_count: 1
+          operating_system:
+              name: RHEL
+              version: "10.1"

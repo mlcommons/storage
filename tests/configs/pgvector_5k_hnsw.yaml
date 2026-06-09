@@ -1,0 +1,47 @@
+backend: pgvector
+mode: both
+
+database:
+  host: 127.0.0.1
+  port: 5432
+  dbname: postgres
+  user: postgres
+  password: postgres
+
+dataset:
+  collection_name: pr316_pgvector_hnsw_5k
+  num_vectors: 5000
+  dimension: 64
+  distribution: uniform
+  block_size: 1000
+  batch_size: 500
+  seed: 42
+
+query:
+  num_query_vectors: 100
+  query_seed: 99
+
+ground_truth:
+  truth_k: 20
+  truth_mode: precomputed
+
+index:
+  index_type: HNSW
+  metric_type: COSINE
+  index_params:
+    M: 16
+    efConstruction: 64
+  num_shards: 1
+
+search:
+  search_k: 10
+  num_search_rounds: 2
+  search_batch_size: 5
+  log_interval: 50
+  search_params:
+    ef_search: 40
+
+workflow:
+  force: true
+  compact: false
+  monitor_interval: 2
