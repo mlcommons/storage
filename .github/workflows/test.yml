@@ -2,9 +2,9 @@ name: Tests
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
 
 jobs:
   test:
@@ -17,6 +17,7 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    # 1. Environment Setup
     - name: Set up Python ${{ matrix.python-version }}
       uses: actions/setup-python@v5
       with:
@@ -27,6 +28,17 @@ jobs:
       with:
         version: "latest" # Resolves to the latest stable version automatically
 
+    # 2. Fast Lint Check (Fails fast if code style is wrong)
+    - name: Install lint dependencies
+      run: uv pip install --system ruff
+
+    - name: Run ruff check
+      run: ruff check
+
+    - name: Run ruff format check
+      run: ruff format --check
+
+    # 3. System and Test Dependencies
     - name: Install system dependencies
       run: |
         sudo apt-get update
@@ -35,28 +47,6 @@ jobs:
     - name: Install package and test dependencies
       run: uv sync # Automatically creates the environment and locks dependencies
 
+    # 4. Heavy Lifting (Runs only if linting passed)
     - name: Run unit tests
       run: uv run pytest # Runs your tests safely inside the managed environment
-
-  lint:
-    runs-on: ubuntu-latest
-    steps:
-    - uses: actions/checkout@v4
-
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-
-    - name: Install lint dependencies
-      run: |
-        python -m pip install --upgrade pip
-        uv pip install ruff
-
-    - name: Run ruff check
-      run: |
-        ruff check mlpstorage_py/ --output-format=github || true
-
-    - name: Run ruff format check
-      run: |
-        ruff format --check mlpstorage_py/ || true
