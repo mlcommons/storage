@@ -64,6 +64,7 @@ def _add_checkpointing_core_args(parser, command):
         allow_invalid_params=False,
         num_checkpoints_read=10,
         num_checkpoints_write=10,
+        dlio_bin_path=None,
     )
 
     add_host_arguments(parser)
