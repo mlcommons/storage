@@ -4,8 +4,12 @@
 import os
 import sys
 
+import pytest
+
 # Add s3dlio to path
 sys.path.insert(0, '/home/eval/Documents/Code/s3dlio/python')
+
+pytestmark = pytest.mark.skip(reason="Requires DLIO MPI initialization; designed to run standalone, not under pytest")
 
 def test_endpoint_selection_methods():
     print("="*60)
