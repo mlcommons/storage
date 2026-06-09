@@ -252,3 +252,67 @@ class TestApplyObjectStorageParamsInjection:
         obj.logger.info.assert_called()
         log_text = ' '.join(str(c) for c in obj.logger.info.call_args_list)
         assert 'log-test-bucket' in log_text
+
+
+# ---------------------------------------------------------------------------
+# Regression: both benchmark subclasses must call _apply_object_storage_params
+# ---------------------------------------------------------------------------
+
+class TestApplyObjectStorageParamsCalledDuringInit:
+    """Regression tests: _apply_object_storage_params() is invoked by __init__
+    for both TrainingBenchmark and CheckpointingBenchmark.
+
+    These tests patch all other __init__ side-effects so they focus solely on
+    the call-site contract — not the method's internal behaviour (which is
+    covered by the classes above).
+    """
+
+    def _training_args(self):
+        return Namespace(
+            model='unet3d',
+            command='run',
+            accelerator_type='h100',
+            params=None,
+            data_dir='/tmp/data',
+            data_access_protocol='object',
+        )
+
+    def _checkpointing_args(self):
+        return Namespace(
+            model='llama3-8b',
+            command='run',
+            params=None,
+            data_access_protocol='object',
+        )
+
+    @patch('mlpstorage_py.benchmarks.dlio.TrainingBenchmark._apply_object_storage_params')
+    @patch('mlpstorage_py.benchmarks.dlio.TrainingBenchmark.verify_benchmark')
+    @patch('mlpstorage_py.benchmarks.dlio.TrainingBenchmark.add_datadir_param')
+    @patch('mlpstorage_py.benchmarks.dlio.TrainingBenchmark.process_dlio_params', return_value=({}, {}, {}))
+    @patch('mlpstorage_py.benchmarks.dlio.DLIOBenchmark.__init__', return_value=None)
+    def test_training_benchmark_calls_apply(
+        self, mock_super, mock_process, mock_add_datadir, mock_verify, mock_apply
+    ):
+        from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
+        bench = TrainingBenchmark.__new__(TrainingBenchmark)
+        bench.args = self._training_args()
+        bench.logger = MagicMock()
+        bench.params_dict = {}
+        TrainingBenchmark.__init__(bench, bench.args)
+        mock_apply.assert_called_once()
+
+    @patch('mlpstorage_py.benchmarks.dlio.CheckpointingBenchmark._apply_object_storage_params')
+    @patch('mlpstorage_py.benchmarks.dlio.CheckpointingBenchmark.add_checkpoint_params')
+    @patch('mlpstorage_py.benchmarks.dlio.CheckpointingBenchmark.verify_benchmark')
+    @patch('mlpstorage_py.benchmarks.dlio.CheckpointingBenchmark.process_dlio_params', return_value=({}, {}, {}))
+    @patch('mlpstorage_py.benchmarks.dlio.DLIOBenchmark.__init__', return_value=None)
+    def test_checkpointing_benchmark_calls_apply(
+        self, mock_super, mock_process, mock_verify, mock_add_ckpt, mock_apply
+    ):
+        from mlpstorage_py.benchmarks.dlio import CheckpointingBenchmark
+        bench = CheckpointingBenchmark.__new__(CheckpointingBenchmark)
+        bench.args = self._checkpointing_args()
+        bench.logger = MagicMock()
+        bench.params_dict = {}
+        CheckpointingBenchmark.__init__(bench, bench.args)
+        mock_apply.assert_called_once()
