@@ -143,16 +143,21 @@ class MinIOStorageWriter(StorageWriter):
         # Get S3 credentials from environment
         access_key = os.environ.get('AWS_ACCESS_KEY_ID')
         secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
-        
-        # Resolve endpoint via centralized resolver (covers all 5 priority sources)
-        endpoint = self._detect_and_select_endpoint()
-        
+
+        # Resolve all S3 config once — avoids 3 redundant env-var scans and
+        # ensures consistent state if env changes between calls.
+        _s3cfg = resolve_object_storage_config()
+        endpoint_val, _endpoint_src = _s3cfg['endpoint']
+        endpoint = endpoint_val or None
+        ca_bundle = _s3cfg['aws_ca_bundle']
+        region = _s3cfg['aws_region']
+
         if not access_key or not secret_key:
             raise ValueError(
                 "AWS credentials required in environment: "
                 "AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY"
             )
-        
+
         if not endpoint:
             # Default to AWS S3
             endpoint = "s3.amazonaws.com"
@@ -168,12 +173,11 @@ class MinIOStorageWriter(StorageWriter):
             else:
                 # No protocol specified, assume http
                 secure = False
-        
+
         # Initialize MinIO client
         # Support custom CA certificate via AWS_CA_BUNDLE (same env var as s3dlio/boto3).
         # Required when the MinIO server uses a self-signed or private CA certificate.
         http_client = None
-        ca_bundle = resolve_object_storage_config()['aws_ca_bundle']
         if secure and ca_bundle:
             import urllib3
             http_client = urllib3.PoolManager(
@@ -191,7 +195,7 @@ class MinIOStorageWriter(StorageWriter):
             access_key=access_key,
             secret_key=secret_key,
             secure=secure,
-            region=resolve_object_storage_config()['aws_region'],
+            region=region,
             http_client=http_client,
         )
         
