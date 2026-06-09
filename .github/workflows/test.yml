@@ -25,7 +25,7 @@ jobs:
     - name: Install system dependencies
       run: |
         sudo apt-get update
-        sudo apt-get install -y libopenmpi-dev openmpi-common
+        sudo apt-get install -y libopenmpi-dev openmpi-common uv
 
     - name: Install package and test dependencies
       run: |
