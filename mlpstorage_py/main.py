@@ -318,6 +318,10 @@ def _main_impl():
     # Handle vdb end conditions, num_process standardization, and args.params flattening
     update_args(args)
 
+    if not getattr(args, 'quiet', False):
+        from mlpstorage_py.run_summary import print_run_summary
+        print_run_summary(args)
+
     # For other commands, run the benchmark
     for i in range(args.loops):
         if signal_received:

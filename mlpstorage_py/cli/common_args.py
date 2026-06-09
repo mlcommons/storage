@@ -249,6 +249,11 @@ def add_universal_arguments(parser, req_results):
         type=str,
         default="INFO"
     )
+    output_control.add_argument(
+        '--quiet',
+        action='store_true',
+        help='Suppress run configuration summary table'
+    )
 
     view_only_args = parser.add_argument_group("View Only")
     view_only_args.add_argument(
