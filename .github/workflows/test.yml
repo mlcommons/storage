@@ -26,7 +26,6 @@ jobs:
       uses: astral-sh/setup-uv@v5
       with:
         version: "latest" # Resolves to the latest stable version automatically
-        enable-cache: true # This automatically configures caching and the environment
 
     - name: Install system dependencies
       run: |
@@ -34,17 +33,14 @@ jobs:
         sudo apt-get install -y libopenmpi-dev openmpi-common
 
     - name: Install package and test dependencies
-      run: |
-        # Install the package in editable mode without DLIO
-        uv pip install -e ".[test]"
+      run: uv sync # Automatically creates the environment and locks dependencies
 
     - name: Run unit tests
-      run: |
-        .venv/bin/pytest tests/unit -vv --tb=short --setup-show
+      run: uv run pytest # Runs your tests safely inside the managed environment
 
     - name: Run unit tests with coverage
       run: |
-        .venv/bin/pytest tests/unit -v --cov=mlpstorage_py --cov-report=xml --cov-report=term-missing
+        uv run pytest tests/unit -v --cov=mlpstorage_py --cov-report=xml --cov-report=term-missing
 
     - name: Upload coverage to Codecov
       uses: codecov/codecov-action@v4
