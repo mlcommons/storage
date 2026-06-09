@@ -426,6 +426,7 @@ class CheckpointingBenchmark(DLIOBenchmark):
         self.config_name = f'{args.model.replace("-", "_")}'
         self.config_file = f'{self.config_name}.yaml'
         self.params_dict, self.yaml_params, self.combined_params = self.process_dlio_params(self.config_file)
+        self._apply_object_storage_params()
         self.verify_benchmark()
         self.add_checkpoint_params()
         self.logger.status(f'Instantiated the Checkpointing Benchmark...')
