@@ -192,4 +192,3 @@ class S3TorchStorageReader(StorageReader):
     def close(self) -> Dict[str, Any]:
         self._close_stream()
         return {'backend': 's3torchconnector', 'total_bytes': self.total_bytes}
-        return {'backend': 's3torchconnector', 'total_bytes': self.total_bytes}
