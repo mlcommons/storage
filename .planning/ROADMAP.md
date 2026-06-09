@@ -10,7 +10,7 @@ Refactor the `mlpstorage` CLI from a flag-gated `--open`/`--closed` design to a 
 - [ ] **Phase 2: Version Command** — Fix VERSION bug + implement `mlpstorage version` subcommand
 - [ ] **Phase 3: Help Behavior** — `--help_all` full tree output + context-sensitive `--help` at each positional level
 - [ ] **Phase 4: Test Coverage** — Three-mode parser tests, open-gated arg validation, model/accelerator restriction tests
-- [ ] **Phase 5: Run Configuration Summary** — Print effective parameter values after argument parsing; centralized S3 config resolver; `--quiet` suppression
+- [x] **Phase 5: Run Configuration Summary** — Print effective parameter values after argument parsing; centralized S3 config resolver; `--quiet` suppression (completed 2026-06-09)
 
 ## Phase Details
 
@@ -113,11 +113,11 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 05-01-PLAN.md — Create mlpstorage_py/storage_config.py with resolve_object_storage_config(); replace scattered S3 env reads in all 6 storage files; write test_storage_config.py
+- [x] 05-01-PLAN.md — Create mlpstorage_py/storage_config.py with resolve_object_storage_config(); replace scattered S3 env reads in all 6 storage files; write test_storage_config.py
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 05-02-PLAN.md — Create mlpstorage_py/run_summary.py with print_run_summary(); wire into main.py post-parse; add --quiet to common_args.py Output Control group; write test_run_summary.py
+- [x] 05-02-PLAN.md — Create mlpstorage_py/run_summary.py with print_run_summary(); wire into main.py post-parse; add --quiet to common_args.py Output Control group; write test_run_summary.py
 
 ## Progress
 
@@ -127,4 +127,4 @@ Plans:
 | 2. Version Command | 0/1 | Not started | - |
 | 3. Help Behavior | 0/1 | Not started | - |
 | 4. Test Coverage | 0/1 | Not started | - |
-| 5. Run Configuration Summary | 0/2 | Planned | - |
+| 5. Run Configuration Summary | 2/2 | Complete   | 2026-06-09 |
