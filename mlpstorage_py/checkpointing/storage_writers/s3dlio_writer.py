@@ -172,12 +172,14 @@ class S3DLIOStorageWriter(StorageWriter):
         # Option 3: File with URIs from S3_ENDPOINT_FILE
         if endpoint_src == 'S3_ENDPOINT_FILE':
             file_path = endpoint_val
-            if os.path.exists(file_path):
-                with open(file_path, 'r') as f:
-                    uris = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-                if len(uris) > 1:
-                    print(f"[S3DLIOWriter] Multi-endpoint mode: {len(uris)} endpoints from file")
-                    return uris
+            if not os.path.exists(file_path):
+                print(f"[S3DLIOWriter] WARNING: S3_ENDPOINT_FILE={file_path!r} not found; falling back to single-endpoint mode")
+                return None
+            with open(file_path, 'r') as f:
+                uris = [line.strip() for line in f if line.strip() and not line.startswith('#')]
+            if len(uris) > 1:
+                print(f"[S3DLIOWriter] Multi-endpoint mode: {len(uris)} endpoints from file")
+                return uris
             return None
 
         return None  # AWS_ENDPOINT_URL or S3_ENDPOINT — single endpoint, handled elsewhere
