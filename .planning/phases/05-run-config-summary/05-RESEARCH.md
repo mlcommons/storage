@@ -453,17 +453,19 @@ def _main_impl():
 
 **All other claims are VERIFIED by direct codebase inspection.**
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **streaming_checkpoint.py debug print (lines 355-356)**
    - What we know: Lines 355-356 print `aws_key[:4]` and `aws_endpoint` directly from `os.environ.get()`. This is a debug-level print, not a primary path.
    - What's unclear: Whether the planner should update these two lines as part of RUNSUM-06 ("no scattered os.environ.get for S3 config") or treat them as debug-only and out of scope.
    - Recommendation: Include in Plan 05-01 scope for completeness; the change is minimal (two lines).
+   - **RESOLVED:** Excluded from RUNSUM-06 scope (planner decision: existing partial redaction `aws_key[:4]` is sufficient for a debug print path; the six primary storage files are the authoritative scope).
 
 2. **Summary output channel**
    - What we know: The existing logging infrastructure has `STATUS` at level 25 (blue, for operational messages) and `INFO` at level 20. The summary should be visible by default but suppressible.
    - What's unclear: Whether `logger.status()` or `print()` is more appropriate.
    - Recommendation: Use `logger.status()` for consistency; `--stream-log-level WARNING` already suppresses STATUS output for users who want quieter operation.
+   - **RESOLVED:** `logger.status()` chosen per Plan 05-02 Task 1 action.
 
 ## Environment Availability
 
