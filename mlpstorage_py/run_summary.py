@@ -16,7 +16,7 @@ from mlpstorage_py.storage_config import resolve_object_storage_config
 
 logger = setup_logging("MLPerfStorage")
 
-# Label column width — matches ban_boto3.py convention.
+# Label column width
 _WIDTH = 32
 
 
