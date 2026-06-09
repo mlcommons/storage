@@ -102,7 +102,7 @@ def parse_arguments():
     if _msg is not None:
         # Fire for: bare invocation, --help at any level, AND bare incomplete paths
         # (e.g., 'mlpstorage closed training' with no --help still shows "next: unet3d | retinanet")
-        print(_msg)
+        print(_msg + '  (or -h or --help_all for details)')
         sys.exit(0)
     # _msg is None → leaf level OR unrecognized token → fall through to argparse (HELP-03)
 
