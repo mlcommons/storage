@@ -38,19 +38,6 @@ jobs:
     - name: Run unit tests
       run: uv run pytest # Runs your tests safely inside the managed environment
 
-    - name: Run unit tests with coverage
-      run: |
-        uv run pytest tests/unit -v --cov=mlpstorage_py --cov-report=xml --cov-report=term-missing
-
-    - name: Upload coverage to Codecov
-      uses: codecov/codecov-action@v4
-      with:
-        files: ./coverage.xml
-        fail_ci_if_error: false
-        verbose: true
-      env:
-        CODECOV_TOKEN: ${{ secrets.CODECOV_TOKEN }}
-
   lint:
     runs-on: ubuntu-latest
     steps:
