@@ -88,7 +88,7 @@ class S3DLIOStorageWriter(StorageWriter):
         self.multi_endpoint_mode = False
         
         # Check for multi-endpoint configuration (S3/Azure/GCS only)
-        endpoint_uris = self._detect_multi_endpoint_config() if use_multi_endpoint else None
+        endpoint_uris = self._configure_multi_endpoint() if use_multi_endpoint else None
         
         # Initialize writer based on URI scheme
         if uri.startswith('s3://') or uri.startswith('gs://'):
@@ -125,7 +125,7 @@ class S3DLIOStorageWriter(StorageWriter):
                 f"Supported: file://, direct://, s3://, az://, gs://"
             )
     
-    def _detect_multi_endpoint_config(self) -> Optional[List[str]]:
+    def _configure_multi_endpoint(self) -> Optional[List[str]]:
         """Detect multi-endpoint configuration using the centralized S3 resolver.
 
         Reads S3_ENDPOINT_URIS, S3_ENDPOINT_TEMPLATE, and S3_ENDPOINT_FILE via
@@ -157,6 +157,7 @@ class S3DLIOStorageWriter(StorageWriter):
             if mpi_rank is not None and uris:
                 selected = uris[mpi_rank % len(uris)]
                 print(f"[S3DLIOWriter] MPI mode: rank {mpi_rank} using endpoint {selected}")
+                # Sets AWS_ENDPOINT_URL for MPI worker subprocesses — intentional side-effect.
                 os.environ['AWS_ENDPOINT_URL'] = selected
             return None
 
