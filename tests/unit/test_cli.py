@@ -315,6 +315,19 @@ class TestAddTrainingArguments:
         ])
         assert args.loops == 3
 
+    def test_closed_mode_namespace_has_open_defaults(self):
+        """Closed-mode parse must still supply loops/params/allow_invalid_params via set_defaults."""
+        parser = argparse.ArgumentParser()
+        add_training_arguments(parser, 'closed')
+        args = parser.parse_args([
+            'unet3d', 'run',
+            '--num-accelerators', '1', '--accelerator-type', 'b200',
+            '--client-host-memory-in-gb', '64', '--results-dir', '/tmp', 'file',
+        ])
+        assert args.loops == 1
+        assert args.params == ''
+        assert args.allow_invalid_params is False
+
 
 class TestAddCheckpointingArguments:
     """Tests for add_checkpointing_arguments function."""
@@ -379,6 +392,73 @@ class TestAddCheckpointingArguments:
             'file'
         ])
         assert args.num_checkpoints_write == 3
+
+    def test_open_mode_accepts_loops(self, parser):
+        """Open mode should expose --loops for checkpointing run."""
+        args = parser.parse_args([
+            'run', '--model', 'llama3-8b', '--num-processes', '8',
+            '--client-host-memory-in-gb', '512', '--checkpoint-folder', '/ckpt',
+            '--results-dir', '/tmp', 'file', '--loops', '5',
+        ])
+        assert args.loops == 5
+
+    def test_open_mode_accepts_params(self, parser):
+        """Open mode should expose --params for checkpointing run."""
+        args = parser.parse_args([
+            'run', '--model', 'llama3-8b', '--num-processes', '8',
+            '--client-host-memory-in-gb', '512', '--checkpoint-folder', '/ckpt',
+            '--results-dir', '/tmp', 'file', '--params', 'k=v',
+        ])
+        assert args.params == [['k=v']]
+
+    def test_open_mode_accepts_num_checkpoints_read(self, parser):
+        """Open mode should expose --num-checkpoints-read."""
+        args = parser.parse_args([
+            'run', '--model', 'llama3-8b', '--num-processes', '8',
+            '--client-host-memory-in-gb', '512', '--checkpoint-folder', '/ckpt',
+            '--results-dir', '/tmp', '--num-checkpoints-read', '20', 'file',
+        ])
+        assert args.num_checkpoints_read == 20
+
+
+class TestAddCheckpointingArgumentsClosed:
+    """Tests for add_checkpointing_arguments in closed mode."""
+
+    RUN_ARGS = [
+        'run', '--model', 'llama3-8b', '--num-processes', '8',
+        '--client-host-memory-in-gb', '512', '--checkpoint-folder', '/ckpt',
+        '--results-dir', '/tmp', 'file',
+    ]
+
+    @pytest.fixture
+    def parser(self):
+        p = argparse.ArgumentParser()
+        add_checkpointing_arguments(p, 'closed')
+        return p
+
+    def test_closed_mode_rejects_loops(self, parser):
+        """Closed checkpointing must reject --loops."""
+        with pytest.raises(SystemExit):
+            parser.parse_args(self.RUN_ARGS + ['--loops', '3'])
+
+    def test_closed_mode_rejects_num_checkpoints_read(self, parser):
+        """Closed checkpointing must reject --num-checkpoints-read."""
+        with pytest.raises(SystemExit):
+            parser.parse_args(self.RUN_ARGS + ['--num-checkpoints-read', '20'])
+
+    def test_closed_mode_rejects_num_checkpoints_write(self, parser):
+        """Closed checkpointing must reject --num-checkpoints-write."""
+        with pytest.raises(SystemExit):
+            parser.parse_args(self.RUN_ARGS + ['--num-checkpoints-write', '20'])
+
+    def test_closed_mode_namespace_has_open_defaults(self, parser):
+        """Closed-mode parse must supply all open-gated attrs via set_defaults."""
+        args = parser.parse_args(self.RUN_ARGS)
+        assert args.loops == 1
+        assert args.params == ''
+        assert args.allow_invalid_params is False
+        assert args.num_checkpoints_read == 10
+        assert args.num_checkpoints_write == 10
 
 
 class TestAddVectordbArguments:

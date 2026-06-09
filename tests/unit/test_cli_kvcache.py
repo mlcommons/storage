@@ -380,3 +380,48 @@ class TestKVCacheRunMLPerfArguments:
     def test_kvcache_bin_path_accepted(self, parser):
         args = parser.parse_args(self.BASE_RUN_ARGS + ['--kvcache-bin-path', '/opt/kv-cache.py'])
         assert args.kvcache_bin_path == '/opt/kv-cache.py'
+
+
+class TestKVCacheClosedMode:
+    """Tests for add_kvcache_arguments in closed mode."""
+
+    @pytest.fixture
+    def parser(self):
+        p = argparse.ArgumentParser()
+        add_kvcache_arguments(p, 'closed')
+        return p
+
+    def test_closed_run_parses_successfully(self, parser):
+        """Closed kvcache run should parse with only --results-dir."""
+        args = parser.parse_args(['run', '--results-dir', '/tmp'])
+        assert args.command == 'run'
+
+    def test_closed_mode_namespace_has_cache_defaults(self, parser):
+        """Closed-mode parse must supply gpu_mem_gb/cpu_mem_gb via set_defaults."""
+        args = parser.parse_args(['run', '--results-dir', '/tmp'])
+        assert args.gpu_mem_gb == 16.0
+        assert args.cpu_mem_gb == 32.0
+
+    def test_closed_mode_namespace_has_open_defaults(self, parser):
+        """Closed-mode parse must supply loops/params/allow_invalid_params via set_defaults."""
+        args = parser.parse_args(['run', '--results-dir', '/tmp'])
+        assert args.loops == 1
+        assert args.allow_invalid_params is False
+        assert args.params == ''
+
+    def test_closed_mode_namespace_has_enforcement_defaults(self, parser):
+        """Closed-mode parse must supply seed/trials/inter_option_delay via set_defaults."""
+        args = parser.parse_args(['run', '--results-dir', '/tmp'])
+        assert args.seed == 42
+        assert args.trials == 3
+        assert args.inter_option_delay == 20
+
+    def test_closed_mode_rejects_gpu_mem_gb(self, parser):
+        """Closed kvcache must reject --gpu-mem-gb (open/whatif only)."""
+        with pytest.raises(SystemExit):
+            parser.parse_args(['run', '--results-dir', '/tmp', '--gpu-mem-gb', '32.0'])
+
+    def test_closed_mode_rejects_cpu_mem_gb(self, parser):
+        """Closed kvcache must reject --cpu-mem-gb (open/whatif only)."""
+        with pytest.raises(SystemExit):
+            parser.parse_args(['run', '--results-dir', '/tmp', '--cpu-mem-gb', '64.0'])

@@ -425,3 +425,33 @@ class TestVectorDBFullCommandParsing:
         assert args.command == 'run'
         assert args.queries == 50000
         assert args.runtime is None
+
+
+class TestVectorDBClosedMode:
+    """Tests for add_vectordb_arguments in closed mode."""
+
+    @pytest.fixture
+    def parser(self):
+        p = argparse.ArgumentParser()
+        add_vectordb_arguments(p, 'closed')
+        return p
+
+    def test_closed_run_parses_successfully(self, parser):
+        """Closed vectordb run should parse successfully."""
+        args = parser.parse_args(['run', '--results-dir', '/tmp', 'file'])
+        assert args.command == 'run'
+
+    def test_closed_mode_namespace_has_open_defaults(self, parser):
+        """Closed-mode parse must supply loops/params/allow_invalid_params via set_defaults."""
+        args = parser.parse_args(['run', '--results-dir', '/tmp', 'file'])
+        assert args.loops == 1
+        assert args.params == ''
+        assert args.allow_invalid_params is False
+
+    def test_closed_mode_restricts_index_type_choices(self, parser):
+        """Closed vectordb datasize must reject index types outside VDB_INDEX_TYPES_CLOSED."""
+        from mlpstorage_py.config import VDB_INDEX_TYPES, VDB_INDEX_TYPES_CLOSED
+        open_only = [t for t in VDB_INDEX_TYPES if t not in VDB_INDEX_TYPES_CLOSED]
+        if open_only:
+            with pytest.raises(SystemExit):
+                parser.parse_args(['datasize', '--index-type', open_only[0]])
