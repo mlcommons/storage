@@ -54,8 +54,20 @@ def _resolve_endpoint() -> Tuple[Optional[str], str]:
     ]
     for var in chain:
         raw = os.environ.get(var, '').strip()
-        if raw:
-            return raw, var
+        if not raw:
+            continue
+        if var == 'S3_ENDPOINT_FILE':
+            file_path = raw
+            try:
+                with open(file_path) as fh:
+                    for line in fh:
+                        line = line.strip()
+                        if line and not line.startswith('#'):
+                            return line, var
+            except OSError:
+                pass
+            continue
+        return raw, var
     return None, ''
 
 
