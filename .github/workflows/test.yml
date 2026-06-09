@@ -26,6 +26,7 @@ jobs:
       uses: astral-sh/setup-uv@v5
       with:
         version: "latest" # Resolves to the latest stable version automatically
+        enable-cache: true # This automatically configures caching and the environment
 
     - name: Install system dependencies
       run: |
