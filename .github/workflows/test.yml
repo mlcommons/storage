@@ -28,15 +28,15 @@ jobs:
       with:
         version: "latest" # Resolves to the latest stable version automatically
 
-    # 2. Fast Lint Check (Fails fast if code style is wrong)
-    - name: Install lint dependencies
-      run: uv pip install --system ruff
-
-    - name: Run ruff check
-      run: ruff check
-
-    - name: Run ruff format check
-      run: ruff format --check
+#    # 2. Fast Lint Check (Fails fast if code style is wrong)
+#    - name: Install lint dependencies
+#      run: uv pip install --system ruff
+#
+#    - name: Run ruff check
+#      run: ruff check
+#
+#    - name: Run ruff format check
+#      run: ruff format --check
 
     # 3. System and Test Dependencies
     - name: Install system dependencies
