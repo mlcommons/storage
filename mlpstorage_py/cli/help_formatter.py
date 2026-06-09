@@ -524,6 +524,12 @@ VERSION
   Resolution order: importlib.metadata("mlpstorage") → pyproject.toml → "unknown"
 """
 
+# Extract the SYNOPSIS block from HELP_ALL_TEXT so it can be printed
+# standalone when the user passes -h at a mid-tree position.
+_syn_start = HELP_ALL_TEXT.index('\nSYNOPSIS\n') + 1
+_syn_end = HELP_ALL_TEXT.index('\nmlpstorage\n│', _syn_start)
+SYNOPSIS_TEXT = HELP_ALL_TEXT[_syn_start:_syn_end].rstrip()
+
 # ---------------------------------------------------------------------------
 # get_context_help_tokens
 #
