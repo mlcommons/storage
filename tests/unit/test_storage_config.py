@@ -9,6 +9,8 @@ Tests cover:
   - TestCentralizedResolver: Default values for every key when env is unset.
 """
 
+import tempfile
+import os
 import pytest
 
 from mlpstorage_py.storage_config import resolve_object_storage_config
@@ -55,6 +57,11 @@ class TestCredentialRedaction:
         assert raw not in str(config), "Raw secret key must not appear in resolved config"
         assert '[SET —' in config['aws_secret_access_key_redacted']
 
+    def test_secret_key_not_set(self, monkeypatch):
+        monkeypatch.delenv('AWS_SECRET_ACCESS_KEY', raising=False)
+        config = resolve_object_storage_config()
+        assert config['aws_secret_access_key_redacted'] == '[not set]'
+
 
 # ---------------------------------------------------------------------------
 # TestEndpointResolution
@@ -92,6 +99,50 @@ class TestEndpointResolution:
         config = resolve_object_storage_config()
         assert isinstance(config['endpoint'], tuple)
         assert len(config['endpoint']) == 2
+
+    def test_s3_endpoint_template_wins_over_aws_endpoint_url(self, monkeypatch):
+        """S3_ENDPOINT_TEMPLATE (priority 2) beats AWS_ENDPOINT_URL (priority 4)."""
+        _clear_all_endpoint_vars(monkeypatch)
+        monkeypatch.setenv('S3_ENDPOINT_TEMPLATE', 'http://template-host:9000')
+        monkeypatch.setenv('AWS_ENDPOINT_URL', 'http://fallback:9001')
+        config = resolve_object_storage_config()
+        val, src = config['endpoint']
+        assert val == 'http://template-host:9000'
+        assert src == 'S3_ENDPOINT_TEMPLATE'
+
+    def test_s3_endpoint_file_wins_over_aws_endpoint_url(self, monkeypatch):
+        """S3_ENDPOINT_FILE (priority 3) beats AWS_ENDPOINT_URL (priority 4).
+
+        The resolver must return the URI *inside* the file, not the file path.
+        """
+        _clear_all_endpoint_vars(monkeypatch)
+        with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as tf:
+            tf.write("# comment line — should be skipped\n")
+            tf.write("http://file-endpoint:9000\n")
+            tf.write("http://second-endpoint:9001\n")
+            tmp_path = tf.name
+        try:
+            monkeypatch.setenv('S3_ENDPOINT_FILE', tmp_path)
+            monkeypatch.setenv('AWS_ENDPOINT_URL', 'http://fallback:9002')
+            config = resolve_object_storage_config()
+            val, src = config['endpoint']
+            # Must return the URI from the file, not the file path itself
+            assert val == 'http://file-endpoint:9000', (
+                f"Expected URI from file, got {val!r} — "
+                "resolver may be returning the file path instead of its contents"
+            )
+            assert src == 'S3_ENDPOINT_FILE'
+        finally:
+            os.unlink(tmp_path)
+
+    def test_s3_endpoint_fallback_last_resort(self, monkeypatch):
+        """S3_ENDPOINT (priority 5) is used when all higher-priority vars are absent."""
+        _clear_all_endpoint_vars(monkeypatch)
+        monkeypatch.setenv('S3_ENDPOINT', 'http://last-resort:9000')
+        config = resolve_object_storage_config()
+        val, src = config['endpoint']
+        assert val == 'http://last-resort:9000'
+        assert src == 'S3_ENDPOINT'
 
 
 # ---------------------------------------------------------------------------
