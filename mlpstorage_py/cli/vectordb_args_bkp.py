@@ -2,22 +2,6 @@
 
 This module defines the CLI arguments for the VectorDB benchmark, including
 datasize, datagen, and run commands.
-
-Distributed VectorDB terminology:
-
-  --host / -s
-      Milvus / vector database endpoint host.
-
-  --hosts
-      Benchmark client hosts used for MPI ranks.
-
-  --coordination filesystem
-      Legacy distributed mode. Uses a shared results directory and marker files.
-
-  --coordination mpi
-      No-shared-filesystem mode. Uses mpi4py bcast/barrier/gather for
-      synchronization and metric aggregation. Rank-local detailed files are
-      written under --rank-output-dir on each node.
 """
 
 from mlpstorage_py.config import (
@@ -39,15 +23,13 @@ from mlpstorage_py.cli.common_args import (
 
 VECTORDB_DISTRIBUTED_HELP_MESSAGES = {
     "distributed": (
-        "Launch the VectorDB benchmark across one or more benchmark client "
-        "hosts using MPI. When omitted, VectorDB keeps the existing single-node "
-        "execution path."
+        "Launch the VectorDB benchmark across one or more client hosts using MPI. "
+        "When omitted, VectorDB keeps the existing single-node execution path."
     ),
     "hosts": (
-        "Space-separated or comma-separated benchmark client hosts for MPI "
-        "ranks. This is NOT the Milvus database host. The Milvus endpoint "
-        "remains --host/-s. Examples: '--hosts node01 node02' or "
-        "'--hosts=node01,node02'."
+        "Space-separated or comma-separated benchmark client hosts for MPI ranks. "
+        "This is NOT the Milvus database host. The Milvus endpoint remains --host/-s. "
+        "Examples: '--hosts node01 node02' or '--hosts=node01,node02'."
     ),
     "npernode": (
         "Number of VectorDB MPI ranks to start on each benchmark client host. "
@@ -63,19 +45,8 @@ VECTORDB_DISTRIBUTED_HELP_MESSAGES = {
         "The effective seed is base seed + MPI rank."
     ),
     "ready_timeout": (
-        "Timeout in seconds for rank synchronization. In filesystem "
-        "coordination mode this controls marker-file waits. In MPI "
-        "coordination mode it is kept for CLI compatibility."
-    ),
-    "coordination": (
-        "Distributed coordination backend. 'filesystem' uses the legacy shared "
-        "results directory and marker-file workflow. 'mpi' uses mpi4py "
-        "bcast/barrier/gather and does not require a shared filesystem."
-    ),
-    "rank_output_dir": (
-        "Node-local directory used by each MPI rank when --coordination mpi is "
-        "selected. This directory does not need to be shared across nodes. "
-        "Rank-local simple/enhanced detailed outputs are written here."
+        "Timeout in seconds for rank synchronization markers during distributed "
+        "VectorDB load/run orchestration."
     ),
 }
 
@@ -122,20 +93,6 @@ def _add_vectordb_distributed_arguments(parser):
     )
 
     distributed_group.add_argument(
-        "--coordination",
-        choices=["filesystem", "mpi"],
-        default="filesystem",
-        help=VECTORDB_DISTRIBUTED_HELP_MESSAGES["coordination"],
-    )
-
-    distributed_group.add_argument(
-        "--rank-output-dir",
-        type=str,
-        default="/tmp/mlps_vdb",
-        help=VECTORDB_DISTRIBUTED_HELP_MESSAGES["rank_output_dir"],
-    )
-
-    distributed_group.add_argument(
         "--seed",
         type=int,
         default=42,
@@ -157,11 +114,8 @@ def _add_vectordb_distributed_arguments(parser):
     #   --mpi-params
     add_mpi_arguments(parser)
 
-    # Common MPI defaults to mpirun. VectorDB multi-node support was first
-    # designed around MPICH, so keep mpiexec as the default. Users running Open
-    # MPI should pass:
-    #
-    #   --mpi-impl openmpi --mpi-bin mpirun
+    # Common MPI defaults to mpirun. VectorDB multi-node support is designed
+    # around MPICH by default, so use mpiexec unless the user overrides it.
     parser.set_defaults(mpi_bin="mpiexec")
 
 
@@ -178,9 +132,7 @@ def add_vectordb_arguments(parser):
     )
     parser.required = True
 
-    # ------------------------------------------------------------------
-    # Subcommands
-    # ------------------------------------------------------------------
+    # ---- Subcommand parsers ----
     datasize = vectordb_subparsers.add_parser(
         "datasize",
         help="Calculate storage requirements for a VDB dataset",
@@ -194,9 +146,7 @@ def add_vectordb_arguments(parser):
         help=HELP_MESSAGES["vdb_run"],
     )
 
-    # ------------------------------------------------------------------
-    # Common arguments for datagen and run
-    # ------------------------------------------------------------------
+    # ---- Common arguments for datagen and run ----
     for _parser in [datagen, run_benchmark]:
         _parser.add_argument(
             "--host",
@@ -222,9 +172,7 @@ def add_vectordb_arguments(parser):
             help=HELP_MESSAGES["db_collection"],
         )
 
-    # ------------------------------------------------------------------
-    # datasize arguments
-    # ------------------------------------------------------------------
+    # ---- Datasize arguments ----
     datasize.add_argument(
         "--dimension",
         type=int,
@@ -256,9 +204,7 @@ def add_vectordb_arguments(parser):
         help=HELP_MESSAGES["vector_dtype"],
     )
 
-    # ------------------------------------------------------------------
-    # datagen / load arguments
-    # ------------------------------------------------------------------
+    # ---- Datagen / load specific arguments ----
     datagen.add_argument(
         "--dimension",
         type=int,
@@ -313,8 +259,6 @@ def add_vectordb_arguments(parser):
         default="COSINE",
         help="Vector search metric type for the created index.",
     )
-
-    # DiskANN parameters.
     datagen.add_argument(
         "--max-degree",
         type=int,
@@ -327,8 +271,6 @@ def add_vectordb_arguments(parser):
         default=200,
         help="DiskANN SearchListSize parameter.",
     )
-
-    # HNSW parameters.
     datagen.add_argument(
         "--M",
         type=int,
@@ -341,15 +283,12 @@ def add_vectordb_arguments(parser):
         default=200,
         help="HNSW efConstruction parameter.",
     )
-
-    # AISAQ parameters.
     datagen.add_argument(
         "--inline-pq",
         type=int,
         default=16,
         help="AISAQ inline_pq parameter.",
     )
-
     datagen.add_argument(
         "--monitor-interval",
         type=int,
@@ -367,9 +306,7 @@ def add_vectordb_arguments(parser):
         help="Force recreate collection if it exists.",
     )
 
-    # ------------------------------------------------------------------
-    # run arguments
-    # ------------------------------------------------------------------
+    # ---- Run specific arguments ----
     run_benchmark.add_argument(
         "--num-query-processes",
         type=int,
@@ -398,7 +335,8 @@ def add_vectordb_arguments(parser):
         ),
     )
 
-    # simple_bench / enhanced_bench search and recall knobs.
+    # Common simple_bench search/recall knobs. These are optional and preserve
+    # the existing defaults when not supplied.
     run_benchmark.add_argument(
         "--vector-dim",
         type=int,
@@ -464,7 +402,7 @@ def add_vectordb_arguments(parser):
     _add_vectordb_distributed_arguments(datagen)
     _add_vectordb_distributed_arguments(run_benchmark)
 
-    # Add universal/storage arguments to all subcommands.
+    # Add universal arguments to all subcommands.
     for _parser in [datasize, datagen, run_benchmark]:
         add_universal_arguments(_parser)
         add_storage_type_arguments(_parser)

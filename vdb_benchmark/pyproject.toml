@@ -24,11 +24,18 @@ dependencies = [
 "Homepage" = "https://github.com/mlcommons/storage/tree/main/vdb_benchmark"
 "Bug Tracker" = "https://github.com/mlcommons/storage/issues"
 
+[project.optional-dependencies]
+mpi = [
+    "mpi4py>=4.0.0",
+]
+
 [project.scripts]
 compact-and-watch = "vdbbench.compact_and_watch:main"
 load-vdb = "vdbbench.load_vdb:main"
 vdbbench = "vdbbench.simple_bench:main"
 enhanced-bench = "vdbbench.enhanced_bench:main"
+vdb-mpi-wrapper = "vdbbench.mpi_wrapper:main"
+vdb-aggregate = "vdbbench.mpi_aggregate:main"
 
 [tool.setuptools]
 packages = {find = {}}
