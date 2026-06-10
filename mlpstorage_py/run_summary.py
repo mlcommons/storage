@@ -11,6 +11,7 @@ runs after run_benchmark(). This summary shows pre-.env-load env state
 
 import os
 
+from mlpstorage_py import VERSION
 from mlpstorage_py.mlps_logging import setup_logging
 from mlpstorage_py.storage_config import resolve_object_storage_config
 
@@ -52,7 +53,7 @@ def print_run_summary(args) -> None:
     if getattr(args, 'quiet', False):
         return
 
-    lines = ["", "--- Run Configuration ---"]
+    lines = ["", f"--- Run Configuration (mlpstorage {VERSION}) ---"]
 
     # Tier 1 CLI args — use getattr so absent attrs are '[not set]' not AttributeError.
     _tier1 = [
