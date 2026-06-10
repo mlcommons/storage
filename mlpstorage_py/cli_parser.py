@@ -7,6 +7,7 @@ using modular argument builders from the cli package.
 
 import argparse
 import re
+import shlex
 import sys
 
 from mlpstorage_py import VERSION
@@ -248,8 +249,22 @@ def update_args(args):
         setattr(args, 'params', flattened_params)
 
     if hasattr(args, 'mpi_params') and args.mpi_params:
-        flattened_mpi_params = [item for sublist in args.mpi_params for item in sublist]
-        setattr(args,'mpi_params', flattened_mpi_params)
+        # --mpi-params is collected with action="append" as a list of raw
+        # strings, each potentially containing several space-separated MPI
+        # flags, e.g. ["-genv PMI_VERSION=2 -genv FI_PROVIDER=tcp"].
+        # MPI flags begin with '-', so nargs="+" used to reject them with
+        # "expected at least one argument" (see issue #422). We now accept the
+        # whole string and tokenize it here with shlex so quoting is honored
+        # and downstream (generate_mpi_prefix_cmd) receives a flat token list.
+        flattened_mpi_params = []
+        for chunk in args.mpi_params:
+            if isinstance(chunk, (list, tuple)):
+                # Backwards-compat: tolerate the old nested-list shape.
+                for item in chunk:
+                    flattened_mpi_params.extend(shlex.split(item))
+            else:
+                flattened_mpi_params.extend(shlex.split(chunk))
+        setattr(args, 'mpi_params', flattened_mpi_params)
 
     if hasattr(args, 'hosts') and args.hosts is not None:
         # Accept any of the following equivalent forms and normalize to a clean list:

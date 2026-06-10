@@ -296,10 +296,18 @@ def add_mpi_arguments(parser):
     )
     mpi_options.add_argument(
         '--mpi-params',
-        nargs="+",
-        type=str,
         action="append",
-        help="Other MPI parameters that will be passed to MPI"
+        type=str,
+        default=None,
+        metavar="MPI_PARAMS",
+        help=(
+            "Additional parameters passed verbatim to the MPI launcher. "
+            "Pass them as a single quoted string, e.g. "
+            "--mpi-params=\"-genv PMI_VERSION=2 -genv FI_PROVIDER=tcp\". "
+            "Because MPI flags begin with '-', use the '--mpi-params=...' "
+            "(equals) form so argparse does not mistake them for options. "
+            "May be supplied multiple times; values are concatenated."
+        )
     )
 
 

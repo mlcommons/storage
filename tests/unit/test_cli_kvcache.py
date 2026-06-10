@@ -215,9 +215,13 @@ class TestKVCacheMPIArguments:
         assert args.allow_run_as_root is True
 
     def test_mpi_params_argument(self, parser):
-        """Run should accept --mpi-params argument."""
-        args = parser.parse_args(['run', '--mpi-params', 'param1', 'param2'])
-        assert args.mpi_params == [['param1', 'param2']]
+        """Run should accept --mpi-params as a single string.
+
+        MPI flags begin with '-', so --mpi-params takes one string value
+        (use the '=' form). See issue #422.
+        """
+        args = parser.parse_args(['run', '--mpi-params=-genv FI_PROVIDER=tcp'])
+        assert args.mpi_params == ['-genv FI_PROVIDER=tcp']
 
 
 class TestKVCacheDatasizeNoDistributedArgs:

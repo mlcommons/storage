@@ -144,10 +144,23 @@ class TestAddMpiArguments:
         assert args.allow_run_as_root is True
 
     def test_adds_mpi_params_argument(self, parser):
-        """Should add --mpi-params argument."""
+        """Should add --mpi-params argument that accepts a single string.
+
+        MPI flags begin with '-', so --mpi-params now takes one string value
+        (use the '=' form) rather than nargs='+', which rejected dash-led
+        values with "expected at least one argument" (issue #422).
+        """
         add_mpi_arguments(parser)
-        args = parser.parse_args(['--mpi-params', 'param1', 'param2'])
-        assert args.mpi_params == [['param1', 'param2']]
+        args = parser.parse_args(['--mpi-params=-genv FI_PROVIDER=tcp'])
+        assert args.mpi_params == ['-genv FI_PROVIDER=tcp']
+
+    def test_mpi_params_appends_multiple(self, parser):
+        """Multiple --mpi-params should accumulate via action='append'."""
+        add_mpi_arguments(parser)
+        args = parser.parse_args(
+            ['--mpi-params=-x FOO=1', '--mpi-params=-genv BAR=2']
+        )
+        assert args.mpi_params == ['-x FOO=1', '-genv BAR=2']
 
 
 class TestAddTrainingArguments:
@@ -464,8 +477,28 @@ class TestUpdateArgs:
         update_args(args)
         assert args.params == ['key1=val1', 'key2=val2', 'key3=val3']
 
+    def test_tokenizes_mpi_params_string(self):
+        """Should shlex-split each --mpi-params string into a flat token list."""
+        args = argparse.Namespace(
+            params=None,
+            mpi_params=['-genv FI_PROVIDER=tcp', '--bind-to core']
+        )
+        update_args(args)
+        assert args.mpi_params == [
+            '-genv', 'FI_PROVIDER=tcp', '--bind-to', 'core'
+        ]
+
+    def test_mpi_params_honors_quoting(self):
+        """shlex tokenization must keep inner-quoted values as one token."""
+        args = argparse.Namespace(
+            params=None,
+            mpi_params=['-x LD_PRELOAD="/opt/my lib/foo.so"']
+        )
+        update_args(args)
+        assert args.mpi_params == ['-x', 'LD_PRELOAD=/opt/my lib/foo.so']
+
     def test_flattens_mpi_params_list(self):
-        """Should flatten nested mpi_params list."""
+        """Legacy nested-list shape (old nargs='+') is still tolerated."""
         args = argparse.Namespace(
             params=None,
             mpi_params=[['--bind-to', 'core'], ['--map-by', 'socket']]
