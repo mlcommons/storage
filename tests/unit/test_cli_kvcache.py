@@ -222,7 +222,7 @@ class TestKVCacheMPIArguments:
         MPI flags begin with '-', so --mpi-params takes one string value
         (use the '=' form). See issue #422.
         """
-        args = parser.parse_args(['run', '--mpi-params=-genv FI_PROVIDER=tcp'])
+        args = parser.parse_args(self.BASE_RUN_ARGS + ['--mpi-params=-genv FI_PROVIDER=tcp'])
         assert args.mpi_params == ['-genv FI_PROVIDER=tcp']
 
 

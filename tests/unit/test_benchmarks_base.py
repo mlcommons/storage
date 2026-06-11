@@ -239,8 +239,8 @@ class TestBenchmarkExecuteCommand:
             return ConcreteBenchmark(args, run_datetime="20250115_120000")
 
     def test_what_if_mode_skips_execution(self, benchmark):
-        """Should skip execution in what-if mode."""
-        benchmark.args.what_if = True
+        """Should skip execution in dry-run mode."""
+        benchmark.args.dry_run = True
 
         stdout, stderr, rc = benchmark._execute_command("echo hello")
 
@@ -287,19 +287,18 @@ class TestBenchmarkVerifyBenchmark:
 
     @pytest.fixture
     def benchmark(self, tmp_path):
-        """Create a benchmark instance with --closed semantics."""
+        """Create a benchmark instance with closed mode."""
         args = Namespace(
             debug=False,
             verbose=False,
-            what_if=False,
+            dry_run=False,
             stream_log_level='INFO',
             results_dir=str(tmp_path),
             model='unet3d',
             command='run',
             num_processes=8,
             accelerator_type='h100',
-            closed=True,
-            open=False,
+            mode='closed',
             allow_invalid_params=False
         )
 
@@ -344,9 +343,8 @@ class TestBenchmarkVerifyBenchmark:
         assert result is True
 
     def test_exits_for_open_when_closed_required(self, benchmark):
-        """Should exit for OPEN verification when --closed was passed."""
-        benchmark.args.closed = True
-        benchmark.args.open = False
+        """Should exit for OPEN verification when closed mode was passed."""
+        benchmark.args.mode = 'closed'
 
         with patch('mlpstorage_py.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
             mock_verifier = MagicMock()
@@ -357,15 +355,12 @@ class TestBenchmarkVerifyBenchmark:
                 benchmark.verify_benchmark()
 
     def test_allows_open_with_open_flag(self, benchmark):
-        """Should allow OPEN verification when --open was passed.
+        """Should allow OPEN verification when open mode was passed.
 
-        Post-#349 fix: --open sets args.open=True (independent of args.closed).
-        Previously this test only set closed=False, which was indistinguishable
-        from "neither flag passed" and therefore did not actually exercise the
-        --open code path.
+        Post-CLI-refactor: closed/open/whatif are positional values on
+        args.mode, not separate boolean flags.
         """
-        benchmark.args.closed = False
-        benchmark.args.open = True
+        benchmark.args.mode = 'open'
 
         with patch('mlpstorage_py.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
             mock_verifier = MagicMock()
@@ -1109,8 +1104,8 @@ class TestTimeSeriesCollectionIntegration:
         assert benchmark._should_collect_timeseries() is False
 
     def test_should_collect_timeseries_whatif_disabled(self, tmp_path, mock_logger):
-        """Time-series collection should be disabled in what-if mode."""
-        benchmark = self._create_benchmark(tmp_path, mock_logger, what_if=True, command='run')
+        """Time-series collection should be disabled in dry-run mode."""
+        benchmark = self._create_benchmark(tmp_path, mock_logger, dry_run=True, command='run')
 
         assert benchmark._should_collect_timeseries() is False
 

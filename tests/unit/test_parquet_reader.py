@@ -440,25 +440,25 @@ class TestParquetReaderS3Iterable:
         reader = self._make_reader()
         result = reader.open(self.FILENAME)
         assert isinstance(result, tuple)
-        pf, offsets = result
+        pf, _rf, offsets = result
         assert pf is not None
         assert isinstance(offsets, list)
 
     def test_open_correct_row_group_count(self):
         reader = self._make_reader()
-        pf, offsets = reader.open(self.FILENAME)
+        pf, _rf, offsets = reader.open(self.FILENAME)
         assert pf.metadata.num_row_groups == NUM_GROUPS
 
     def test_open_cumulative_offsets(self):
         reader = self._make_reader()
-        pf, offsets = reader.open(self.FILENAME)
+        pf, _rf, offsets = reader.open(self.FILENAME)
         # offsets should be [0, 8, 16, 24] for 3 groups of 8 rows
         expected = [i * ROWS_PER_GROUP for i in range(NUM_GROUPS + 1)]
         assert offsets == expected
 
     def test_open_total_rows(self):
         reader = self._make_reader()
-        pf, offsets = reader.open(self.FILENAME)
+        pf, _rf, offsets = reader.open(self.FILENAME)
         assert offsets[-1] == TOTAL_ROWS
 
     # ── get_sample() ─────────────────────────────────────────────────────────
