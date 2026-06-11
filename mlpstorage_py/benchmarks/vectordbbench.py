@@ -65,7 +65,6 @@ class VectorDBBenchmark(Benchmark):
             CONFIGS_ROOT_DIR,
             self.VECTORDB_CONFIG_PATH,
         )
-<<<<<<< HEAD
         self.config_name = (
             args.config if hasattr(args, "config") and args.config else "default"
         )
@@ -73,14 +72,7 @@ class VectorDBBenchmark(Benchmark):
 
         self.yaml_params = read_config_from_file(self.config_file)
 
-        # Validate VDB-specific dependencies.
-        # Keep existing behavior: skip for datasize and what-if.
         if not getattr(args, "what_if", False) and self.command != "datasize":
-=======
- 
-        # Validate VDB-specific dependencies (skip for dry-run / datasize)
-        if not getattr(args, 'dry_run', False) and self.command != 'datasize':
->>>>>>> ce200ed (feat(01-03): rewrite vectordb_args.py and update vectordbbench.py)
             self._validate_vdb_dependencies()
 
         self.verify_benchmark()
@@ -749,7 +741,6 @@ class VectorDBBenchmark(Benchmark):
         --mode sweep:
             enhanced_bench via enhanced-bench
         """
-<<<<<<< HEAD
         if self._is_distributed():
             return self._execute_run_distributed()
 
@@ -757,14 +748,9 @@ class VectorDBBenchmark(Benchmark):
 
     def _execute_run_single_node(self) -> int:
         """Execute existing single-node VectorDB run path."""
-        mode = getattr(self.args, "mode", "timed")
+        mode = getattr(self.args, "benchmark_mode", "timed")
 
         if mode == "sweep":
-=======
-        mode = getattr(self.args, 'benchmark_mode', 'timed')
-
-        if mode == 'sweep':
->>>>>>> ce200ed (feat(01-03): rewrite vectordb_args.py and update vectordbbench.py)
             script = "enhanced-bench"
 
             # Important: do not pass --batch-size to enhanced-bench sweep mode.
@@ -816,7 +802,7 @@ class VectorDBBenchmark(Benchmark):
 
     def _execute_run_distributed(self) -> int:
         """Execute distributed VectorDB run through MPI wrapper."""
-        mode = getattr(self.args, "mode", "timed")
+        mode = getattr(self.args, "benchmark_mode", "timed")
         phase = "enhanced" if mode == "sweep" else "simple"
         world_size = self._mpi_world_size()
         base_output_dir = self._base_output_dir(phase)
@@ -977,7 +963,6 @@ class VectorDBBenchmark(Benchmark):
     def metadata(self) -> Dict[str, Any]:
         """Generate metadata for the VectorDB benchmark run."""
         base_metadata = super().metadata
-<<<<<<< HEAD
 
         is_dist = (
             self._is_distributed()
@@ -1041,7 +1026,7 @@ class VectorDBBenchmark(Benchmark):
                     "batch_size": getattr(self.args, "batch_size", None),
                     "runtime": getattr(self.args, "runtime", None),
                     "queries": getattr(self.args, "queries", None),
-                    "mode": getattr(self.args, "mode", "timed"),
+                    "benchmark_mode": getattr(self.args, "benchmark_mode", "timed"),
                     "vector_dim": getattr(self.args, "vector_dim", None),
                     "search_limit": getattr(self.args, "search_limit", None),
                     "search_ef": getattr(self.args, "search_ef", None),
@@ -1049,39 +1034,5 @@ class VectorDBBenchmark(Benchmark):
                 }
             )
 
-=======
- 
-        base_metadata.update({
-            'vectordb_config': self.config_name,
-            'model': self.config_name,
-            'host': getattr(self.args, 'host', '127.0.0.1'),
-            'port': getattr(self.args, 'port', 19530),
-            'collection': getattr(self.args, 'collection', None),
-        })
- 
-        if self.command == 'datasize':
-            base_metadata.update({
-                'dimension': getattr(self.args, 'dimension', None),
-                'num_vectors': getattr(self.args, 'num_vectors', None),
-                'index_type': getattr(self.args, 'index_type', None),
-                'num_shards': getattr(self.args, 'num_shards', None),
-            })
-        elif self.command == 'datagen':
-            base_metadata.update({
-                'dimension': getattr(self.args, 'dimension', None),
-                'num_vectors': getattr(self.args, 'num_vectors', None),
-                'num_shards': getattr(self.args, 'num_shards', None),
-                'vector_dtype': getattr(self.args, 'vector_dtype', None),
-                'distribution': getattr(self.args, 'distribution', None),
-            })
-        elif self.command == 'run':
-            base_metadata.update({
-                'num_query_processes': getattr(self.args, 'num_query_processes', None),
-                'batch_size': getattr(self.args, 'batch_size', None),
-                'runtime': getattr(self.args, 'runtime', None),
-                'queries': getattr(self.args, 'queries', None),
-                'benchmark_mode': getattr(self.args, 'benchmark_mode', 'timed'),
-            })
- 
->>>>>>> ce200ed (feat(01-03): rewrite vectordb_args.py and update vectordbbench.py)
+
         return base_metadata

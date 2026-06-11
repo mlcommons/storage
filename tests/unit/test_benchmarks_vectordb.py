@@ -296,12 +296,15 @@ class TestVectorDBMetadata:
             bm = VectorDBBenchmark(datagen_args)
             meta = bm.metadata
 
-        # Run-specific fields should not be in datagen metadata
-        # Note: 'runtime' exists in base metadata with a different meaning (execution time)
-        # so we check for num_query_processes and queries which are VectorDB run-specific
+        # Run-specific fields should not be in datagen metadata.
+        # Note: 'runtime' exists in base metadata with a different meaning
+        # (execution time) so we check for VectorDB run-specific fields.
+        # batch_size IS recorded for datagen (multi-host VDB reproducibility),
+        # but its semantics differ from run's batch_size.
         assert 'num_query_processes' not in meta
         assert 'queries' not in meta
-        assert 'batch_size' not in meta  # datagen uses different batch_size semantics
+        assert 'benchmark_mode' not in meta
+        assert 'search_limit' not in meta
 
 
 class TestVectorDBBenchmarkType:
