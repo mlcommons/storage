@@ -394,6 +394,15 @@ class TrainingBenchmark(DLIOBenchmark):
         num_files_train, num_subfolders_train, total_disk_bytes = calculate_training_data_size(
             self.args, self.cluster_information, self.combined_params['dataset'], self.combined_params['reader'], self.logger
         )
+
+        # Persist calculated sizing into params_dict so the values flow into the
+        # written metadata file via the dotted-key override mechanism in
+        # Benchmark.metadata (#208). Without this, the metadata reflects only
+        # the YAML defaults and downstream automation cannot read back the
+        # num_files_train that datasize reported on stderr.
+        self.params_dict['dataset.num_files_train'] = num_files_train
+        self.params_dict['dataset.num_subfolders_train'] = num_subfolders_train
+
         self.logger.result(f'Number of training files: {num_files_train}')
         self.logger.result(f'Number of training subfolders: {num_subfolders_train}')
         self.logger.result(f'Total disk space required for training: {total_disk_bytes / 1024**3:.2f}GiB')
