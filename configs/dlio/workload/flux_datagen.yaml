@@ -13,10 +13,12 @@ dataset:
   format: parquet
   compression: none
   num_files_train: 4296
-  num_samples_per_file: 256
+  num_samples_per_file: 288
   record_length: 2164832
 
   parquet:
+    use_s3dlio_gen: true
+    row_group_size: 48
     # Parquet-specific field specifications
     columns:
       - name: t5_encodings

@@ -12,7 +12,7 @@ dataset:
   data_folder: data/dlrm/
   format: parquet
   num_files_train: 1024        # Number of training files to generate
-  num_samples_per_file: 4718592    # Samples per parquet file
+  num_samples_per_file: 1536000    # 250 RGs × 6144 → ~3.1 MiB footer, matches dlrm_datagen.yaml
   record_length_bytes: 761
   compression: none          # Options: snappy, gzip, lz4, zstd, none
   

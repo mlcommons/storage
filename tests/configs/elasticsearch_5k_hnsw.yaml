@@ -1,0 +1,43 @@
+backend: elasticsearch
+mode: both
+
+database:
+  host: http://localhost:9200
+
+dataset:
+  collection_name: pr316_es_hnsw_5k
+  num_vectors: 5000
+  dimension: 64
+  distribution: uniform
+  block_size: 1000
+  batch_size: 500
+  seed: 42
+
+query:
+  num_query_vectors: 100
+  query_seed: 99
+
+ground_truth:
+  truth_k: 20
+  truth_mode: precomputed
+
+index:
+  index_type: HNSW
+  metric_type: COSINE
+  index_params:
+    m: 16
+    ef_construction: 64
+  num_shards: 1
+
+search:
+  search_k: 10
+  num_search_rounds: 2
+  search_batch_size: 5
+  log_interval: 50
+  search_params:
+    num_candidates: 100
+
+workflow:
+  force: true
+  compact: false
+  monitor_interval: 2

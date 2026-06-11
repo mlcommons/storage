@@ -17,7 +17,7 @@ import pytest
 from dataclasses import dataclass
 from unittest.mock import MagicMock, patch
 
-from mlpstorage.utils import (
+from mlpstorage_py.utils import (
     MLPSJsonEncoder,
     is_valid_datetime_format,
     get_datetime_from_timestamp,
@@ -27,7 +27,7 @@ from mlpstorage.utils import (
     remove_nan_values,
     generate_mpi_prefix_cmd,
 )
-from mlpstorage.config import MPIRUN, MPIEXEC
+from mlpstorage_py.config import MPIRUN, MPIEXEC
 
 
 class TestMLPSJsonEncoder:
@@ -579,6 +579,135 @@ class TestGenerateMpiPrefixCmd:
         # 7 processes across 3 hosts: 3, 2, 2 distribution
         assert '-n 7' in result
 
+    def test_mpi_btl_auto_by_default_single_host(self, mock_logger):
+        """No --mca btl flag is added in auto mode (default)."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=None,
+            logger=mock_logger
+        )
+        assert '--mca btl' not in result
+
+    def test_mpi_btl_tcp_single_host(self, mock_logger):
+        """--mca btl tcp,self is added when mpi_btl='tcp'."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=None,
+            logger=mock_logger,
+            mpi_btl='tcp'
+        )
+        assert '--mca btl tcp,self' in result
+
+    def test_mpi_btl_vader_single_host(self, mock_logger):
+        """--mca btl vader,self is added when mpi_btl='vader'."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=None,
+            logger=mock_logger,
+            mpi_btl='vader'
+        )
+        assert '--mca btl vader,self' in result
+
+    def test_mpi_btl_not_applied_for_multihost(self, mock_logger):
+        """--mca btl flags are never applied for multi-host runs."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1', 'host2'],
+            num_processes=8,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=None,
+            logger=mock_logger,
+            mpi_btl='tcp'
+        )
+        assert '--mca btl' not in result
+
+    def test_processes_per_node_injects_npernode(self, mock_logger):
+        """--npernode N appears in prefix when processes_per_node is set."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=None,
+            logger=mock_logger,
+            processes_per_node=2,
+        )
+        assert '--npernode 2' in result
+
+    def test_processes_per_node_none_omits_npernode(self, mock_logger):
+        """--npernode absent when processes_per_node=None (default)."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=None,
+            logger=mock_logger,
+            processes_per_node=None,
+        )
+        assert '--npernode' not in result
+
+    def test_processes_per_node_combined_with_params(self, mock_logger):
+        """--npernode and custom params both appear."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=['--mca orte_abort_on_non_zero_status 0'],
+            logger=mock_logger,
+            processes_per_node=2,
+        )
+        assert '--npernode 2' in result
+        assert '--mca orte_abort_on_non_zero_status 0' in result
+
+    def test_processes_per_node_multihost(self, mock_logger):
+        """--npernode appears with multi-host invocation alongside --map-by node."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1', 'host2'],
+            num_processes=8,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=None,
+            logger=mock_logger,
+            processes_per_node=4,
+        )
+        assert '--npernode 4' in result
+        assert '--map-by node' in result
+
+    def test_processes_per_node_position_before_bind_to(self, mock_logger):
+        """--npernode appears before --bind-to in the generated string."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=None,
+            logger=mock_logger,
+            processes_per_node=2,
+        )
+        npernode_idx = result.index('--npernode')
+        bindto_idx = result.index('--bind-to')
+        assert npernode_idx < bindto_idx
+
 
 class TestCommandExecutor:
     """Tests for CommandExecutor class."""
@@ -586,7 +715,7 @@ class TestCommandExecutor:
     @pytest.fixture
     def executor(self):
         """Create a CommandExecutor instance."""
-        from mlpstorage.utils import CommandExecutor
+        from mlpstorage_py.utils import CommandExecutor
         logger = MagicMock(spec=logging.Logger)
         return CommandExecutor(logger=logger)
 

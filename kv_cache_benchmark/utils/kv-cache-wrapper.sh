@@ -427,7 +427,7 @@ if should_run 'mlperf_submission'; then
     # Primary Metrics: Decode Bytes Read (2.62x), Wall-Clock Throughput (2.43x)
     # WARNING: Do NOT use Storage Throughput at cpu_mem=0GB (only 1.1x differentiation)
     # -------------------------------------------------------------------------
-    echo "[MLPerf 1/4] Maximum Storage Stress: llama3.1-8b, cpu_mem=0GB, 200 users..."
+    echo "[MLPerf 1/3] Maximum Storage Stress: llama3.1-8b, cpu_mem=0GB, 200 users..."
     echo "             PRIMARY METRICS: Decode Bytes Read, Wall-Clock Throughput"
     echo "             WARNING: Storage Throughput unreliable at cpu_mem=0GB"
     python3 kv-cache.py \
@@ -450,7 +450,7 @@ if should_run 'mlperf_submission'; then
     # Test 2: Storage Throughput Test (cpu_mem=4GB)
     # Primary Metric: Storage Throughput (2.2x differentiation, 97% win rate)
     # -------------------------------------------------------------------------
-    echo "[MLPerf 2/4] Storage Throughput Test: llama3.1-8b, cpu_mem=4GB, 100 users..."
+    echo "[MLPerf 2/3] Storage Throughput Test: llama3.1-8b, cpu_mem=4GB, 100 users..."
     echo "             PRIMARY METRIC: Storage Throughput (tok/s)"
     python3 kv-cache.py \
         --config config.yaml \
@@ -472,7 +472,7 @@ if should_run 'mlperf_submission'; then
     # Test 3: Large Model Storage Stress (70B, cpu_mem=0GB)
     # 70B model generates ~10x more I/O per token than 8B
     # -------------------------------------------------------------------------
-    echo "[MLPerf 3/4] Large Model Stress: llama3.1-70b-instruct, cpu_mem=0GB, 70 users..."
+    echo "[MLPerf 3/3] Large Model Stress: llama3.1-70b-instruct, cpu_mem=0GB, 70 users..."
     echo "             PRIMARY METRICS: Decode Bytes Read, Wall-Clock Throughput"
     python3 kv-cache.py \
         --config config.yaml \
@@ -493,23 +493,23 @@ if should_run 'mlperf_submission'; then
     # -------------------------------------------------------------------------
     # Test 4: Large Model Throughput Test (70B, cpu_mem=4GB)
     # -------------------------------------------------------------------------
-    echo "[MLPerf 4/4] Large Model Throughput: llama3.1-70b-instruct, cpu_mem=4GB, 50 users..."
-    echo "             PRIMARY METRIC: Storage Throughput (tok/s)"
-    python3 kv-cache.py \
-        --config config.yaml \
-        --model llama3.1-70b-instruct \
-        --num-users 50 \
-        --duration 300 \
-        --gpu-mem-gb 0 \
-        --cpu-mem-gb 4 \
-        --max-concurrent-allocs 4 \
-        --generation-mode none \
-        --cache-dir "$cache_dir" \
-        --seed 42 \
-        --output mlperf_v3_throughput_70b.json \
-        --xlsx-output mlperf_v3_throughput_70b.xlsx
-    echo "Large model throughput test (70B) complete."
-    echo ""
+    # echo "[MLPerf 4/4] Large Model Throughput: llama3.1-70b-instruct, cpu_mem=4GB, 50 users..."
+    # echo "             PRIMARY METRIC: Storage Throughput (tok/s)"
+    # python3 kv-cache.py \
+    #     --config config.yaml \
+    #     --model llama3.1-70b-instruct \
+    #     --num-users 50 \
+    #     --duration 300 \
+    #     --gpu-mem-gb 0 \
+    #     --cpu-mem-gb 4 \
+    #     --max-concurrent-allocs 4 \
+    #     --generation-mode none \
+    #     --cache-dir "$cache_dir" \
+    #     --seed 42 \
+    #     --output mlperf_v3_throughput_70b.json \
+    #     --xlsx-output mlperf_v3_throughput_70b.xlsx
+    # echo "Large model throughput test (70B) complete."
+    # echo ""
 
     echo "============================================================================"
     echo "MLPERF SUBMISSION WORKLOAD COMPLETE"

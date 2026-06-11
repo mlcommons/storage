@@ -14,7 +14,7 @@ import os
 import pytest
 from unittest.mock import patch, MagicMock
 
-from mlpstorage.dependency_check import (
+from mlpstorage_py.dependency_check import (
     check_executable_available,
     check_mpi_available,
     check_dlio_available,
@@ -23,8 +23,8 @@ from mlpstorage.dependency_check import (
     check_dlio_with_hints,
     check_ssh_available,
 )
-from mlpstorage.environment import OSInfo
-from mlpstorage.errors import DependencyError
+from mlpstorage_py.environment import OSInfo
+from mlpstorage_py.errors import DependencyError
 
 
 class TestCheckExecutableAvailable:
@@ -231,13 +231,13 @@ class TestCheckMpiWithHints:
 
     def test_finds_mpirun_when_available(self):
         """Should return path when mpirun is available."""
-        with patch('mlpstorage.dependency_check.shutil.which', return_value='/usr/bin/mpirun'):
+        with patch('mlpstorage_py.dependency_check.shutil.which', return_value='/usr/bin/mpirun'):
             path = check_mpi_with_hints('mpirun')
             assert path == '/usr/bin/mpirun'
 
     def test_finds_mpiexec_when_available(self):
         """Should return path when mpiexec is available."""
-        with patch('mlpstorage.dependency_check.shutil.which', return_value='/usr/local/bin/mpiexec'):
+        with patch('mlpstorage_py.dependency_check.shutil.which', return_value='/usr/local/bin/mpiexec'):
             path = check_mpi_with_hints('mpiexec')
             assert path == '/usr/local/bin/mpiexec'
 
@@ -252,8 +252,8 @@ class TestCheckMpiWithHints:
             distro_version='22.04'
         )
 
-        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
-            with patch('mlpstorage.dependency_check.detect_os', return_value=mock_os_info):
+        with patch('mlpstorage_py.dependency_check.shutil.which', return_value=None):
+            with patch('mlpstorage_py.dependency_check.detect_os', return_value=mock_os_info):
                 with pytest.raises(DependencyError) as exc_info:
                     check_mpi_with_hints('mpirun')
 
@@ -271,8 +271,8 @@ class TestCheckMpiWithHints:
             distro_version='22.04'
         )
 
-        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
-            with patch('mlpstorage.dependency_check.detect_os', return_value=mock_os_info):
+        with patch('mlpstorage_py.dependency_check.shutil.which', return_value=None):
+            with patch('mlpstorage_py.dependency_check.detect_os', return_value=mock_os_info):
                 with pytest.raises(DependencyError) as exc_info:
                     check_mpi_with_hints('mpirun')
 
@@ -288,8 +288,8 @@ class TestCheckMpiWithHints:
             machine='x86_64'
         )
 
-        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
-            with patch('mlpstorage.dependency_check.detect_os', return_value=mock_os_info):
+        with patch('mlpstorage_py.dependency_check.shutil.which', return_value=None):
+            with patch('mlpstorage_py.dependency_check.detect_os', return_value=mock_os_info):
                 with pytest.raises(DependencyError) as exc_info:
                     check_mpi_with_hints('mpirun')
 
@@ -308,8 +308,8 @@ class TestCheckMpiWithHints:
             distro_version='8.5'
         )
 
-        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
-            with patch('mlpstorage.dependency_check.detect_os', return_value=mock_os_info):
+        with patch('mlpstorage_py.dependency_check.shutil.which', return_value=None):
+            with patch('mlpstorage_py.dependency_check.detect_os', return_value=mock_os_info):
                 with pytest.raises(DependencyError) as exc_info:
                     check_mpi_with_hints('mpirun')
 
@@ -323,7 +323,7 @@ class TestCheckDlioWithHints:
 
     def test_finds_dlio_in_path(self):
         """Should find dlio_benchmark when available in PATH."""
-        with patch('mlpstorage.dependency_check.shutil.which', return_value='/usr/local/bin/dlio_benchmark'):
+        with patch('mlpstorage_py.dependency_check.shutil.which', return_value='/usr/local/bin/dlio_benchmark'):
             path = check_dlio_with_hints()
             assert path == '/usr/local/bin/dlio_benchmark'
 
@@ -334,13 +334,13 @@ class TestCheckDlioWithHints:
         dlio_exe.touch()
         dlio_exe.chmod(0o755)
 
-        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
+        with patch('mlpstorage_py.dependency_check.shutil.which', return_value=None):
             path = check_dlio_with_hints(dlio_bin_path=str(tmp_path))
             assert path == str(dlio_exe)
 
     def test_raises_dependency_error_when_missing(self):
         """Should raise DependencyError when DLIO is not found."""
-        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
+        with patch('mlpstorage_py.dependency_check.shutil.which', return_value=None):
             with pytest.raises(DependencyError) as exc_info:
                 check_dlio_with_hints()
 
@@ -349,7 +349,7 @@ class TestCheckDlioWithHints:
 
     def test_error_contains_pip_install_suggestion(self):
         """Error message should contain pip install command."""
-        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
+        with patch('mlpstorage_py.dependency_check.shutil.which', return_value=None):
             with pytest.raises(DependencyError) as exc_info:
                 check_dlio_with_hints()
 
@@ -359,7 +359,7 @@ class TestCheckDlioWithHints:
 
     def test_prefers_path_over_custom_path(self):
         """Should prefer PATH location over custom path."""
-        with patch('mlpstorage.dependency_check.shutil.which', return_value='/usr/bin/dlio_benchmark'):
+        with patch('mlpstorage_py.dependency_check.shutil.which', return_value='/usr/bin/dlio_benchmark'):
             path = check_dlio_with_hints(dlio_bin_path='/custom/path')
             # Should use PATH, not custom path
             assert path == '/usr/bin/dlio_benchmark'
@@ -370,7 +370,7 @@ class TestCheckSshAvailable:
 
     def test_finds_ssh_when_available(self):
         """Should find ssh when available in PATH."""
-        with patch('mlpstorage.dependency_check.shutil.which', return_value='/usr/bin/ssh'):
+        with patch('mlpstorage_py.dependency_check.shutil.which', return_value='/usr/bin/ssh'):
             path = check_ssh_available()
             assert path == '/usr/bin/ssh'
 
@@ -385,8 +385,8 @@ class TestCheckSshAvailable:
             distro_version='22.04'
         )
 
-        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
-            with patch('mlpstorage.dependency_check.detect_os', return_value=mock_os_info):
+        with patch('mlpstorage_py.dependency_check.shutil.which', return_value=None):
+            with patch('mlpstorage_py.dependency_check.detect_os', return_value=mock_os_info):
                 with pytest.raises(DependencyError) as exc_info:
                     check_ssh_available()
 
@@ -404,8 +404,8 @@ class TestCheckSshAvailable:
             distro_version='22.04'
         )
 
-        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
-            with patch('mlpstorage.dependency_check.detect_os', return_value=mock_os_info):
+        with patch('mlpstorage_py.dependency_check.shutil.which', return_value=None):
+            with patch('mlpstorage_py.dependency_check.detect_os', return_value=mock_os_info):
                 with pytest.raises(DependencyError) as exc_info:
                     check_ssh_available()
 
@@ -423,8 +423,8 @@ class TestCheckSshAvailable:
             distro_version='8.5'
         )
 
-        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
-            with patch('mlpstorage.dependency_check.detect_os', return_value=mock_os_info):
+        with patch('mlpstorage_py.dependency_check.shutil.which', return_value=None):
+            with patch('mlpstorage_py.dependency_check.detect_os', return_value=mock_os_info):
                 with pytest.raises(DependencyError) as exc_info:
                     check_ssh_available()
 
@@ -440,8 +440,8 @@ class TestCheckSshAvailable:
             machine='x86_64'
         )
 
-        with patch('mlpstorage.dependency_check.shutil.which', return_value=None):
-            with patch('mlpstorage.dependency_check.detect_os', return_value=mock_os_info):
+        with patch('mlpstorage_py.dependency_check.shutil.which', return_value=None):
+            with patch('mlpstorage_py.dependency_check.detect_os', return_value=mock_os_info):
                 with pytest.raises(DependencyError) as exc_info:
                     check_ssh_available()
 

@@ -12,7 +12,7 @@ dataset:
   data_folder: data/dlrm/
   format: parquet
   num_files_train: 1024        # Number of training files to generate
-  num_samples_per_file: 4718592    # Samples per parquet file
+  num_samples_per_file: 1536000    # 250 RGs × 6144 → ~3.1 MiB footer (under s3-ultra 4 MiB limit)
   record_length_bytes: 761
   compression: none          # Options: snappy, gzip, lz4, zstd, none
   
@@ -627,12 +627,12 @@ dataset:
 reader:
   data_loader: pytorch
   batch_size: 12288
-  prefetch_size: 2  # Increase from default 2 for better I/O overlap
-  read_threads: 4   # Increase parallelism
+  prefetch_size: 0
+  read_threads: 0   # single-process, no IPC overhead; ThreadPoolExecutor handles I/O
   file_shuffle: seed
 
 train:
-  epochs: 1
+  epochs: 2
   computation_time: 0.000375
 
 metric:

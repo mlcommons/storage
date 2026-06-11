@@ -6,7 +6,7 @@ import time
 import pytest
 from unittest.mock import MagicMock, patch, Mock
 
-from mlpstorage.cluster_collector import (
+from mlpstorage_py.cluster_collector import (
     parse_proc_vmstat,
     parse_proc_mounts,
     parse_proc_cgroups,
@@ -19,7 +19,7 @@ from mlpstorage.cluster_collector import (
     TimeSeriesCollector,
     MultiHostTimeSeriesCollector,
 )
-from mlpstorage.interfaces.collector import CollectionResult
+from mlpstorage_py.interfaces.collector import CollectionResult
 
 
 class TestParseProcVmstat:
@@ -319,7 +319,7 @@ class TestCollectLocalSystemInfo:
 
     def test_includes_vmstat(self):
         """Test that collect_local_system_info includes vmstat data."""
-        from mlpstorage.cluster_collector import collect_local_system_info
+        from mlpstorage_py.cluster_collector import collect_local_system_info
 
         info = collect_local_system_info()
         assert 'vmstat' in info
@@ -331,7 +331,7 @@ class TestCollectLocalSystemInfo:
 
     def test_includes_mounts(self):
         """Test that collect_local_system_info includes mounts data."""
-        from mlpstorage.cluster_collector import collect_local_system_info
+        from mlpstorage_py.cluster_collector import collect_local_system_info
 
         info = collect_local_system_info()
         assert 'mounts' in info
@@ -346,7 +346,7 @@ class TestCollectLocalSystemInfo:
 
     def test_includes_cgroups(self):
         """Test that collect_local_system_info includes cgroups data."""
-        from mlpstorage.cluster_collector import collect_local_system_info
+        from mlpstorage_py.cluster_collector import collect_local_system_info
 
         info = collect_local_system_info()
         assert 'cgroups' in info
@@ -499,7 +499,7 @@ class TestSSHClusterCollector:
         assert result.collection_method == 'local'
         assert len(result.data) == 1
 
-    @patch('mlpstorage.cluster_collector.collect_local_system_info')
+    @patch('mlpstorage_py.cluster_collector.collect_local_system_info')
     def test_collect_from_localhost_uses_direct_collection(self, mock_local, collector):
         """Test that localhost uses direct collection, not SSH."""
         mock_local.return_value = {'hostname': 'localhost', 'meminfo': {}}
@@ -507,7 +507,7 @@ class TestSSHClusterCollector:
         mock_local.assert_called_once()
         assert result['hostname'] == 'localhost'
 
-    @patch('mlpstorage.cluster_collector.collect_local_system_info')
+    @patch('mlpstorage_py.cluster_collector.collect_local_system_info')
     def test_collect_from_127_uses_direct_collection(self, mock_local, collector):
         """Test that 127.0.0.1 uses direct collection, not SSH."""
         mock_local.return_value = {'hostname': 'localhost', 'meminfo': {}}
@@ -614,7 +614,7 @@ class TestSSHClusterCollector:
         assert 'error' in result
         assert 'Network unreachable' in result['error']
 
-    @patch('mlpstorage.cluster_collector.SSHClusterCollector._collect_from_single_host')
+    @patch('mlpstorage_py.cluster_collector.SSHClusterCollector._collect_from_single_host')
     def test_collect_parallel_execution(self, mock_collect_single, mock_logger):
         """Test that collect uses parallel execution."""
         collector = SSHClusterCollector(
@@ -632,7 +632,7 @@ class TestSSHClusterCollector:
         assert result.collection_method == 'ssh'
         assert len(result.data) == 3
 
-    @patch('mlpstorage.cluster_collector.SSHClusterCollector._collect_from_single_host')
+    @patch('mlpstorage_py.cluster_collector.SSHClusterCollector._collect_from_single_host')
     def test_collect_returns_success_when_all_succeed(self, mock_collect_single, mock_logger):
         """Test collect returns success when all hosts succeed."""
         collector = SSHClusterCollector(
@@ -646,7 +646,7 @@ class TestSSHClusterCollector:
         assert result.success is True
         assert len(result.errors) == 0
 
-    @patch('mlpstorage.cluster_collector.SSHClusterCollector._collect_from_single_host')
+    @patch('mlpstorage_py.cluster_collector.SSHClusterCollector._collect_from_single_host')
     def test_collect_returns_success_with_partial_failure(self, mock_collect_single, mock_logger):
         """Test collect returns success if majority of hosts succeed."""
         collector = SSHClusterCollector(
@@ -667,7 +667,7 @@ class TestSSHClusterCollector:
         assert len(result.errors) == 1
         assert len(result.data) == 3
 
-    @patch('mlpstorage.cluster_collector.SSHClusterCollector._collect_from_single_host')
+    @patch('mlpstorage_py.cluster_collector.SSHClusterCollector._collect_from_single_host')
     def test_collect_returns_error_list(self, mock_collect_single, mock_logger):
         """Test collect includes errors in result."""
         collector = SSHClusterCollector(
@@ -904,7 +904,7 @@ class TestTimeSeriesSampleDataclass:
 
     def test_create_with_required_fields(self):
         """Can create sample with just timestamp and hostname."""
-        from mlpstorage.rules.models import TimeSeriesSample
+        from mlpstorage_py.rules.models import TimeSeriesSample
 
         sample = TimeSeriesSample(
             timestamp='2026-01-24T12:00:00Z',
@@ -916,7 +916,7 @@ class TestTimeSeriesSampleDataclass:
 
     def test_to_dict_excludes_none(self):
         """to_dict should exclude None values."""
-        from mlpstorage.rules.models import TimeSeriesSample
+        from mlpstorage_py.rules.models import TimeSeriesSample
 
         sample = TimeSeriesSample(
             timestamp='2026-01-24T12:00:00Z',
@@ -932,7 +932,7 @@ class TestTimeSeriesSampleDataclass:
 
     def test_from_dict_roundtrip(self):
         """Can roundtrip through to_dict/from_dict."""
-        from mlpstorage.rules.models import TimeSeriesSample
+        from mlpstorage_py.rules.models import TimeSeriesSample
 
         original = TimeSeriesSample(
             timestamp='2026-01-24T12:00:00Z',
@@ -955,7 +955,7 @@ class TestTimeSeriesDataDataclass:
 
     def test_create_with_fields(self):
         """Can create TimeSeriesData with all fields."""
-        from mlpstorage.rules.models import TimeSeriesSample, TimeSeriesData
+        from mlpstorage_py.rules.models import TimeSeriesSample, TimeSeriesData
 
         sample = TimeSeriesSample(
             timestamp='2026-01-24T12:00:00Z',
@@ -978,7 +978,7 @@ class TestTimeSeriesDataDataclass:
 
     def test_to_dict_serializes_samples(self):
         """to_dict should serialize nested samples."""
-        from mlpstorage.rules.models import TimeSeriesSample, TimeSeriesData
+        from mlpstorage_py.rules.models import TimeSeriesSample, TimeSeriesData
 
         sample = TimeSeriesSample(
             timestamp='2026-01-24T12:00:00Z',
@@ -1005,7 +1005,7 @@ class TestTimeSeriesDataDataclass:
 
     def test_from_dict_roundtrip(self):
         """Can roundtrip TimeSeriesData through to_dict/from_dict."""
-        from mlpstorage.rules.models import TimeSeriesSample, TimeSeriesData
+        from mlpstorage_py.rules.models import TimeSeriesSample, TimeSeriesData
 
         sample = TimeSeriesSample(
             timestamp='2026-01-24T12:00:00Z',
@@ -1210,3 +1210,147 @@ class TestMultiHostTimeSeriesCollector:
         if bad_host_samples:
             # If we got samples, they should have errors
             assert any('errors' in s for s in bad_host_samples)
+
+
+class TestMPICollectorScriptMain:
+    """Tests for the main() function embedded in MPI_COLLECTOR_SCRIPT.
+
+    Verifies that every rank always calls comm.gather() even when
+    collect_local_info() raises, preventing a deadlock on surviving ranks.
+    """
+
+    @staticmethod
+    def _load_script_ns():
+        """Exec MPI_COLLECTOR_SCRIPT into a fresh namespace and return it."""
+        from mlpstorage_py.cluster_collector import MPI_COLLECTOR_SCRIPT
+        ns = {'__name__': 'mlps_collector'}
+        exec(MPI_COLLECTOR_SCRIPT, ns)
+        return ns
+
+    @staticmethod
+    def _mock_mpi(mock_comm):
+        """Return a sys.modules patch dict wiring mock_comm as MPI.COMM_WORLD."""
+        mock_mpi = MagicMock()
+        mock_mpi.COMM_WORLD = mock_comm
+        mock_mpi4py = MagicMock()
+        mock_mpi4py.MPI = mock_mpi
+        return {'mpi4py': mock_mpi4py}
+
+    def test_gather_called_on_successful_collection(self, tmp_path):
+        """Normal path: gather is called with local info dict including mpi_rank."""
+        output_file = str(tmp_path / 'out.json')
+        mock_comm = MagicMock()
+        mock_comm.Get_rank.return_value = 1
+        mock_comm.Get_size.return_value = 2
+        mock_comm.gather.return_value = None
+
+        ns = self._load_script_ns()
+        ns['collect_local_info'] = MagicMock(return_value={'hostname': 'node1'})
+
+        with patch.dict('sys.modules', self._mock_mpi(mock_comm)), \
+             patch('sys.argv', ['script', output_file]):
+            ns['main']()
+
+        mock_comm.gather.assert_called_once()
+        gathered_info = mock_comm.gather.call_args[0][0]
+        assert gathered_info['hostname'] == 'node1'
+        assert gathered_info['mpi_rank'] == 1
+        assert '_collection_error' not in gathered_info
+
+    def test_gather_still_called_when_collection_raises(self, tmp_path):
+        """Error path: gather is called even when collect_local_info() raises."""
+        output_file = str(tmp_path / 'out.json')
+        mock_comm = MagicMock()
+        mock_comm.Get_rank.return_value = 1
+        mock_comm.Get_size.return_value = 2
+        mock_comm.gather.return_value = None
+
+        ns = self._load_script_ns()
+        ns['collect_local_info'] = MagicMock(side_effect=RuntimeError('disk read failed'))
+
+        with patch.dict('sys.modules', self._mock_mpi(mock_comm)), \
+             patch('sys.argv', ['script', output_file]):
+            ns['main']()
+
+        mock_comm.gather.assert_called_once()
+
+    def test_sentinel_has_collection_error_key(self, tmp_path):
+        """Error sentinel must contain _collection_error so callers can detect failures."""
+        output_file = str(tmp_path / 'out.json')
+        mock_comm = MagicMock()
+        mock_comm.Get_rank.return_value = 1
+        mock_comm.Get_size.return_value = 2
+        mock_comm.gather.return_value = None
+
+        ns = self._load_script_ns()
+        ns['collect_local_info'] = MagicMock(side_effect=RuntimeError('disk read failed'))
+
+        with patch.dict('sys.modules', self._mock_mpi(mock_comm)), \
+             patch('sys.argv', ['script', output_file]):
+            ns['main']()
+
+        gathered_info = mock_comm.gather.call_args[0][0]
+        assert '_collection_error' in gathered_info
+        assert 'disk read failed' in gathered_info['_collection_error']
+
+    def test_sentinel_has_hostname_and_rank(self, tmp_path):
+        """Error sentinel must carry hostname and mpi_rank so rank 0 can identify the source."""
+        output_file = str(tmp_path / 'out.json')
+        mock_comm = MagicMock()
+        mock_comm.Get_rank.return_value = 2
+        mock_comm.Get_size.return_value = 4
+        mock_comm.gather.return_value = None
+
+        ns = self._load_script_ns()
+        ns['collect_local_info'] = MagicMock(side_effect=OSError('permission denied'))
+
+        with patch.dict('sys.modules', self._mock_mpi(mock_comm)), \
+             patch('sys.argv', ['script', output_file]):
+            ns['main']()
+
+        gathered_info = mock_comm.gather.call_args[0][0]
+        assert gathered_info['mpi_rank'] == 2
+        assert 'hostname' in gathered_info
+
+    def test_rank_zero_writes_output_file(self, tmp_path):
+        """Rank 0 writes the JSON output file when collection succeeds."""
+        output_file = str(tmp_path / 'out.json')
+        mock_comm = MagicMock()
+        mock_comm.Get_rank.return_value = 0
+        mock_comm.Get_size.return_value = 1
+        mock_comm.gather.return_value = [{'hostname': 'node0', 'mpi_rank': 0}]
+
+        ns = self._load_script_ns()
+        ns['collect_local_info'] = MagicMock(return_value={'hostname': 'node0'})
+
+        with patch.dict('sys.modules', self._mock_mpi(mock_comm)), \
+             patch('sys.argv', ['script', output_file]):
+            ns['main']()
+
+        with open(output_file) as f:
+            data = json.load(f)
+        assert 'node0' in data
+
+    def test_rank_zero_writes_output_when_another_rank_sent_sentinel(self, tmp_path):
+        """Rank 0 writes JSON even when another rank's payload is an error sentinel."""
+        output_file = str(tmp_path / 'out.json')
+        mock_comm = MagicMock()
+        mock_comm.Get_rank.return_value = 0
+        mock_comm.Get_size.return_value = 2
+        mock_comm.gather.return_value = [
+            {'hostname': 'node0', 'mpi_rank': 0},
+            {'hostname': 'node1', 'mpi_rank': 1, '_collection_error': 'disk read failed'},
+        ]
+
+        ns = self._load_script_ns()
+        ns['collect_local_info'] = MagicMock(return_value={'hostname': 'node0'})
+
+        with patch.dict('sys.modules', self._mock_mpi(mock_comm)), \
+             patch('sys.argv', ['script', output_file]):
+            ns['main']()
+
+        with open(output_file) as f:
+            data = json.load(f)
+        assert 'node0' in data
+        assert 'node1' in data
+        assert '_collection_error' in data['node1']

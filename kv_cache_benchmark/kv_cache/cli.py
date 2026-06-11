@@ -64,8 +64,11 @@ def export_results_to_xlsx(results: Dict, args, output_path: str):
         'Model': args.model,
         'Num Users': args.num_users,
         'Duration (s)': args.duration,
-        'GPU Memory (GB)': args.gpu_mem_gb,
-        'CPU Memory (GB)': args.cpu_mem_gb,
+        'GPU Memory per Card (GiB)': args.gpu_mem_gb,
+        'Num GPUs': args.num_gpus,
+        'Tensor Parallel': args.tensor_parallel,
+        'Total GPU Memory (GiB)': args.gpu_mem_gb * args.num_gpus,
+        'CPU Memory (GiB)': args.cpu_mem_gb,
         'Generation Mode': args.generation_mode,
         'Performance Profile': args.performance_profile,
         'Multi-turn': not args.disable_multi_turn,
@@ -78,9 +81,9 @@ def export_results_to_xlsx(results: Dict, args, output_path: str):
         'Max Requests': args.max_requests,
         'Dataset Path': args.dataset_path or 'N/A',
         'Cache Dir': args.cache_dir or 'temp',
-        'Storage Capacity (GB)': args.storage_capacity_gb,
+        'Storage Capacity (GiB)': args.storage_capacity_gb,
         'Precondition': args.precondition,
-        'Precondition Size (GB)': args.precondition_size_gb,
+        'Precondition Size (GiB)': args.precondition_size_gb,
         'Precondition Threads': args.precondition_threads if args.precondition_threads > 0 else (os.cpu_count() or 4),
         'Trace Speedup': args.trace_speedup,
         'Replay Cycles': args.replay_cycles,
@@ -148,23 +151,23 @@ def export_results_to_xlsx(results: Dict, args, output_path: str):
 
         'Cache Hit Rate': get_nested(summary, ['cache_stats', 'cache_hit_rate']),
         'Read/Write Ratio': get_nested(summary, ['cache_stats', 'read_write_ratio']),
-        'Total Read (GB)': get_nested(summary, ['cache_stats', 'total_read_gb']),
-        'Total Write (GB)': get_nested(summary, ['cache_stats', 'total_write_gb']),
+        'Total Read (GiB)': get_nested(summary, ['cache_stats', 'total_read_gb']),
+        'Total Write (GiB)': get_nested(summary, ['cache_stats', 'total_write_gb']),
 
-        'Tier GPU KV Bytes Written (GB)': get_nested(summary, ['cache_stats', 'tier_gpu_kv_bytes_written_gb']),
-        'Tier CPU KV Bytes Written (GB)': get_nested(summary, ['cache_stats', 'tier_cpu_kv_bytes_written_gb']),
-        'Tier Storage KV Bytes Written (GB)': get_nested(summary, ['cache_stats', 'tier_storage_kv_bytes_written_gb']),
+        'Tier GPU KV Bytes Written (GiB)': get_nested(summary, ['cache_stats', 'tier_gpu_kv_bytes_written_gb']),
+        'Tier CPU KV Bytes Written (GiB)': get_nested(summary, ['cache_stats', 'tier_cpu_kv_bytes_written_gb']),
+        'Tier Storage KV Bytes Written (GiB)': get_nested(summary, ['cache_stats', 'tier_storage_kv_bytes_written_gb']),
 
-        'Tier GPU KV Bytes Read (GB)': get_nested(summary, ['cache_stats', 'tier_gpu_kv_bytes_read_gb']),
-        'Tier CPU KV Bytes Read (GB)': get_nested(summary, ['cache_stats', 'tier_cpu_kv_bytes_read_gb']),
-        'Tier Storage KV Bytes Read (GB)': get_nested(summary, ['cache_stats', 'tier_storage_kv_bytes_read_gb']),
+        'Tier GPU KV Bytes Read (GiB)': get_nested(summary, ['cache_stats', 'tier_gpu_kv_bytes_read_gb']),
+        'Tier CPU KV Bytes Read (GiB)': get_nested(summary, ['cache_stats', 'tier_cpu_kv_bytes_read_gb']),
+        'Tier Storage KV Bytes Read (GiB)': get_nested(summary, ['cache_stats', 'tier_storage_kv_bytes_read_gb']),
 
-        'Tier GPU Read Bandwidth (GB/s)': get_nested(summary, ['cache_stats', 'tier_gpu_read_bandwidth_gbps']),
-        'Tier GPU Write Bandwidth (GB/s)': get_nested(summary, ['cache_stats', 'tier_gpu_write_bandwidth_gbps']),
-        'Tier CPU Read Bandwidth (GB/s)': get_nested(summary, ['cache_stats', 'tier_cpu_read_bandwidth_gbps']),
-        'Tier CPU Write Bandwidth (GB/s)': get_nested(summary, ['cache_stats', 'tier_cpu_write_bandwidth_gbps']),
-        'Tier Storage Read Bandwidth (GB/s)': get_nested(summary, ['cache_stats', 'tier_storage_read_bandwidth_gbps']),
-        'Tier Storage Write Bandwidth (GB/s)': get_nested(summary, ['cache_stats', 'tier_storage_write_bandwidth_gbps']),
+        'Tier GPU Read Bandwidth (GiB/s)': get_nested(summary, ['cache_stats', 'tier_gpu_read_bandwidth_gbps']),
+        'Tier GPU Write Bandwidth (GiB/s)': get_nested(summary, ['cache_stats', 'tier_gpu_write_bandwidth_gbps']),
+        'Tier CPU Read Bandwidth (GiB/s)': get_nested(summary, ['cache_stats', 'tier_cpu_read_bandwidth_gbps']),
+        'Tier CPU Write Bandwidth (GiB/s)': get_nested(summary, ['cache_stats', 'tier_cpu_write_bandwidth_gbps']),
+        'Tier Storage Read Bandwidth (GiB/s)': get_nested(summary, ['cache_stats', 'tier_storage_read_bandwidth_gbps']),
+        'Tier Storage Write Bandwidth (GiB/s)': get_nested(summary, ['cache_stats', 'tier_storage_write_bandwidth_gbps']),
 
         'GPU Entries': get_nested(summary, ['cache_stats', 'gpu_entries']),
         'CPU Entries': get_nested(summary, ['cache_stats', 'cpu_entries']),
@@ -208,6 +211,78 @@ def export_results_to_xlsx(results: Dict, args, output_path: str):
                         qos_df = pd.DataFrame(qos_rows)
                         qos_df.to_excel(writer, sheet_name='QoS Metrics', index=False)
 
+                # Device tracing sheet (when --enable-latency-tracing is used)
+                trace_data = results.get('device_latency_tracing', {})
+                if trace_data:
+                    trace_rows = []
+                    display_order = [
+                        ('d2c_read_us', 'D2C Read (us)', 'Device hardware time'),
+                        ('d2c_write_us', 'D2C Write (us)', 'Device hardware time'),
+                        ('q2d_read_us', 'Q2D Read (us)', 'I/O scheduler queue'),
+                        ('q2d_write_us', 'Q2D Write (us)', 'I/O scheduler queue'),
+                        ('vfs_read_us', 'VFS Read (us)', 'Application-visible'),
+                        ('vfs_write_us', 'VFS Write (us)', 'Application-visible'),
+                        ('fsync_us', 'fsync (us)', 'Device flush'),
+                        ('write_to_fsync_us', 'Write-to-fsync (us)', 'CPU serialization gap'),
+                        ('fadvise_to_read_us', 'fadvise-to-read (us)', 'Cache drop overhead'),
+                        ('bssplit_read_kb', 'Block Size Read (KiB)', 'I/O size distribution'),
+                        ('bssplit_write_kb', 'Block Size Write (KiB)', 'I/O size distribution'),
+                        ('qd_read', 'Queue Depth Read', 'Instantaneous QD at dispatch'),
+                        ('qd_write', 'Queue Depth Write', 'Instantaneous QD at dispatch'),
+                        ('lba_read_gb', 'LBA Heatmap Read (GiB)', 'Spatial I/O distribution'),
+                        ('lba_write_gb', 'LBA Heatmap Write (GiB)', 'Spatial I/O distribution'),
+                    ]
+
+                    def hist_pct(buckets, pct):
+                        total = sum(b['count'] for b in buckets)
+                        if total == 0:
+                            return 0
+                        target = total * pct / 100.0
+                        cum = 0
+                        for b in buckets:
+                            cum += b['count']
+                            if cum >= target:
+                                return b['range_us'][0]
+                        return buckets[-1]['range_us'][0]
+
+                    for key, label, description in display_order:
+                        if key not in trace_data or not trace_data[key].get('buckets'):
+                            continue
+                        buckets = trace_data[key]['buckets']
+                        total_count = sum(b['count'] for b in buckets)
+                        if total_count == 0:
+                            continue
+                        trace_rows.append({
+                            'Metric': label,
+                            'Description': description,
+                            'Samples': total_count,
+                            'P50': hist_pct(buckets, 50),
+                            'P95': hist_pct(buckets, 95),
+                            'P99': hist_pct(buckets, 99),
+                            'Min Bucket': buckets[0]['range_us'][0],
+                            'Max Bucket': buckets[-1]['range_us'][1],
+                        })
+
+                    if trace_rows:
+                        trace_df = pd.DataFrame(trace_rows)
+                        trace_df.to_excel(writer, sheet_name='Device Tracing', index=False)
+
+                        # Raw histograms sheet
+                        raw_rows = []
+                        for key, label, _ in display_order:
+                            if key not in trace_data or not trace_data[key].get('buckets'):
+                                continue
+                            for b in trace_data[key]['buckets']:
+                                raw_rows.append({
+                                    'Histogram': label,
+                                    'Bucket Low': b['range_us'][0],
+                                    'Bucket High': b['range_us'][1],
+                                    'Count': b['count'],
+                                })
+                        if raw_rows:
+                            raw_df = pd.DataFrame(raw_rows)
+                            raw_df.to_excel(writer, sheet_name='Trace Histograms', index=False)
+
             logger.info(f"XLSX results saved to {output_path}")
         else:
             csv_path = output_path.replace('.xlsx', '.csv') if output_path.endswith('.xlsx') else output_path
@@ -239,9 +314,20 @@ def main():
     parser.add_argument('--duration', type=int, default=60,
                         help='The duration of the benchmark in seconds.')
     parser.add_argument('--gpu-mem-gb', type=float, default=16,
-                        help='The amount of GPU memory (VRAM) to allocate for the cache in GB.')
+                        help='Per-GPU VRAM to allocate for the KV cache tier in GiB. '
+                             'When --num-gpus > 1 the effective GPU pool = num_gpus × gpu-mem-gb.')
+    parser.add_argument('--num-gpus', type=int, default=1,
+                        help='Number of GPUs in the tensor-parallel group. '
+                             'Sets total GPU tier = num_gpus × gpu-mem-gb. '
+                             'Example: --num-gpus 8 --gpu-mem-gb 141 models 8×H200.')
+    parser.add_argument('--tensor-parallel', type=int, default=1,
+                        help='Tensor-parallel degree (TP). '
+                             'Each GPU rank stores 1/TP of each KV cache entry, '
+                             'so per-rank I/O object sizes are divided by TP. '
+                             'Must be >= 1 and <= --num-gpus. '
+                             'Example: --tensor-parallel 8 models TP=8 for Llama 70B on 8×H200.')
     parser.add_argument('--cpu-mem-gb', type=float, default=32,
-                        help='The amount of CPU memory (RAM) to allocate for the cache in GB.')
+                        help='Total CPU DRAM to allocate for the KV cache spill tier in GiB.')
     parser.add_argument('--cache-dir', type=str, default=None,
                         help='The directory to use for the NVMe cache tier.')
     parser.add_argument('--use-mmap', action='store_true',
@@ -287,11 +373,11 @@ def main():
     parser.add_argument('--config', type=str, default=None,
                         help='Path to YAML configuration file.')
     parser.add_argument('--storage-capacity-gb', type=float, default=0,
-                        help='NVMe/storage tier capacity in GB. 0 = auto-detect.')
+                        help='NVMe/storage tier capacity in GiB. 0 = auto-detect.')
     parser.add_argument('--precondition', action='store_true',
                         help='Enable SSD preconditioning phase before benchmark.')
     parser.add_argument('--precondition-size-gb', type=float, default=0,
-                        help='Preconditioning data volume in GB. 0 = 2x NVMe capacity.')
+                        help='Preconditioning data volume in GiB. 0 = 2x NVMe capacity.')
     parser.add_argument('--precondition-threads', type=int, default=0,
                         help='Number of threads for preconditioning writes. 0 = os.cpu_count().')
     parser.add_argument('--trace-speedup', type=float, default=1.0,
@@ -302,6 +388,16 @@ def main():
                         help='Simulate disaggregated prefill node (write-heavy, no decode reads).')
     parser.add_argument('--decode-only', action='store_true',
                         help='Simulate disaggregated decode node (read-heavy, assumes KV cache exists).')
+    parser.add_argument('--io-trace-log', type=str, default=None,
+                        help=(
+                            'Path for the I/O trace CSV output file. '
+                            'When set, activates trace mode: no real GPU/CPU/NVMe I/O is performed. '
+                            'Instead every KV cache operation is logged as a row: '
+                            'Timestamp,Operation,Object_Size_Bytes,Tier (Tier-0=GPU, Tier-1=CPU, Tier-2=NVMe). '
+                            'The resulting trace can be replayed by an external storage benchmark tool.'
+                        ))
+    parser.add_argument('--enable-latency-tracing', action='store_true',
+                        help='Enable bpftrace device latency tracing (requires sudo, bpftrace).')
 
     args = parser.parse_args()
 
@@ -316,6 +412,9 @@ def main():
     )
 
     args = validate_args(args)
+
+    if args.io_trace_log:
+        logger.info(f"Trace mode active: I/O operations will be logged to {args.io_trace_log} (no real hardware I/O)")
 
     if args.config:
         config = ConfigLoader(args.config)
@@ -352,6 +451,8 @@ def main():
         model_config=model_config,
         num_users=args.num_users,
         gpu_memory_gb=args.gpu_mem_gb,
+        num_gpus=args.num_gpus,
+        tensor_parallel=args.tensor_parallel,
         cpu_memory_gb=args.cpu_mem_gb,
         duration_seconds=args.duration,
         cache_dir=args.cache_dir,
@@ -381,7 +482,9 @@ def main():
         trace_speedup=args.trace_speedup,
         replay_cycles=args.replay_cycles,
         prefill_only=args.prefill_only,
-        decode_only=args.decode_only
+        decode_only=args.decode_only,
+        io_trace_log=args.io_trace_log,
+        enable_latency_tracing=args.enable_latency_tracing
     )
 
     results = benchmark.run()
@@ -404,6 +507,15 @@ def main():
 
     if args.xlsx_output:
         export_results_to_xlsx(results, args, args.xlsx_output)
+
+    # Save fio workload file when latency tracing produced one
+    fio_config = results.get('fio_workload')
+    if fio_config:
+        timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
+        fio_filename = f"fio_kv_cache_workload_{timestamp}.ini"
+        with open(fio_filename, 'w') as f:
+            f.write(fio_config)
+        logger.info(f"fio workload saved to {fio_filename}")
 
 
 if __name__ == "__main__":

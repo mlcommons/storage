@@ -12,9 +12,12 @@ import csv
 import glob
 import time
 import queue
+import signal
 import random
 import logging
 import threading
+import subprocess
+import re
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime
 from concurrent.futures import ThreadPoolExecutor
@@ -34,6 +37,7 @@ from kv_cache.monitoring import StorageMonitor, WorkloadAutoscaler, QoSMonitor
 from kv_cache.workload import (
     ValidationEngine, UserSimulator, ShareGPTDatasetLoader,
 )
+from kv_cache.tracer import IOTracer
 
 logger = logging.getLogger(__name__)
 
@@ -47,6 +51,8 @@ class IntegratedBenchmark:
                  gpu_memory_gb: float,
                  cpu_memory_gb: float,
                  duration_seconds: int,
+                 num_gpus: int = 1,
+                 tensor_parallel: int = 1,
                  cache_dir: str = None,
                  use_mmap: bool = False,
                  enable_autoscaling: bool = False,
@@ -74,14 +80,22 @@ class IntegratedBenchmark:
                  trace_speedup: float = 1.0,
                  replay_cycles: int = 0,
                  prefill_only: bool = False,
-                 decode_only: bool = False):
+                 decode_only: bool = False,
+                 io_trace_log: Optional[str] = None,
+                 enable_latency_tracing: bool = False):
 
         self.model_config = model_config
         self.num_users = num_users
         self.initial_users = num_users
         self.duration = duration_seconds
+        self.num_gpus = max(1, num_gpus)
+        self.tensor_parallel = max(1, tensor_parallel)
+        self.gpu_memory_gb_per_card = gpu_memory_gb
+        self.total_gpu_memory_gb = gpu_memory_gb * self.num_gpus
         self.enable_autoscaling = enable_autoscaling
         self.enable_multi_turn = enable_multi_turn
+        self.enable_latency_tracing = enable_latency_tracing
+        self._trace_proc = None
         self.generation_mode = generation_mode
         self.ms_per_token = GENERATION_TIMING[generation_mode] * 1000
         self.enable_prefix_caching = enable_prefix_caching
@@ -104,6 +118,12 @@ class IntegratedBenchmark:
         self.replay_cycles = replay_cycles
         self.prefill_only = prefill_only
         self.decode_only = decode_only
+
+        # Trace mode: IOTracer is created here and closed at the end of run()
+        if io_trace_log:
+            self.io_tracer: Optional[IOTracer] = IOTracer(io_trace_log)
+        else:
+            self.io_tracer = None
         self.burst_trace_files: List[str] = []
         self.sharegpt_loader: Optional[ShareGPTDatasetLoader] = None
 
@@ -123,14 +143,16 @@ class IntegratedBenchmark:
         # Initialize components
         self.cache = MultiTierCache(
             model_config=model_config,
-            gpu_memory_gb=gpu_memory_gb,
+            gpu_memory_gb=self.total_gpu_memory_gb,
             cpu_memory_gb=cpu_memory_gb,
             cache_dir=cache_dir,
             use_mmap=use_mmap,
             performance_profile=performance_profile,
             seed=seed,
             max_concurrent_allocs=max_concurrent_allocs,
-            storage_capacity_gb=storage_capacity_gb
+            storage_capacity_gb=storage_capacity_gb,
+            tensor_parallel=self.tensor_parallel,
+            io_tracer=self.io_tracer,
         )
         self.conversation_manager = ConversationManager()
         self.prefix_cache_manager = PrefixCacheManager(self.cache) if enable_prefix_caching else None
@@ -421,6 +443,15 @@ class IntegratedBenchmark:
                             self.user_conversations.pop(user.user_id, None)
                         local_conv_id = None
 
+                    # Enforce max_turns_per_conv hard cap
+                    if local_conv_id:
+                        with self.conversation_manager.lock:
+                            state = self.conversation_manager.conversations.get(local_conv_id)
+                            if state and state.turn_number >= self.conversation_manager.max_turns_per_conv:
+                                with self.user_conversations_lock:
+                                    self.user_conversations.pop(user.user_id, None)
+                                local_conv_id = None
+
                     if local_conv_id is None:
                         local_conv_id = self.conversation_manager.start_conversation(user.user_id)
                         with self.user_conversations_lock:
@@ -516,19 +547,26 @@ class IntegratedBenchmark:
                     storage_latency += read_lat
                     request.context_tokens = remaining_tokens
 
-            # 2. For multi-turn conversations, access cache from previous turn.
-            if self.conversation_manager and request.turn_number > 1:
-                prev_turn_key = f"{request.conversation_id}_turn_{request.turn_number - 1}"
-                location, read_latency = self.cache.access_cache(prev_turn_key, InferencePhase.DECODE, 'multi_turn')
-                if location is not None:
-                    storage_latency += read_latency
-                    with self.results_lock: self.results['multi_turn_cache_hits'] += 1
-                else:
-                    with self.results_lock: self.results['multi_turn_cache_misses'] += 1
-
-            # 3. Perform the main PREFILL operation (a cache WRITE).
-            # Skip if decode_only mode (disaggregated decode node)
+            # Skip steps 2+3 entirely in decode_only mode:
+            # - Step 2 reads always miss (step 3 writes are skipped, so no entries exist)
+            # - Step 3 prefill writes don't apply to decode-only nodes
             if not self.decode_only:
+                # 2. For multi-turn conversations, reload all previous turns' KV cache.
+                #    Reads every previous turn via access_cache (real I/O for entries
+                #    that survived eviction; immediate (None, 0.0) for evicted entries).
+                if self.conversation_manager and request.turn_number > 1:
+                    prev_keys = self.conversation_manager.get_all_previous_turn_keys(
+                        request.conversation_id, request.turn_number
+                    )
+                    for prev_turn_key in prev_keys:
+                        location, read_latency = self.cache.access_cache(prev_turn_key, InferencePhase.DECODE, 'multi_turn')
+                        if location is not None:
+                            storage_latency += read_latency
+                            with self.results_lock: self.results['multi_turn_cache_hits'] += 1
+                        else:
+                            with self.results_lock: self.results['multi_turn_cache_misses'] += 1
+
+                # 3. Perform the main PREFILL operation (a cache WRITE).
                 if request.phase == InferencePhase.PREFILL or request.phase == InferencePhase.PREFILL_DECODE:
                     success, location, write_latency = self.cache.allocate_cache(
                         request.cache_key, request.context_tokens, InferencePhase.PREFILL
@@ -558,6 +596,8 @@ class IntegratedBenchmark:
                         decode_key = request.cache_key
                     
                     location, read_latency = self.cache.access_cache(decode_key, InferencePhase.DECODE, cache_type)
+                    storage_latency += read_latency
+                    decode_total_latency = read_latency
 
                     if location is None:
                         # Cache miss during decode - need to allocate (unless decode_only)
@@ -574,8 +614,9 @@ class IntegratedBenchmark:
                         for _ in range(num_batched_reads):
                             _, batch_read_latency = self.cache.access_cache(decode_key, InferencePhase.DECODE, cache_type)
                             storage_latency += batch_read_latency
+                            decode_total_latency += batch_read_latency
 
-                    with self.results_lock: self.results['decode_latencies'].append(read_latency)
+                    with self.results_lock: self.results['decode_latencies'].append(decode_total_latency)
 
             # 6. Simulate token generation time.
             generation_latency = request.generate_tokens * GENERATION_TIMING[self.generation_mode]
@@ -670,10 +711,441 @@ class IntegratedBenchmark:
                       f"Throughput: {throughput:.2f} tok/s")
                 last_log_time = now
 
+    def _start_latency_tracing(self):
+        """Spawn bpftrace as a sudo subprocess to trace block-layer device latency."""
+        script_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), 'utils')
+        script_path = os.path.join(script_dir, 'storage_latency_stack.sh')
+
+        if not os.path.exists(script_path):
+            logger.warning(f"Tracing script not found: {script_path}")
+            print(f"  WARNING: {script_path} not found. Skipping latency tracing.")
+            return
+
+        # Determine the process name to filter on
+        comm = os.path.basename(sys.argv[0]) if sys.argv[0] else 'python3'
+
+        print(f"\n### LATENCY TRACING ###")
+        print(f"  Script: {script_path}")
+        print(f"  Filter: {comm}")
+        print(f"  Spawning sudo bpftrace (you may be prompted for password)...")
+
+        try:
+            self._trace_proc = subprocess.Popen(
+                ['sudo', script_path, comm],
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                preexec_fn=os.setsid  # own process group for clean SIGINT
+            )
+            # Give bpftrace time to attach probes
+            time.sleep(2)
+            if self._trace_proc.poll() is not None:
+                stderr = self._trace_proc.stderr.read().decode('utf-8', errors='replace')
+                logger.warning(f"bpftrace exited early: {stderr[:200]}")
+                print(f"  WARNING: bpftrace failed to start. Continuing without tracing.")
+                self._trace_proc = None
+            else:
+                print(f"  bpftrace attached (pid {self._trace_proc.pid}). Tracing active.")
+        except FileNotFoundError:
+            logger.warning("sudo or bpftrace not found")
+            print(f"  WARNING: sudo/bpftrace not available. Skipping latency tracing.")
+            self._trace_proc = None
+        except Exception as e:
+            logger.warning(f"Failed to start tracing: {e}")
+            print(f"  WARNING: Tracing failed: {e}. Continuing without tracing.")
+            self._trace_proc = None
+
+    def _stop_latency_tracing(self) -> Optional[Dict]:
+        """Send SIGINT to bpftrace, capture histograms, parse into dict."""
+        if not self._trace_proc:
+            return None
+
+        print(f"\n### COLLECTING TRACE DATA ###")
+        try:
+            # SIGINT to the process group triggers bpftrace's END block
+            os.killpg(os.getpgid(self._trace_proc.pid), signal.SIGINT)
+            stdout, stderr = self._trace_proc.communicate(timeout=10)
+        except subprocess.TimeoutExpired:
+            os.killpg(os.getpgid(self._trace_proc.pid), signal.SIGKILL)
+            stdout, stderr = self._trace_proc.communicate()
+        except Exception as e:
+            logger.warning(f"Error stopping bpftrace: {e}")
+            return None
+
+        # bpftrace may print histograms to stdout or stderr depending on version
+        stdout_text = stdout.decode('utf-8', errors='replace')
+        stderr_text = stderr.decode('utf-8', errors='replace')
+        output = stdout_text + '\n' + stderr_text
+
+        if '@' not in output:
+            logger.warning(f"No histogram data in bpftrace output ({len(output)} bytes)")
+            logger.warning(f"Raw output: {repr(output[:500])}")
+            return {}
+
+        return self._parse_bpftrace_output(output)
+
+    def _parse_bpftrace_output(self, output: str) -> Dict:
+        """Parse bpftrace histogram output into structured dict."""
+        result = {}
+        current_hist = None
+        lines = output.split('\n')
+
+        for line in lines:
+            # Match histogram name like "@d2c_read_us:" or "@vfs_write_us:"
+            # bpftrace may prefix with newlines or spaces
+            hist_match = re.match(r'^\s*@(\w+):\s*$', line)
+            if hist_match:
+                current_hist = hist_match.group(1)
+                result[current_hist] = {'buckets': [], 'raw': []}
+                continue
+
+            # Match histogram bucket like "[128, 256)         5 |@@@@                |"
+            bucket_match = re.match(r'^\[(\d+),\s*(\d+)\)\s+(\d+)\s+\|', line)
+            if bucket_match and current_hist:
+                low = int(bucket_match.group(1))
+                high = int(bucket_match.group(2))
+                count = int(bucket_match.group(3))
+                result[current_hist]['buckets'].append({
+                    'range_us': [low, high],
+                    'count': count
+                })
+                result[current_hist]['raw'].append(line.rstrip())
+                continue
+
+            # Match single-value bucket like "[1M, 2M)           1 |@@@@                |"
+            bucket_match_k = re.match(r'^\[(\d+)([KM]),\s*(\d+)([KM])\)\s+(\d+)\s+\|', line)
+            if bucket_match_k and current_hist:
+                def parse_val(num, suffix):
+                    v = int(num)
+                    return v * 1024 if suffix == 'K' else v * 1048576
+                low = parse_val(bucket_match_k.group(1), bucket_match_k.group(2))
+                high = parse_val(bucket_match_k.group(3), bucket_match_k.group(4))
+                count = int(bucket_match_k.group(5))
+                result[current_hist]['buckets'].append({
+                    'range_us': [low, high],
+                    'count': count
+                })
+                result[current_hist]['raw'].append(line.rstrip())
+
+        return result
+
+    @staticmethod
+    def _hist_percentile(buckets: List[Dict], pct: float) -> Dict:
+        """Compute a percentile bucket from a parsed histogram."""
+        total = sum(b['count'] for b in buckets)
+        if total == 0:
+            return buckets[0] if buckets else {'range_us': [0, 0], 'count': 0}
+        target = total * pct / 100.0
+        cumulative = 0
+        for b in buckets:
+            cumulative += b['count']
+            if cumulative >= target:
+                return b
+        return buckets[-1]
+
+    def _print_trace_results(self, trace_data: Dict):
+        """Print parsed bpftrace histograms."""
+        if not trace_data:
+            return
+
+        print(f"\n### DEVICE LATENCY TRACING (bpftrace) ###")
+
+        # ── Latency histograms ──
+        latency_histograms = [
+            ('d2c_read_us', 'D2C Read (device hardware time)', 'us'),
+            ('d2c_write_us', 'D2C Write (device hardware time)', 'us'),
+            ('q2d_read_us', 'Q2D Read (I/O scheduler queue)', 'us'),
+            ('q2d_write_us', 'Q2D Write (I/O scheduler queue)', 'us'),
+            ('vfs_read_us', 'VFS Read (application-visible)', 'us'),
+            ('vfs_write_us', 'VFS Write (application-visible)', 'us'),
+            ('fsync_us', 'fsync (device flush)', 'us'),
+            ('write_to_fsync_us', 'Write-to-fsync gap (CPU serialization)', 'us'),
+            ('fadvise_to_read_us', 'fadvise-to-read gap (cache drop)', 'us'),
+        ]
+
+        for key, label, unit in latency_histograms:
+            if key not in trace_data or not trace_data[key]['buckets']:
+                continue
+            buckets = trace_data[key]['buckets']
+            total_count = sum(b['count'] for b in buckets)
+            if total_count == 0:
+                continue
+
+            p50 = self._hist_percentile(buckets, 50)
+            p95 = self._hist_percentile(buckets, 95)
+            p99 = self._hist_percentile(buckets, 99)
+
+            print(f"\n  {label}:")
+            print(f"    Samples: {total_count}")
+            print(f"    P50: [{p50['range_us'][0]:,}, {p50['range_us'][1]:,}) {unit}")
+            print(f"    P95: [{p95['range_us'][0]:,}, {p95['range_us'][1]:,}) {unit}")
+            print(f"    P99: [{p99['range_us'][0]:,}, {p99['range_us'][1]:,}) {unit}")
+            for raw_line in trace_data[key]['raw']:
+                print(f"    {raw_line}")
+
+        # ── Block size distribution ──
+        bssplit_histograms = [
+            ('bssplit_read_kb', 'Block Size Distribution (Reads)'),
+            ('bssplit_write_kb', 'Block Size Distribution (Writes)'),
+        ]
+
+        for key, label in bssplit_histograms:
+            if key not in trace_data or not trace_data[key]['buckets']:
+                continue
+            buckets = trace_data[key]['buckets']
+            total_count = sum(b['count'] for b in buckets)
+            if total_count == 0:
+                continue
+
+            p50 = self._hist_percentile(buckets, 50)
+
+            print(f"\n  {label}:")
+            print(f"    I/O count: {total_count}")
+            print(f"    P50: [{p50['range_us'][0]:,}, {p50['range_us'][1]:,})KiB")
+            for raw_line in trace_data[key]['raw']:
+                print(f"    {raw_line}")
+
+        # ── Queue depth distribution ──
+        qd_histograms = [
+            ('qd_read', 'Queue Depth at Dispatch (Reads)'),
+            ('qd_write', 'Queue Depth at Dispatch (Writes)'),
+        ]
+
+        for key, label in qd_histograms:
+            if key not in trace_data or not trace_data[key]['buckets']:
+                continue
+            buckets = trace_data[key]['buckets']
+            total_count = sum(b['count'] for b in buckets)
+            if total_count == 0:
+                continue
+
+            p50 = self._hist_percentile(buckets, 50)
+            p95 = self._hist_percentile(buckets, 95)
+
+            print(f"\n  {label}:")
+            print(f"    Samples: {total_count}")
+            print(f"    P50: [{p50['range_us'][0]}, {p50['range_us'][1]})")
+            print(f"    P95: [{p95['range_us'][0]}, {p95['range_us'][1]})")
+            for raw_line in trace_data[key]['raw']:
+                print(f"    {raw_line}")
+
+        # ── LBA heatmap ──
+        lba_histograms = [
+            ('lba_read_gb', 'LBA Heatmap (Reads, 10GiB buckets)'),
+            ('lba_write_gb', 'LBA Heatmap (Writes, 10GiB buckets)'),
+        ]
+
+        for key, label in lba_histograms:
+            if key not in trace_data or not trace_data[key]['buckets']:
+                continue
+            buckets = trace_data[key]['buckets']
+            total_count = sum(b['count'] for b in buckets)
+            if total_count == 0:
+                continue
+
+            # Find the hot zone (buckets with > 1% of I/O)
+            hot_zones = [b for b in buckets if b['count'] > total_count * 0.01]
+            if hot_zones:
+                hot_start = hot_zones[0]['range_us'][0]
+                hot_end = hot_zones[-1]['range_us'][1]
+                hot_pct = sum(b['count'] for b in hot_zones) * 100.0 / total_count
+            else:
+                hot_start = hot_end = hot_pct = 0
+
+            print(f"\n  {label}:")
+            print(f"    I/O count: {total_count}")
+            if hot_zones:
+                print(f"    Hot zone: {hot_start}-{hot_end}GiB ({hot_pct:.0f}% of I/O)")
+            for raw_line in trace_data[key]['raw']:
+                print(f"    {raw_line}")
+
+    def _generate_fio_workload(self, trace_data: Dict) -> Optional[str]:
+        """Generate a fio workload .ini file from bpftrace trace data.
+
+        Distills the traced block-layer I/O pattern into a standalone fio config
+        that reproduces the same bssplit, read/write ratio, queue depth, and
+        idle time characteristics observed during the benchmark run.
+        """
+        # ── Validate minimum required histograms ──
+        required = ['bssplit_read_kb', 'bssplit_write_kb']
+        for key in required:
+            if key not in trace_data or not trace_data[key].get('buckets'):
+                logger.warning(f"Missing {key} histogram; cannot generate fio workload")
+                return None
+
+        # ── bssplit: convert histogram buckets to fio format ──
+        def hist_to_bssplit(buckets: List[Dict]) -> str:
+            total = sum(b['count'] for b in buckets)
+            if total == 0:
+                return "4k/100"
+            parts = []
+            for b in buckets:
+                if b['count'] == 0:
+                    continue
+                size_kb = b['range_us'][0]  # lower bound of bucket
+                pct = int(round(b['count'] * 100.0 / total))
+                if pct == 0 and b['count'] > 0:
+                    pct = 1  # don't drop non-zero buckets
+                # Format size: use k for < 1024, m for >= 1024
+                if size_kb >= 1024:
+                    size_str = f"{size_kb // 1024}m"
+                else:
+                    size_str = f"{size_kb}k"
+                parts.append(f"{size_str}/{pct}")
+            return ":".join(parts) if parts else "4k/100"
+
+        read_bssplit = hist_to_bssplit(trace_data['bssplit_read_kb']['buckets'])
+        write_bssplit = hist_to_bssplit(trace_data['bssplit_write_kb']['buckets'])
+        bssplit_line = f"{read_bssplit},{write_bssplit}"
+
+        # ── rwmixread: from I/O count ratio ──
+        read_count = sum(b['count'] for b in trace_data['bssplit_read_kb']['buckets'])
+        write_count = sum(b['count'] for b in trace_data['bssplit_write_kb']['buckets'])
+        total_io = read_count + write_count
+        rwmixread = int(round(read_count * 100.0 / total_io)) if total_io > 0 else 50
+
+        # ── iodepth: from QD histogram P50 ──
+        iodepth = 32  # default
+        for qd_key in ('qd_read', 'qd_write'):
+            if qd_key in trace_data and trace_data[qd_key].get('buckets'):
+                p50 = self._hist_percentile(trace_data[qd_key]['buckets'], 50)
+                candidate = max(1, p50['range_us'][0])
+                iodepth = max(iodepth, candidate)
+
+        # ── thinktime: from write_to_fsync gap (CPU idle between I/O bursts) ──
+        thinktime_us = 0
+        if 'write_to_fsync_us' in trace_data and trace_data['write_to_fsync_us'].get('buckets'):
+            buckets = trace_data['write_to_fsync_us']['buckets']
+            total_samples = sum(b['count'] for b in buckets)
+            if total_samples >= 4:
+                p50 = self._hist_percentile(buckets, 50)
+                thinktime_us = p50['range_us'][0]
+
+        # ── thinktime_iotime: from fsync latency (active I/O burst duration) ──
+        thinktime_iotime_us = 0
+        if 'fsync_us' in trace_data and trace_data['fsync_us'].get('buckets'):
+            buckets = trace_data['fsync_us']['buckets']
+            total_samples = sum(b['count'] for b in buckets)
+            if total_samples >= 4:
+                p50 = self._hist_percentile(buckets, 50)
+                thinktime_iotime_us = p50['range_us'][0]
+
+        # ── Build the fio config ──
+        timestamp = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        model_name = self.model_config.name
+        bpt = self.model_config.kv_cache_size_per_token
+
+        lines = [
+            f"# KV Cache Benchmark; Traced Workload",
+            f"# Generated: {timestamp}",
+            f"# Model: {model_name}, Users: {self.num_users}, Duration: {self.duration}s",
+            f"# KV bytes/token: {bpt:,} bytes ({bpt/1024:.0f}KiB)",
+            f"#",
+            f"# Distilled from bpftrace block-layer tracing during benchmark run.",
+            f"# Total traced I/Os: {total_io:,} ({read_count:,} reads, {write_count:,} writes)",
+            f"#",
+            f"# Usage:",
+            f"#   fio <this_file> --filename=/dev/nvmeXn1",
+            f"#   fio <this_file> --filename=/mnt/nvme/fio_test --size=100G",
+            f"",
+            f"[kv-cache-traced]",
+            f"ioengine=libaio",
+            f"direct=1",
+            f"time_based",
+            f"runtime=300",
+            f"rw=randrw",
+            f"rwmixread={rwmixread}",
+            f"bssplit={bssplit_line}",
+            f"iodepth={iodepth}",
+            f"iodepth_batch_submit={iodepth}",
+            f"iodepth_batch_complete_min=1",
+            f"size=100%",
+        ]
+
+        if thinktime_us > 0:
+            lines.extend([
+                f"thinktime={thinktime_us}",
+                f"thinktime_blocks={iodepth}",
+            ])
+            if thinktime_iotime_us > 0:
+                # thinktime_iotime requires fio 3.28+
+                # Converts active I/O period from microseconds to seconds
+                thinktime_iotime_s = max(1, thinktime_iotime_us // 1000000)
+                lines.append(f"# thinktime_iotime={thinktime_iotime_s}s  # uncomment for fio 3.28+ (active I/O burst before idle)")
+
+        lines.extend([
+            f"refill_buffers=1",
+            f"norandommap=1",
+            f"randrepeat=0",
+            f"numjobs=1",
+            f"group_reporting",
+            f"percentile_list=50:95:99:99.9:99.99",
+        ])
+
+        return "\n".join(lines) + "\n"
+
+    def _check_memory_safety(self):
+        """Estimate peak memory usage and warn if OOM is likely.
+
+        Peak memory per worker thread comes from access_cache -> np.load + np.array
+        which briefly holds 2x the entry size in RAM. With N worker threads running
+        concurrently, peak = N * 2 * mean_entry_bytes + baseline (precomputed buffer,
+        Python/torch overhead, OS).
+        """
+        try:
+            import psutil
+            available_ram = psutil.virtual_memory().available
+        except ImportError:
+            try:
+                with open('/proc/meminfo', 'r') as f:
+                    for line in f:
+                        if line.startswith('MemAvailable:'):
+                            available_ram = int(line.split()[1]) * 1024  # kB to bytes
+                            break
+                    else:
+                        return  # can't determine
+            except (FileNotFoundError, ValueError):
+                return  # non-Linux or parse error
+
+        bpt = self.model_config.kv_cache_size_per_token
+        # Mean context from user templates: midpoint of chatbot + coding + document ranges
+        mean_context_tokens = 8000  # conservative estimate
+        mean_entry_bytes = mean_context_tokens * bpt
+        # np.load + np.array = 2x entry size per concurrent read
+        per_thread_peak = mean_entry_bytes * 2
+        # Worker threads = min(num_users, 500); all can read concurrently
+        num_workers = min(self.num_users, 500)
+        # Baseline: precomputed buffer (~256 MB) + Python/torch overhead (~2 GB)
+        baseline = 2.5 * 1024**3
+        estimated_peak = (num_workers * per_thread_peak) + baseline
+
+        safe_workers = max(1, int((available_ram - baseline) / per_thread_peak)) if per_thread_peak > 0 else num_workers
+
+        print(f"\n### MEMORY SAFETY CHECK ###")
+        print(f"  Formula: peak = (workers x 2 x mean_entry_bytes) + baseline")
+        print(f"         = ({num_workers} x 2 x {mean_entry_bytes / 1024**2:.0f}MiB) + {baseline / 1024**3:.1f}GiB")
+        print(f"         = {estimated_peak / 1024**3:.1f}GiB")
+        print(f"  Available RAM: {available_ram / 1024**3:.1f}GiB")
+        print(f"  Mean entry size: {mean_entry_bytes / 1024**2:.0f}MiB  ({mean_context_tokens} tok x {bpt:,} B/tok)")
+        print(f"  Peak per thread: {per_thread_peak / 1024**2:.0f}MiB  (np.load + np.array copy)")
+        print(f"  Worker threads: {num_workers}")
+        print(f"  Safe concurrent readers: ~{safe_workers}  = (available - baseline) / peak_per_thread")
+
+        if estimated_peak > available_ram * 0.85:
+            print(f"  WARNING: Estimated peak memory ({estimated_peak / 1024**3:.1f}GiB) exceeds 85% of")
+            print(f"  available RAM ({available_ram / 1024**3:.1f}GiB). Risk of OOM with {num_workers} workers.")
+            print(f"  Consider: --num-users {min(safe_workers, self.num_users)} or --max-concurrent-allocs {max(1, safe_workers // 2)}")
+        else:
+            print(f"  Status: OK")
+
     def run(self) -> Dict:
         """The main entry point to start the benchmark execution."""
         print(f"\nIntegrated Multi-User KV Cache Benchmark - MLPerf Edition")
         print(f"Model: {self.model_config.name}")
+        if self.num_gpus > 1 or self.tensor_parallel > 1:
+            print(f"System: {self.num_gpus}× {self.gpu_memory_gb_per_card:.0f} GB GPU  "
+                  f"(total {self.total_gpu_memory_gb:.0f} GB HBM)  │  TP={self.tensor_parallel}")
+        else:
+            print(f"GPU Memory: {self.total_gpu_memory_gb:.0f} GB")
         print(f"Users: {self.num_users}")
         print(f"Duration: {self.duration}s")
         if self.seed is not None:
@@ -689,6 +1161,9 @@ class IntegratedBenchmark:
             print(f"    - Mode: {self.autoscaler.mode}")
         print(f"  - QoS Support: Enabled (Interactive/Responsive/Batch)")
         print(f"  - Trace-Driven (BurstGPT): {'Enabled' if self.use_burst_trace else 'Disabled'}")
+        if self.io_tracer is not None:
+            print(f"  - I/O TRACE MODE: ACTIVE — writing trace to {self.io_tracer.path}")
+            print(f"    (No real GPU/CPU/NVMe I/O will be performed)")
         if self.use_burst_trace:
             print(f"    Trace files: {len(self.burst_trace_files)}")
             print(f"    Trace speedup: {self.trace_speedup}x ({'no delay' if self.trace_speedup == 0 else 'real-time' if self.trace_speedup == 1.0 else f'{self.trace_speedup}x faster'})")
@@ -702,10 +1177,14 @@ class IntegratedBenchmark:
         if not self.use_burst_trace and not self.use_dataset:
             users = UserSimulator.generate_mixed_users(self.num_users)
             context_lengths = [u.context_length for u in users]
+            bytes_per_token_per_rank = self.model_config.kv_cache_size_per_token / self.tensor_parallel
+            tp_note = f" per TP rank (full={bytes_per_token_per_rank * self.tensor_parallel / 1024**2 * min(context_lengths):.2f} MB)" if self.tensor_parallel > 1 else ""
             print(f"\nUser Context Length Distribution:")
-            print(f"  Min: {min(context_lengths)} tokens ({min(context_lengths) * self.model_config.kv_cache_size_per_token / 1024**2:.2f} MB)")
-            print(f"  Max: {max(context_lengths)} tokens ({max(context_lengths) * self.model_config.kv_cache_size_per_token / 1024**2:.2f} MB)")
-            print(f"  Mean: {np.mean(context_lengths):.0f} tokens ({np.mean(context_lengths) * self.model_config.kv_cache_size_per_token / 1024**2:.2f} MB)")
+            print(f"  Min: {min(context_lengths)} tokens ({min(context_lengths) * bytes_per_token_per_rank / 1024**2:.2f}MiB{tp_note})")
+            print(f"  Max: {max(context_lengths)} tokens ({max(context_lengths) * bytes_per_token_per_rank / 1024**2:.2f}MiB)")
+            print(f"  Mean: {np.mean(context_lengths):.0f} tokens ({np.mean(context_lengths) * bytes_per_token_per_rank / 1024**2:.2f}MiB)")
+            if self.tensor_parallel > 1:
+                print(f"  (sizes shown are per-rank 1/{self.tensor_parallel} shard; TP={self.tensor_parallel})")
 
             qos_dist = {level: sum(1 for u in users if u.qos_level == level) for level in QoSLevel}
             print(f"\nQoS Distribution:")
@@ -715,6 +1194,8 @@ class IntegratedBenchmark:
             print(f"\nShareGPT Dataset Statistics:")
             print(f"  Conversations: {self.sharegpt_loader.token_stats.get('total_conversations', 0)}")
             print(f"  Total Turns: {self.sharegpt_loader.token_stats.get('total_turns', 0)}")
+
+        self._check_memory_safety()
 
         if self.precondition:
             self._run_preconditioning()
@@ -729,6 +1210,9 @@ class IntegratedBenchmark:
             mode_str = "PREFILL-ONLY (write-heavy, disaggregated prefill node)"
         elif self.decode_only:
             mode_str = "DECODE-ONLY (read-heavy, assumes KV cache pre-populated)"
+        if self.enable_latency_tracing:
+            self._start_latency_tracing()
+
         print(f"\nStarting benchmark... Mode: {mode_str}")
         print("-" * 80)
 
@@ -765,10 +1249,29 @@ class IntegratedBenchmark:
         for thread in threads:
             thread.join(timeout=2.0)
 
+        # Stop tracing and collect results before stats calculation
+        trace_data = None
+        if self.enable_latency_tracing:
+            trace_data = self._stop_latency_tracing()
+
         self._calculate_stats(actual_duration)
+
+        if trace_data:
+            self.results['device_latency_tracing'] = trace_data
+            self._print_trace_results(trace_data)
+
+            fio_config = self._generate_fio_workload(trace_data)
+            if fio_config:
+                self.results['fio_workload'] = fio_config
+                print(f"\n### GENERATED FIO WORKLOAD ###")
+                for line in fio_config.strip().split('\n'):
+                    print(f"  {line}")
 
         if self.validator:
             self.results['validation'] = self.validator.validate_benchmark(self.results)
+
+        if self.io_tracer is not None:
+            self.io_tracer.close()
 
         return self.results
 
@@ -786,7 +1289,7 @@ class IntegratedBenchmark:
         target_gb = target_bytes / 1024**3
         num_threads = self.precondition_threads
         print(f"\n### PRECONDITIONING PHASE ###")
-        print(f"  Target: {target_gb:.1f} GB")
+        print(f"  Target: {target_gb:.1f}GiB")
         print(f"  Threads: {num_threads}")
 
         tokens_per_entry = 2048
@@ -813,13 +1316,13 @@ class IntegratedBenchmark:
                             state['written_bytes'] += entry['size']
                             gb_written = state['written_bytes'] / 1024**3
                             if gb_written - state['last_report'] >= 10:
-                                print(f"  Preconditioning progress: {gb_written:.1f} / {target_gb:.1f} GB")
+                                print(f"  Preconditioning progress: {gb_written:.1f} / {target_gb:.1f}GiB")
                                 state['last_report'] = gb_written
                 else:
                     consecutive_failures += 1
                     if consecutive_failures > 50:
                         with lock:
-                            print(f"  WARNING: Preconditioning stalled at {state['written_bytes']/1024**3:.1f} GB — filesystem full. Continuing.")
+                            print(f"  WARNING: Preconditioning stalled at {state['written_bytes']/1024**3:.1f}GiB — filesystem full. Continuing.")
                         return
                     time.sleep(0.1)
 
@@ -828,7 +1331,7 @@ class IntegratedBenchmark:
             for f in futures:
                 f.result()
 
-        print(f"  Preconditioning complete: {state['written_bytes'] / 1024**3:.1f} GB written")
+        print(f"  Preconditioning complete: {state['written_bytes'] / 1024**3:.1f}GiB written")
         print(f"  Resetting stats for steady-state measurement...")
         self.cache.reset_stats()
 
@@ -981,7 +1484,7 @@ class IntegratedBenchmark:
         print(f"\nIMPORTANT: All storage latencies below are measured per KV cache BLOCK,")
         print(f"not per token or per disk page.  Each block holds the full KV state for")
         print(f"one request (all layers, all heads, full sequence length).")
-        print(f"  Model KV bytes/token: {bpt:,} bytes ({bpt/1024:.1f} KB)")
+        print(f"  Model KV bytes/token: {bpt:,} bytes ({bpt/1024:.1f}KiB)")
 
         # Compute entry size distribution from live cache entries
         with self.cache.metadata_lock:
@@ -989,20 +1492,20 @@ class IntegratedBenchmark:
         if entry_sizes:
             sizes = np.array(entry_sizes)
             print(f"  Entries in cache: {len(sizes)}")
-            print(f"  Block size min:   {np.min(sizes)/1024**2:.1f} MB")
-            print(f"  Block size mean:  {np.mean(sizes)/1024**2:.1f} MB")
-            print(f"  Block size P95:   {np.percentile(sizes, 95)/1024**2:.1f} MB")
-            print(f"  Block size max:   {np.max(sizes)/1024**2:.1f} MB")
+            print(f"  Block size min:   {np.min(sizes)/1024**2:.1f}MiB")
+            print(f"  Block size mean:  {np.mean(sizes)/1024**2:.1f}MiB")
+            print(f"  Block size P95:   {np.percentile(sizes, 95)/1024**2:.1f}MiB")
+            print(f"  Block size max:   {np.max(sizes)/1024**2:.1f}MiB")
         else:
             # Fall back to average from aggregate stats
             total_write_bytes = summary.get('cache_stats', {}).get('total_write_bytes', 0)
             write_ops = summary.get('cache_stats', {}).get('write_iops', 0)
             if write_ops > 0:
                 avg_mb = (total_write_bytes / write_ops) / 1024**2
-                print(f"  Avg block size:   {avg_mb:.1f} MB (from {write_ops} writes)")
+                print(f"  Avg block size:   {avg_mb:.1f}MiB (from {write_ops} writes)")
 
-        print(f"  A 200 MB block at 1 GB/s NVMe read = ~200 ms device latency.")
-        print(f"  Compare latencies against block sizes, not against 4 KB page I/O.\n")
+        print(f"  A 200MiB block at 1GiB/s NVMe read = ~200 ms device latency.")
+        print(f"  Compare latencies against block sizes, not against 4KiB page I/O.\n")
 
         PASS_SYMBOL = "[OK]"
         FAIL_SYMBOL = "[X]"
@@ -1064,8 +1567,8 @@ class IntegratedBenchmark:
 
         print(f"\n### STORAGE PERFORMANCE ###")
         print(f"  Cache Hit Rate: {cache_stats['cache_hit_rate']*100:.1f}%")
-        print(f"  Total Read: {cache_stats['total_read_gb']:.2f} GB")
-        print(f"  Total Write: {cache_stats['total_write_gb']:.2f} GB")
+        print(f"  Total Read: {cache_stats['total_read_gb']:.2f}GiB")
+        print(f"  Total Write: {cache_stats['total_write_gb']:.2f}GiB")
         rw_ratio = cache_stats['read_write_ratio']
         if rw_ratio > 1e9:
             print(f"  Read/Write Ratio: ∞ (read-only)")
@@ -1077,32 +1580,32 @@ class IntegratedBenchmark:
         print(f"  Storage KV Write Operations/sec: {cache_stats['write_iops'] / self.duration:.2f}")
 
         print(f"\n### CACHE TIER DISTRIBUTION ###")
-        print(f"  GPU Entries: {cache_stats['gpu_entries']} ({cache_stats['gpu_memory_used_gb']:.2f} GB)")
-        print(f"  CPU Entries: {cache_stats['cpu_entries']} ({cache_stats['cpu_memory_used_gb']:.2f} GB)")
+        print(f"  GPU Entries: {cache_stats['gpu_entries']} ({cache_stats['gpu_memory_used_gb']:.2f}GiB)")
+        print(f"  CPU Entries: {cache_stats['cpu_entries']} ({cache_stats['cpu_memory_used_gb']:.2f}GiB)")
         print(f"  Storage Entries: {cache_stats['storage_entries']}")
 
         print(f"\n### TIER-SPECIFIC KV BYTES ###")
         if cache_stats.get('tier_gpu_kv_bytes_written_gb', 0) > 0:
-            print(f"  GPU KV Bytes Written: {cache_stats['tier_gpu_kv_bytes_written_gb']:.2f} GB")
+            print(f"  GPU KV Bytes Written: {cache_stats['tier_gpu_kv_bytes_written_gb']:.2f}GiB")
         if cache_stats.get('tier_gpu_kv_bytes_read_gb', 0) > 0:
-            print(f"  GPU KV Bytes Read: {cache_stats['tier_gpu_kv_bytes_read_gb']:.2f} GB")
+            print(f"  GPU KV Bytes Read: {cache_stats['tier_gpu_kv_bytes_read_gb']:.2f}GiB")
         if cache_stats.get('tier_cpu_kv_bytes_written_gb', 0) > 0:
-            print(f"  CPU KV Bytes Written: {cache_stats['tier_cpu_kv_bytes_written_gb']:.2f} GB")
+            print(f"  CPU KV Bytes Written: {cache_stats['tier_cpu_kv_bytes_written_gb']:.2f}GiB")
         if cache_stats.get('tier_cpu_kv_bytes_read_gb', 0) > 0:
-            print(f"  CPU KV Bytes Read: {cache_stats['tier_cpu_kv_bytes_read_gb']:.2f} GB")
+            print(f"  CPU KV Bytes Read: {cache_stats['tier_cpu_kv_bytes_read_gb']:.2f}GiB")
         if cache_stats.get('tier_storage_kv_bytes_written_gb', 0) > 0:
-            print(f"  Storage KV Bytes Written: {cache_stats['tier_storage_kv_bytes_written_gb']:.2f} GB")
+            print(f"  Storage KV Bytes Written: {cache_stats['tier_storage_kv_bytes_written_gb']:.2f}GiB")
         if cache_stats.get('tier_storage_kv_bytes_read_gb', 0) > 0:
-            print(f"  Storage KV Bytes Read: {cache_stats['tier_storage_kv_bytes_read_gb']:.2f} GB")
+            print(f"  Storage KV Bytes Read: {cache_stats['tier_storage_kv_bytes_read_gb']:.2f}GiB")
 
         print(f"\n### STORAGE KV BANDWIDTH ###")
         for tier_label, tier_key in [('GPU', 'gpu'), ('CPU', 'cpu'), ('Storage', 'storage')]:
             read_bw = cache_stats.get(f'tier_{tier_key}_read_bandwidth_gbps', 0)
             write_bw = cache_stats.get(f'tier_{tier_key}_write_bandwidth_gbps', 0)
             if read_bw > 0:
-                print(f"  {tier_label} KV Read Bandwidth: {read_bw:.2f} GB/s")
+                print(f"  {tier_label} KV Read Bandwidth: {read_bw:.2f}GiB/s")
             if write_bw > 0:
-                print(f"  {tier_label} KV Write Bandwidth: {write_bw:.2f} GB/s")
+                print(f"  {tier_label} KV Write Bandwidth: {write_bw:.2f}GiB/s")
 
         print(f"\n### TIER-SPECIFIC LATENCIES (Total = Host + Device) ###")
         for tier in ['gpu', 'cpu', 'storage']:
@@ -1137,7 +1640,7 @@ class IntegratedBenchmark:
             print(f"  Prefix Hits: {prefix_stats['prefix_hits']}")
             print(f"  Prefix Misses: {prefix_stats['prefix_misses']}")
             print(f"  System Prompt Reuse: {prefix_stats['system_prompt_reuse']}")
-            print(f"  Bytes Saved: {prefix_stats['bytes_saved'] / 1024**3:.2f} GB")
+            print(f"  Bytes Saved: {prefix_stats['bytes_saved'] / 1024**3:.2f}GiB")
 
         if summary.get('multi_turn_stats') and summary['multi_turn_stats']['cache_hits'] > 0:
             print(f"\n### MULTI-TURN CONVERSATIONS ###")

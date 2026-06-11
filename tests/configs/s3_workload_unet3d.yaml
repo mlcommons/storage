@@ -1,0 +1,33 @@
+# MLPerf Storage S3 object-store test workload
+# Workload parameters only — no runtime/environment configuration here.
+# Runtime parameters (endpoint, credentials, bucket, storage library) are
+# supplied via environment variables or a .env file at runtime.
+#
+# Usage:
+#   uv run mlpstorage training datagen --model unet3d \
+#     --param storage.storage_type=s3 \
+#     --param storage.storage_root=${BUCKET} \
+#     --param storage.storage_options.endpoint_url=${AWS_ENDPOINT_URL} \
+#     --param storage.storage_options.access_key_id=${AWS_ACCESS_KEY_ID} \
+#     --param storage.storage_options.secret_access_key=${AWS_SECRET_ACCESS_KEY} \
+#     --param storage.storage_options.storage_library=s3dlio   # or: minio
+#   See tests/object-store/README.md for full examples.
+
+model: unet3d
+
+dataset:
+  num_files_train: 168
+  num_samples_per_file: 1
+  record_length: 146600628    # ~140 MB per file (unet3d h100 workload)
+  record_length_stdev: 0
+  format: npz
+  keep_files: true
+
+reader:
+  read_threads: 4
+
+workflow:
+  generate_data: true
+  train: true
+
+framework: pytorch

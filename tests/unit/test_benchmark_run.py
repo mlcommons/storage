@@ -15,8 +15,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 
-from mlpstorage.config import BENCHMARK_TYPES, PARAM_VALIDATION
-from mlpstorage.rules import (
+from mlpstorage_py.config import BENCHMARK_TYPES, PARAM_VALIDATION
+from mlpstorage_py.rules import (
     BenchmarkRun,
     BenchmarkRunData,
     BenchmarkInstanceExtractor,
@@ -243,7 +243,7 @@ class TestBenchmarkRunVerificationState:
 
     def test_issues_can_be_set(self, sample_run):
         """issues property can be set."""
-        from mlpstorage.rules import Issue
+        from mlpstorage_py.rules import Issue
         issues = [Issue(PARAM_VALIDATION.OPEN, "Test issue")]
         sample_run.issues = issues
         assert len(sample_run.issues) == 1

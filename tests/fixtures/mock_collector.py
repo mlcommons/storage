@@ -9,7 +9,7 @@ logic that depends on cluster information.
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 
-from mlpstorage.interfaces.collector import (
+from mlpstorage_py.interfaces.collector import (
     ClusterCollectorInterface,
     CollectionResult,
 )
@@ -159,7 +159,7 @@ class MockClusterCollector(ClusterCollectorInterface):
 
         Args:
             num_hosts: Number of hosts to generate.
-            memory_gb: Memory per host in GB.
+            memory_gb: Memory per host in GiB.
             cpu_cores: CPU cores per host.
         """
         hosts = []

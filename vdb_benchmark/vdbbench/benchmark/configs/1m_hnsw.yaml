@@ -1,0 +1,45 @@
+# ---------------------------------------------------------------
+# 1M-vector HNSW benchmark  (Milvus, producer-consumer pipeline)
+# ---------------------------------------------------------------
+backend: milvus
+mode: both
+
+database:
+  host: 127.0.0.1
+  port: 19530
+
+dataset:
+  collection_name: bench_1m_hnsw
+  num_vectors: 1_000_000
+  dimension: 1536
+  distribution: uniform
+  block_size: 100_000
+  batch_size: 10_000
+  seed: 42
+
+query:
+  num_query_vectors: 10_000
+  query_seed: 99
+
+ground_truth:
+  truth_k: 100
+
+index:
+  index_type: HNSW
+  metric_type: COSINE
+  index_params:
+    M: 64
+    efConstruction: 200
+  num_shards: 1
+
+search:
+  search_k: 10
+  num_search_rounds: 1
+  search_batch_size: 1
+  search_params:
+    ef: 128
+
+workflow:
+  force: false
+  compact: true
+  monitor_interval: 5

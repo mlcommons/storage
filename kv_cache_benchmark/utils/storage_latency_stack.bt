@@ -1,0 +1,317 @@
+#!/usr/bin/env bpftrace
+/*
+ * storage_latency_stack.bt — Full-Stack Storage Latency Diagnostic Tool
+ *
+ * Decomposes storage I/O latency across every layer of the Linux I/O stack:
+ *
+ *   Application (VFS)
+ *     └── Filesystem / Page Cache
+ *           └── Block Layer (I/O Scheduler)
+ *                 └── NVMe / SCSI Driver
+ *                       └── Physical Device
+ *
+ * Ten histograms produced on Ctrl-C:
+ *
+ *   @q2d_read_us   — Queue-to-Dispatch (I/O scheduler wait) for reads
+ *   @q2d_write_us  — Queue-to-Dispatch (I/O scheduler wait) for writes
+ *   @d2c_read_us   — Dispatch-to-Complete (actual device hardware time) for reads
+ *   @d2c_write_us  — Dispatch-to-Complete (actual device hardware time) for writes
+ *   @vfs_read_us   — Full VFS read latency (application-visible)
+ *   @vfs_write_us  — Full VFS write latency (application-visible)
+ *
+ * Plus block size, queue depth, and LBA distribution:
+ *
+ *   @bssplit_read_kb  — Block size distribution for reads (KB)
+ *   @bssplit_write_kb — Block size distribution for writes (KB)
+ *   @qd_read          — Instantaneous queue depth at dispatch (reads)
+ *   @qd_write         — Instantaneous queue depth at dispatch (writes)
+ *   @lba_read_gb      — LBA heatmap for reads (10 GB linear buckets)
+ *   @lba_write_gb     — LBA heatmap for writes (10 GB linear buckets)
+ *
+ * Plus the write-path serialization gap:
+ *
+ *   @write_to_fsync_us — Time between write() return and fsync() entry
+ *                         (captures CPU serialization, locks, GIL overhead)
+ *   @fsync_us          — Actual fsync() latency (device flush)
+ *
+ * Interpreting results:
+ *
+ *   If D2C >> Q2D:       Device is the bottleneck (slow NAND, MDTS splitting)
+ *   If Q2D >> D2C:       I/O scheduler contention (too many threads, bad scheduler)
+ *   If VFS >> Q2D + D2C: Filesystem/page cache/serialization overhead dominates
+ *   If write_to_fsync >> fsync: CPU serialization is the bottleneck, not storage
+ *
+ * Bimodal VFS patterns:
+ *
+ *   Fast (µs) + Slow (ms) reads  = page cache hits + device misses
+ *   Fast (µs) + Slow (ms) writes = buffered writes + fsync flushes
+ *   If ALL reads are fast (µs)    = page cache absorbing everything — NOT testing storage!
+ *
+ * Usage:
+ *
+ *   # Trace all I/O to all devices, filter VFS to specific process:
+ *   sudo BPFTRACE_COMM="kv-cache" bpftrace storage_latency_stack.bt
+ *
+ *   # Trace a Python script:
+ *   sudo BPFTRACE_COMM="python3" bpftrace storage_latency_stack.bt
+ *
+ *   # Trace fio:
+ *   sudo BPFTRACE_COMM="fio" bpftrace storage_latency_stack.bt
+ *
+ *   # Trace all processes (caution: noisy):
+ *   sudo BPFTRACE_COMM="" bpftrace storage_latency_stack.bt
+ *
+ * Optional device filter (block layer only):
+ *
+ *   # Get device number: lsblk -no MAJ:MIN /dev/nvme5n1 → 259:5
+ *   # Convert: python3 -c "print(hex(259 << 20 | 5))"  → 0x10300005
+ *   sudo BPFTRACE_COMM="kv-cache" BPFTRACE_DEV=0x10300005 bpftrace storage_latency_stack.bt
+ *
+ * Requirements:
+ *   - Linux 5.x+ with BTF support
+ *   - bpftrace 0.16+ (sudo apt install bpftrace)
+ *   - CAP_BPF or root
+ *
+ * Author: Hazem Awadallah, Kingston Digital <hazem_awadallah@kingston.com>
+ * License: Apache-2.0, donated to MLCommons
+ */
+
+/* ====================================================================
+ * BLOCK LAYER: Queue → Dispatch → Complete
+ *
+ * These tracepoints fire for ALL block I/O on the system (or filtered
+ * by device). They measure the kernel block layer, below the filesystem
+ * and above the device driver.
+ *
+ * Timeline per I/O request:
+ *
+ *   block_rq_insert  ─── Q2D ───  block_rq_issue  ─── D2C ───  block_rq_complete
+ *   (entered I/O                   (dispatched to                (device finished)
+ *    scheduler queue)               NVMe/SCSI driver)
+ *
+ * Q2D = time waiting in I/O scheduler (noop/mq-deadline/kyber/bfq)
+ * D2C = time the physical device took to complete the command
+ *
+ * For NVMe, D2C includes:
+ *   - NVMe submission queue → controller processing → completion queue
+ *   - For PRP drives: host PRP list construction overhead
+ *   - For drives with small MDTS: each split command measured individually
+ *
+ * ==================================================================== */
+
+tracepoint:block:block_rq_insert
+{
+    @q[args->dev, args->sector] = nsecs;
+}
+
+/* Handle device-mapper and md remaps — follow the I/O to its final device */
+tracepoint:block:block_rq_remap
+{
+    if (@q[args->old_dev, args->old_sector]) {
+        @q[args->dev, args->sector] = @q[args->old_dev, args->old_sector];
+        delete(@q[args->old_dev, args->old_sector]);
+    }
+}
+
+/* I/O dispatched to device driver — start of D2C.
+ *
+ * NVMe with blk-mq and 'none' scheduler uses direct dispatch:
+ * I/Os go straight to block_rq_issue without block_rq_insert.
+ * D2C, bssplit, and QD are measured unconditionally.
+ * Q2D is measured separately only when block_rq_insert fired.
+ *
+ * Split into two probes to stay within bpftrace 0.14 verifier limits. */
+
+/* Q2D: only fires when block_rq_insert populated @q */
+tracepoint:block:block_rq_issue
+/@q[args->dev, args->sector]/
+{
+    $lat = (nsecs - @q[args->dev, args->sector]) / 1000;
+    if (((uint8 *)args->rwbs)[0] == 82) {
+        @q2d_read_us = hist($lat);
+    } else if (((uint8 *)args->rwbs)[0] == 87) {
+        @q2d_write_us = hist($lat);
+    }
+    delete(@q[args->dev, args->sector]);
+}
+
+/* D2C start + bssplit + QD: fires on ALL dispatched I/Os */
+tracepoint:block:block_rq_issue
+{
+    @d[args->dev, args->sector] = nsecs;
+
+    if (((uint8 *)args->rwbs)[0] == 82) {
+        @bssplit_read_kb = hist(args->bytes / 1024);
+        @inflight_read++;
+        @qd_read = hist(@inflight_read);
+    } else if (((uint8 *)args->rwbs)[0] == 87) {
+        @bssplit_write_kb = hist(args->bytes / 1024);
+        @inflight_write++;
+        @qd_write = hist(@inflight_write);
+    }
+}
+
+/* LBA heatmap: where on the device is I/O landing?
+ * Sector >> 21 converts 512-byte sectors to GB offset.
+ * lhist gives linear 10 GB buckets up to 8 TB — shows spatial I/O pattern.
+ * Clustered = narrow band; random = spread; sequential = progression. */
+tracepoint:block:block_rq_issue
+{
+    $gb = args->sector >> 21;
+    if (((uint8 *)args->rwbs)[0] == 82) {
+        @lba_read_gb = lhist($gb, 0, 8000, 10);
+    } else if (((uint8 *)args->rwbs)[0] == 87) {
+        @lba_write_gb = lhist($gb, 0, 8000, 10);
+    }
+}
+
+/* I/O completed by device — end of D2C, decrement in-flight counters */
+tracepoint:block:block_rq_complete
+{
+    if (@d[args->dev, args->sector]) {
+        $lat = (nsecs - @d[args->dev, args->sector]) / 1000;
+
+        if (((uint8 *)args->rwbs)[0] == 82) {
+            @d2c_read_us = hist($lat);
+            @inflight_read--;
+        } else if (((uint8 *)args->rwbs)[0] == 87) {
+            @d2c_write_us = hist($lat);
+            @inflight_write--;
+        }
+
+        delete(@d[args->dev, args->sector]);
+    }
+}
+
+
+/* ====================================================================
+ * VFS LAYER: Application-visible read/write latency
+ *
+ * Measures the full syscall time from the application's perspective.
+ * Includes: page cache lookup, filesystem journaling, block I/O,
+ * and data copy to/from userspace.
+ *
+ * Bimodal pattern expected under correct benchmark behavior:
+ *   - Fast peak (µs):  page cache hits (buffered writes, cached reads)
+ *   - Slow peak (ms):  actual device I/O (fsync flushes, cache misses)
+ *
+ * If the slow peak is MISSING, the benchmark is not hitting storage!
+ * Check that posix_fadvise(DONTNEED) or O_DIRECT is being used.
+ *
+ * Filtered by process name via BPFTRACE_COMM environment variable.
+ * ==================================================================== */
+
+kprobe:vfs_read
+/comm == str($1) || str($1) == ""/
+{
+    @rs[tid] = nsecs;
+}
+
+kretprobe:vfs_read
+/@rs[tid]/
+{
+    @vfs_read_us = hist((nsecs - @rs[tid]) / 1000);
+    delete(@rs[tid]);
+}
+
+kprobe:vfs_write
+/comm == str($1) || str($1) == ""/
+{
+    @ws[tid] = nsecs;
+}
+
+kretprobe:vfs_write
+/@ws[tid]/
+{
+    $lat = (nsecs - @ws[tid]) / 1000;
+    @vfs_write_us = hist($lat);
+    delete(@ws[tid]);
+}
+
+
+/* ====================================================================
+ * SERIALIZATION GAP: write() → fsync()
+ *
+ * Measures the CPU time between a write() returning and the next
+ * fsync() call on the same thread. This gap captures:
+ *
+ *   - NumPy/Python serialization overhead
+ *   - Lock acquisition and GIL contention
+ *   - Memory allocation and buffer management
+ *   - Application-level bookkeeping (stats, logging)
+ *
+ * In KV cache workloads, this is "host serialization latency" —
+ * typically 30-50% of total per-request time.
+ *
+ * Also measures fsync() itself — the actual device flush.
+ *
+ * Combined interpretation:
+ *   write_to_fsync + fsync ≈ total per-entry write cost
+ *   If write_to_fsync >> fsync: CPU-bound, faster storage won't help
+ *   If fsync >> write_to_fsync: device-bound, storage upgrade helps
+ * ==================================================================== */
+
+tracepoint:syscalls:sys_enter_write
+/comm == str($1) || str($1) == ""/
+{
+    @write_enter[tid] = nsecs;
+}
+
+tracepoint:syscalls:sys_exit_write
+/@write_enter[tid]/
+{
+    @write_done[tid] = nsecs;
+    delete(@write_enter[tid]);
+}
+
+tracepoint:syscalls:sys_enter_fsync
+/comm == str($1) || str($1) == ""/
+{
+    /* Measure gap from last write() completion to this fsync() entry */
+    if (@write_done[tid]) {
+        @write_to_fsync_us = hist((nsecs - @write_done[tid]) / 1000);
+        delete(@write_done[tid]);
+    }
+    @fsync_enter[tid] = nsecs;
+}
+
+tracepoint:syscalls:sys_exit_fsync
+/@fsync_enter[tid]/
+{
+    @fsync_us = hist((nsecs - @fsync_enter[tid]) / 1000);
+    delete(@fsync_enter[tid]);
+}
+
+
+/* ====================================================================
+ * READ PATH: fadvise → read gap (optional, for cache invalidation)
+ *
+ * If the benchmark uses posix_fadvise(DONTNEED) to drop page cache
+ * before reads, this measures the gap. A non-zero gap means the
+ * application is doing work between cache invalidation and read.
+ * ==================================================================== */
+
+tracepoint:syscalls:sys_exit_fadvise64
+/comm == str($1) || str($1) == ""/
+{
+    @fadvise_done[tid] = nsecs;
+}
+
+tracepoint:syscalls:sys_enter_read
+/comm == str($1) || str($1) == "" && @fadvise_done[tid]/
+{
+    if (@fadvise_done[tid]) {
+        @fadvise_to_read_us = hist((nsecs - @fadvise_done[tid]) / 1000);
+        delete(@fadvise_done[tid]);
+    }
+}
+
+
+/* ====================================================================
+ * CLEANUP: Remove incomplete entries on exit
+ * ==================================================================== */
+
+/* END block removed for bpftrace 0.14 compatibility.
+ * bpftrace automatically prints all maps on SIGINT.
+ * The @q, @d, @rs etc. maps will appear as empty hashes in output;
+ * the parser ignores them (no histogram buckets). */

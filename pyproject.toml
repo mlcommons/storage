@@ -4,35 +4,71 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlpstorage"
-version = "2.0.0b1"
+version = "3.0.6"
 description = "MLPerf Storage Benchmark Suite"
 readme = "README.md"
+license = {text = "Apache-2.0"}
 authors = [
     {name = "MLCommons Storage Working Group"}
 ]
-requires-python = ">=3.10.0"
+requires-python = ">=3.12, <3.13"
 dependencies = [
     "psutil>=5.9",
     "pyarrow",
     "pyyaml>=6.0",
-    "packaging>=21.0",  # For PEP 440 version parsing in lockfile validation
-    "rich>=13.0",  # Progress indication (UX-04)
+    "packaging>=21.0",
+    "rich>=13.0",
+    "dlio-benchmark", # Required dependency
+    "pydantic>=2.13.4",
+    "minio>=7.2.20",
+    "s3torchconnector>=1.5.0",
+    "python-dotenv>=1.0.0",
+    "s3dlio>=0.9.100",
 ]
 
 [project.optional-dependencies]
-dlio = [
-    "dlio-benchmark @ git+https://github.com/wvaske/dlio_benchmark.git@parquet-support",
-]
 test = [
     "pytest>=7.0",
     "pytest-cov>=4.0",
     "pytest-mock>=3.0",
 ]
-# Full installation with DLIO for running benchmarks.
-# Note: DLIO depends on PyTorch. The [tool.uv] configuration ensures
-# CPU-only PyTorch wheels are used to avoid GPU dependencies.
 full = [
-    "dlio-benchmark @ git+https://github.com/wvaske/dlio_benchmark.git@parquet-support",
+    "dlio-benchmark",
+]
+vectordb = [
+  "pymilvus>=2.4.0",
+  "psycopg2-binary>=2.9",
+  "pgvector>=0.2",
+  "elasticsearch>=8.0",
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "pyyaml>=6.0",
+  "tabulate>=0.9",
+]
+
+vectordb-milvus = [
+  "pymilvus>=2.4.0",
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "pyyaml>=6.0",
+  "tabulate>=0.9",
+]
+
+vectordb-pgvector = [
+  "psycopg2-binary>=2.9",
+  "pgvector>=0.2",
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "pyyaml>=6.0",
+  "tabulate>=0.9",
+]
+
+vectordb-elasticsearch = [
+  "elasticsearch>=8.0",
+  "numpy>=1.24",
+  "pandas>=2.0",
+  "pyyaml>=6.0",
+  "tabulate>=0.9",
 ]
 
 [project.urls]
@@ -40,13 +76,13 @@ full = [
 "Bug Tracker" = "https://github.com/mlcommons/storage/issues"
 
 [tool.setuptools]
-packages = {find = {}}
+packages = {find = {include = ["mlpstorage_py*", "vdbbench*"]}}
 
 [tool.setuptools.package-data]
-"mlpstorage" = ["../configs/dlio/workload/*.yaml"]
+"mlpstorage_py" = ["../configs/dlio/workload/*.yaml"]
 
 [project.scripts]
-mlpstorage = 'mlpstorage.main:main'
+mlpstorage = 'mlpstorage_py.main:main'
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -58,7 +94,7 @@ filterwarnings = [
 ]
 
 [tool.coverage.run]
-source = ["mlpstorage"]
+source = ["mlpstorage_py"]
 omit = ["*/tests/*", "*/__pycache__/*"]
 
 [tool.coverage.report]
@@ -70,18 +106,25 @@ exclude_lines = [
 ]
 
 # =============================================================================
-# UV Configuration for CPU-only builds
+# UV Configuration
 # =============================================================================
-# MLPerf Storage is a storage benchmark and does not require GPU support.
-# These settings ensure CPU-only PyTorch wheels are used, avoiding large
-# CUDA downloads and nvidia-* package dependencies.
 
 [[tool.uv.index]]
 name = "pytorch-cpu"
 url = "https://download.pytorch.org/whl/cpu"
 explicit = true
 
+[tool.uv]
+# s3dlio only ships Linux wheels — restrict resolution to Linux.
+environments = ["sys_platform == 'linux'"]
+
 [tool.uv.sources]
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
 torchaudio = [{ index = "pytorch-cpu" }]
+dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", branch = "main" }
+
+[dependency-groups]
+dev = [
+    "pytest>=9.0.2",
+]

@@ -13,8 +13,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 from pathlib import Path
 
-from mlpstorage.config import BENCHMARK_TYPES
-from mlpstorage.rules import (
+from mlpstorage_py.config import BENCHMARK_TYPES
+from mlpstorage_py.rules import (
     calculate_training_data_size,
     generate_output_location,
     get_runs_files,

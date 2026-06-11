@@ -24,3 +24,11 @@ index:
 
 workflow:
   compact: True
+
+benchmark:
+  mode: timed
+  runtime: 60
+  batch_size: 1
+  report_count: 100
+  recall_k: 10
+  search_limit: 10

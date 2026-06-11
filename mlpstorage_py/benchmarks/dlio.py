@@ -1,0 +1,516 @@
+import abc
+import os
+import os.path
+import pprint
+import sys
+
+from mlpstorage_py.benchmarks.base import Benchmark
+from mlpstorage_py.config import (CONFIGS_ROOT_DIR, BENCHMARK_TYPES, EXEC_TYPE, MPIRUN, MLPSTORAGE_BIN_NAME,
+                               LLM_ALLOWED_VALUES, LLM_SUBSET_PROCS, EXIT_CODE, MODELS, HYDRA_OUTPUT_SUBDIR,
+                               LLM_SIZE_BY_RANK)
+from mlpstorage_py.dependency_check import validate_benchmark_dependencies
+from mlpstorage_py.rules import calculate_training_data_size, HostInfo, HostMemoryInfo, HostCPUInfo, ClusterInformation
+from mlpstorage_py.utils import (read_config_from_file, create_nested_dict, update_nested_dict, generate_mpi_prefix_cmd)
+from mlpstorage_py.storage_config import resolve_object_storage_config
+
+
+class DLIOBenchmark(Benchmark, abc.ABC):
+
+    DLIO_CONFIG_PATH = "dlio"
+    BENCHMARK_TYPE = None
+
+    def __init__(self, args, **kwargs):
+        super().__init__(args, **kwargs)
+        self._config_name = None
+        self.base_command = "dlio_benchmark"
+        if args.dlio_bin_path:
+            self.base_path = args.dlio_bin_path
+        else:
+            self.base_path = os.path.dirname(sys.argv[0])
+        self.base_command_path = os.path.join(self.base_path, self.base_command)
+
+        # This is the path that DLIO needs. The files are in this self.config_path/workload
+        self.config_path = os.path.join(CONFIGS_ROOT_DIR, self.DLIO_CONFIG_PATH)
+
+        self.per_host_mem_kB = None
+        self.total_mem_kB = None
+
+        # Fail-fast dependency validation (skip for dry-run mode)
+        if not getattr(args, 'dry_run', False):
+            self._validate_dependencies(args)
+
+        if args.command != "datagen":
+            self.cluster_information = self.accumulate_host_info(args)
+
+    def _validate_dependencies(self, args):
+        """Validate required external dependencies before benchmark execution.
+
+        Performs fail-fast checks for MPI and DLIO to provide clear error
+        messages early rather than failing during benchmark execution.
+
+        Args:
+            args: Parsed command-line arguments.
+
+        Raises:
+            DependencyError: If required dependencies are not available.
+        """
+        requires_mpi = getattr(args, 'exec_type', None) == EXEC_TYPE.MPI
+        mpi_bin = getattr(args, 'mpi_bin', 'mpirun')
+        dlio_bin_path = getattr(args, 'dlio_bin_path', None)
+
+        mpi_path, dlio_path = validate_benchmark_dependencies(
+            requires_mpi=requires_mpi,
+            requires_dlio=True,
+            mpi_bin=mpi_bin,
+            dlio_bin_path=dlio_bin_path,
+            logger=self.logger
+        )
+
+        # Update base_command_path if DLIO was found in a different location
+        if dlio_path:
+            self.base_command_path = dlio_path
+
+    def accumulate_host_info(self, args):
+        """Collect cluster information from all hosts.
+
+        This method first attempts to collect detailed system information via MPI.
+        If MPI collection fails or is not available, it falls back to using the
+        CLI argument `client_host_memory_in_gb` applied uniformly to all hosts.
+
+        Args:
+            args: Parsed command-line arguments.
+
+        Returns:
+            ClusterInformation instance with host details.
+        """
+        # Try MPI-based collection first
+        cluster_info = self._collect_cluster_information()
+        if cluster_info is not None:
+            self.logger.verbose(
+                f'Using MPI-collected cluster info: {cluster_info.num_hosts} hosts, '
+                f'{cluster_info.total_memory_bytes / (1024**3):.1f}GiB total memory'
+            )
+            return cluster_info
+
+        # Fall back to CLI args-based collection
+        self.logger.debug('Using CLI args for cluster info (MPI collection not available)')
+        host_info_list = []
+        per_host_mem = args.client_host_memory_in_gb
+        for host in args.hosts:
+            host_info = HostInfo(
+                hostname=host,
+                cpu=None,
+                memory=HostMemoryInfo.from_total_mem_int(per_host_mem * 1024 * 1024 * 1024)
+            )
+            host_info_list.append(host_info)
+
+        cluster_info = ClusterInformation(host_info_list=host_info_list, logger=self.logger)
+        cluster_info.collection_method = "args"
+        return cluster_info
+
+    @property
+    def config_name(self):
+        if self._config_name is None:
+            self.logger.error("This subclass doesn't appropriately set config name. self.config_name should be set in __init__")
+            raise ValueError("config_name not set")
+        return self._config_name
+
+    @config_name.setter
+    def config_name(self, config_name):
+        self._config_name = config_name
+
+    def _apply_object_storage_params(self):
+        """When --object is used, load .env and inject required DLIO storage params.
+
+        The following params are injected into self.params_dict (only if not already
+        set by the user via --params):
+          storage.storage_type          = 's3'
+          storage.storage_root          = $BUCKET
+          storage.storage_options.storage_library = $STORAGE_LIBRARY
+          storage.s3_force_path_style   = 'true'  (when AWS_ENDPOINT_URL is set)
+
+        Credentials (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) and the endpoint
+        (AWS_ENDPOINT_URL) are read directly from the environment by obj_store_lib.py
+        and do not need to be passed as DLIO params.  We load .env here so that
+        the parent process environment is populated before mpirun spawns workers.
+        """
+        protocol = getattr(self.args, 'data_access_protocol', None)
+        if protocol is None or protocol == 'file':
+            return  # file mode or flag not supplied: nothing to do
+
+        # Load .env into the process environment.  Values already set in the shell
+        # take priority (override=False is the default).
+        try:
+            from dotenv import load_dotenv
+
+            # Locate the .env file: CWD first, then relative to the script directory.
+            env_file_cwd = os.path.abspath('.env')
+            env_file_script = os.path.normpath(
+                os.path.join(os.path.dirname(sys.argv[0]), '..', '.env')
+            )
+
+            if os.path.exists(env_file_cwd):
+                self.logger.info(f'--object mode: loading credentials from {env_file_cwd}')
+                load_dotenv(env_file_cwd)
+            elif os.path.exists(env_file_script):
+                self.logger.info(f'--object mode: loading credentials from {env_file_script}')
+                load_dotenv(env_file_script)
+            else:
+                # Try dotenv's own upward search as a last resort
+                found = load_dotenv()  # returns True if a file was found and loaded
+                if found:
+                    self.logger.info(
+                        '--object mode: loaded credentials from .env file found by directory search'
+                    )
+                else:
+                    raise FileNotFoundError(
+                        '--object mode requires a .env file with object storage credentials, '
+                        'but no .env file was found in the current directory '
+                        f'({os.getcwd()}) or the script directory. '
+                        'Create a .env file (see .env.example) or export the required '
+                        'environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, '
+                        'AWS_ENDPOINT_URL, BUCKET, STORAGE_LIBRARY) before running.'
+                    )
+        except ImportError:
+            self.logger.warning(
+                'python-dotenv not installed; .env file will not be loaded automatically. '
+                'Ensure AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, '
+                'BUCKET, and STORAGE_LIBRARY are set in the environment.'
+            )
+
+        _s3cfg = resolve_object_storage_config()
+        bucket = _s3cfg['bucket']
+        storage_library = _s3cfg['storage_library']
+        # STORAGE_URI_SCHEME controls the URI prefix used by s3dlio:
+        #   s3     — standard S3 (requires endpoint + credentials)
+        #   direct — O_DIRECT filesystem via s3dlio (BUCKET is the base path, no HTTP)
+        #   file   — buffered filesystem via s3dlio (BUCKET is the base path, no HTTP)
+        uri_scheme = _s3cfg['uri_scheme']
+        endpoint_url, _src = _s3cfg['endpoint']
+        endpoint_url = endpoint_url or ''  # preserve empty-string semantics downstream
+
+        if not bucket:
+            raise ValueError(
+                'BUCKET environment variable is required for --object mode. '
+                'Set it in .env or export it before running mlpstorage.'
+            )
+
+        # Inject params; respect any value the user already supplied via --params
+        if 'storage.storage_type' not in self.params_dict:
+            self.params_dict['storage.storage_type'] = 's3'
+        if 'storage.storage_root' not in self.params_dict:
+            self.params_dict['storage.storage_root'] = bucket
+        if 'storage.storage_options.storage_library' not in self.params_dict:
+            self.params_dict['storage.storage_options.storage_library'] = storage_library
+        if 'storage.storage_options.uri_scheme' not in self.params_dict:
+            self.params_dict['storage.storage_options.uri_scheme'] = uri_scheme
+        # Force path-style addressing for non-AWS S3 endpoints (MinIO, s3-ultra, VAST, Ceph…)
+        # Not applicable for direct:// or file:// — those don't use HTTP at all.
+        is_http_scheme = uri_scheme not in ('direct', 'file')
+        if is_http_scheme and endpoint_url and 'storage.s3_force_path_style' not in self.params_dict:
+            self.params_dict['storage.s3_force_path_style'] = 'true'
+
+        self.logger.info(
+            f'--object mode: injected storage params '
+            f'(storage_type=s3, storage_root={bucket}, library={storage_library}, '
+            f'uri_scheme={uri_scheme}, force_path_style={is_http_scheme and bool(endpoint_url)})'
+        )
+
+    def process_dlio_params(self, config_file):
+        params_dict = dict() if not self.args.params else {k: v for k, v in (item.split("=") for item in self.args.params)}
+        yaml_params = read_config_from_file(os.path.join(self.DLIO_CONFIG_PATH, "workload", config_file))
+        combined_params = update_nested_dict(yaml_params, create_nested_dict(params_dict))
+
+        self.logger.debug(f'yaml params: \n{pprint.pformat(yaml_params)}')
+        self.logger.debug(f'combined params: \n{pprint.pformat(combined_params)}')
+        self.logger.debug(f'Instance params: \n{pprint.pformat(self.__dict__)}')
+
+        return params_dict, yaml_params, combined_params
+
+    @abc.abstractmethod
+    def _run(self):
+        """
+        This method needs to call execute_command method to run the benchmark
+        :return:
+        """
+        raise NotImplementedError("Subclasses must implement this method")
+
+    def execute_command(self):
+        cmd = self.generate_dlio_command()
+        self.logger.status(f'Running benchmark command:: {cmd}')
+        output_file_prefix = f"{self.BENCHMARK_TYPE.value}"
+        if hasattr(self.args, "command"):
+            output_file_prefix += f"_{self.args.command}"
+
+        self._execute_command(cmd, output_file_prefix=output_file_prefix)
+
+    @abc.abstractmethod
+    def add_workflow_to_cmd(self, cmd) -> str:
+        raise NotImplementedError("Subclasses must implement this method")
+
+    def generate_dlio_command(self):
+        self.logger.verboser(f'Generating DLIO command for benchmark {self.BENCHMARK_TYPE.value}')
+        cmd = ""
+        cmd = f"{self.base_command_path}"
+        cmd += f" workload={self.config_name}"
+
+        # Run directory for Hydra to output log files
+        cmd += f" ++hydra.run.dir={self.run_result_output}"
+        cmd += f" ++hydra.output_subdir={HYDRA_OUTPUT_SUBDIR}"
+
+        cmd = self.add_workflow_to_cmd(cmd)
+
+        if self.params_dict:
+            for key, value in self.params_dict.items():
+                cmd += f" ++workload.{key}={value}"
+
+        cmd += f" --config-dir={self.config_path}"
+
+        if self.args.exec_type == EXEC_TYPE.MPI:
+            self.logger.debug(f'Generating MPI Command with binary "{self.args.mpi_bin}"')
+            mpi_prefix = generate_mpi_prefix_cmd(self.args.mpi_bin, self.args.hosts, self.args.num_processes,
+                                                 self.args.oversubscribe, self.args.allow_run_as_root,
+                                                 self.args.mpi_params, self.logger,
+                                                 mpi_btl=getattr(self.args, 'mpi_btl', 'auto'))
+            cmd = f"{mpi_prefix} {cmd}"
+
+        return cmd
+
+
+class TrainingBenchmark(DLIOBenchmark):
+
+    BENCHMARK_TYPE = BENCHMARK_TYPES.training
+
+    def __init__(self, args, **kwargs):
+        super().__init__(args, **kwargs)
+
+        # This allows each command to map to a specific wrapper method. When methods are created, replace the default
+        # 'self.execute_command' with the command-specific method (like "self._datasize()")
+        self.command_method_map = dict(
+            datasize=self.datasize,
+            datagen=self.execute_command,
+            run=self.execute_command,
+            configview=self.execute_command,
+            reportgen=self.execute_command)
+        config_suffix = "datagen" if args.command == "datagen" else args.accelerator_type
+        under_model = args.model.replace("-", "_")
+        self.config_file = f"{under_model}_{config_suffix}.yaml"
+        self.config_name = f"{under_model}_{config_suffix}"
+
+        self.params_dict, self.yaml_params, self.combined_params = self.process_dlio_params(self.config_file)
+
+        # Inject object storage params before add_datadir_param (which reads storage_type
+        # from params_dict to decide whether to create local directories).
+        self._apply_object_storage_params()
+
+        if self.args.command not in ("datagen", "datasize"):
+            self.verify_benchmark()
+
+        if self.args.command != "datasize" and self.args.data_dir:
+            # The datasize command uses --data-dir and needs to generate a command that also calls --data-dir
+            # The add_datadir_param would convert --data-dir to --dataset.data_folder which is invalid to
+            # mlpstorage.
+            self.add_datadir_param()
+        self.logger.verboser(f'Instantiated the Training Benchmark...')
+
+    def add_datadir_param(self):
+        self.params_dict['dataset.data_folder'] = self.args.data_dir
+        # Detect object storage: if storage.storage_type is not 'local' (or unset),
+        # data_folder is an S3/object-store key prefix — never a local filesystem path.
+        storage_type = self.params_dict.get('storage.storage_type', 'local')
+        is_object_storage = storage_type != 'local'
+
+        if not any([self.args.data_dir.endswith(m) for m in MODELS]):
+            # Append the model name to the data dir path
+            self.params_dict['dataset.data_folder'] = os.path.join(self.args.data_dir, self.args.model)
+            if not is_object_storage and not os.path.exists(self.params_dict['dataset.data_folder']):
+                self.logger.info(f'Creating data directory: {self.params_dict["dataset.data_folder"]}...')
+                os.makedirs(self.params_dict['dataset.data_folder'])
+
+        if not is_object_storage:
+            # For local storage only: ensure train/valid/test sub-directories exist on disk
+            for folder in ["train", "valid", "test"]:
+                folder_path = os.path.join(self.params_dict['dataset.data_folder'], folder)
+                if not os.path.exists(folder_path):
+                    self.logger.info(f'Creating directory: {folder_path}...')
+                    os.makedirs(folder_path)
+        else:
+            self.logger.debug(
+                f'Object storage ({storage_type}): skipping local directory creation for '
+                f'{self.params_dict["dataset.data_folder"]} — path is an S3 key prefix, not a filesystem path.'
+            )
+
+    def add_workflow_to_cmd(self, cmd) -> str:
+        # # Configure the workflow depending on command
+        # if self.args.command == "datagen":
+        #     cmd += " ++workload.workflow.generate_data=True ++workload.workflow.train=False"
+        # elif self.args.command == "run_benchmark":
+        #     cmd += " ++workload.workflow.generate_data=False ++workload.workflow.train=True"
+        #
+        # # Training doesn't do checkpoints
+        # cmd += " ++workload.workflow.checkpoint=False"
+        # We're now using the workflow defined in the yaml file only
+        return cmd
+
+    def generate_datagen_benchmark_command(self, num_files_train, num_subfolders_train):
+        """
+        This function will generate the command to use to call this program with the training & datagen parameters.
+        """
+        kv_map = {
+            "dataset.num_files_train": num_files_train,
+            "dataset.num_subfolders_train": num_subfolders_train,
+        }
+
+        cmd = f"{MLPSTORAGE_BIN_NAME} training datagen"
+        if self.args.hosts:
+            cmd += f" --hosts={','.join(self.args.hosts)}"
+        cmd += f" --model={self.args.model}"
+        cmd += f" --exec-type={self.args.exec_type}"
+
+        if self.params_dict:
+            for key, value in self.params_dict.items():
+                if key in kv_map.keys():
+                    continue
+                cmd += f" --{key}={value}"
+
+        for key, value in kv_map.items():
+            if value == 0:
+                continue
+            cmd += f" --param {key}={value}"
+
+        # During datasize, this will be set to max_accelerators
+        cmd += f" --num-processes={self.args.num_processes}"
+        cmd += f" --results-dir={self.args.results_dir}"
+
+        if self.args.data_dir:
+            cmd += f" --data-dir={self.args.data_dir}"
+        else:
+            cmd += f" --data-dir=<INSERT_DATA_DIR>"
+
+        return cmd
+
+
+    def datasize(self):
+        num_files_train, num_subfolders_train, total_disk_bytes = calculate_training_data_size(
+            self.args, self.cluster_information, self.combined_params['dataset'], self.combined_params['reader'], self.logger
+        )
+
+        # Persist calculated sizing into params_dict so the values flow into the
+        # written metadata file via the dotted-key override mechanism in
+        # Benchmark.metadata (#208). Without this, the metadata reflects only
+        # the YAML defaults and downstream automation cannot read back the
+        # num_files_train that datasize reported on stderr.
+        self.params_dict['dataset.num_files_train'] = num_files_train
+        self.params_dict['dataset.num_subfolders_train'] = num_subfolders_train
+
+        self.logger.result(f'Number of training files: {num_files_train}')
+        self.logger.result(f'Number of training subfolders: {num_subfolders_train}')
+        self.logger.result(f'Total disk space required for training: {total_disk_bytes / 1024**3:.2f}GiB')
+
+        if num_files_train > 10000:
+            self.logger.warning(
+                f'The number of files required may be excessive for some filesystems. You can use the num_subfolders_train parameter to shard the dataset. To keep near 10,000 files per folder use "{int(num_files_train / 10000)}x" subfolders by adding "--param dataset.num_subfolders_train={int(num_files_train / 10000)}"')
+
+        cmd = self.generate_datagen_benchmark_command(num_files_train, num_subfolders_train)
+        self.logger.result(f'Run the following command to generate data: \n{cmd}')
+        self.logger.warning(f'The parameter for --num-processes is the same as --max-accelerators. Adjust the value '
+                       f'according to your system.')
+
+    def _run(self):
+        try:
+            self.command_method_map[self.args.command]()
+        except Exception as e:
+            self.logger.error(f'Error occurred while executing command: {str(e)}')
+            return EXIT_CODE.FAILURE
+        return EXIT_CODE.SUCCESS
+
+
+class CheckpointingBenchmark(DLIOBenchmark):
+
+    BENCHMARK_TYPE = BENCHMARK_TYPES.checkpointing
+
+    def __init__(self, args, **kwargs):
+        super().__init__(args, **kwargs)
+
+        self.config_name = f'{args.model.replace("-", "_")}'
+        self.config_file = f'{self.config_name}.yaml'
+        self.params_dict, self.yaml_params, self.combined_params = self.process_dlio_params(self.config_file)
+        self._apply_object_storage_params()
+        self.verify_benchmark()
+        self.add_checkpoint_params()
+        self.logger.status(f'Instantiated the Checkpointing Benchmark...')
+
+    def add_checkpoint_params(self):
+        min_procs, zero_level, GPUpDP, ClosedGPUs = LLM_ALLOWED_VALUES.get(self.args.model)
+        configured_data_parallelism = int(ClosedGPUs / GPUpDP)
+
+        # We only need the param "model.parallelism.data" if we are not using default checkpoint_mode
+        if self.args.num_processes < ClosedGPUs:
+            self.params_dict['checkpoint.mode'] = "subset"
+            self.params_dict['model.parallelism.data'] = configured_data_parallelism
+
+        self.params_dict['checkpoint.num_checkpoints_read'] = self.args.num_checkpoints_read
+        self.params_dict['checkpoint.num_checkpoints_write'] = self.args.num_checkpoints_write
+        if self.args.checkpoint_folder:
+            self.params_dict['checkpoint.checkpoint_folder'] = os.path.join(self.args.checkpoint_folder, self.args.model)
+
+
+    def add_workflow_to_cmd(self, cmd) -> str:
+        # cmd += " ++workload.workflow.generate_data=False ++workload.workflow.train=False"
+        # cmd += " ++workload.workflow.checkpoint=True"
+        # We're now using the workflow defined in the yaml file only
+        return cmd
+
+    def _run_configview(self):
+        """Display the final DLIO config without executing."""
+        cmd = self.generate_dlio_command()
+        self.logger.status(f"Configuration view:\n{cmd}")
+        print(cmd)
+        return EXIT_CODE.SUCCESS
+
+    def _run(self):
+        try:
+            if self.args.command == "run":
+                self.execute_command()
+            elif self.args.command == "datasize":
+                self.datasize()
+            elif self.args.command == "configview":
+                return self._run_configview()
+            else:
+                self.logger.error(f'Invalid command: {self.args.command}')
+                return EXIT_CODE.INVALID_ARGUMENTS
+        except Exception as e:
+            return EXIT_CODE.FAILURE
+        return EXIT_CODE.SUCCESS
+
+    def datasize(self):
+        self.logger.verbose(f'Running datasize for {self.args.model}...')
+        # Calculate the total writes per rank which equates to memory required per rank
+        # If zero_level is 1, then rank 0 writes the entire model,
+        # If zero_level is 3, then the model is sharded across all ranks
+        min_procs, zero_level, GPUpDP, ClosedGPUs = LLM_ALLOWED_VALUES.get(self.args.model)
+        model_gb, optimizer_gb = LLM_SIZE_BY_RANK.get(self.args.model)
+        rank_gb = []
+
+        self.logger.verbose(f'Model & optimizer size: {model_gb:.2f}GiB, {optimizer_gb:.2f}GiB')
+        for rank in range(self.args.num_processes):
+            rank_gb.append(0)
+            if zero_level == 1:
+                self.logger.debug("Optimizer is written by all ranks, but only the ranks on the first DP instance write the model")
+                rank_gb[rank] = optimizer_gb / self.args.num_processes
+                if rank < GPUpDP:
+                    rank_gb[rank] += model_gb / GPUpDP
+                    self.logger.debug(f'First DP: rank-{rank} write model: {rank_gb[rank]:.2f}GiB')
+            elif zero_level == 3:
+                rank_gb[rank] = (model_gb + optimizer_gb) / self.args.num_processes
+                self.logger.debug(f'Rank {rank} writes portion of model and optimizer: {rank_gb[rank]:.2f}GiB')
+            else:
+                self.logger.error(f'Invalid zero_level: {zero_level}')
+                raise ValueError("Invalid zero_level")
+
+        rank_string = "\n\t".join(f"Rank {rank}: {rank_gb[rank]:.2f}GiB" for rank in range(self.args.num_processes))
+
+        self.logger.result(f'Total GiB required per rank:\n\t{rank_string}')
+        self.logger.result(f'Total GiB required for all ranks: {sum(rank_gb):.2f}GiB')
+
+

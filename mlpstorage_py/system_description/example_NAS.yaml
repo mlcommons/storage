@@ -1,0 +1,99 @@
+system_under_test:
+    solution:
+        submission_name: NAS_Example
+        friendly_description: A generic example of an Enterprise NAS solution
+        architecture:
+            storage_location: remote
+            benchmark_API: file
+            product_API: file
+            client_footprint: open_source
+            client_installation: in_box
+        capabilities:
+            multi_host: true
+            simultaneous_write: true
+            simultaneous_read: true
+            remap_time_in_seconds: 0
+    deployment: "onprem"
+    product_nodes:
+        - friendly_description: NAS Node
+          quantity: 4
+          chassis: 
+             model_name: FAS A100
+             rack_units: 1
+             cpu_model: XEON 90000
+             cpu_qty: 2
+             cpu_cores: 96
+             memory_capacity: 256
+             power:
+                min_psus_active: 1
+                psus_configured:
+                    - power_capacity_watts: 1800
+                      efficiency: Platinum
+                      unit_count: 2
+          networking:
+              - type: ethernet
+                speed: 100
+                traffic:
+                    - management
+                    - metadata
+                    - data
+                unit_count: 2
+          operating_system:
+             name: NAS OS
+             version: "9.5"
+          environment:
+              - name: foobar
+                value: "12"
+              - name: foobarbaz
+                value: "13"
+          sysctl:
+              - name: barfoo
+                value: "21"
+              - name: bazbarfoo
+                value: "31"
+    product_switches:
+        - vendor_name: Cisco
+          model_name: Mongo 5000
+          ports:
+             - type: ethernet
+               speed: 100
+               traffic:
+                   - data
+               unit_count: 128
+          configuration:
+              - name: LACP
+                value: layer 3
+          rack_units: 2
+          power:
+             min_psus_active: 1
+             psus_configured:
+                 - power_capacity_watts: 1800
+                   efficiency: Platinum
+                   unit_count: 2
+          unit_count: 2
+    total_rack_units: 8
+    clients:
+        - friendly_description: Benchmark load system
+          quantity: 16
+          chassis: 
+             model_name: Dell7680
+             rack_units: 1
+             cpu_model: XEON 90000
+             cpu_qty: 2
+             cpu_cores: 96
+             memory_capacity: 256
+             power:
+                min_psus_active: 1
+                psus_configured:
+                    - power_capacity_watts: 1800
+                      efficiency: Platinum
+                      unit_count: 2
+          networking:
+             - type: ethernet
+               speed: 100
+               traffic:
+                   - data
+               unit_count: 1
+          operating_system:
+              name: RHEL
+              version: "10.1"
