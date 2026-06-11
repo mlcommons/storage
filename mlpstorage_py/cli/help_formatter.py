@@ -12,11 +12,13 @@ Exports:
 # Section headers between blocks are included as plain text (no markdown).
 # ---------------------------------------------------------------------------
 
-HELP_ALL_TEXT = """\
+_HEADER_TEXT = """\
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  MLPSTORAGE — COMPLETE COMMAND REFERENCE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
 
+SYNOPSIS_TEXT = """\
 SYNOPSIS
   mlpstorage <closed|open|whatif> <benchmark> <model|algorithm> <command> <file|object> [OPTIONS]
   mlpstorage (reports|history|lockfile|version) [subcommand] [OPTIONS]
@@ -24,8 +26,9 @@ SYNOPSIS
   <closed|open|whatif>  — required first positional for benchmark commands
   <model|algorithm>     — required second positional (see per-benchmark choices below)
   <file|object>         — required storage selector for commands that touch storage
-                          (absent on datasize; absent on all kvcache commands)
+                          (absent on datasize; absent on all kvcache commands)"""
 
+_TREE_AND_BODY_TEXT = """\
 mlpstorage
 │
 ├── closed ──────────────────────────────────────────────────────
@@ -523,6 +526,10 @@ VERSION
   No flags.  Prints the installed package version string and exits 0.
   Resolution order: importlib.metadata("mlpstorage") → pyproject.toml → "unknown"
 """
+
+# HELP_ALL_TEXT is composed from three pieces so that SYNOPSIS_TEXT can be
+# printed standalone (mid-tree -h) without parsing the combined string.
+HELP_ALL_TEXT = _HEADER_TEXT + "\n" + SYNOPSIS_TEXT + "\n\n" + _TREE_AND_BODY_TEXT
 
 # ---------------------------------------------------------------------------
 # get_context_help_tokens

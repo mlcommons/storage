@@ -97,12 +97,15 @@ def parse_arguments():
     _help_flags = {'-h', '--help'}
     _stripped = [a for a in _argv if a not in _help_flags]
     _positionals = [a for a in _stripped if not a.startswith('-')]
-    from mlpstorage_py.cli.help_formatter import get_context_help_tokens
+    from mlpstorage_py.cli.help_formatter import get_context_help_tokens, SYNOPSIS_TEXT
     _msg = get_context_help_tokens(_positionals)
     if _msg is not None:
         # Fire for: bare invocation, --help at any level, AND bare incomplete paths
         # (e.g., 'mlpstorage closed training' with no --help still shows "next: unet3d | retinanet")
-        print(_msg)
+        if _help_flags.intersection(_argv):
+            print(SYNOPSIS_TEXT)
+            print()
+        print(_msg + '  (or -h or --help_all for details)')
         sys.exit(0)
     # _msg is None → leaf level OR unrecognized token → fall through to argparse (HELP-03)
 
