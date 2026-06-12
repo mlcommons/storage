@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlpstorage"
-version = "3.0.7"
+version = "3.0.9"
 description = "MLPerf Storage Benchmark Suite"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -122,7 +122,9 @@ environments = ["sys_platform == 'linux'"]
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
 torchaudio = [{ index = "pytorch-cpu" }]
-dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", branch = "main" }
+# Pinned to PR #22 head (fix for issue #415: mpi4py auto-init aborts in PyTorch
+# DataLoader spawn-workers). Revert to branch = "main" once the PR merges upstream.
+dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "60fd3b8e7ae9cc8be644b47df0661366ac2c8bd6" }
 
 [dependency-groups]
 dev = [
