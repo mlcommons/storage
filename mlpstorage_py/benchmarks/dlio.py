@@ -35,8 +35,8 @@ class DLIOBenchmark(Benchmark, abc.ABC):
         self.per_host_mem_kB = None
         self.total_mem_kB = None
 
-        # Fail-fast dependency validation (skip for dry-run mode)
-        if not getattr(args, 'dry_run', False):
+        # Fail-fast dependency validation (skip for dry-run/what-if mode)
+        if not getattr(args, 'dry_run', False) and not getattr(args, 'what_if', False):
             self._validate_dependencies(args)
 
         if args.command != "datagen":
@@ -275,6 +275,9 @@ class DLIOBenchmark(Benchmark, abc.ABC):
             cmd = f"{mpi_prefix} {cmd}"
 
         return cmd
+
+    def generate_command(self, command: str) -> str:
+        return self.generate_dlio_command()
 
 
 class TrainingBenchmark(DLIOBenchmark):

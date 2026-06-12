@@ -24,8 +24,10 @@ class TestTrainingBenchmarkFlow:
     """Integration tests for training benchmark execution flow."""
 
     @pytest.fixture
-    def training_args(self):
+    def training_args(self, tmp_path):
         """Create training benchmark args."""
+        data_dir = tmp_path / 'data' / 'unet3d'
+        data_dir.mkdir(parents=True)
         return create_sample_benchmark_args(
             benchmark_type='training',
             command='run',
@@ -34,7 +36,7 @@ class TestTrainingBenchmarkFlow:
             num_accelerators=8,
             client_host_memory_in_gb=256,
             hosts=['127.0.0.1'],
-            data_dir='/data/unet3d',
+            data_dir=str(data_dir),
         )
 
     @pytest.fixture
@@ -98,7 +100,7 @@ class TestTrainingBenchmarkFlow:
 
             # Get the generated command
             if hasattr(benchmark, 'generate_command'):
-                cmd = benchmark.generate_command()
+                cmd = benchmark.generate_command(training_args.command)
                 # Command should contain dlio_benchmark or relevant executable
                 assert cmd is not None
 
@@ -150,12 +152,15 @@ class TestBenchmarkWithMockExecutor:
     """Test benchmark execution using mock command executor."""
 
     @pytest.fixture
-    def training_args(self):
+    def training_args(self, tmp_path):
         """Create training benchmark args."""
+        data_dir = tmp_path / 'data'
+        data_dir.mkdir()
         return create_sample_benchmark_args(
             benchmark_type='training',
             command='run',
             model='unet3d',
+            data_dir=str(data_dir),
         )
 
     def test_benchmark_records_executed_commands(self, training_args, mock_executor, tmp_path):
@@ -197,12 +202,15 @@ class TestBenchmarkWithMockCollector:
     """Test benchmark initialization with mock cluster collector."""
 
     @pytest.fixture
-    def training_args(self):
+    def training_args(self, tmp_path):
         """Create training benchmark args."""
+        data_dir = tmp_path / 'data'
+        data_dir.mkdir()
         return create_sample_benchmark_args(
             benchmark_type='training',
             command='run',
             model='unet3d',
+            data_dir=str(data_dir),
         )
 
     def test_benchmark_uses_mock_cluster_info(self, training_args, mock_collector, tmp_path):
@@ -238,12 +246,15 @@ class TestMetadataGeneration:
     """Test benchmark metadata file generation."""
 
     @pytest.fixture
-    def training_args(self):
+    def training_args(self, tmp_path):
         """Create training benchmark args."""
+        data_dir = tmp_path / 'data'
+        data_dir.mkdir()
         return create_sample_benchmark_args(
             benchmark_type='training',
             command='run',
             model='unet3d',
+            data_dir=str(data_dir),
         )
 
     def test_metadata_file_created_on_run(self, training_args, tmp_path):

@@ -292,13 +292,15 @@ class TestBenchmarkVerifyBenchmark:
             debug=False,
             verbose=False,
             dry_run=False,
+            what_if=False,
             stream_log_level='INFO',
             results_dir=str(tmp_path),
             model='unet3d',
             command='run',
             num_processes=8,
             accelerator_type='h100',
-            mode='closed',
+            closed=True,
+            open=False,
             allow_invalid_params=False
         )
 
@@ -344,8 +346,6 @@ class TestBenchmarkVerifyBenchmark:
 
     def test_exits_for_open_when_closed_required(self, benchmark):
         """Should exit for OPEN verification when closed mode was passed."""
-        benchmark.args.mode = 'closed'
-
         with patch('mlpstorage_py.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
             mock_verifier = MagicMock()
             mock_verifier.verify.return_value = PARAM_VALIDATION.OPEN
@@ -357,10 +357,10 @@ class TestBenchmarkVerifyBenchmark:
     def test_allows_open_with_open_flag(self, benchmark):
         """Should allow OPEN verification when open mode was passed.
 
-        Post-CLI-refactor: closed/open/whatif are positional values on
-        args.mode, not separate boolean flags.
+        Post-#349 fix: closed/open are independent boolean flags on args.
         """
-        benchmark.args.mode = 'open'
+        benchmark.args.closed = False
+        benchmark.args.open = True
 
         with patch('mlpstorage_py.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
             mock_verifier = MagicMock()
