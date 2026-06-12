@@ -151,6 +151,23 @@ def _add_training_core_args(parser, command, accel_choices):
     )
 
     add_dlio_arguments(parser)
+
+    # --params is allowed in CLOSED mode for the parameters listed in
+    # TrainingRunRulesChecker.CLOSED_ALLOWED_PARAMS (e.g. dataset.num_files_train,
+    # dataset.num_subfolders_train). Register it in the core args so closed
+    # submissions can actually pass those overrides — gating to open/whatif
+    # caused #433. `--param` (singular) is kept as a legacy alias so older
+    # docs and the strings emitted by `datasize` still parse.
+    parser.add_argument(
+        '--params', '--param', '-p',
+        dest='params',
+        nargs="+",
+        action="append",
+        default=None,  # append action requires list/None; set_defaults(params='') is overridden here
+        metavar="KEY=VALUE",
+        help=HELP_MESSAGES['params']
+    )
+
     add_universal_arguments(parser, req_results=(command in ("run", "configview")))
 
     # Storage type positional for datagen, run, configview — NOT datasize
@@ -175,14 +192,6 @@ def _add_training_open_args(parser, command):
         '--allow-invalid-params', '-aip',
         action='store_true',
         help="Allow invalid DLIO parameters to be passed"
-    )
-    parser.add_argument(
-        '--params', '-p',
-        nargs="+",
-        action="append",
-        default=None,  # Override set_defaults(params='') — append action requires list/None
-        metavar="KEY=VALUE",
-        help=HELP_MESSAGES['params']
     )
     if command == "run":
         add_timeseries_arguments(parser)

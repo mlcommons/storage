@@ -378,8 +378,12 @@ def add_dlio_arguments(parser):
         type=str,
         help="Path to DLIO binary. Default is the same as mlpstorage binary path"
     )
-    # --params is intentionally not registered here; it moves to _add_{cmd}_open_args()
-    # in each benchmark builder. Closed-mode callers set: parser.set_defaults(params='')
+    # --params lives on the per-benchmark builder, not here, because its allowed
+    # keys differ by benchmark and by mode (per the *RunRulesChecker
+    # *_ALLOWED_PARAMS lists and Rules.md §N.6 tables). Builders that need a
+    # CLOSED-allowed dotted-key surface (training — see issue #433) register
+    # --params in their core args; builders without CLOSED-tunable dotted keys
+    # may keep it in open args only.
 
 
 def add_timeseries_arguments(parser):

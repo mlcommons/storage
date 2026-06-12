@@ -316,7 +316,13 @@ class TestAddTrainingArguments:
         assert args.loops == 3
 
     def test_closed_mode_namespace_has_open_defaults(self):
-        """Closed-mode parse must still supply loops/params/allow_invalid_params via set_defaults."""
+        """Closed-mode parse must supply loops/allow_invalid_params via set_defaults.
+
+        `params` is now registered as a real flag in core training args (it is
+        CLOSED-allowed for the parameters listed in CLOSED_ALLOWED_PARAMS — see
+        issue #433), so its default is None from the flag, not '' from
+        set_defaults.
+        """
         parser = argparse.ArgumentParser()
         add_training_arguments(parser, 'closed')
         args = parser.parse_args([
@@ -325,8 +331,21 @@ class TestAddTrainingArguments:
             '--client-host-memory-in-gb', '64', '--results-dir', '/tmp', 'file',
         ])
         assert args.loops == 1
-        assert args.params == ''
+        assert args.params is None
         assert args.allow_invalid_params is False
+
+    def test_closed_mode_accepts_params(self):
+        """Closed mode must accept --params for CLOSED_ALLOWED_PARAMS (regression for #433)."""
+        parser = argparse.ArgumentParser()
+        add_training_arguments(parser, 'closed')
+        args = parser.parse_args([
+            'unet3d', 'datagen',
+            '--num-processes', '8', '--results-dir', '/tmp', 'file',
+            '--params', 'dataset.num_files_train=1000', 'dataset.num_subfolders_train=10',
+        ])
+        flattened = [kv for batch in (args.params or []) for kv in batch]
+        assert 'dataset.num_files_train=1000' in flattened
+        assert 'dataset.num_subfolders_train=10' in flattened
 
 
 class TestAddCheckpointingArguments:
