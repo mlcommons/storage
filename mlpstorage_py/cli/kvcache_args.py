@@ -173,7 +173,7 @@ def _add_kvcache_cache_arguments(parser, mode):
             loops=1,
             duration=KVCACHE_DEFAULT_DURATION,
             generation_mode='realistic',
-            performance_profile='latency',
+            performance_profile='throughput',
             disable_multi_turn=False,
             disable_prefix_caching=False,
             enable_rag=True,
@@ -241,7 +241,7 @@ def _add_kvcache_open_args(parser):
     run_group.add_argument(
         '--performance-profile',
         choices=KVCACHE_PERFORMANCE_PROFILES,
-        default='latency',
+        default='throughput',
         help=KVCACHE_HELP_MESSAGES['performance_profile']
     )
     run_group.add_argument(
