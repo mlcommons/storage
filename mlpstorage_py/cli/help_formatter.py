@@ -436,7 +436,7 @@ KV_RUN_CLOSED
   + MPI_ARGS
   + CORE_STD
   Note: the following are fixed in closed and not shown:
-    duration=60s, generation-mode=realistic, performance-profile=latency,
+    duration=60s, generation-mode=realistic, performance-profile=throughput,
     seed=42, trials=3, inter-option-delay=20s,
     disable-multi-turn=False, disable-prefix-caching=False,
     enable-rag=True, rag-num-docs=10,
@@ -457,7 +457,7 @@ KV_RUN_OPEN
     --cpu-mem-gb FLOAT              (default: 32.0)
     --duration/-d N                 Seconds (default: 60)
     --generation-mode {none,fast,realistic}  (default: realistic)
-    --performance-profile {latency,throughput}  (default: latency)
+    --performance-profile {latency,throughput}  (default: throughput)
     --disable-multi-turn
     --disable-prefix-caching
     --enable-rag

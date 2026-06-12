@@ -122,6 +122,11 @@ class TestKVCacheRunArguments:
             args = parser.parse_args(['run', '--results-dir', '/tmp', '--performance-profile', profile])
             assert args.performance_profile == profile
 
+    def test_performance_profile_default_is_throughput(self, parser):
+        """performance_profile should default to 'throughput' in open/whatif mode."""
+        args = parser.parse_args(['run', '--results-dir', '/tmp'])
+        assert args.performance_profile == 'throughput'
+
     def test_seed_argument(self, parser):
         """Should accept --seed argument."""
         args = parser.parse_args(['run', '--results-dir', '/tmp', '--seed', '42'])
@@ -425,3 +430,24 @@ class TestKVCacheClosedMode:
         """Closed kvcache must reject --cpu-mem-gb (open/whatif only)."""
         with pytest.raises(SystemExit):
             parser.parse_args(['run', '--results-dir', '/tmp', '--cpu-mem-gb', '64.0'])
+
+
+class TestKVCacheClosedModePerformanceProfile:
+    """Tests for --performance-profile in closed mode: fixed to 'throughput', not a visible arg."""
+
+    @pytest.fixture
+    def closed_parser(self):
+        parser = argparse.ArgumentParser()
+        add_kvcache_arguments(parser, 'closed')
+        return parser
+
+    def test_performance_profile_fixed_to_throughput(self, closed_parser):
+        """In closed mode performance_profile is silently fixed to 'throughput'."""
+        args = closed_parser.parse_args(['run', '--results-dir', '/tmp'])
+        assert args.performance_profile == 'throughput'
+
+    def test_performance_profile_not_a_registered_arg_in_closed(self, closed_parser):
+        """In closed mode --performance-profile is hidden and must not be accepted."""
+        with pytest.raises(SystemExit):
+            closed_parser.parse_args(['run', '--results-dir', '/tmp',
+                                      '--performance-profile', 'latency'])
