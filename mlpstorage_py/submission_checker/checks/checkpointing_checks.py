@@ -51,6 +51,7 @@ class CheckpointingCheck(BaseCheck):
             self.subset_run_validation,
             self.open_mpi_processes,           # CHKPT-01 (Task 2a)
             self.cache_flush_validation,       # CHKPT-02 (Task 2a)
+            self.checkpoint_invocation_structure,  # 4.7.1 strict structural enforcement
             self.total_test_duration,          # CHKPT-03 (Task 2a)
             self.remapping_time_reporting,     # CHKPT-04 (Task 2b)
             self.simultaneous_rw_support,      # CHKPT-05 (Task 2b)
@@ -616,6 +617,106 @@ class CheckpointingCheck(BaseCheck):
                 )
                 valid = False
         return valid
+
+    @rule("4.7.1", "checkpointCacheFlushValidation")
+    def checkpoint_invocation_structure(self):
+        """Enforce the strict invocation structure for CLOSED checkpointing (Rules.md 4.7.1).
+
+        A CLOSED submission must consist of either:
+          - a single invocation with --num-checkpoints-write=10 AND
+            --num-checkpoints-read=10; or
+          - exactly two invocations: a write phase (10/0) followed by a read
+            phase (0/10), with the read phase starting AFTER the write phase
+            has ended (no overlap).
+
+        The 30-second upper bound on the inter-phase gap is enforced separately
+        by ``cache_flush_validation``. OPEN submissions may use any non-negative
+        integer for --num-checkpoints-* per Rules.md Table 3, so this check is
+        a no-op for them.
+        """
+        valid = True
+        if self.mode != "checkpointing":
+            return valid
+
+        closed_runs = [
+            (summary, metadata, ts)
+            for summary, metadata, ts in self._iter_valid_files()
+            if (metadata or {}).get("verification") == "closed"
+        ]
+        if not closed_runs:
+            return valid
+
+        REQUIRED = 10
+
+        def _wr(metadata):
+            args = (metadata or {}).get("args", {}) or {}
+            return (
+                int(args.get("num_checkpoints_write", 0) or 0),
+                int(args.get("num_checkpoints_read", 0) or 0),
+            )
+
+        if len(closed_runs) == 1:
+            _summary, metadata, ts = closed_runs[0]
+            writes, reads = _wr(metadata)
+            if (writes, reads) != (REQUIRED, REQUIRED):
+                self.log_violation(
+                    "4.7.1", "checkpointCacheFlushValidation", self.path,
+                    "single-invocation CLOSED submission must use "
+                    "--num-checkpoints-write=10 AND --num-checkpoints-read=10 "
+                    "(got writes=%d, reads=%d in %s)",
+                    writes, reads, ts,
+                )
+                valid = False
+            return valid
+
+        if len(closed_runs) == 2:
+            # Sort by ts (YYYYMMDD_HHmmss is lexicographically chronological).
+            ordered = sorted(closed_runs, key=lambda e: e[2])
+            first_summary, first_md, first_ts = ordered[0]
+            second_summary, second_md, second_ts = ordered[1]
+
+            first_w, first_r = _wr(first_md)
+            second_w, second_r = _wr(second_md)
+
+            if (first_w, first_r) != (REQUIRED, 0) or (second_w, second_r) != (0, REQUIRED):
+                self.log_violation(
+                    "4.7.1", "checkpointCacheFlushValidation", self.path,
+                    "two-invocation CLOSED submission must be write-phase (10/0) "
+                    "followed by read-phase (0/10); got first=(writes=%d,reads=%d) "
+                    "in %s, second=(writes=%d,reads=%d) in %s",
+                    first_w, first_r, first_ts, second_w, second_r, second_ts,
+                )
+                valid = False
+                return valid
+
+            # Overlap check: read phase must start after write phase ends.
+            write_end = (first_summary or {}).get("end_time") or (first_summary or {}).get("end")
+            read_start = (second_summary or {}).get("start_time") or (second_summary or {}).get("start")
+            if write_end and read_start:
+                try:
+                    gap_seconds = _parse_iso_gap(write_end, read_start)
+                except (ValueError, TypeError):
+                    # Parse errors are already reported by cache_flush_validation;
+                    # don't double-log.
+                    return valid
+                if gap_seconds < 0:
+                    self.log_violation(
+                        "4.7.1", "checkpointCacheFlushValidation", self.path,
+                        "read phase started %.1fs before write phase ended; "
+                        "the two phases must not overlap (write_end=%s, read_start=%s)",
+                        -gap_seconds, write_end, read_start,
+                    )
+                    valid = False
+            return valid
+
+        # 3+ invocations — disallowed.
+        self.log_violation(
+            "4.7.1", "checkpointCacheFlushValidation", self.path,
+            "CLOSED checkpointing submission must consist of 1 or 2 invocations "
+            "(got %d). See Rules.md 4.7.1.",
+            len(closed_runs),
+        )
+        return False
 
     @rule("4.7.2", "checkpointTotalTestDuration")
     def total_test_duration(self):

@@ -262,16 +262,19 @@ CK_DATASIZE_CLOSED
     --client-host-memory-in-gb/-cm N
   Optional:
     --hosts/-s HOST...              (default: 127.0.0.1)
+    --num-checkpoints-read/-ncr N   (default: 10; closed allows 10 or 0)
+    --num-checkpoints-write/-ncw N  (default: 10; closed allows 10 or 0)
   + CORE_STD  (--results-dir optional)
-  Note: --num-checkpoints-read/write fixed at 10 in closed; not shown
+  Note: closed runs use 10/10 by default. Use 10/0 then 0/10 in two
+        invocations when a cache flush is required between phases
+        (see Rules.md §4.7.1 and checkpointing/README.md).
 
 CK_DATASIZE_OPEN
   = CK_DATASIZE_CLOSED plus:
-    --num-checkpoints-read/-ncr N   (default: 10)
-    --num-checkpoints-write/-ncw N  (default: 10)
     --dlio-bin-path/-dp PATH
     --params/-p KEY=VALUE...
   + OPEN_STD
+  Note: open allows any non-negative integer for --num-checkpoints-read/-write
 
 CK_DATASIZE_WHATIF
   = CK_DATASIZE_OPEN  (model positional choices identical; flags identical)
@@ -288,9 +291,13 @@ CK_RUN_CLOSED
   Optional:
     --exec-type/-et {mpi,docker}    (default: mpi)
     --hosts/-s HOST...              (default: 127.0.0.1)
+    --num-checkpoints-read/-ncr N   (default: 10; closed allows 10 or 0)
+    --num-checkpoints-write/-ncw N  (default: 10; closed allows 10 or 0)
   + MPI_ARGS
   + CORE_STD
-  Note: --num-checkpoints-read/write fixed at 10 in closed; not shown
+  Note: closed runs use 10/10 by default. Use 10/0 then 0/10 in two
+        invocations when a cache flush is required between phases
+        (see Rules.md §4.7.1 and checkpointing/README.md).
 
   Closed rank constraints by model:
     llama3-1t:   8 or 1024
@@ -300,13 +307,12 @@ CK_RUN_CLOSED
 
 CK_RUN_OPEN
   = CK_RUN_CLOSED plus:
-    --num-checkpoints-read/-ncr N   (default: 10)
-    --num-checkpoints-write/-ncw N  (default: 10)
     --dlio-bin-path/-dp PATH
     --params/-p KEY=VALUE...
   + OPEN_STD
   + TIMESERIES
   Note: open allows any multiple of the per-model GPU-per-DP-instance count
+        and any non-negative integer for --num-checkpoints-read/-write
 
 CK_RUN_WHATIF
   = CK_RUN_OPEN  (model positional choices identical; flags identical)

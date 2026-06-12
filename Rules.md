@@ -472,14 +472,16 @@ root_folder (or any name you prefer)
 | --ppn hostname:slotcount           | Number of processes per node                 | N/A                                           | YES (minimal 4)      | YES (minimal 4)    |
 | --num-processes                    | Total number of processes                    | Node local: 8<br>Global: the value in Table 1 | NO                   | YES                |
 | --checkpoint-folder                | The folder to save the checkpoint data       | checkpoint/{workload}                         | YES                  | YES                |
-| --num-checkpoints-write            | Number of write checkpoints                  | 10 or 0**                                     | NO                   | NO                 |
-| --num-checkpoints-read             | Number of write checkpoints                  | 10 or 0**                                     | NO                   | NO                 |
+| --num-checkpoints-write            | Number of write checkpoints                  | 10 (or 0**)                                   | Only 10 or 0**       | YES                |
+| --num-checkpoints-read             | Number of read checkpoints                   | 10 (or 0**)                                   | Only 10 or 0**       | YES                |
 
 **NOTE: In the ``--ppn`` syntax above, the ``slotcount`` value means the number of processes per node to run.**
 
+**\*\* NOTE: In CLOSED submissions, ``--num-checkpoints-write`` and ``--num-checkpoints-read`` may be set to ``0`` only as part of the two-invocation cache-flush workflow described in §4.7.1: one invocation runs the write phase with ``--num-checkpoints-read=0`` and the next runs the read phase with ``--num-checkpoints-write=0``. The default for both flags is 10 and the total work performed across both invocations must still be 10 writes followed by 10 reads.**
+
 ## 4.7.  Storage System Must Be Simultaneously R/W or _Remappable_
 
-4.7.1. **checkpointCacheFlushValidation** -- If a submitter needs to issue a cache flush operation between the write phase and the read phase of a checkpoint benchmark run, then the validator must check that ``--num-checkpoints-read=0`` was set during the write phase, that there was a short pause of up to 30 seconds maximum, then the write phase was started with ``--num-checkpoints-write=0`` set.
+4.7.1. **checkpointCacheFlushValidation** -- A cache flush between the write and read phases is only required when the client node has enough memory to cache all of the checkpoints written by that client during the run. The benchmark writes 10 sequential checkpoints specifically to overfill typical filesystem caches; on most submission configurations the early checkpoints have already been evicted by the time the read phase begins, so no flush is required. As a rule of thumb (see `checkpointing/README.md`), a flush is required when the total checkpoint size written per client is less than 3× the client node's memory capacity. When a flush is required, the submitter must execute the run in two invocations: the write phase with ``--num-checkpoints-read=0``, followed by the cache flush during a pause of no more than 30 seconds, then the read phase with ``--num-checkpoints-write=0``. The validator must confirm this split occurred and that the inter-phase gap did not exceed 30 seconds.
 
 4.7.2. **checkpointTotalTestDuration** -- The validator must verify that the total test duration starts from the timestamp of the first checkpoint written and ends at the ending timestamp of the last checkpoint read, notably including the "remapping" time.
 

@@ -62,8 +62,6 @@ def _add_checkpointing_core_args(parser, command):
         loops=1,
         params='',
         allow_invalid_params=False,
-        num_checkpoints_read=10,
-        num_checkpoints_write=10,
         dlio_bin_path=None,
         checkpoint_folder=None,
     )
@@ -117,14 +115,9 @@ def _add_checkpointing_core_args(parser, command):
             help=HELP_MESSAGES['checkpoint_folder']
         )
 
-
-def _add_checkpointing_open_args(parser, command):
-    """Add open/whatif-only checkpointing arguments.
-
-    Args:
-        parser: The subcommand parser to add arguments to.
-        command: The subcommand name.
-    """
+    # num-checkpoints-read/write are available in all modes so closed submitters
+    # can split write and read into two invocations (set =0 on one side) with a
+    # cache flush in between — see Rules.md §4.7.1.
     parser.add_argument(
         '--num-checkpoints-read', '-ncr',
         type=int,
@@ -137,6 +130,15 @@ def _add_checkpointing_open_args(parser, command):
         default=10,
         help=HELP_MESSAGES['num_checkpoints']
     )
+
+
+def _add_checkpointing_open_args(parser, command):
+    """Add open/whatif-only checkpointing arguments.
+
+    Args:
+        parser: The subcommand parser to add arguments to.
+        command: The subcommand name.
+    """
     parser.add_argument(
         '--loops',
         type=int,
@@ -173,6 +175,26 @@ def validate_checkpointing_arguments(args):
         error_messages.append("Invalid LLM model. Supported models are: {}".format(", ".join(LLM_MODELS)))
     if args.num_checkpoints_read < 0 or args.num_checkpoints_write < 0:
         error_messages.append("Number of checkpoints read and write must be non-negative")
+
+    # CLOSED mode: each flag must be exactly 10 or 0, and both can't be 0.
+    # Two-invocation split (10/0 then 0/10) is the only deviation from 10/10
+    # allowed by Rules.md §4.7.1.
+    if getattr(args, 'mode', None) == 'closed':
+        if args.num_checkpoints_write not in (10, 0):
+            error_messages.append(
+                "CLOSED submissions require --num-checkpoints-write to be 10 or 0 "
+                f"(got {args.num_checkpoints_write}). See Rules.md §4.7.1."
+            )
+        if args.num_checkpoints_read not in (10, 0):
+            error_messages.append(
+                "CLOSED submissions require --num-checkpoints-read to be 10 or 0 "
+                f"(got {args.num_checkpoints_read}). See Rules.md §4.7.1."
+            )
+        if args.num_checkpoints_write == 0 and args.num_checkpoints_read == 0:
+            error_messages.append(
+                "CLOSED submissions cannot set both --num-checkpoints-write=0 and "
+                "--num-checkpoints-read=0 in the same invocation."
+            )
 
     if error_messages:
         for msg in error_messages:

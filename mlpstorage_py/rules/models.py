@@ -83,6 +83,7 @@ class BenchmarkRunData:
     metrics: Optional[Dict[str, Any]] = None
     result_dir: Optional[str] = None
     accelerator: Optional[str] = None
+    end_datetime: str = ""
 
 
 @dataclass
@@ -755,6 +756,7 @@ class DLIOResultParser:
             model=model,
             command=command,
             run_datetime=summary.get("start", ""),
+            end_datetime=summary.get("end", ""),
             num_processes=summary.get("num_accelerators", 0),
             parameters=hydra_workload_config,
             override_parameters=override_parameters,
@@ -849,6 +851,7 @@ class ResultFilesExtractor:
             model=metadata.get('model'),
             command=metadata.get('command'),
             run_datetime=metadata.get('run_datetime', ''),
+            end_datetime=metadata.get('end_datetime', ''),
             num_processes=metadata.get('num_processes', 0),
             parameters=metadata.get('parameters', {}),
             override_parameters=metadata.get('override_parameters', {}),
@@ -943,6 +946,10 @@ class BenchmarkRun:
     @property
     def run_datetime(self):
         return self._data.run_datetime
+
+    @property
+    def end_datetime(self):
+        return self._data.end_datetime
 
     @property
     def num_processes(self):
