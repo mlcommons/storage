@@ -262,8 +262,8 @@ class Benchmark(BenchmarkInterface, abc.ABC):
 
         self.__dict__.update({'executed_command': command})
 
-        if getattr(self.args, 'dry_run', False):
-            self.logger.debug(f'Executing command in --dry-run mode means no execution will be performed.')
+        if getattr(self.args, 'dry_run', False) or getattr(self.args, 'what_if', False):
+            self.logger.debug(f'Executing command in --dry-run/--what-if mode means no execution will be performed.')
             log_message = f'Dry-run mode: \nCommand: {command}'
             if self.debug:
                 log_message += f'\n\nParameters: \n{pprint.pformat(vars(self.args))}'
@@ -657,8 +657,8 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         if hasattr(self.args, 'command') and self.args.command not in ('run',):
             return False
 
-        # Skip in dry-run mode
-        if getattr(self.args, 'dry_run', False):
+        # Skip in dry-run/what-if mode
+        if getattr(self.args, 'dry_run', False) or getattr(self.args, 'what_if', False):
             return False
 
         return True
@@ -823,9 +823,8 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         # may not define one or both attributes. Neither flag set => warn and
         # skip formal verification (fixes #349: --open was previously
         # indistinguishable from "nothing passed").
-        mode = getattr(self.args, 'mode', None)
-        closed_mode = (mode == 'closed')
-        open_mode = (mode == 'open')
+        closed_mode = getattr(self.args, 'closed', False)
+        open_mode = getattr(self.args, 'open', False)
 
         if not closed_mode and not open_mode:
             self.logger.warning(f'Running the benchmark without verification for open or closed configurations. These results are not valid for submission. Use closed or open as the first positional argument to specify a configuration.')

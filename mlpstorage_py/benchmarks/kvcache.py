@@ -105,7 +105,7 @@ class KVCacheBenchmark(Benchmark):
 
         # Benchmark configuration
         self.generation_mode = getattr(args, 'generation_mode', 'realistic')
-        self.performance_profile = getattr(args, 'performance_profile', 'latency')
+        self.performance_profile = getattr(args, 'performance_profile', 'throughput')
 
         # Find the kv-cache.py script
         self.kvcache_bin_path = self._find_kvcache_script()

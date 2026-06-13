@@ -12,11 +12,13 @@ Exports:
 # Section headers between blocks are included as plain text (no markdown).
 # ---------------------------------------------------------------------------
 
-HELP_ALL_TEXT = """\
+_HEADER_TEXT = """\
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
  MLPSTORAGE — COMPLETE COMMAND REFERENCE
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+"""
 
+SYNOPSIS_TEXT = """\
 SYNOPSIS
   mlpstorage <closed|open|whatif> <benchmark> <model|algorithm> <command> <file|object> [OPTIONS]
   mlpstorage (reports|history|lockfile|version) [subcommand] [OPTIONS]
@@ -24,8 +26,9 @@ SYNOPSIS
   <closed|open|whatif>  — required first positional for benchmark commands
   <model|algorithm>     — required second positional (see per-benchmark choices below)
   <file|object>         — required storage selector for commands that touch storage
-                          (absent on datasize; absent on all kvcache commands)
+                          (absent on datasize; absent on all kvcache commands)"""
 
+_TREE_AND_BODY_TEXT = """\
 mlpstorage
 │
 ├── closed ──────────────────────────────────────────────────────
@@ -433,7 +436,7 @@ KV_RUN_CLOSED
   + MPI_ARGS
   + CORE_STD
   Note: the following are fixed in closed and not shown:
-    duration=60s, generation-mode=realistic, performance-profile=latency,
+    duration=60s, generation-mode=realistic, performance-profile=throughput,
     seed=42, trials=3, inter-option-delay=20s,
     disable-multi-turn=False, disable-prefix-caching=False,
     enable-rag=True, rag-num-docs=10,
@@ -454,7 +457,7 @@ KV_RUN_OPEN
     --cpu-mem-gb FLOAT              (default: 32.0)
     --duration/-d N                 Seconds (default: 60)
     --generation-mode {none,fast,realistic}  (default: realistic)
-    --performance-profile {latency,throughput}  (default: latency)
+    --performance-profile {latency,throughput}  (default: throughput)
     --disable-multi-turn
     --disable-prefix-caching
     --enable-rag
@@ -523,6 +526,10 @@ VERSION
   No flags.  Prints the installed package version string and exits 0.
   Resolution order: importlib.metadata("mlpstorage") → pyproject.toml → "unknown"
 """
+
+# HELP_ALL_TEXT is composed from three pieces so that SYNOPSIS_TEXT can be
+# printed standalone (mid-tree -h) without parsing the combined string.
+HELP_ALL_TEXT = _HEADER_TEXT + "\n" + SYNOPSIS_TEXT + "\n\n" + _TREE_AND_BODY_TEXT
 
 # ---------------------------------------------------------------------------
 # get_context_help_tokens
