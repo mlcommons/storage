@@ -79,14 +79,21 @@ class TestOpenGatedArgExclusion:
                 parse_arguments()
         assert exc.value.code != 0
 
-    def test_closed_training_rejects_params(self):
-        """closed training run must reject --params with a non-zero SystemExit."""
+    def test_closed_training_accepts_params(self):
+        """closed training must accept --params for CLOSED_ALLOWED_PARAMS (issue #433).
+
+        The rules checker (TrainingRunRulesChecker.CLOSED_ALLOWED_PARAMS) explicitly
+        permits dotted-key overrides like dataset.num_files_train and
+        dataset.num_subfolders_train in closed submissions, so the parser must
+        register --params in closed mode too. Per-key validity is a rules-checker
+        concern, not an argparse concern.
+        """
         base = ['mlpstorage', 'closed', 'training', 'unet3d', 'run',
                 '-cm', '64', '-at', 'b200', '-na', '4', '-rd', '/tmp', 'file']
-        with patch('sys.argv', base + ['--params', 'key=val']):
-            with pytest.raises(SystemExit) as exc:
-                parse_arguments()
-        assert exc.value.code != 0
+        with patch('sys.argv', base + ['--params', 'dataset.num_files_train=1000']):
+            args = parse_arguments()
+        flattened = [kv for batch in (args.params or []) for kv in batch]
+        assert 'dataset.num_files_train=1000' in flattened
 
     def test_closed_training_rejects_timeseries_interval(self):
         """closed training run must reject --timeseries-interval with a non-zero SystemExit."""
@@ -179,16 +186,23 @@ class TestOpenGatedArgExclusion:
     # ------------------------------------------------------------------
 
     def test_closed_training_leaf_help_hides_open_args(self, capsys):
-        """closed training run file --help must NOT show --loops, --params, etc. in stdout."""
+        """closed training run file --help must NOT show open-only flags in stdout.
+
+        --params was moved into the core training args in #433 (it is CLOSED-allowed
+        per CLOSED_ALLOWED_PARAMS) and should be visible in closed help. The truly
+        open-only flags (--loops, --allow-invalid-params, --timeseries-interval) must
+        still be hidden.
+        """
         with patch('sys.argv', ['mlpstorage', 'closed', 'training', 'unet3d', 'run', 'file', '--help']):
             with pytest.raises(SystemExit) as exc:
                 parse_arguments()
         assert exc.value.code == 0
         out = capsys.readouterr().out
         assert '--loops' not in out
-        assert '--params' not in out
         assert '--allow-invalid-params' not in out
         assert '--timeseries-interval' not in out
+        # --params is now exposed in closed mode and should appear in help.
+        assert '--params' in out
 
 
 # =====================================================================

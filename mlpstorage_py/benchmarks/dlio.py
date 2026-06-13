@@ -357,40 +357,58 @@ class TrainingBenchmark(DLIOBenchmark):
 
     def generate_datagen_benchmark_command(self, num_files_train, num_subfolders_train):
         """
-        This function will generate the command to use to call this program with the training & datagen parameters.
+        Build the mlpstorage datagen command that mirrors this datasize run.
+
+        The emitted string must round-trip through `parse_arguments()` — see
+        the unit test in tests/unit/test_datagen_command_generation.py. The
+        shape is:
+
+            mlpstorage <mode> training <model> datagen <file|object> \\
+                --hosts=... --exec-type=... \\
+                --num-processes=... --results-dir=... --data-dir=... \\
+                --params key1=val1 key2=val2 ...
+
+        All dotted-key DLIO parameter overrides funnel through --params;
+        they are not real CLI flags individually. The storage-protocol
+        positional defaults to 'file' since datasize does not collect one.
         """
-        kv_map = {
-            "dataset.num_files_train": num_files_train,
-            "dataset.num_subfolders_train": num_subfolders_train,
-        }
+        params_kv = dict(self.params_dict) if self.params_dict else {}
+        if num_files_train:
+            params_kv['dataset.num_files_train'] = num_files_train
+        if num_subfolders_train:
+            params_kv['dataset.num_subfolders_train'] = num_subfolders_train
 
-        cmd = f"{MLPSTORAGE_BIN_NAME} training datagen"
+        # datasize does not collect a storage protocol; default to 'file' for the hint.
+        storage_protocol = "file"
+
+        parts = [
+            MLPSTORAGE_BIN_NAME,
+            self.args.mode,
+            "training",
+            self.args.model,
+            "datagen",
+            storage_protocol,
+        ]
+
         if self.args.hosts:
-            cmd += f" --hosts={','.join(self.args.hosts)}"
-        cmd += f" --model={self.args.model}"
-        cmd += f" --exec-type={self.args.exec_type}"
-
-        if self.params_dict:
-            for key, value in self.params_dict.items():
-                if key in kv_map.keys():
-                    continue
-                cmd += f" --{key}={value}"
-
-        for key, value in kv_map.items():
-            if value == 0:
-                continue
-            cmd += f" --param {key}={value}"
-
-        # During datasize, this will be set to max_accelerators
-        cmd += f" --num-processes={self.args.num_processes}"
-        cmd += f" --results-dir={self.args.results_dir}"
-
+            # --hosts uses nargs='+'; emit as separate tokens so the parser sees
+            # a real list. Comma-joining produces a single-element list on parse.
+            parts.append("--hosts")
+            parts.extend(self.args.hosts)
+        parts.append(f"--exec-type={self.args.exec_type}")
+        # During datasize, num_processes is populated from max_accelerators.
+        parts.append(f"--num-processes={self.args.num_processes}")
+        parts.append(f"--results-dir={self.args.results_dir}")
         if self.args.data_dir:
-            cmd += f" --data-dir={self.args.data_dir}"
+            parts.append(f"--data-dir={self.args.data_dir}")
         else:
-            cmd += f" --data-dir=<INSERT_DATA_DIR>"
+            parts.append("--data-dir=<INSERT_DATA_DIR>")
 
-        return cmd
+        if params_kv:
+            params_str = " ".join(f"{k}={v}" for k, v in params_kv.items())
+            parts.append(f"--params {params_str}")
+
+        return " ".join(parts)
 
 
     def datasize(self):
@@ -412,7 +430,7 @@ class TrainingBenchmark(DLIOBenchmark):
 
         if num_files_train > 10000:
             self.logger.warning(
-                f'The number of files required may be excessive for some filesystems. You can use the num_subfolders_train parameter to shard the dataset. To keep near 10,000 files per folder use "{int(num_files_train / 10000)}x" subfolders by adding "--param dataset.num_subfolders_train={int(num_files_train / 10000)}"')
+                f'The number of files required may be excessive for some filesystems. You can use the num_subfolders_train parameter to shard the dataset. To keep near 10,000 files per folder use "{int(num_files_train / 10000)}x" subfolders by adding "--params dataset.num_subfolders_train={int(num_files_train / 10000)}"')
 
         cmd = self.generate_datagen_benchmark_command(num_files_train, num_subfolders_train)
         self.logger.result(f'Run the following command to generate data: \n{cmd}')

@@ -102,6 +102,12 @@ def _add_checkpointing_core_args(parser, command):
 
     add_mpi_arguments(parser)
 
+    # --dlio-bin-path is a deployment knob (path to the DLIO binary), not a
+    # submission tunable. Rules.md does not gate it. Training already exposes it
+    # in core args; checkpointing was inconsistent. Move it here so closed-mode
+    # submitters can point at a custom DLIO build without flipping to open.
+    add_dlio_arguments(parser)
+
     add_universal_arguments(parser, req_results=(command in ("run", "configview")))
 
     # Storage type positional for run and configview — NOT datasize
@@ -156,7 +162,6 @@ def _add_checkpointing_open_args(parser, command):
         metavar="KEY=VALUE",
         help=HELP_MESSAGES['params']
     )
-    add_dlio_arguments(parser)
     if command == "run":
         add_timeseries_arguments(parser)
 
