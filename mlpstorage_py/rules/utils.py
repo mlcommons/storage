@@ -167,7 +167,15 @@ def generate_output_location(benchmark, datetime_str=None, **kwargs) -> str:
         output_location = os.path.join(output_location, datetime_str)
 
     elif benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.kv_cache:
+        model = getattr(benchmark.args, "model", None)
+        if not model:
+            raise ValueError(
+                "Model is required for kv_cache output location: set "
+                "args.model before calling generate_output_location "
+                "(KVCacheBenchmark.__init__ defaults this from KVCACHE_MODEL_DEFAULT)."
+            )
         output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
+        output_location = os.path.join(output_location, model)
         output_location = os.path.join(output_location, benchmark.args.command)
         output_location = os.path.join(output_location, datetime_str)
 

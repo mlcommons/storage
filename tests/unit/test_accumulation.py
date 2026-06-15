@@ -180,20 +180,20 @@ def make_vectordb_run(
 def make_kvcache_run(
     results_dir: Path,
     *,
+    model: str = "llama3.1-8b",
     run_datetime: str = "20250111_170000",
     command: str = "run",
     include_summary: bool = True,
 ) -> Path:
-    """Create one kvcache run at results_dir/kv_cache/<command>/<datetime>/.
-
-    Current layout has no model component — PR 4 will add it.
+    """Create one kvcache run at
+    results_dir/kv_cache/<model>/<command>/<datetime>/.
     """
-    run_dir = results_dir / "kv_cache" / command / run_datetime
+    run_dir = results_dir / "kv_cache" / model / command / run_datetime
     return _write_run(
         run_dir,
         benchmark_type="kv_cache",
         run_datetime=run_datetime,
-        model=None,
+        model=model,
         accelerator=None,
         command=command,
         parameters={"workload": "kv"},
@@ -389,7 +389,8 @@ class TestWorkloadSeparation:
 
 
 class TestPreviewBenchmarkAccumulationLimitation:
-    """Locks down the current (buggy) behavior so PR 3/4 changes are visible."""
+    """VectorDB still lacks an engine component in path/metadata (PR 3 will fix).
+    KVCache now records the model — see TestKVCacheAccumulation below."""
 
     def test_vectordb_runs_have_no_model(self, tmp_path, mock_logger):
         """Two vectordb runs are discovered, but both have model=None — there is
@@ -406,18 +407,62 @@ class TestPreviewBenchmarkAccumulationLimitation:
             "Current behavior: vectordb runs lack model — fix in PR 3."
         )
 
-    def test_kvcache_runs_have_no_model(self, tmp_path, mock_logger):
-        """Same shape as the vectordb limitation. PR 4 adds model to kvcache."""
+
+class TestKVCacheAccumulation:
+    """KVCache now (this PR) records the model in path and metadata."""
+
+    def test_kvcache_path_includes_model(self, tmp_path):
+        """generate_output_location produces kv_cache/<model>/<command>/<datetime>/."""
+        from types import SimpleNamespace
+
+        from mlpstorage_py.config import BENCHMARK_TYPES as _BT
+        from mlpstorage_py.rules.utils import generate_output_location
+
+        fake_benchmark = SimpleNamespace(
+            BENCHMARK_TYPE=_BT.kv_cache,
+            args=SimpleNamespace(
+                results_dir=str(tmp_path),
+                command="run",
+                model="llama3.1-8b",
+            ),
+        )
+        location = generate_output_location(fake_benchmark, datetime_str="20250111_170000")
+        assert location == str(
+            tmp_path / "kv_cache" / "llama3.1-8b" / "run" / "20250111_170000"
+        )
+
+    def test_kvcache_path_requires_model(self, tmp_path):
+        """Without args.model, generate_output_location refuses to build a path."""
+        from types import SimpleNamespace
+
+        from mlpstorage_py.config import BENCHMARK_TYPES as _BT
+        from mlpstorage_py.rules.utils import generate_output_location
+
+        fake_benchmark = SimpleNamespace(
+            BENCHMARK_TYPE=_BT.kv_cache,
+            args=SimpleNamespace(
+                results_dir=str(tmp_path),
+                command="run",
+                # no model
+            ),
+        )
+        with pytest.raises(ValueError, match="Model is required for kv_cache"):
+            generate_output_location(fake_benchmark, datetime_str="20250111_170000")
+
+    def test_kvcache_runs_distinguished_by_model(self, tmp_path, mock_logger):
+        """Two kvcache models accumulate in one results-dir without collision.
+        Each run's metadata records the model so workload grouping by
+        (model, accelerator) treats them as distinct workloads."""
         results_dir = tmp_path / "results"
-        make_kvcache_run(results_dir, run_datetime="20250111_170000")
-        make_kvcache_run(results_dir, run_datetime="20250111_170100")
+        make_kvcache_run(results_dir, model="llama3.1-8b", run_datetime="20250111_170000")
+        make_kvcache_run(results_dir, model="llama3.1-8b", run_datetime="20250111_170100")
+        make_kvcache_run(results_dir, model="llama2-7b", run_datetime="20250111_170200")
 
         runs = get_runs_files(str(results_dir), logger=mock_logger)
 
-        assert len(runs) == 2
-        assert all(r.model is None for r in runs), (
-            "Current behavior: kvcache runs lack model — fix in PR 4."
-        )
+        assert len(runs) == 3
+        models = sorted(r.model for r in runs)
+        assert models == ["llama2-7b", "llama3.1-8b", "llama3.1-8b"]
 
 
 # ---------------------------------------------------------------------------
