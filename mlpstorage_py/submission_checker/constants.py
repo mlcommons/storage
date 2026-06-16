@@ -167,12 +167,15 @@ MD5_EXCLUDE_PREFIXES: tuple[str, ...] = (
     "build/",
     "dist/",
     ".tox/",
+    "test/",
+    "tests/",
 )
 
 # Filename patterns excluded from the code-tree MD5 (Rules.md 2.1.6).
 # Matched against the basename. ``.egg-info`` is handled at the prefix level
 # (any directory ending in ``.egg-info``) — keep that in the predicate, not here.
 MD5_EXCLUDE_FILENAMES: tuple[str, ...] = (
+    ".code-hash.json",
     "*.pyc",
     "*.pyo",
     ".DS_Store",
