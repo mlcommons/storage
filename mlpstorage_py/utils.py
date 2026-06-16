@@ -477,6 +477,25 @@ class CommandExecutor:
         self._original_handlers = {}
 
 
+def _mpi_params_contain_flag(params: Optional[List[str]], flag: str) -> bool:
+    """Return True if ``params`` already specifies the MPI ``flag``.
+
+    Matches any of the surface forms a user may pass through ``--mpi-params``:
+    ``--flag``, ``-flag``, ``--flag=value``, ``-flag=value``. ``flag`` is the
+    bare name without leading dashes (e.g. ``"bind-to"``).
+    """
+    if not params:
+        return False
+    candidates = {f"--{flag}", f"-{flag}"}
+    for tok in params:
+        if not isinstance(tok, str):
+            continue
+        head = tok.split("=", 1)[0]
+        if head in candidates:
+            return True
+    return False
+
+
 def generate_mpi_prefix_cmd(
     mpi_cmd: str,
     hosts: List[str],
@@ -567,13 +586,22 @@ def generate_mpi_prefix_cmd(
         host_part = host.split(':')[0] if ':' in host else host
         unique_hosts.add(host_part)
 
-    if len(unique_hosts) > 1:
-        # Multi-host: prioritize even distribution across nodes
-        prefix += " --bind-to none --map-by node"
+    is_multi_host = len(unique_hosts) > 1
+
+    # OpenMPI rejects duplicate --bind-to / --map-by occurrences, so suppress
+    # the default for whichever of those flags the user supplied via --mpi-params.
+    user_set_bind_to = _mpi_params_contain_flag(params, "bind-to")
+    user_set_map_by = _mpi_params_contain_flag(params, "map-by")
+
+    if not user_set_bind_to:
+        prefix += " --bind-to none"
+    if not user_set_map_by:
+        prefix += " --map-by node" if is_multi_host else " --map-by socket"
+
+    if is_multi_host:
         logger.info("MPI BTL transport: auto (multi-host run; transport managed by network fabric)")
     else:
         # Single-host: optimize for NUMA domains
-        prefix += " --bind-to none --map-by socket"
         if mpi_btl == "vader":
             prefix += " --mca btl vader,self"
             logger.info("MPI BTL transport: vader (POSIX shared-memory)")

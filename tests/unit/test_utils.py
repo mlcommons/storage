@@ -708,6 +708,111 @@ class TestGenerateMpiPrefixCmd:
         bindto_idx = result.index('--bind-to')
         assert npernode_idx < bindto_idx
 
+    def test_user_bind_to_in_mpi_params_suppresses_default(self, mock_logger):
+        """User-supplied --bind-to in --mpi-params suppresses the default --bind-to none.
+
+        OpenMPI rejects duplicate occurrences of --bind-to, so emitting both the
+        default and the user value would break the command.
+        """
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=['--bind-to', 'core'],
+            logger=mock_logger,
+        )
+        assert '--bind-to none' not in result
+        assert '--bind-to core' in result
+        # --map-by default still applied since user didn't override it
+        assert '--map-by socket' in result
+
+    def test_user_map_by_in_mpi_params_suppresses_default(self, mock_logger):
+        """User-supplied --map-by in --mpi-params suppresses the default --map-by."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=['--map-by', 'core'],
+            logger=mock_logger,
+        )
+        assert '--map-by socket' not in result
+        assert '--map-by node' not in result
+        assert '--map-by core' in result
+        # --bind-to default still applied since user didn't override it
+        assert '--bind-to none' in result
+
+    def test_user_override_both_bind_and_map(self, mock_logger):
+        """User overriding both --bind-to and --map-by suppresses both defaults."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1', 'host2'],
+            num_processes=8,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=['--bind-to', 'socket', '--map-by', 'core'],
+            logger=mock_logger,
+        )
+        # No defaults emitted
+        assert '--bind-to none' not in result
+        assert '--map-by node' not in result
+        # Only the user values present (each --bind-to / --map-by appears once)
+        assert result.count('--bind-to') == 1
+        assert result.count('--map-by') == 1
+        assert '--bind-to socket' in result
+        assert '--map-by core' in result
+
+    def test_user_override_with_equals_form(self, mock_logger):
+        """The --flag=value token form also suppresses defaults."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=['--bind-to=core', '--map-by=numa'],
+            logger=mock_logger,
+        )
+        assert '--bind-to none' not in result
+        assert '--map-by socket' not in result
+        assert result.count('--bind-to') == 1
+        assert result.count('--map-by') == 1
+
+    def test_user_override_with_single_dash_form(self, mock_logger):
+        """Single-dash ``-bind-to`` / ``-map-by`` forms also suppress defaults."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=['-bind-to', 'core', '-map-by', 'socket'],
+            logger=mock_logger,
+        )
+        assert '--bind-to none' not in result
+        assert '--map-by socket' not in result.replace('-map-by socket', '')
+        # Two map-by tokens would be a bug; we only emit the user's one
+        # (which uses single-dash form here)
+        assert result.count('--map-by') == 0
+        assert result.count('--bind-to') == 0
+
+    def test_unrelated_mpi_params_do_not_suppress_defaults(self, mock_logger):
+        """Unrelated --mpi-params flags leave defaults intact."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIRUN,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=['--mca', 'btl', 'tcp,self', '-x', 'FOO=bar'],
+            logger=mock_logger,
+        )
+        assert '--bind-to none' in result
+        assert '--map-by socket' in result
+
 
 class TestCommandExecutor:
     """Tests for CommandExecutor class."""
