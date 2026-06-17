@@ -113,9 +113,17 @@ class TestFixtureFactory:
             build_submission(tmp_path, no_such_kwarg=True)
 
     def test_default_fixture_no_errors(self, tmp_path, mock_logger):
-        """Default fixture should produce no errors from any STRUCT check."""
+        """Default fixture should produce no errors from any STRUCT check.
+
+        Plan 02-05: now that the Plan 02-03 layered self-consistency check
+        walks every CLOSED leaf's code/, the fixture's pre-existing code/ must
+        carry a matching .code-hash.json. Populating it here keeps the
+        "default fixture is clean" invariant intact across the full check
+        suite.
+        """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(tmp_path)
+        _write_valid_hash_json(root / "closed" / "Acme" / "code", mock_logger)
         check = _make_check(root, mock_logger)
         result = check()
         assert mock_logger.errors == [], f"Unexpected errors: {mock_logger.errors}"
@@ -392,9 +400,15 @@ class TestStruct05_RequiredSubdirectories:
 class TestStruct06_CodeDirectoryContents:
 
     def test_default_fixture_passes_with_unset_reference(self, tmp_path, mock_logger):
-        """No reference checksum → warn ONCE (not per-submitter) and return True (D-12)."""
+        """No reference checksum → warn ONCE (not per-submitter) and return True (D-12).
+
+        Plan 02-05: now that Plan 02-03's layered self-consistency check runs
+        unconditionally for every leaf, the fixture's pre-existing code/ must
+        carry a matching .code-hash.json — written via _write_valid_hash_json.
+        """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(tmp_path)
+        _write_valid_hash_json(root / "closed" / "Acme" / "code", mock_logger)
         check = _make_check(root, mock_logger)  # no ref_checksum
         result = run_one_check(check, "code_directory_contents_check", mock_logger)
         assert result is True
@@ -403,39 +417,73 @@ class TestStruct06_CodeDirectoryContents:
         assert mock_logger.errors == []
 
     def test_unset_reference_emits_single_warning_for_multi_submitter_tree(self, tmp_path, mock_logger):
-        """Regression for pre-fix per-submitter warning spam: 5-submitter merged
-        tree must emit exactly one no-checksum warning, not five."""
+        """Regression for pre-fix per-submitter warning spam: multi-submitter
+        merged tree must emit exactly one no-checksum warning, not one per
+        submitter.
+
+        Plan 02-05: populate code/ + .code-hash.json under EVERY submitter so
+        the layered self-consistency check passes for each leaf. STRUCT-06 now
+        walks every submitter under closed/ and flags missing code/ — the
+        fixture's AlsoAcme submitter is bare, so we manually build a minimal
+        code/ under it.
+        """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(tmp_path, multiple_submitters_in_closed=True)
+        _write_valid_hash_json(root / "closed" / "Acme" / "code", mock_logger)
+        # AlsoAcme has no code/ subdirectory in the fixture; build one and
+        # populate the hash so the layered self-check is satisfied per-leaf.
+        also_code = root / "closed" / "AlsoAcme" / "code"
+        also_code.mkdir(parents=True)
+        (also_code / "mod.py").write_bytes(b"# mod\n")
+        _write_valid_hash_json(also_code, mock_logger)
         check = _make_check(root, mock_logger)  # no ref_checksum
         result = run_one_check(check, "code_directory_contents_check", mock_logger)
-        assert result is True
+        assert result is True, mock_logger.errors
         warnings = [w for w in mock_logger.warnings if "[2.1.6 codeDirectoryContents]" in w]
         assert len(warnings) == 1, warnings
 
     def test_reference_checksum_mismatch_fails(self, tmp_path, mock_logger):
-        """Deliberate mismatch: zeros as reference → check fails."""
+        """Deliberate mismatch: zeros as reference → check fails.
+
+        Plan 02-05: populate .code-hash.json so the SELF-consistency check passes
+        — the REFERENCE_CHECKSUMS mismatch is what fails the test (not the new
+        layered self-check).
+        """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(tmp_path)
+        _write_valid_hash_json(root / "closed" / "Acme" / "code", mock_logger)
         check = _make_check(root, mock_logger, ref_checksum="0" * 32)
         result = run_one_check(check, "code_directory_contents_check", mock_logger)
         assert result is False
         assert any("[2.1.6 codeDirectoryContents]" in m for m in mock_logger.errors)
 
     def test_reference_checksum_match_passes(self, tmp_path, mock_logger):
-        """Correct reference checksum → check passes silently."""
+        """Correct reference checksum → check passes silently.
+
+        Plan 02-05: populate .code-hash.json so BOTH layered checks pass
+        (self-consistency AND REFERENCE_CHECKSUMS upstream-identity).
+        """
         from mlpstorage_py.tests.conftest import build_submission
         from mlpstorage_py.submission_checker.tools.code_checksum import compute_code_tree_md5
         root = build_submission(tmp_path)
         code_path = str(root / "closed" / "Acme" / "code")
+        # Compute hash BEFORE writing .code-hash.json (the JSON file is on the
+        # exclude list so its presence does not affect the tree hash).
         actual_hash = compute_code_tree_md5(code_path, mock_logger)
+        _write_valid_hash_json(root / "closed" / "Acme" / "code", mock_logger)
         check = _make_check(root, mock_logger, ref_checksum=actual_hash)
         result = run_one_check(check, "code_directory_contents_check", mock_logger)
         assert result is True
         assert mock_logger.errors == []
 
     def test_mutated_code_fails(self, tmp_path, mock_logger):
-        """Extra file in code/ changes hash → violation."""
+        """Extra file in code/ changes hash → violation.
+
+        Plan 02-05: mutation breaks BOTH the layered self-consistency check
+        (no .code-hash.json present) AND the REFERENCE_CHECKSUMS check. The
+        assertion now allows multiple [2.1.6] violations (count >= 1) since
+        both sub-paths fire — see Plan 02-05 Task 2 `<behavior>` notes.
+        """
         from mlpstorage_py.tests.conftest import build_submission
         from mlpstorage_py.submission_checker.tools.code_checksum import compute_code_tree_md5
         # First build clean tree to get reference hash
@@ -443,15 +491,24 @@ class TestStruct06_CodeDirectoryContents:
         code_path = str(clean_root / "closed" / "Acme" / "code")
         clean_hash = compute_code_tree_md5(code_path, mock_logger)
 
-        # Now build mutated tree
+        # Now build mutated tree. Deliberately do NOT populate .code-hash.json
+        # — mutation breaks the hash by design, so the layered self-check is
+        # expected to fire alongside the REFERENCE_CHECKSUMS mismatch.
         root = build_submission(tmp_path / "mutated", mutate_code=True)
         check = _make_check(root, mock_logger, ref_checksum=clean_hash)
         result = run_one_check(check, "code_directory_contents_check", mock_logger)
         assert result is False
-        assert any("[2.1.6 codeDirectoryContents]" in m for m in mock_logger.errors)
+        # Allow multiple [2.1.6] violations (self-check + ref mismatch).
+        assert sum("[2.1.6 codeDirectoryContents]" in m for m in mock_logger.errors) >= 1, mock_logger.errors
 
     def test_pycache_excluded_passes(self, tmp_path, mock_logger):
-        """__pycache__ is excluded from hash — code_with_pycache fixture still passes."""
+        """__pycache__ is excluded from hash — code_with_pycache fixture still passes.
+
+        Plan 02-05: populate .code-hash.json AFTER the pycache fixture is built
+        so the recorded hash reflects the pycache-augmented (but pycache-excluded)
+        tree state. Both the layered self-check AND REFERENCE_CHECKSUMS must
+        agree.
+        """
         from mlpstorage_py.tests.conftest import build_submission
         from mlpstorage_py.submission_checker.tools.code_checksum import compute_code_tree_md5
         # Get clean hash
@@ -460,6 +517,7 @@ class TestStruct06_CodeDirectoryContents:
         clean_hash = compute_code_tree_md5(code_path, mock_logger)
 
         root = build_submission(tmp_path / "pycache", code_with_pycache=True)
+        _write_valid_hash_json(root / "closed" / "Acme" / "code", mock_logger)
         check = _make_check(root, mock_logger, ref_checksum=clean_hash)
         result = run_one_check(check, "code_directory_contents_check", mock_logger)
         assert result is True
@@ -680,6 +738,102 @@ class TestStruct06_RefactoredCodeDirectoryContents:
             and "required code/ directory missing" in m
         ]
         assert missing_msgs == [], missing_msgs
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 Plan 02-05 — Targeted OPEN-walk tests for VALS-03/04
+# (TestStruct06_OpenCodeDirectory)
+# ---------------------------------------------------------------------------
+
+class TestStruct06_OpenCodeDirectory:
+    """VALS-03 / VALS-04: STRUCT-06 walks OPEN per-leaf code/ dirs via
+    `_iter_open_code_dirs` (Plan 02-03 D-15) and emits per-leaf violations.
+
+    These tests target the OPEN walk in isolation: missing per-leaf code/,
+    self-consistency mismatch, missing .code-hash.json, multi-leaf violation
+    counting, and the OPEN-only "no closed-warning" invariant.
+    """
+
+    # ----- VALS-03 — missing OPEN code/ -----
+    def test_missing_open_code_dir_fails(self, tmp_path, mock_logger):
+        _make_open_leaf(tmp_path, write_code=False)
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is False
+        missing_msgs = [
+            m for m in mock_logger.errors
+            if "[2.1.6 codeDirectoryContents]" in m
+            and "required code/ directory missing at" in m
+            and m.rstrip().endswith("/training/unet3d/code")
+        ]
+        assert len(missing_msgs) == 1, mock_logger.errors
+
+    # ----- VALS-04 happy path — OPEN code/ self-consistency passes -----
+    def test_present_open_code_dir_self_consistency_passes(self, tmp_path, mock_logger):
+        code_path = _make_open_leaf(tmp_path, write_code=True)
+        _write_valid_hash_json(code_path, mock_logger)
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is True, mock_logger.errors
+        # No [2.1.6] violations.
+        v216 = [m for m in mock_logger.errors if "[2.1.6 codeDirectoryContents]" in m]
+        assert v216 == [], v216
+
+    # ----- VALS-04 sad path — OPEN code/ hash mismatch -----
+    def test_open_code_dir_hash_mismatch_fails(self, tmp_path, mock_logger):
+        code_path = _make_open_leaf(tmp_path, write_code=True)
+        # Record a deliberately incorrect hash (32 hex zeros) in .code-hash.json.
+        _write_valid_hash_json(code_path, mock_logger, hash="0" * 32)
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is False
+        mismatch_msgs = [
+            m for m in mock_logger.errors
+            if "[2.1.6 codeDirectoryContents]" in m
+            and "code tree hash does not match .code-hash.json at" in m
+        ]
+        assert len(mismatch_msgs) == 1, mock_logger.errors
+
+    # ----- VALS-04 missing JSON — OPEN code/ without .code-hash.json -----
+    def test_open_missing_code_hash_json_fails(self, tmp_path, mock_logger):
+        _make_open_leaf(tmp_path, write_code=True)
+        # Deliberately do NOT call _write_valid_hash_json.
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is False
+        # The MissingHashFile exception text is logged as the violation msg.
+        any_violation = [m for m in mock_logger.errors if "[2.1.6 codeDirectoryContents]" in m]
+        assert len(any_violation) >= 1, mock_logger.errors
+
+    # ----- OPEN-only tree must not emit the closed-specific "not configured" warning -----
+    def test_open_no_reference_warning_when_only_open_present(self, tmp_path, mock_logger):
+        code_path = _make_open_leaf(tmp_path, write_code=True)
+        _write_valid_hash_json(code_path, mock_logger)
+        check = _make_check(tmp_path, mock_logger)  # no ref_checksum
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is True, mock_logger.errors
+        # The "reference checksum not configured" warning is CLOSED-specific.
+        unconfigured = [
+            w for w in mock_logger.warnings
+            if "reference checksum not configured" in w
+        ]
+        assert unconfigured == [], unconfigured
+
+    # ----- Multiple OPEN model leaves each get their own per-leaf violation -----
+    def test_open_multiple_models_each_get_their_own_violation(self, tmp_path, mock_logger):
+        # Build TWO OPEN model leaves, both missing code/.
+        _make_open_leaf(tmp_path, model="unet3d", write_code=False)
+        _make_open_leaf(tmp_path, model="resnet50", write_code=False)
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is False
+        missing_msgs = [
+            m for m in mock_logger.errors
+            if "[2.1.6 codeDirectoryContents]" in m
+            and "required code/ directory missing at" in m
+        ]
+        # Exactly two — one per model leaf.
+        assert len(missing_msgs) == 2, missing_msgs
 
 
 # ---------------------------------------------------------------------------
