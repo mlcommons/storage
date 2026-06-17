@@ -1,7 +1,7 @@
 system_under_test:
     solution:
-        submission_name: NVMe_Example
-        friendly_description: A generic example of a single-drive submission
+        submission_name: 'NVMe_Example'
+        friendly_description: 'Single Drive Direct Attach NVMe'
         architecture:
             storage_location: local
             benchmark_API: file
@@ -14,10 +14,10 @@ system_under_test:
             simultaneous_read: false
             remap_time_in_seconds: 30
     deployment: "onprem"
-    product_nodes:
+    clients:
         - friendly_description: Data
           quantity: 1
-          chassis: 
+          chassis:
              model_name: Dell7680
              rack_units: 1
              cpu_model: XEON 90000
@@ -27,29 +27,37 @@ system_under_test:
              power:
                 min_psus_active: 1
                 psus_configured:
-                    - power_capacity_watts: 1800
+                    - nameplate_power_watts: 1800
+                      inlet_voltage: 120
                       efficiency: Platinum
                       unit_count: 2
+          drives:
+              - vendor_name: Micron
+                model_name: X9000 TLC
+                interface: nvme
+                media_type: TLC
+                capacity_in_GB: 8000
+                unit_count: 1
+                performance:
+                    seq_read_MBps: 14000
+                    seq_write_MBps: 10000
+                    random_read_IOPS: 2700000
+                    random_write_IOPS: 400000
+                    form_factor: U.2
+                    interface_speed: PCIe Gen5 x4
+          networking:
+             - unit_count: 1
+               type: ethernet
+               speed: 1
+               traffic:
+                  - management
           operating_system:
-             name: Rocky Linux
-             version: "9.5"
-    total_rack_units: 1
-    clients:
-        - friendly_description: Benchmark load system
-          quantity: 16
-          chassis: 
-             model_name: Dell7680
-             rack_units: 1
-             cpu_model: XEON 90000
-             cpu_qty: 2
-             cpu_cores: 96
-             memory_capacity: 256
-             power:
-                min_psus_active: 1
-                psus_configured:
-                    - power_capacity_watts: 1800
-                      efficiency: Platinum
-                      unit_count: 2
-          operating_system:
-              name: RHEL
-              version: "10.1"
+             name: Ubuntu
+             version: "24.04.2 LTS"
+          environment:
+             - name: 'MPI'
+               value: 'Open MPI 4.1.7'
+          sysctl:
+             - name: 'vm.swappiness'
+               value: '1'
+    total_rack_units: 0

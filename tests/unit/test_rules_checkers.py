@@ -766,14 +766,16 @@ class TestTrainingSubmissionRulesChecker:
 
     def test_supported_models_includes_training_models(self, mock_logger):
         """TrainingSubmissionRulesChecker has correct supported models."""
-        from mlpstorage_py.config import MODELS
+        from mlpstorage_py.config import MODELS_CLOSED
 
         # Create empty checker to check class attribute
         checker = TrainingSubmissionRulesChecker([], logger=mock_logger)
 
+        # Rules.md 2.1.11 — closed/open accept only {unet3d, retinanet}.
         assert 'unet3d' in checker.supported_models
-        assert 'resnet50' in checker.supported_models
-        assert 'cosmoflow' in checker.supported_models
+        assert 'retinanet' in checker.supported_models
+        assert 'resnet50' not in checker.supported_models
+        assert 'cosmoflow' not in checker.supported_models
 
 
 class TestTrainingParquetFormat:

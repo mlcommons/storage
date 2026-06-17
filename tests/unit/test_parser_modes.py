@@ -182,6 +182,47 @@ class TestOpenGatedArgExclusion:
         assert args.loops == 2
 
     # ------------------------------------------------------------------
+    # Regression: every subcommand must expose `args.loops` on its namespace.
+    # main.py:326 does `for i in range(getattr(args, 'loops', 1))` after the
+    # fix for #444, but the parsers should still guarantee the attribute so
+    # the run_summary output and any future caller doesn't see None. Issue
+    # #444 was caused by kvcache datasize in open/whatif lacking this.
+    # ------------------------------------------------------------------
+
+    @pytest.mark.parametrize('mode, benchmark, sub_argv', [
+        # kvcache — the direct repro for #444
+        ('closed',  'kvcache',       ['datasize']),
+        ('open',    'kvcache',       ['datasize']),
+        ('whatif',  'kvcache',       ['datasize']),
+        # training — non-run subcommands have no --loops flag
+        ('closed',  'training',      ['unet3d', 'datasize', '-cm', '64', '-at', 'b200', '-ma', '4']),
+        ('open',    'training',      ['unet3d', 'datasize', '-cm', '64', '-at', 'b200', '-ma', '4']),
+        ('whatif',  'training',      ['unet3d', 'datasize', '-cm', '64', '-at', 'h100', '-ma', '4']),
+        ('closed',  'training',      ['unet3d', 'datagen', '-np', '4', 'file']),
+        # checkpointing — datasize / configview
+        ('closed',  'checkpointing', ['datasize', '-cm', '64', '-m', 'llama3-8b', '-np', '2']),
+        ('open',    'checkpointing', ['datasize', '-cm', '64', '-m', 'llama3-8b', '-np', '2']),
+        # vectordb — datasize / datagen
+        ('closed',  'vectordb',      ['datasize']),
+        ('open',    'vectordb',      ['datasize']),
+        ('whatif',  'vectordb',      ['datasize']),
+    ])
+    def test_non_run_subcommands_expose_loops_attr(self, mode, benchmark, sub_argv):
+        """Every benchmark subcommand must populate args.loops so main.py can drive the run loop.
+
+        Regression for #444: `mlpstorage whatif kvcache datasize` crashed with
+        AttributeError because the run loop in main.py reads args.loops, but
+        --loops was only registered on the run subparser.
+        """
+        argv = ['mlpstorage', mode, benchmark] + sub_argv
+        with patch('sys.argv', argv):
+            args = parse_arguments()
+        assert hasattr(args, 'loops'), (
+            f"{mode} {benchmark} {sub_argv[0]} did not set args.loops on the namespace"
+        )
+        assert args.loops == 1
+
+    # ------------------------------------------------------------------
     # Help-text hiding test (MEDIUM concern from 04-REVIEWS.md)
     # ------------------------------------------------------------------
 

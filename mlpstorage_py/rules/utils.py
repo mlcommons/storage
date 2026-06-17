@@ -162,12 +162,27 @@ def generate_output_location(benchmark, datetime_str=None, **kwargs) -> str:
         output_location = os.path.join(output_location, datetime_str)
 
     elif benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.vector_database:
+        engine = getattr(benchmark.args, "vdb_engine", None)
+        if not engine:
+            raise ValueError(
+                "VectorDB engine is required for output location "
+                "(set --vdb-engine on the CLI)."
+            )
         output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
+        output_location = os.path.join(output_location, engine)
         output_location = os.path.join(output_location, benchmark.args.command)
         output_location = os.path.join(output_location, datetime_str)
 
     elif benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.kv_cache:
+        model = getattr(benchmark.args, "model", None)
+        if not model:
+            raise ValueError(
+                "Model is required for kv_cache output location: set "
+                "args.model before calling generate_output_location "
+                "(KVCacheBenchmark.__init__ defaults this from KVCACHE_MODEL_DEFAULT)."
+            )
         output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
+        output_location = os.path.join(output_location, model)
         output_location = os.path.join(output_location, benchmark.args.command)
         output_location = os.path.join(output_location, datetime_str)
 
@@ -206,8 +221,11 @@ def get_runs_files(results_dir: str, logger=None) -> List:
             logger.warning(f"Results directory not found: {results_dir}")
         return runs
 
-    # Walk the directory tree looking for run directories
-    for root, dirs, files in os.walk(results_dir):
+    # Walk the directory tree looking for run directories. followlinks=True
+    # lets users symlink previously-completed run directories into a fresh
+    # results-dir to accumulate them — a common workflow when stitching
+    # together results from multiple machines or earlier runs.
+    for root, dirs, files in os.walk(results_dir, followlinks=True):
         # Check if this directory contains a summary.json (DLIO run) or metadata file
         has_summary = 'summary.json' in files
         metadata_files = [f for f in files if f.endswith('_metadata.json')]

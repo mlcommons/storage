@@ -15,9 +15,19 @@ def test_endpoint_selection_methods():
     print("="*60)
     print("Test 1: Endpoint Selection Methods")
     print("="*60)
-    
-    from s3dlio.integrations.dlio.s3dlio_storage import S3dlioStorage
-    
+
+    try:
+        from s3dlio.integrations.dlio.s3dlio_storage import S3dlioStorage
+    except ImportError:
+        import pytest
+        pytest.skip("s3dlio not installed")
+
+    # DLIO's storage_handler asks DLIOMPI for the world size during __init__.
+    # When running under pytest there is no MPI bootstrap, so initialize the
+    # singleton with default (rank=0, size=1) before instantiating S3dlioStorage.
+    from dlio_benchmark.utils.utility import DLIOMPI
+    DLIOMPI.get_instance().initialize()
+
     # Create a storage instance to access the methods
     storage = S3dlioStorage("file:///tmp/test")
     

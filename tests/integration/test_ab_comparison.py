@@ -11,7 +11,8 @@ import tempfile
 from pathlib import Path
 import pytest
 
-@pytest.fixture(params=["dlio"]) # Add whichever library names your test expects here
+
+@pytest.fixture(params=["s3dlio"])
 def library_name(request):
     return request.param
 

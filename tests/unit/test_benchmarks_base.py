@@ -196,7 +196,6 @@ class TestBenchmarkWriteMetadata:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             return ConcreteBenchmark(args, run_datetime="20250115_120000")
 
     def test_writes_metadata_file(self, benchmark):
@@ -235,7 +234,6 @@ class TestBenchmarkExecuteCommand:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             return ConcreteBenchmark(args, run_datetime="20250115_120000")
 
     def test_what_if_mode_skips_execution(self, benchmark):
@@ -306,7 +304,6 @@ class TestBenchmarkVerifyBenchmark:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             return ConcreteBenchmark(args, run_datetime="20250115_120000")
 
     def test_returns_true_for_closed_verification(self, benchmark):
@@ -395,7 +392,6 @@ class TestBenchmarkVerifyBenchmark:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ConcreteBenchmark(args, run_datetime="20250115_120000")
 
         with patch('mlpstorage_py.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
@@ -429,7 +425,6 @@ class TestBenchmarkRun:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             return ConcreteBenchmark(args, run_datetime="20250115_120000")
 
     def test_calls_run_method(self, benchmark):
@@ -504,7 +499,6 @@ class TestBenchmarkGenerateOutputLocation:
         # Create a valid benchmark first
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ConcreteBenchmark(args)
 
         # Then set BENCHMARK_TYPE to None on the instance
@@ -620,7 +614,6 @@ class TestBenchmarkValidation:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = TrackingBenchmark(basic_args)
 
         benchmark.run()
@@ -643,7 +636,6 @@ class TestBenchmarkValidation:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = CustomValidationBenchmark(basic_args)
 
         benchmark.run()
@@ -669,7 +661,6 @@ class TestBenchmarkValidation:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = FailingValidationBenchmark(basic_args)
 
         with pytest.raises(DependencyError):
@@ -683,7 +674,6 @@ class TestBenchmarkValidation:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ConcreteBenchmark(basic_args)
 
         # Should not raise any exception
@@ -706,7 +696,6 @@ class TestBenchmarkValidation:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ConfigErrorBenchmark(basic_args)
 
         with pytest.raises(ConfigurationError):
@@ -746,7 +735,6 @@ class TestBenchmarkCollectionSelection:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ConcreteBenchmark(args, logger=mock_logger, run_datetime='20260124_120000')
 
         return benchmark
@@ -879,7 +867,6 @@ class TestBenchmarkClusterSnapshots:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             with patch.object(ClusterInformation, 'from_mpi_collection') as mock_from_mpi:
                 mock_cluster_info = MagicMock()
                 mock_cluster_info.num_hosts = 1
@@ -927,7 +914,6 @@ class TestBenchmarkClusterSnapshots:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             with patch.object(ClusterInformation, 'from_mpi_collection') as mock_from_mpi:
                 mock_cluster_info = MagicMock()
                 mock_cluster_info.num_hosts = 1
@@ -977,7 +963,6 @@ class TestBenchmarkClusterSnapshots:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = TrackingBenchmark(args, logger=mock_logger, run_datetime='20260124_120000')
 
         benchmark.run()
@@ -1002,7 +987,6 @@ class TestBenchmarkClusterSnapshots:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ConcreteBenchmark(args, logger=mock_logger, run_datetime='20260124_120000')
 
         # Mock ClusterSnapshots
@@ -1031,7 +1015,6 @@ class TestBenchmarkClusterSnapshots:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ConcreteBenchmark(args, logger=mock_logger, run_datetime='20260124_120000')
 
         # Call end collection without start collection
@@ -1080,7 +1063,6 @@ class TestTimeSeriesCollectionIntegration:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ConcreteBenchmark(args, logger=mock_logger, run_datetime='20260124_120000')
 
         return benchmark
@@ -1414,7 +1396,6 @@ class TestBenchmarkProgress:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ConcreteBenchmark(args, logger=mock_logger, run_datetime='20260125_120000')
 
         return benchmark
@@ -1567,7 +1548,6 @@ class TestBenchmarkProgress:
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
-            os.makedirs(tmp_path / "output", exist_ok=True)
             benchmark = ExceptionRaisingBenchmark(args, logger=mock_logger, run_datetime='20260125_120000')
 
         with pytest.raises(RuntimeError, match="Test exception"):

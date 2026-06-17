@@ -71,7 +71,6 @@ class TestKVCacheClusterCollection:
             output_dir = str(tmp_path / "output")
             mock_gen.return_value = output_dir
             mock_cluster.return_value = MagicMock()
-            os.makedirs(output_dir, exist_ok=True)
 
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             benchmark = KVCacheBenchmark(basic_args, run_datetime="20250115_120000")
@@ -87,7 +86,6 @@ class TestKVCacheClusterCollection:
              patch('mlpstorage_py.benchmarks.kvcache.KVCacheBenchmark._collect_cluster_information') as mock_cluster:
             output_dir = str(tmp_path / "output")
             mock_gen.return_value = output_dir
-            os.makedirs(output_dir, exist_ok=True)
 
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             benchmark = KVCacheBenchmark(basic_args, run_datetime="20250115_120000")
@@ -139,7 +137,6 @@ class TestKVCacheNumProcessesStorage:
             output_dir = str(tmp_path / "output")
             mock_gen.return_value = output_dir
             mock_cluster.return_value = None
-            os.makedirs(output_dir, exist_ok=True)
 
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             benchmark = KVCacheBenchmark(basic_args, run_datetime="20250115_120000")
@@ -155,7 +152,6 @@ class TestKVCacheNumProcessesStorage:
             output_dir = str(tmp_path / "output")
             mock_gen.return_value = output_dir
             mock_cluster.return_value = None
-            os.makedirs(output_dir, exist_ok=True)
 
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             benchmark = KVCacheBenchmark(basic_args, run_datetime="20250115_120000")
@@ -218,7 +214,6 @@ class TestKVCacheMetadata:
             output_dir = str(tmp_path / "output")
             mock_gen.return_value = output_dir
             mock_cluster.return_value = None
-            os.makedirs(output_dir, exist_ok=True)
 
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             bm = KVCacheBenchmark(base_args, logger=mock_logger, run_datetime="20250124_120000")
@@ -238,7 +233,6 @@ class TestKVCacheMetadata:
             output_dir = str(tmp_path / "output")
             mock_gen.return_value = output_dir
             mock_cluster.return_value = None
-            os.makedirs(output_dir, exist_ok=True)
 
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             bm = KVCacheBenchmark(base_args, logger=mock_logger, run_datetime="20250124_120000")
@@ -263,7 +257,6 @@ class TestKVCacheMetadata:
             output_dir = str(tmp_path / "output")
             mock_gen.return_value = output_dir
             mock_cluster.return_value = None
-            os.makedirs(output_dir, exist_ok=True)
 
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             bm = KVCacheBenchmark(base_args, logger=mock_logger, run_datetime="20250124_120000")
@@ -284,7 +277,6 @@ class TestKVCacheMetadata:
             output_dir = str(tmp_path / "output")
             mock_gen.return_value = output_dir
             mock_cluster.return_value = None
-            os.makedirs(output_dir, exist_ok=True)
 
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             bm = KVCacheBenchmark(base_args, logger=mock_logger, run_datetime="20250124_120000")
@@ -292,6 +284,31 @@ class TestKVCacheMetadata:
 
         assert meta['model'] == 'llama3.1-70b-instruct'
         assert meta['kvcache_model'] == 'llama3.1-70b-instruct'
+
+    def test_metadata_closed_mode_defaults_model(self, base_args, mock_logger, tmp_path):
+        """In closed mode the CLI does not expose --model (see
+        _add_kvcache_model_arguments — only added for open/whatif). The
+        benchmark must default args.model from KVCACHE_MODEL_DEFAULT before
+        the base class writes metadata, otherwise the on-disk model field
+        would be None and workload grouping would mis-bucket the run."""
+        from mlpstorage_py.config import KVCACHE_MODEL_DEFAULT
+
+        delattr(base_args, 'model')
+
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen, \
+             patch('mlpstorage_py.benchmarks.kvcache.KVCacheBenchmark._collect_cluster_information') as mock_cluster:
+            output_dir = str(tmp_path / "output")
+            mock_gen.return_value = output_dir
+            mock_cluster.return_value = None
+
+            from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
+            bm = KVCacheBenchmark(base_args, logger=mock_logger, run_datetime="20250124_120000")
+            meta = bm.metadata
+
+        assert meta['model'] == KVCACHE_MODEL_DEFAULT
+        assert meta['kvcache_model'] == KVCACHE_MODEL_DEFAULT
+        # args was mutated to carry the default forward
+        assert base_args.model == KVCACHE_MODEL_DEFAULT
 
     def test_metadata_without_distributed_info(self, base_args, mock_logger, tmp_path):
         """Verify metadata works correctly without distributed execution info."""
@@ -302,7 +319,6 @@ class TestKVCacheMetadata:
             output_dir = str(tmp_path / "output")
             mock_gen.return_value = output_dir
             mock_cluster.return_value = None
-            os.makedirs(output_dir, exist_ok=True)
 
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             bm = KVCacheBenchmark(base_args, logger=mock_logger, run_datetime="20250124_120000")
@@ -355,7 +371,6 @@ def _make_run_benchmark(tmp_path, what_if=False):
         open=False,
     )
     output_dir = str(tmp_path / 'run_output')
-    os.makedirs(output_dir, exist_ok=True)
     with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen, \
          patch('mlpstorage_py.benchmarks.kvcache.KVCacheBenchmark._collect_cluster_information',
                return_value=None):

@@ -3,9 +3,6 @@
 Benchmarks and compares vector database performance for MLPerf Storage. Currently
 supports Milvus with DiskANN, HNSW, AISAQ, FLAT, and IVF-style indexes.
 
-> **Preview Status:** The VectorDB benchmark is in preview. All runs qualify for
-> OPEN category only. Pass `--open` to acknowledge this.
-
 The benchmark can be run in two ways:
 
 1. Directly with the scripts in `vdb_benchmark/vdbbench/`

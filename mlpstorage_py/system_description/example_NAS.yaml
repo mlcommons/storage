@@ -27,7 +27,8 @@ system_under_test:
              power:
                 min_psus_active: 1
                 psus_configured:
-                    - power_capacity_watts: 1800
+                    - inlet_voltage: 240
+                      nameplate_power_watts: 1800
                       efficiency: Platinum
                       unit_count: 2
           networking:
@@ -67,7 +68,8 @@ system_under_test:
           power:
              min_psus_active: 1
              psus_configured:
-                 - power_capacity_watts: 1800
+                 - inlet_voltage: 240
+                   nameplate_power_watts: 1800
                    efficiency: Platinum
                    unit_count: 2
           unit_count: 2
@@ -85,7 +87,8 @@ system_under_test:
              power:
                 min_psus_active: 1
                 psus_configured:
-                    - power_capacity_watts: 1800
+                    - inlet_voltage: 240
+                      nameplate_power_watts: 1800
                       efficiency: Platinum
                       unit_count: 2
           networking:

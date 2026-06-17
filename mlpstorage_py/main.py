@@ -13,13 +13,11 @@ import signal
 import sys
 import traceback
 
-from mlpstorage_py.benchmarks import TrainingBenchmark, VectorDBBenchmark, CheckpointingBenchmark
 from mlpstorage_py.cli_parser import parse_arguments, validate_args, update_args
 from mlpstorage_py.config import HISTFILE, DATETIME_STR, EXIT_CODE, DEFAULT_RESULTS_DIR, get_datetime_string, HYDRA_OUTPUT_SUBDIR
 from mlpstorage_py.debug import debugger_hook, MLPS_DEBUG
 from mlpstorage_py.history import HistoryTracker
 from mlpstorage_py.mlps_logging import setup_logging, apply_logging_options
-from mlpstorage_py.report_generator import ReportGenerator
 from mlpstorage_py.errors import (
     MLPStorageException,
     ConfigurationError,
@@ -152,7 +150,16 @@ def run_benchmark(args, run_datetime):
         ConfigurationError: If benchmark type is unsupported.
         BenchmarkExecutionError: If benchmark execution fails.
     """
-    from mlpstorage_py.benchmarks import KVCacheBenchmark
+    # Lazy-load benchmark classes so that non-benchmark subcommands
+    # (validate, rules-coverage, version, lockfile) do not pay the import
+    # cost of pyarrow / pymilvus / etc. — letting `mlpstorage validate`
+    # run on a base install without the `[full]` extra.
+    from mlpstorage_py.benchmarks import (
+        TrainingBenchmark,
+        VectorDBBenchmark,
+        CheckpointingBenchmark,
+        KVCacheBenchmark,
+    )
 
     # Validate lockfile if requested
     if hasattr(args, 'verify_lockfile') and args.verify_lockfile:
@@ -271,7 +278,7 @@ def _main_impl():
         print(VERSION)
         sys.exit(0)
 
-    if args.debug or MLPS_DEBUG:
+    if getattr(args, 'debug', False) or MLPS_DEBUG:
         sys.excepthook = debugger_hook
 
     apply_logging_options(logger, args)
@@ -309,9 +316,21 @@ def _main_impl():
         return handle_lockfile_command(args)
 
     if args.mode == "reports":
+        # Lazy-import: ReportGenerator pulls psutil, which is only required
+        # for the reports subcommand. Keeping the import here lets validate /
+        # rules-coverage / version run on a base install.
+        from mlpstorage_py.report_generator import ReportGenerator
         results_dir = args.results_dir if hasattr(args, 'results_dir') else DEFAULT_RESULTS_DIR
         report_generator = ReportGenerator(results_dir, args, logger=logger)
         return report_generator.generate_reports()
+
+    if args.mode == "validate":
+        from mlpstorage_py.submission_checker.main import run as run_submission_checker
+        return run_submission_checker(args)
+
+    if args.mode == "rules-coverage":
+        from mlpstorage_py.submission_checker.tools.rules_coverage import run as run_rules_coverage
+        return run_rules_coverage(args)
 
     run_datetime = datetime_str
 
@@ -323,7 +342,7 @@ def _main_impl():
         print_run_summary(args)
 
     # For other commands, run the benchmark
-    for i in range(args.loops):
+    for i in range(getattr(args, 'loops', 1)):
         if signal_received:
             logger.warning('Caught signal, exiting...')
             return EXIT_CODE.INTERRUPTED
