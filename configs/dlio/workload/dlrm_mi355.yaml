@@ -629,6 +629,9 @@ reader:
   batch_size: 18432
   prefetch_size: 2  # Increase from default 2 for better I/O overlap
   read_threads: 4   # Increase parallelism
+  # Avoid spawn-context SemLock reap by systemd-logind RemoveIPC=yes. See #447.
+  # DLIO auto-promotes fork->spawn for s3dlio / s3torchconnector.
+  multiprocessing_context: fork
   file_shuffle: seed
 
 train:

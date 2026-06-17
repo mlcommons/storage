@@ -71,7 +71,6 @@ class TestKVCacheClusterCollection:
             output_dir = str(tmp_path / "output")
             mock_gen.return_value = output_dir
             mock_cluster.return_value = MagicMock()
-            os.makedirs(output_dir, exist_ok=True)
 
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             benchmark = KVCacheBenchmark(basic_args, run_datetime="20250115_120000")
@@ -87,7 +86,6 @@ class TestKVCacheClusterCollection:
              patch('mlpstorage_py.benchmarks.kvcache.KVCacheBenchmark._collect_cluster_information') as mock_cluster:
             output_dir = str(tmp_path / "output")
             mock_gen.return_value = output_dir
-            os.makedirs(output_dir, exist_ok=True)
 
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             benchmark = KVCacheBenchmark(basic_args, run_datetime="20250115_120000")
@@ -139,7 +137,6 @@ class TestKVCacheNumProcessesStorage:
             output_dir = str(tmp_path / "output")
             mock_gen.return_value = output_dir
             mock_cluster.return_value = None
-            os.makedirs(output_dir, exist_ok=True)
 
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             benchmark = KVCacheBenchmark(basic_args, run_datetime="20250115_120000")
@@ -155,7 +152,6 @@ class TestKVCacheNumProcessesStorage:
             output_dir = str(tmp_path / "output")
             mock_gen.return_value = output_dir
             mock_cluster.return_value = None
-            os.makedirs(output_dir, exist_ok=True)
 
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             benchmark = KVCacheBenchmark(basic_args, run_datetime="20250115_120000")
@@ -218,7 +214,6 @@ class TestKVCacheMetadata:
             output_dir = str(tmp_path / "output")
             mock_gen.return_value = output_dir
             mock_cluster.return_value = None
-            os.makedirs(output_dir, exist_ok=True)
 
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             bm = KVCacheBenchmark(base_args, logger=mock_logger, run_datetime="20250124_120000")
@@ -238,7 +233,6 @@ class TestKVCacheMetadata:
             output_dir = str(tmp_path / "output")
             mock_gen.return_value = output_dir
             mock_cluster.return_value = None
-            os.makedirs(output_dir, exist_ok=True)
 
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             bm = KVCacheBenchmark(base_args, logger=mock_logger, run_datetime="20250124_120000")
@@ -263,7 +257,6 @@ class TestKVCacheMetadata:
             output_dir = str(tmp_path / "output")
             mock_gen.return_value = output_dir
             mock_cluster.return_value = None
-            os.makedirs(output_dir, exist_ok=True)
 
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             bm = KVCacheBenchmark(base_args, logger=mock_logger, run_datetime="20250124_120000")
@@ -284,7 +277,6 @@ class TestKVCacheMetadata:
             output_dir = str(tmp_path / "output")
             mock_gen.return_value = output_dir
             mock_cluster.return_value = None
-            os.makedirs(output_dir, exist_ok=True)
 
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             bm = KVCacheBenchmark(base_args, logger=mock_logger, run_datetime="20250124_120000")
@@ -302,7 +294,6 @@ class TestKVCacheMetadata:
             output_dir = str(tmp_path / "output")
             mock_gen.return_value = output_dir
             mock_cluster.return_value = None
-            os.makedirs(output_dir, exist_ok=True)
 
             from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
             bm = KVCacheBenchmark(base_args, logger=mock_logger, run_datetime="20250124_120000")
@@ -355,7 +346,6 @@ def _make_run_benchmark(tmp_path, what_if=False):
         open=False,
     )
     output_dir = str(tmp_path / 'run_output')
-    os.makedirs(output_dir, exist_ok=True)
     with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen, \
          patch('mlpstorage_py.benchmarks.kvcache.KVCacheBenchmark._collect_cluster_information',
                return_value=None):

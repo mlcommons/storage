@@ -246,6 +246,12 @@ Expected results directory structure:
             checkpointing_llama3-8b_metadata.json
             summary.json
 
+    vector_database/
+      milvus/                          # VDB engine (--vdb-engine)
+        run/
+          20250115_160000/
+            vector_database_20250115_160000_metadata.json
+
     kv_cache/
       llama3.1-8b/
         run/

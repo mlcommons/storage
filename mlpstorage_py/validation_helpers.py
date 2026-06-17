@@ -29,6 +29,7 @@ from mlpstorage_py.errors import (
 from mlpstorage_py.error_messages import format_error
 from mlpstorage_py.dependency_check import check_mpi_with_hints, check_dlio_with_hints, check_ssh_available
 from mlpstorage_py.environment import detect_os, validate_ssh_connectivity, ValidationIssue
+from mlpstorage_py.environment.systemd_ipc import check_removeipc_risk
 
 
 def validate_pre_run(args, logger=None) -> None:
@@ -631,6 +632,16 @@ def validate_benchmark_environment(
                 if logger:
                     logger.debug(f"SSH check failed: {e}")
                 issues.append(e)
+
+    # Issue #447: warn (don't fail) when systemd-logind RemoveIPC=yes could
+    # reap POSIX semaphores out from under the benchmark's spawn workers.
+    if os_info.system == 'Linux' and _requires_dlio(args):
+        try:
+            advisory = check_removeipc_risk()
+        except Exception:  # pragma: no cover — purely defensive
+            advisory = None
+        if advisory and logger:
+            logger.warning(advisory)
 
     # Validate file system paths
     path_errors = _validate_paths(args)

@@ -22,6 +22,8 @@ SYNOPSIS_TEXT = """\
 SYNOPSIS
   mlpstorage <closed|open|whatif> <benchmark> <model|algorithm> <command> <file|object> [OPTIONS]
   mlpstorage (reports|history|lockfile|version) [subcommand] [OPTIONS]
+  mlpstorage validate <submission-dir> [OPTIONS]
+  mlpstorage rules-coverage [--rules-md PATH]
 
   <closed|open|whatif>  — required first positional for benchmark commands
   <model|algorithm>     — required second positional (see per-benchmark choices below)
@@ -115,6 +117,16 @@ mlpstorage
 ├── lockfile
 │   ├── generate                                 {LF_GENERATE}
 │   └── verify                                   {LF_VERIFY}
+│
+├── validate <submission-dir>                    Run the Rules.md submission checker
+│       --submitters CSV                          Comma-separated submitter allowlist (default: all)
+│       --mlperf-version VERSION                  Spec version (default: v5.1)
+│       --csv PATH                                Summary CSV path (default: summary.csv)
+│       --skip-output-file                        Suppress per-submission output file
+│       --reference-checksum MD5                  Override REFERENCE_CHECKSUMS for code/ MD5 check
+│
+├── rules-coverage                               Reconcile Rules.md IDs against @rule-decorated checks
+│       --rules-md PATH                           Path to Rules.md (default: project-root Rules.md)
 │
 └── version                                      {VERSION}
 
@@ -250,16 +262,19 @@ CK_DATASIZE_CLOSED
     --client-host-memory-in-gb/-cm N
   Optional:
     --hosts/-s HOST...              (default: 127.0.0.1)
+    --num-checkpoints-read/-ncr N   (default: 10; closed allows 10 or 0)
+    --num-checkpoints-write/-ncw N  (default: 10; closed allows 10 or 0)
   + CORE_STD  (--results-dir optional)
-  Note: --num-checkpoints-read/write fixed at 10 in closed; not shown
+  Note: closed runs use 10/10 by default. Use 10/0 then 0/10 in two
+        invocations when a cache flush is required between phases
+        (see Rules.md §4.7.1 and checkpointing/README.md).
 
 CK_DATASIZE_OPEN
   = CK_DATASIZE_CLOSED plus:
-    --num-checkpoints-read/-ncr N   (default: 10)
-    --num-checkpoints-write/-ncw N  (default: 10)
     --dlio-bin-path/-dp PATH
     --params/-p KEY=VALUE...
   + OPEN_STD
+  Note: open allows any non-negative integer for --num-checkpoints-read/-write
 
 CK_DATASIZE_WHATIF
   = CK_DATASIZE_OPEN  (model positional choices identical; flags identical)
@@ -276,9 +291,13 @@ CK_RUN_CLOSED
   Optional:
     --exec-type/-et {mpi,docker}    (default: mpi)
     --hosts/-s HOST...              (default: 127.0.0.1)
+    --num-checkpoints-read/-ncr N   (default: 10; closed allows 10 or 0)
+    --num-checkpoints-write/-ncw N  (default: 10; closed allows 10 or 0)
   + MPI_ARGS
   + CORE_STD
-  Note: --num-checkpoints-read/write fixed at 10 in closed; not shown
+  Note: closed runs use 10/10 by default. Use 10/0 then 0/10 in two
+        invocations when a cache flush is required between phases
+        (see Rules.md §4.7.1 and checkpointing/README.md).
 
   Closed rank constraints by model:
     llama3-1t:   8 or 1024
@@ -288,13 +307,12 @@ CK_RUN_CLOSED
 
 CK_RUN_OPEN
   = CK_RUN_CLOSED plus:
-    --num-checkpoints-read/-ncr N   (default: 10)
-    --num-checkpoints-write/-ncw N  (default: 10)
     --dlio-bin-path/-dp PATH
     --params/-p KEY=VALUE...
   + OPEN_STD
   + TIMESERIES
   Note: open allows any multiple of the per-model GPU-per-DP-instance count
+        and any non-negative integer for --num-checkpoints-read/-write
 
 CK_RUN_WHATIF
   = CK_RUN_OPEN  (model positional choices identical; flags identical)
@@ -584,7 +602,7 @@ def get_context_help_tokens(argv: list) -> 'str | None':
 
     # Root — no tokens
     if n == 0:
-        return 'next: closed | open | whatif | reports | history | lockfile | version'
+        return 'next: closed | open | whatif | reports | history | lockfile | version | validate | rules-coverage'
 
     t0 = argv[0]
 
@@ -605,6 +623,12 @@ def get_context_help_tokens(argv: list) -> 'str | None':
         return None  # leaf
 
     if t0 == 'version':
+        return None  # leaf — fall through to argparse
+
+    if t0 == 'validate':
+        return None  # leaf — fall through to argparse (positional <input> required)
+
+    if t0 == 'rules-coverage':
         return None  # leaf — fall through to argparse
 
     # ── Three-mode benchmark branch ──────────────────────────────────────────

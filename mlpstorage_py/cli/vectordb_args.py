@@ -26,6 +26,8 @@ from mlpstorage_py.config import (
     VECTOR_DTYPES,
     VECTORDB_DEFAULT_RUNTIME,
     VDB_BENCHMARK_MODES,
+    VDB_ENGINE_DEFAULT,
+    VDB_ENGINES,
     VDB_INDEX_TYPES,
     VDB_INDEX_TYPES_CLOSED,
 )
@@ -205,6 +207,20 @@ def _add_vectordb_core_args(parser, command, index_choices):
     """
     # Set defaults for open-gated attrs so they always exist in the namespace.
     parser.set_defaults(loops=1, params='', allow_invalid_params=False)
+
+    # The engine identifies which vector database implementation is being
+    # benchmarked (milvus today). It is recorded in the results-dir path
+    # and metadata so accumulated runs from different engines coexist.
+    parser.add_argument(
+        '--vdb-engine',
+        choices=VDB_ENGINES,
+        default=VDB_ENGINE_DEFAULT,
+        help=(
+            "Vector database engine being benchmarked. "
+            "Recorded in the result path so multiple engines can accumulate "
+            "in one --results-dir without collision."
+        ),
+    )
 
     # ---- Common args for datagen and run ----
     if command in ("datagen", "run"):

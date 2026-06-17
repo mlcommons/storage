@@ -17,7 +17,14 @@ from pathlib import Path
 from typing import List, Optional
 
 import yaml
-from pydantic import BaseModel, Field, ValidationError, model_validator
+from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
+
+
+# All schema models inherit from this so that unknown fields surface as
+# validation errors instead of being silently dropped — catches typos like
+# "power_capacity_watts" vs. "nameplate_power_watts" at submission time.
+class StrictModel(BaseModel):
+    model_config = ConfigDict(extra="forbid")
 
 
 # ---------------------------------------------------------------------------
@@ -78,6 +85,27 @@ class DriveInterface(str, Enum):
     other = 'other'
 
 
+class DriveMediaType(str, Enum):
+    HDD   = 'HDD'
+    TLC   = 'TLC'
+    QLC   = 'QLC'
+    other = 'other'
+
+
+class DriveFormFactor(str, Enum):
+    U_2     = 'U.2'
+    U_3     = 'U.3'
+    M_2     = 'M.2'
+    E1_S    = 'E1.S'
+    E1_L    = 'E1.L'
+    E3_S    = 'E3.S'
+    E3_L    = 'E3.L'
+    in_2_5  = '2.5in'
+    in_3_5  = '3.5in'
+    AIC     = 'AIC'
+    other   = 'other'
+
+
 class PowerEfficiency(str, Enum):
     Standard = 'Standard'
     Bronze   = 'Bronze'
@@ -93,20 +121,20 @@ class PowerEfficiency(str, Enum):
 # Leaf models
 # ---------------------------------------------------------------------------
 
-class KeyValue(BaseModel):
+class KeyValue(StrictModel):
     """A single name/value tuning pair (OS environment variable, sysctl knob, etc.)."""
     name:  str = Field(min_length=1)
     value: str = Field(min_length=1)
 
 
-class PowerSupply(BaseModel):
+class PowerSupply(StrictModel):
     unit_count:           int            = Field(ge=1)
     inlet_voltage:        int            = Field(gt=0)
     nameplate_power_watts: int           = Field(ge=1)
     efficiency:           PowerEfficiency
 
 
-class PowerDevice(BaseModel):
+class PowerDevice(StrictModel):
     """Power configuration for a chassis or switch (PSU count and redundancy model)."""
     min_psus_active:  int               = Field(ge=1)
     psus_configured:  List[PowerSupply] = Field(min_length=1)
@@ -123,7 +151,7 @@ class PowerDevice(BaseModel):
         return self
 
 
-class NetworkPort(BaseModel):
+class NetworkPort(StrictModel):
     """One homogeneous group of NIC ports sharing the same type, speed, and traffic role."""
     unit_count:  int               = Field(ge=1)
     type:        NetworkType
@@ -131,25 +159,41 @@ class NetworkPort(BaseModel):
     traffic:     List[TrafficType] = Field(min_length=1)
 
 
+class DrivePerformance(BaseModel):
+    """Vendor-published spec-sheet performance for a drive.
+
+    Whole block is optional on DriveInstance; if present, the four throughput/IOPS
+    fields are required.  form_factor and interface_speed remain optional.
+    """
+    seq_read_MBps:      int                        = Field(ge=1)   # base-10 MB/s
+    seq_write_MBps:     int                        = Field(ge=1)   # base-10 MB/s
+    random_read_IOPS:   int                        = Field(ge=1)   # 4KB random
+    random_write_IOPS:  int                        = Field(ge=1)   # 4KB random
+    form_factor:        Optional[DriveFormFactor]  = None
+    interface_speed:    Optional[str]              = Field(default=None, min_length=1)
+
+
 class DriveInstance(BaseModel):
     """One homogeneous group of storage drives sharing the same model and configuration."""
-    unit_count:      int            = Field(ge=1)
-    vendor_name:     str            = Field(min_length=1)
-    model_name:      str            = Field(min_length=1)
+    unit_count:      int                          = Field(ge=1)
+    vendor_name:     str                          = Field(min_length=1)
+    model_name:      str                          = Field(min_length=1)
     interface:       DriveInterface
-    capacity_in_GB:  int            = Field(ge=1)  # base-10 GB
+    media_type:      DriveMediaType                              # HDD vs flash cell type
+    capacity_in_GB:  int                          = Field(ge=1)  # base-10 GB
+    performance:     Optional[DrivePerformance]   = None
 
 
 # ---------------------------------------------------------------------------
 # Mid-level models
 # ---------------------------------------------------------------------------
 
-class OperatingSystem(BaseModel):
+class OperatingSystem(StrictModel):
     name:    str = Field(min_length=1)
     version: str = Field(min_length=1)
 
 
-class Chassis(BaseModel):
+class Chassis(StrictModel):
     model_name:       str                  = Field(min_length=1)
     rack_units:       Optional[int]        = Field(default=None, ge=1)
     cpu_model:        str                  = Field(min_length=1)
@@ -159,7 +203,7 @@ class Chassis(BaseModel):
     power:            Optional[PowerDevice] = None
 
 
-class NodeDescription(BaseModel):
+class NodeDescription(StrictModel):
     """Describes a homogeneous group of nodes (product nodes or benchmark clients)."""
     friendly_description:  str                      = Field(min_length=1)
     quantity:              int                      = Field(ge=1)
@@ -171,7 +215,7 @@ class NodeDescription(BaseModel):
     sysctl:                Optional[List[KeyValue]]      = None
 
 
-class SwitchDescription(BaseModel):
+class SwitchDescription(StrictModel):
     """Describes a homogeneous group of network switches included in the storage solution."""
     unit_count:    int                      = Field(ge=1)
     vendor_name:   str                      = Field(min_length=1)
@@ -186,7 +230,7 @@ class SwitchDescription(BaseModel):
 # Top-level solution models
 # ---------------------------------------------------------------------------
 
-class Architecture(BaseModel):
+class Architecture(StrictModel):
     storage_location:    StorageLocation
     benchmark_API:       BenchmarkAPI
     product_API:         ProductAPI
@@ -206,7 +250,7 @@ class Architecture(BaseModel):
         return self
 
 
-class Capabilities(BaseModel):
+class Capabilities(StrictModel):
     multi_host:             bool
     simultaneous_write:     bool
     simultaneous_read:      bool
@@ -230,14 +274,14 @@ class Capabilities(BaseModel):
         return self
 
 
-class Solution(BaseModel):
+class Solution(StrictModel):
     submission_name:      str          = Field(min_length=1)
     friendly_description: str          = Field(min_length=1)
     architecture:         Architecture
     capabilities:         Capabilities
 
 
-class SystemUnderTest(BaseModel):
+class SystemUnderTest(StrictModel):
     solution:             Solution
     deployment:           DeploymentMode
     product_nodes:        Optional[List[NodeDescription]]   = None
@@ -334,7 +378,7 @@ class SystemUnderTest(BaseModel):
         return self
 
 
-class SystemDescription(BaseModel):
+class SystemDescription(StrictModel):
     """Root model — the entire system_under_test document."""
     system_under_test: SystemUnderTest
 
@@ -343,34 +387,96 @@ class SystemDescription(BaseModel):
 # Public API
 # ---------------------------------------------------------------------------
 
-def validate_dict(data: dict) -> list[str]:
-    """Validate a pre-loaded dict. Returns human-readable error strings; empty list means valid."""
+def _locate_line(node, loc: tuple) -> Optional[int]:
+    """Walk a YAML node tree following the Pydantic error ``loc`` path and
+    return the 1-indexed line number of the deepest reachable node.
+
+    Pydantic ``loc`` paths can reference fields that don't exist in the YAML
+    (``Field required`` errors) or extra fields that do. We descend as far as
+    the path matches and report the line of the last node we landed on, so
+    "Field required" surfaces the line of the parent mapping.
+    """
+    if node is None:
+        return None
+    current = node
+    for step in loc:
+        if isinstance(current, yaml.MappingNode):
+            matched = None
+            for key_node, value_node in current.value:
+                # Scalar key nodes carry the field name in ``.value``.
+                if getattr(key_node, "value", None) == str(step):
+                    matched = value_node
+                    break
+            if matched is None:
+                break
+            current = matched
+        elif isinstance(current, yaml.SequenceNode):
+            try:
+                idx = int(step)
+            except (TypeError, ValueError):
+                break
+            if 0 <= idx < len(current.value):
+                current = current.value[idx]
+            else:
+                break
+        else:
+            break
+    mark = getattr(current, "start_mark", None)
+    if mark is None:
+        return None
+    return mark.line + 1  # PyYAML marks are 0-indexed; humans count from 1
+
+
+def validate_dict(data: dict, *, node: object = None) -> list[str]:
+    """Validate a pre-loaded dict. Returns human-readable error strings; empty list means valid.
+
+    If ``node`` (a ``yaml.Node`` from ``yaml.compose``) is provided, each error
+    string is suffixed with ``(line N)`` pointing at the offending YAML line.
+    """
     try:
         SystemDescription.model_validate(data)
         return []
     except ValidationError as exc:
         errors = []
         for err in exc.errors():
-            loc = " -> ".join(str(p) for p in err["loc"])
-            errors.append(f"{loc}: {err['msg']}")
+            loc_tuple = err["loc"]
+            loc = " -> ".join(str(p) for p in loc_tuple)
+            line = _locate_line(node, loc_tuple) if node is not None else None
+            suffix = f" (line {line})" if line is not None else ""
+            errors.append(f"{loc}: {err['msg']}{suffix}")
         return errors
 
 
 def validate_file(path: str | Path) -> list[str]:
-    """Load a YAML file and validate it. Returns human-readable error strings; empty list means valid."""
+    """Load a YAML file and validate it. Returns human-readable error strings; empty list means valid.
+
+    Each returned string carries a ``(line N)`` suffix locating the offending
+    YAML line whenever the error's field path can be resolved in the source
+    document.
+    """
     path = Path(path)
     try:
         with path.open() as fh:
-            data = yaml.safe_load(fh)
-    except yaml.YAMLError as exc:
-        return [f"YAML parse error: {exc}"]
+            source = fh.read()
     except OSError as exc:
         return [f"Cannot read file: {exc}"]
+
+    try:
+        data = yaml.safe_load(source)
+    except yaml.YAMLError as exc:
+        return [f"YAML parse error: {exc}"]
 
     if not isinstance(data, dict):
         return ["Top-level YAML value must be a mapping"]
 
-    return validate_dict(data)
+    # Re-parse for node-level line tracking. Failures here are non-fatal —
+    # we fall back to validation without line annotations.
+    try:
+        node = yaml.compose(source)
+    except yaml.YAMLError:
+        node = None
+
+    return validate_dict(data, node=node)
 
 
 # ---------------------------------------------------------------------------

@@ -187,6 +187,10 @@ def _add_kvcache_cache_arguments(parser, mode):
             params='',
         )
     else:
+        # `--loops` is registered only on the run subparser (via
+        # _add_kvcache_open_args), so the datasize subparser would have no
+        # `loops` attr on its namespace. main.py reads it for every command.
+        cache_group.set_defaults(loops=1)
         cache_group.add_argument(
             '--gpu-mem-gb',
             type=float,

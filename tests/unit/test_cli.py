@@ -26,6 +26,7 @@ from mlpstorage_py.cli import (
     add_history_arguments,
     add_universal_arguments,
     add_mpi_arguments,
+    validate_checkpointing_arguments,
     HELP_MESSAGES,
     PROGRAM_DESCRIPTIONS,
 )
@@ -460,15 +461,40 @@ class TestAddCheckpointingArgumentsClosed:
         with pytest.raises(SystemExit):
             parser.parse_args(self.RUN_ARGS + ['--loops', '3'])
 
-    def test_closed_mode_rejects_num_checkpoints_read(self, parser):
-        """Closed checkpointing must reject --num-checkpoints-read."""
-        with pytest.raises(SystemExit):
-            parser.parse_args(self.RUN_ARGS + ['--num-checkpoints-read', '20'])
+    def test_closed_mode_accepts_num_checkpoints_read_zero(self, parser):
+        """Closed checkpointing accepts --num-checkpoints-read=0 (read-only split)."""
+        args = parser.parse_args(self.RUN_ARGS + ['--num-checkpoints-read', '0'])
+        assert args.num_checkpoints_read == 0
+        assert args.num_checkpoints_write == 10
 
-    def test_closed_mode_rejects_num_checkpoints_write(self, parser):
-        """Closed checkpointing must reject --num-checkpoints-write."""
+    def test_closed_mode_accepts_num_checkpoints_write_zero(self, parser):
+        """Closed checkpointing accepts --num-checkpoints-write=0 (write-only split)."""
+        args = parser.parse_args(self.RUN_ARGS + ['--num-checkpoints-write', '0'])
+        assert args.num_checkpoints_write == 0
+        assert args.num_checkpoints_read == 10
+
+    def test_closed_mode_rejects_arbitrary_num_checkpoints_read(self, parser):
+        """validate_checkpointing_arguments must reject non-{10,0} read counts in closed mode."""
+        args = parser.parse_args(self.RUN_ARGS + ['--num-checkpoints-read', '20'])
+        args.mode = 'closed'
         with pytest.raises(SystemExit):
-            parser.parse_args(self.RUN_ARGS + ['--num-checkpoints-write', '20'])
+            validate_checkpointing_arguments(args)
+
+    def test_closed_mode_rejects_arbitrary_num_checkpoints_write(self, parser):
+        """validate_checkpointing_arguments must reject non-{10,0} write counts in closed mode."""
+        args = parser.parse_args(self.RUN_ARGS + ['--num-checkpoints-write', '20'])
+        args.mode = 'closed'
+        with pytest.raises(SystemExit):
+            validate_checkpointing_arguments(args)
+
+    def test_closed_mode_rejects_both_zero(self, parser):
+        """validate_checkpointing_arguments must reject write=0 and read=0 together in closed mode."""
+        args = parser.parse_args(
+            self.RUN_ARGS + ['--num-checkpoints-write', '0', '--num-checkpoints-read', '0']
+        )
+        args.mode = 'closed'
+        with pytest.raises(SystemExit):
+            validate_checkpointing_arguments(args)
 
     def test_closed_mode_namespace_has_open_defaults(self, parser):
         """Closed-mode parse must supply all open-gated attrs via set_defaults."""

@@ -27,6 +27,8 @@ from mlpstorage_py.cli import (
     add_history_arguments,
     add_lockfile_arguments,
     add_version_arguments,
+    add_validate_arguments,
+    add_rules_coverage_arguments,
 )
 
 # Backwards compatibility aliases
@@ -133,10 +135,22 @@ def parse_arguments():
     history_parser = top.add_parser("history", help="Display benchmark history")
     lockfile_parser = top.add_parser("lockfile", help="Generate and verify package lockfiles")
     version_parser = top.add_parser("version", description="Print the mlpstorage package version", help="Show installed package version and exit")
+    validate_parser = top.add_parser(
+        "validate",
+        description="Validate a submission package against Rules.md (closed/open/whatif hierarchy).",
+        help="Validate a submission package against Rules.md",
+    )
+    rules_coverage_parser = top.add_parser(
+        "rules-coverage",
+        description="Self-validation: reconcile Rules.md IDs against @rule-decorated check methods.",
+        help="Audit which Rules.md IDs are covered by check methods",
+    )
     add_reports_arguments(reports_parser)
     add_history_arguments(history_parser)
     add_lockfile_arguments(lockfile_parser)
     add_version_arguments(version_parser)
+    add_validate_arguments(validate_parser)
+    add_rules_coverage_arguments(rules_coverage_parser)
 
     _apply_formatter(parser)
 

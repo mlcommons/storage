@@ -49,7 +49,7 @@ def _mock_benchmark():
 class TestResultsDirWarning:
     """run_benchmark() warns when results land in the system temp directory."""
 
-    @patch('mlpstorage_py.main.TrainingBenchmark')
+    @patch('mlpstorage_py.benchmarks.TrainingBenchmark')
     @patch('mlpstorage_py.main.logger')
     def test_warning_emitted_when_using_tempdir_default(
         self, mock_logger, mock_training_cls, monkeypatch
@@ -73,7 +73,7 @@ class TestResultsDirWarning:
             f"Expected temp-dir mention in warning, got: {warning_text}"
         )
 
-    @patch('mlpstorage_py.main.TrainingBenchmark')
+    @patch('mlpstorage_py.benchmarks.TrainingBenchmark')
     @patch('mlpstorage_py.main.logger')
     def test_warning_mentions_results_dir_flag(
         self, mock_logger, mock_training_cls, monkeypatch
@@ -97,7 +97,7 @@ class TestResultsDirWarning:
             "Warning should tell users about the MLPERF_RESULTS_DIR env var"
         )
 
-    @patch('mlpstorage_py.main.TrainingBenchmark')
+    @patch('mlpstorage_py.benchmarks.TrainingBenchmark')
     @patch('mlpstorage_py.main.logger')
     def test_no_tempdir_warning_when_results_dir_explicitly_set(
         self, mock_logger, mock_training_cls, monkeypatch
@@ -117,7 +117,7 @@ class TestResultsDirWarning:
                 f"Unexpected tempdir warning when results_dir was explicit: {call}"
             )
 
-    @patch('mlpstorage_py.main.TrainingBenchmark')
+    @patch('mlpstorage_py.benchmarks.TrainingBenchmark')
     @patch('mlpstorage_py.main.logger')
     def test_no_tempdir_warning_when_mlperf_results_dir_env_set(
         self, mock_logger, mock_training_cls, monkeypatch

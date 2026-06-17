@@ -120,6 +120,11 @@ VDB_INDEX_TYPES = ["DISKANN", "HNSW", "AISAQ", "IVF_FLAT", "IVF_SQ8", "FLAT"]
 VDB_INDEX_TYPES_CLOSED = ["DISKANN", "HNSW", "AISAQ"]
 VDB_ORCHESTRATION_MODES = ["ssh", "mpi"]
 VDB_BENCHMARK_MODES = ["timed", "query_count", "sweep"]
+# Vector-database engines. Only milvus is wired up today; the slot exists so
+# accumulated results from multiple engines can coexist in one results-dir
+# (path: vector_database/<engine>/<command>/<datetime>/).
+VDB_ENGINES = ["milvus"]
+VDB_ENGINE_DEFAULT = "milvus"
 
 MPIRUN = "mpirun"
 MPIEXEC = "mpiexec"

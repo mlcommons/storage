@@ -36,7 +36,7 @@ OPTION_PARAMS = {
         'duration': 300,
         'gpu-mem-gb': 0,
         'cpu-mem-gb': 4,
-        'max-concurrent-allocs': 0,
+        'max-concurrent-allocs': 16,
         'generation-mode': 'none',
     },
     3: {

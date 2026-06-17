@@ -45,9 +45,11 @@ from typing import Tuple, Dict, Any, List, Optional, Callable, Set, TYPE_CHECKIN
 
 from functools import wraps
 
-from pyarrow.ipc import open_stream
-
 from mlpstorage_py.config import PARAM_VALIDATION, DATETIME_STR, MLPS_DEBUG, EXEC_TYPE
+from mlpstorage_py.run_directory import (
+    DEFAULT_COLLISION_BUMP_BUDGET,
+    reserve_run_directory,
+)
 from mlpstorage_py.debug import debug_tryer_wrapper
 from mlpstorage_py.interfaces import BenchmarkInterface, BenchmarkConfig, BenchmarkCommand
 from mlpstorage_py.mlps_logging import setup_logging, apply_logging_options
@@ -134,8 +136,7 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         self.cmd_executor = CommandExecutor(logger=self.logger, debug=args.debug)
 
         self.command_output_files = list()
-        self.run_result_output = self.generate_output_location()
-        os.makedirs(self.run_result_output, exist_ok=True)
+        self.run_result_output = self._reserve_run_directory()
 
         self.metadata_filename = f"{self.BENCHMARK_TYPE.value}_{self.run_datetime}_metadata.json"
         self.metadata_file_path = os.path.join(self.run_result_output, self.metadata_filename)
@@ -801,6 +802,23 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         if not self.BENCHMARK_TYPE:
             raise ValueError('No benchmark specified. Unable to generate output location')
         return generate_output_location(self, self.run_datetime)
+
+    _COLLISION_BUMP_BUDGET = DEFAULT_COLLISION_BUMP_BUDGET
+
+    def _reserve_run_directory(self) -> str:
+        """Atomically reserve a unique run directory, updating run_datetime
+        if a collision pushes the timestamp forward. See
+        mlpstorage_py.benchmarks.run_directory.reserve_run_directory.
+        """
+        def _path_for(dt: str) -> str:
+            self.run_datetime = dt
+            return self.generate_output_location()
+
+        reserved, final_dt = reserve_run_directory(
+            self.run_datetime, _path_for, budget=self._COLLISION_BUMP_BUDGET
+        )
+        self.run_datetime = final_dt
+        return reserved
 
     def verify_benchmark(self) -> bool:
         """Verify benchmark parameters meet OPEN or CLOSED requirements.

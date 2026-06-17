@@ -62,7 +62,7 @@ class Loader:
     def load_single_log(self, path, log_type):
         log = None
         if os.path.exists(path):
-            self.logger.info("Loading %s log from %s", log_type, path)
+            self.logger.debug("Loading %s log from %s", log_type, path)
             log = self.parser_map.get(log_type, self.parser_map["default"])(path, log_type).get_dict()
         else:
             self.logger.warning(
@@ -106,7 +106,12 @@ class Loader:
                                 run_path = os.path.join(benchmark_path, "run")
                                 datagen_files = []
                                 run_files = []
-                                for timestamp in list_dir(datagen_path):
+                                # Missing datagen/ or run/ is a structural violation caught by
+                                # SubmissionStructureCheck STRUCT-12 (2.1.12). The loader yields
+                                # empty file lists so the rest of the corpus traversal continues.
+                                datagen_timestamps = list_dir(datagen_path) if os.path.isdir(datagen_path) else []
+                                run_timestamps = list_dir(run_path) if os.path.isdir(run_path) else []
+                                for timestamp in datagen_timestamps:
                                     timestamp_path = os.path.join(datagen_path, timestamp)
                                     summary_path = os.path.join(timestamp_path, "summary.json")
                                     metadata_path = self.find_metadata_path(timestamp_path)
@@ -114,9 +119,11 @@ class Loader:
                                     datagen_file = self.load_single_log(summary_path, "Summary")
                                     datagen_files.append((datagen_file, metadata_file, timestamp))
 
-                                for timestamp in list_dir(run_path):
+                                for timestamp in run_timestamps:
                                     timestamp_path = os.path.join(run_path, timestamp)
                                     summary_path = os.path.join(timestamp_path, "summary.json")
+                                    # BUG-01 (D-E1): refresh per-run metadata; do NOT reuse datagen-loop metadata_path.
+                                    metadata_path = self.find_metadata_path(timestamp_path)
                                     metadata_file = self.load_single_log(metadata_path, "Metadata")
                                     run_file = self.load_single_log(summary_path, "Summary")
                                     run_files.append((run_file, metadata_file, timestamp))
@@ -125,7 +132,8 @@ class Loader:
                             else:
                                 checkpoint_path = os.path.join(mode_path, benchmark)
                                 checkpoint_files = []
-                                for timestamp in list_dir(checkpoint_path):
+                                checkpoint_timestamps = list_dir(checkpoint_path) if os.path.isdir(checkpoint_path) else []
+                                for timestamp in checkpoint_timestamps:
                                     timestamp_path = os.path.join(checkpoint_path, timestamp)
                                     summary_path = os.path.join(timestamp_path, "summary.json")
                                     metadata_path = self.find_metadata_path(timestamp_path)
