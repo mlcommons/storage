@@ -136,7 +136,7 @@ def _validate_required_params(args) -> List[Exception]:
             errors.append(ConfigurationError(
                 "Missing required parameter: model",
                 parameter="model",
-                suggestion="Specify --model (cosmoflow, resnet50, or unet3d)",
+                suggestion="Specify --model (unet3d or retinanet)",
                 code=ErrorCode.CONFIG_MISSING_REQUIRED
             ))
 

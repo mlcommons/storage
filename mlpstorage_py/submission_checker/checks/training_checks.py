@@ -254,7 +254,7 @@ class TrainingCheck(BaseCheck):
 
         # Resolve expected dataset cardinalities up front. Returns None if
         # the workload directory name does not match a known model
-        # ({unet3d, resnet50, cosmoflow}); 2.1.11 trainingWorkloads already
+        # ({unet3d, retinanet}); 2.1.11 trainingWorkloads already
         # flags the structural complaint for the non-conforming name, so
         # skip the cardinality cross-check rather than crash on the dict
         # lookup or on a None comparison below.
@@ -264,7 +264,7 @@ class TrainingCheck(BaseCheck):
             self.log.info(
                 "[3.3.1 trainingRunDataMatchesDatasize] %s: skipping "
                 "cardinality cross-check — workload %r is not in known "
-                "models {unet3d, resnet50, cosmoflow}; see 2.1.11 violation "
+                "models {unet3d, retinanet}; see 2.1.11 violation "
                 "for the structural complaint",
                 self.path, self.model,
             )

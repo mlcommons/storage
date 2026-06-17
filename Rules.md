@@ -82,7 +82,7 @@ configuration of storage system and to link together those results with the .pdf
 
 2.1.10. **workloadCategories** --  Within a *system name* directory in the "results" directory, there must be one or both of the following directories, and nothing else: "training", and/or "checkpointing".  These names are case-sensitive.
 
-2.1.11. **trainingWorkloads** --  Within the "training" directory, there must be one or more of the following *workload directories*, and nothing else: "unet3d", "resnet50" and/or "cosmoflow".  These names are case-sensitive.
+2.1.11. **trainingWorkloads** --  Within the "training" directory, there must be one or more of the following *workload directories*, and nothing else: "unet3d" and/or "retinanet".  These names are case-sensitive.
 
 2.1.12. **trainingPhases** --  Within the *workload directories* in the "training" hierarchy, there must exist *phase directories* named "datagen" and "run", and nothing else.  These names are case-sensitive.
 
@@ -134,18 +134,7 @@ root_folder (or any name you prefer)
 │	  	│		│	│		... (5x Runs per Emulated Accelerator Type)
 │	  	│		│	│		└── YYYYMMDD_HHmmss
 │	  	│		│	│			└── dlio_config
-│	  	│	 	│	├── resnet50
-│	  	│		│	│	├── datagen
-│	  	│		│	│	│	└── YYYYMMDD_HHmmss
-│	  	│		│	│	│		└── dlio_config
-│	  	│		│	│	└── run
-│	  	│		│	│		├──results.json
-│	  	│		│	│		├── YYYYMMDD_HHmmss
-│	  	│		│	│		│	└── dlio_config 
-│	  	│		│	│		... (5x Runs per Emulated Accelerator Type)
-│	  	│		│	│		└── YYYYMMDD_HHmmss
-│	  	│		│	│			└── dlio_config
-│	  	│	 	│	└── cosmoflow
+│	  	│	 	│	└── retinanet
 │	  	│		│	 	├── datagen
 │	  	│		│	 	│	└── YYYYMMDD_HHmmss
 │	  	│		│	 	│		└── dlio_config
@@ -227,18 +216,7 @@ root_folder (or any name you prefer)
 		│		│	│		... (5x Runs per Emulated Accelerator Type)
 		│		│	│		└── YYYYMMDD_HHmmss
 		│		│	│			└── dlio_config
-		│	 	│	├── resnet50
-		│		│	│	├── datagen
-		│		│	│	│	└── YYYYMMDD_HHmmss
-		│		│	│	│		└── dlio_config
-		│		│	│	└── run
-		│		│	|		├──results.json
-		│		│	│		├── YYYYMMDD_HHmmss
-		│		│	│		│	└── dlio_config 
-		│		│	│		... (5x Runs per Emulated Accelerator Type)
-		│		│	│		└── YYYYMMDD_HHmmss
-		│		│	│			└── dlio_config
-		│	 	│	└── cosmoflow
+		│	 	│	└── retinanet
 		│		│	 	├── datagen
 		│		│	 	│	└── YYYYMMDD_HHmmss
 		│		│	 	│		└── dlio_config

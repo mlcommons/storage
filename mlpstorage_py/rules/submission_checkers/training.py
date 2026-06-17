@@ -6,7 +6,7 @@ Validates training benchmark submissions (multiple runs).
 
 from typing import Optional
 
-from mlpstorage_py.config import MODELS, PARAM_VALIDATION
+from mlpstorage_py.config import MODELS_CLOSED, PARAM_VALIDATION
 from mlpstorage_py.rules.issues import Issue
 from mlpstorage_py.rules.submission_checkers.base import MultiRunRulesChecker
 
@@ -14,7 +14,9 @@ from mlpstorage_py.rules.submission_checkers.base import MultiRunRulesChecker
 class TrainingSubmissionRulesChecker(MultiRunRulesChecker):
     """Rules checker for training benchmark submissions."""
 
-    supported_models = MODELS
+    # Rules.md 2.1.11 trainingWorkloads — closed/open submissions accept
+    # only {unet3d, retinanet}.
+    supported_models = MODELS_CLOSED
     REQUIRED_RUNS = 5
 
     def check_num_runs(self) -> Optional[Issue]:

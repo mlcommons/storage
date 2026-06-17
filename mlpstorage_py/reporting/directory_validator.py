@@ -38,7 +38,7 @@ class ResultsDirectoryValidator:
     Expected structure:
     results_dir/
         <benchmark_type>/           # training, checkpointing, vector_database, kv_cache
-            <model>/                # unet3d, resnet50, llama3-8b, etc.
+            <model>/                # unet3d, retinanet, llama3-8b, etc.
                 <command>/          # run, datagen (for training)
                     <datetime>/     # YYYYMMDD_HHMMSS format
                         *_metadata.json
