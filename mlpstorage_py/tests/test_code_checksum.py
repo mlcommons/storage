@@ -241,6 +241,49 @@ class TestComputeCodeTreeMd5:
 
         assert result is None
 
+    def test_nested_excluded_dir_pruned_at_any_depth(self, tmp_path, mock_logger):
+        """Regression: directory names in MD5_EXCLUDE_PREFIXES must be pruned at any
+        depth, not only at the tree root. Without this, capture_code_image (which
+        excludes by basename via shutil.copytree ignore) diverges from
+        compute_code_tree_md5 (which only matched a rooted-prefix) and verify
+        spuriously fails for unchanged source on real repos."""
+        from mlpstorage_py.submission_checker.tools.code_checksum import compute_code_tree_md5
+
+        # Tree A: real file plus a NON-pyc file inside a deeply nested __pycache__.
+        # Using a non-.pyc filename ensures the dir-level exclusion is what makes
+        # this pass — filename-level exclusion would not catch it.
+        tree_a = tmp_path / "tree_a"
+        write_binary(tree_a / "pkg" / "mod.py", b"x = 1\n")
+        write_binary(tree_a / "pkg" / "__pycache__" / "leak.txt", b"leaked\n")
+        write_binary(tree_a / "pkg" / "tests" / "leak.txt", b"also leaked\n")
+        write_binary(tree_a / "pkg" / "sub" / "build" / "artifact.bin", b"\x00")
+
+        # Tree B: only the real file.
+        tree_b = tmp_path / "tree_b"
+        write_binary(tree_b / "pkg" / "mod.py", b"x = 1\n")
+
+        assert compute_code_tree_md5(str(tree_a), mock_logger) == compute_code_tree_md5(str(tree_b), mock_logger)
+
+    def test_capture_verify_roundtrip_with_nested_excluded_dirs(self, tmp_path, mock_logger):
+        """Regression for the cross-walker divergence: capture_code_image (basename
+        ignore) and verify_source_against_image (compute_code_tree_md5) must agree
+        on unchanged source even when the source has deeply nested __pycache__/
+        directories with non-pyc files. Before the fix, the captured tree omitted
+        the deep dir but the source walker hashed it in, producing False."""
+        from mlpstorage_py.submission_checker.tools.code_image import (
+            capture_code_image, verify_source_against_image,
+        )
+
+        source = tmp_path / "source"
+        write_binary(source / "pkg" / "main.py", b"print('hi')\n")
+        write_binary(source / "pkg" / "__pycache__" / "leak.txt", b"residue\n")
+        write_binary(source / "deep" / "tests" / "leak.txt", b"residue\n")
+
+        image_parent = tmp_path / "out"
+        capture_code_image(source, image_parent, mock_logger)
+
+        assert verify_source_against_image(source, image_parent / "code", mock_logger) is True
+
 
 # ---------------------------------------------------------------------------
 # CLI integration tests (D-11) — added in Task 3
