@@ -467,6 +467,346 @@ class TestStruct06_CodeDirectoryContents:
 
 
 # ---------------------------------------------------------------------------
+# Phase 2 Plan 02-03 — Helpers + Tests for the refactored
+# code_directory_contents_check (VALS-01..04 + D-11 layered model + D-15 walk)
+# ---------------------------------------------------------------------------
+
+def _write_valid_hash_json(code_path, mock_logger, **overrides):
+    """Compute the current tree hash and write a matching .code-hash.json.
+
+    This makes the captured tree self-consistent so that
+    verify_image_self_consistent returns True without re-running
+    capture_code_image (which would copy the live source tree).
+    """
+    from mlpstorage_py.submission_checker.tools.code_checksum import (
+        compute_code_tree_md5,
+    )
+    digest = compute_code_tree_md5(str(code_path), mock_logger)
+    payload = {
+        "hash": digest,
+        "algorithm": "md5-tree-v1",
+        "captured_at": "2026-06-17T00:00:00Z",
+        "mlpstorage_version": "3.0.9",
+        "git_sha": None,
+    }
+    payload.update(overrides)
+    hash_file = Path(code_path) / ".code-hash.json"
+    hash_file.write_text(json.dumps(payload))
+    return payload["hash"]
+
+
+def _make_open_leaf(root, submitter="Acme", sys_name="sys-1", wtype="training",
+                    model="unet3d", write_code=True):
+    """Build a minimal open/<submitter>/results/<sys>/<wtype>/<model>/code tree.
+
+    Returns the absolute path to .../code (whether or not write_code created it).
+    """
+    leaf = root / "open" / submitter / "results" / sys_name / wtype / model
+    leaf.mkdir(parents=True, exist_ok=True)
+    code_path = leaf / "code"
+    if write_code:
+        code_path.mkdir(parents=True, exist_ok=True)
+        (code_path / "mod.py").write_bytes(b"# mod\n")
+        (code_path / "helper.py").write_bytes(b"# helper\n")
+    return code_path
+
+
+class TestStruct06_RefactoredCodeDirectoryContents:
+    """Refactored STRUCT-06 enforcing VALS-01..04 across CLOSED + OPEN.
+
+    Plan 02-03: code_directory_contents_check walks both divisions and
+    emits separate violations for missing-code/ vs hash-mismatch (D-14),
+    runs REFERENCE_CHECKSUMS only for CLOSED leaves (D-11), and runs
+    per-tree self-consistency for both CLOSED and OPEN.
+    """
+
+    # ----- VALS-01 — CLOSED missing code/ -----
+    def test_vals01_closed_missing_code_emits_missing_violation(self, tmp_path, mock_logger):
+        # Tree: closed/Acme/{results,systems} but no closed/Acme/code/
+        sub = tmp_path / "closed" / "Acme"
+        (sub / "results").mkdir(parents=True)
+        (sub / "systems").mkdir(parents=True)
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is False
+        missing_msgs = [
+            m for m in mock_logger.errors
+            if "[2.1.6 codeDirectoryContents]" in m
+            and "required code/ directory missing at" in m
+            and "closed/Acme/code" in m
+        ]
+        assert len(missing_msgs) == 1, mock_logger.errors
+
+    # ----- VALS-02 — CLOSED self-consistency mismatch -----
+    def test_vals02_closed_self_consistency_mismatch(self, tmp_path, mock_logger):
+        sub = tmp_path / "closed" / "Acme"
+        code_path = sub / "code"
+        code_path.mkdir(parents=True)
+        (code_path / "mod.py").write_bytes(b"# original\n")
+        _write_valid_hash_json(code_path, mock_logger)
+        # Mutate the tree so the hash no longer matches the recorded JSON
+        (code_path / "mod.py").write_bytes(b"# TAMPERED\n")
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is False
+        mismatch_msgs = [
+            m for m in mock_logger.errors
+            if "[2.1.6 codeDirectoryContents]" in m
+            and "code tree hash does not match .code-hash.json at" in m
+        ]
+        assert len(mismatch_msgs) == 1, mock_logger.errors
+
+    # ----- VALS-02 — missing .code-hash.json -----
+    def test_vals02_missing_hash_json_emits_violation(self, tmp_path, mock_logger):
+        sub = tmp_path / "closed" / "Acme"
+        code_path = sub / "code"
+        code_path.mkdir(parents=True)
+        (code_path / "mod.py").write_bytes(b"# mod\n")
+        # Intentionally do NOT write .code-hash.json
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is False
+        # The MissingHashFile exception message is logged as the violation msg.
+        any_violation = [
+            m for m in mock_logger.errors
+            if "[2.1.6 codeDirectoryContents]" in m
+        ]
+        assert len(any_violation) >= 1, mock_logger.errors
+
+    # ----- VALS-03 — OPEN missing code/ -----
+    def test_vals03_open_missing_code_emits_missing_violation(self, tmp_path, mock_logger):
+        # build OPEN leaf without code/
+        _make_open_leaf(tmp_path, write_code=False)
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is False
+        missing_msgs = [
+            m for m in mock_logger.errors
+            if "[2.1.6 codeDirectoryContents]" in m
+            and "required code/ directory missing at" in m
+            and "open/Acme/results/sys-1/training/unet3d/code" in m
+        ]
+        assert len(missing_msgs) == 1, mock_logger.errors
+
+    # ----- VALS-04 — OPEN self-consistency mismatch -----
+    def test_vals04_open_self_consistency_mismatch(self, tmp_path, mock_logger):
+        code_path = _make_open_leaf(tmp_path, write_code=True)
+        _write_valid_hash_json(code_path, mock_logger)
+        (code_path / "mod.py").write_bytes(b"# TAMPERED\n")
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is False
+        mismatch_msgs = [
+            m for m in mock_logger.errors
+            if "[2.1.6 codeDirectoryContents]" in m
+            and "code tree hash does not match .code-hash.json at" in m
+        ]
+        assert len(mismatch_msgs) == 1, mock_logger.errors
+
+    # ----- D-11 layered model (CLOSED happy path) -----
+    def test_d11_closed_layered_happy_path(self, tmp_path, mock_logger):
+        """When REFERENCE_CHECKSUMS matches AND self-consistency passes → True."""
+        sub = tmp_path / "closed" / "Acme"
+        code_path = sub / "code"
+        code_path.mkdir(parents=True)
+        (code_path / "mod.py").write_bytes(b"# mod\n")
+        actual_hash = _write_valid_hash_json(code_path, mock_logger)
+        check = _make_check(tmp_path, mock_logger, ref_checksum=actual_hash)
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is True, mock_logger.errors
+        assert mock_logger.errors == []
+
+    # ----- D-11 layered model (CLOSED self-consistency passes, ref mismatch) -----
+    def test_d11_closed_self_consistent_but_ref_mismatch(self, tmp_path, mock_logger):
+        sub = tmp_path / "closed" / "Acme"
+        code_path = sub / "code"
+        code_path.mkdir(parents=True)
+        (code_path / "mod.py").write_bytes(b"# mod\n")
+        _write_valid_hash_json(code_path, mock_logger)  # self-consistent
+        check = _make_check(tmp_path, mock_logger, ref_checksum="0" * 32)
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is False
+        ref_mismatch_msgs = [
+            m for m in mock_logger.errors
+            if "[2.1.6 codeDirectoryContents]" in m
+            and "code tree MD5 mismatch: expected" in m
+        ]
+        assert len(ref_mismatch_msgs) == 1, mock_logger.errors
+
+    # ----- D-12 single-warning preserved with new addendum -----
+    def test_d12_unconfigured_warning_runs_self_consistency_with_addendum(
+        self, tmp_path, mock_logger
+    ):
+        sub = tmp_path / "closed" / "Acme"
+        code_path = sub / "code"
+        code_path.mkdir(parents=True)
+        (code_path / "mod.py").write_bytes(b"# mod\n")
+        _write_valid_hash_json(code_path, mock_logger)
+        check = _make_check(tmp_path, mock_logger)  # no ref_checksum
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is True
+        warnings = [
+            w for w in mock_logger.warnings
+            if "[2.1.6 codeDirectoryContents]" in w
+            and "reference checksum not configured" in w
+            and "self-consistency check still ran" in w
+        ]
+        assert len(warnings) == 1, mock_logger.warnings
+
+    # ----- OPEN-only tree does not emit the "not configured" warning -----
+    def test_open_only_tree_does_not_emit_unconfigured_warning(self, tmp_path, mock_logger):
+        code_path = _make_open_leaf(tmp_path, write_code=True)
+        _write_valid_hash_json(code_path, mock_logger)
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is True, mock_logger.errors
+        # No "reference checksum not configured" warning when only open/ exists.
+        warnings = [
+            w for w in mock_logger.warnings
+            if "reference checksum not configured" in w
+        ]
+        assert warnings == [], warnings
+
+    # ----- D-15 walk hygiene: empty type subtree yields nothing -----
+    def test_d15_walk_hygiene_no_model_yields_no_violation(self, tmp_path, mock_logger):
+        # open/Acme/results/sys-1/training/ exists but no model/ subdirs.
+        (tmp_path / "open" / "Acme" / "results" / "sys-1" / "training").mkdir(parents=True)
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is True, mock_logger.errors
+        missing_msgs = [
+            m for m in mock_logger.errors
+            if "[2.1.6 codeDirectoryContents]" in m
+            and "required code/ directory missing" in m
+        ]
+        assert missing_msgs == [], missing_msgs
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 Plan 02-03 — Tests for mode-aware required_subdirectories_check
+# (STRUCT-05 per Rules.md §2.1.5 split — D-17)
+# ---------------------------------------------------------------------------
+
+class TestStruct05_ModeAwareRequiredSubdirectories:
+    """STRUCT-05 (Plan 02-03 mode-aware refactor).
+
+    CLOSED submitter dir requires {code, results, systems};
+    OPEN submitter dir requires {results, systems}; code/ lives per-leaf in OPEN.
+    Violation messages route through `requiredSubdirectoriesClosed` / `requiredSubdirectoriesOpen`.
+    """
+
+    def test_closed_happy_path_unchanged(self, tmp_path, mock_logger):
+        sub = tmp_path / "closed" / "Acme"
+        (sub / "code").mkdir(parents=True)
+        (sub / "results").mkdir(parents=True)
+        (sub / "systems").mkdir(parents=True)
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "required_subdirectories_check", mock_logger)
+        assert result is True, mock_logger.errors
+        assert mock_logger.errors == []
+
+    def test_closed_missing_code_routes_through_closed_anchor(self, tmp_path, mock_logger):
+        sub = tmp_path / "closed" / "Acme"
+        (sub / "results").mkdir(parents=True)
+        (sub / "systems").mkdir(parents=True)
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "required_subdirectories_check", mock_logger)
+        assert result is False
+        closed_anchor_msgs = [
+            m for m in mock_logger.errors
+            if "[2.1.5 requiredSubdirectoriesClosed]" in m
+            and "required subdirectory 'code' missing from closed/Acme" in m
+        ]
+        assert len(closed_anchor_msgs) == 1, mock_logger.errors
+
+    def test_open_happy_path_two_subdirs(self, tmp_path, mock_logger):
+        """OPEN submitter dir with {results, systems} only must pass.
+
+        This is the Gemini-HIGH regression target — without the mode-aware
+        check, every OPEN package the new runtime produces would be flagged.
+        """
+        sub = tmp_path / "open" / "Acme"
+        (sub / "results").mkdir(parents=True)
+        (sub / "systems").mkdir(parents=True)
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "required_subdirectories_check", mock_logger)
+        assert result is True, mock_logger.errors
+        assert mock_logger.errors == []
+
+    def test_open_with_code_at_submitter_level_is_unexpected(self, tmp_path, mock_logger):
+        sub = tmp_path / "open" / "Acme"
+        (sub / "code").mkdir(parents=True)
+        (sub / "results").mkdir(parents=True)
+        (sub / "systems").mkdir(parents=True)
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "required_subdirectories_check", mock_logger)
+        assert result is False
+        unexpected_msgs = [
+            m for m in mock_logger.errors
+            if "[2.1.5 requiredSubdirectoriesOpen]" in m
+            and "unexpected subdirectory 'code'" in m
+        ]
+        assert len(unexpected_msgs) == 1, mock_logger.errors
+
+    def test_open_missing_results(self, tmp_path, mock_logger):
+        sub = tmp_path / "open" / "Acme"
+        (sub / "systems").mkdir(parents=True)
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "required_subdirectories_check", mock_logger)
+        assert result is False
+        missing_msgs = [
+            m for m in mock_logger.errors
+            if "[2.1.5 requiredSubdirectoriesOpen]" in m
+            and "required subdirectory 'results' missing from open/Acme" in m
+        ]
+        assert len(missing_msgs) == 1, mock_logger.errors
+
+    def test_open_missing_systems(self, tmp_path, mock_logger):
+        sub = tmp_path / "open" / "Acme"
+        (sub / "results").mkdir(parents=True)
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "required_subdirectories_check", mock_logger)
+        assert result is False
+        missing_msgs = [
+            m for m in mock_logger.errors
+            if "[2.1.5 requiredSubdirectoriesOpen]" in m
+            and "required subdirectory 'systems' missing from open/Acme" in m
+        ]
+        assert len(missing_msgs) == 1, mock_logger.errors
+
+    def test_closed_wrapping_hint_still_works(self, tmp_path, mock_logger):
+        sub = tmp_path / "closed" / "Acme"
+        wrapper = sub / "benchmarks"
+        (wrapper / "code").mkdir(parents=True)
+        (wrapper / "results").mkdir(parents=True)
+        (wrapper / "systems").mkdir(parents=True)
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "required_subdirectories_check", mock_logger)
+        assert result is False
+        hint_msgs = [
+            m for m in mock_logger.errors
+            if "[2.1.5 requiredSubdirectoriesClosed]" in m
+            and "nested one level deeper than expected" in m
+        ]
+        assert len(hint_msgs) == 1, mock_logger.errors
+
+    def test_open_wrapping_hint(self, tmp_path, mock_logger):
+        sub = tmp_path / "open" / "Acme"
+        wrapper = sub / "benchmarks"
+        (wrapper / "results").mkdir(parents=True)
+        (wrapper / "systems").mkdir(parents=True)
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "required_subdirectories_check", mock_logger)
+        assert result is False
+        hint_msgs = [
+            m for m in mock_logger.errors
+            if "[2.1.5 requiredSubdirectoriesOpen]" in m
+            and "nested one level deeper than expected" in m
+        ]
+        assert len(hint_msgs) == 1, mock_logger.errors
+
+
+# ---------------------------------------------------------------------------
 # TestStruct07_SystemsDirectoryFiles  (STRUCT-07, rule 2.1.7)
 # ---------------------------------------------------------------------------
 
