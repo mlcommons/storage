@@ -44,6 +44,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mlpstorage_py import __version__ as MLPSTORAGE_VERSION
+from mlpstorage_py.config import BENCHMARK_TYPES
 from mlpstorage_py.errors import ConfigurationError, ErrorCode
 from mlpstorage_py.rules.utils import (
     MLPSTORAGE_ORGNAME_ENVVAR,
@@ -51,6 +52,20 @@ from mlpstorage_py.rules.utils import (
 )
 from .code_checksum import compute_code_tree_md5
 from ..constants import MD5_EXCLUDE_FILENAMES, MD5_EXCLUDE_PREFIXES
+
+
+# CLI subparser name → canonical on-disk type segment (BENCHMARK_TYPES.name).
+# generate_output_location() writes the BENCHMARK_TYPES.name segment, so the
+# captured code/ must use the same name to live in the same submission tree.
+# For training/checkpointing the CLI name and BENCHMARK_TYPES.name happen to
+# match; for vectordb/kvcache they diverge ('vectordb'→'vector_database',
+# 'kvcache'→'kv_cache').
+_CLI_BENCHMARK_TO_TYPE: dict[str, BENCHMARK_TYPES] = {
+    "training": BENCHMARK_TYPES.training,
+    "checkpointing": BENCHMARK_TYPES.checkpointing,
+    "vectordb": BENCHMARK_TYPES.vector_database,
+    "kvcache": BENCHMARK_TYPES.kv_cache,
+}
 
 
 class CodeImageError(Exception):
@@ -525,9 +540,23 @@ def capture_or_verify_code_image(args, env, log):
     if mode == "closed":
         image_parent = results_dir / "closed" / orgname
     else:  # mode == "open"
+        # Canonicalize the per-type segment via _CLI_BENCHMARK_TO_TYPE so the
+        # captured code/ shares the on-disk tree with generate_output_location's
+        # output (which uses BENCHMARK_TYPES.name). The CLI subparser names
+        # 'vectordb' and 'kvcache' diverge from the canonical 'vector_database'
+        # and 'kv_cache' — without this lookup the captured code/ would live in
+        # a different tree than the runtime's results.
+        cli_benchmark = getattr(args, "benchmark")
+        try:
+            type_segment = _CLI_BENCHMARK_TO_TYPE[cli_benchmark].name
+        except KeyError:
+            raise CodeImageError(
+                f"Unknown benchmark CLI name {cli_benchmark!r} — "
+                f"expected one of {sorted(_CLI_BENCHMARK_TO_TYPE)}"
+            ) from None
         image_parent = (
             results_dir / "open" / orgname / "results" / systemname
-            / getattr(args, "benchmark") / getattr(args, "model")
+            / type_segment / getattr(args, "model")
         )
     image_parent.mkdir(parents=True, exist_ok=True)
 

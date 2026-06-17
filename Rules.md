@@ -200,7 +200,7 @@ root_folder (or any name you prefer)
 │	  	│		│	 	... (10x Runs for Read and Write. May be combined in a single run)
 │	  	│		│		└── YYYYMMDD_HHmmss
 │	  	│		│	 		└── dlio_config
-│	  	│	 	└── vdb_bench
+│	  	│	 	└── vector_database
 |		|			├── AiSEQ
 │	  	│	 		|	├── YYYYMMDD_HHmmss
 │	  	│			|	│	└── summary.json
@@ -299,7 +299,7 @@ root_folder (or any name you prefer)
 	  	│		│	 	... (10x Runs for Read and Write. May be combined in a single run)
 	  	│		│		└── YYYYMMDD_HHmmss
 	  	│		│	 		└── dlio_config
-	  	│	 	└── vdb_bench
+	  	│	 	└── vector_database
 		|			├── AiSEQ
 	  	│	 		|	├── code  # captured per-leaf
 	  	│	 		|	├── YYYYMMDD_HHmmss
