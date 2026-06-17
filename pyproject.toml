@@ -126,13 +126,12 @@ environments = ["sys_platform == 'linux'"]
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
 torchaudio = [{ index = "pytorch-cpu" }]
-# Pinned to FileSystemGuy-combined-391-448 head — carries:
+# Pinned to upstream main @ PR #24 merge — carries:
 #   - DLIO PR #21 fix for storage #391 part 1 (TorchIterableDatasetSimple gating)
 #   - DLIO PR #22 fix for storage #415 (mpi4py auto-init in spawn workers)
 #   - DLIO PR #23 fix for storage #391 part 2 (sudo -n + warn-once for drop_caches)
 #   - DLIO PR #24 fix for storage #448 (per-node worker-memory budget)
-# Revert to branch = "main" once PRs #23 and #24 merge upstream.
-dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "814f3ff400c865a294bfc70714a3289efbfa83ac" }
+dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "1d11f9820b71db1d59b41283bc8c57db0c42cb7f" }
 
 [dependency-groups]
 dev = [
