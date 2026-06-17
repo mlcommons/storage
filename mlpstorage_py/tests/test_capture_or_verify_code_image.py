@@ -219,6 +219,41 @@ class TestCapturePath:
         assert result == expected_code
         assert expected_code.is_dir()
 
+    def test_open_vectordb_uses_canonical_type_name(self, tmp_path, log):
+        """The CLI subparser is named 'vectordb', but generate_output_location and
+        Rules.md write the on-disk segment as 'vector_database' (BENCHMARK_TYPES.name).
+        The helper must emit the same canonical segment so the captured code/ lives
+        in the same submission tree the runtime writes results into."""
+        args = _make_args(
+            mode="open", command="run", results_dir=tmp_path,
+            benchmark="vectordb", model="DiskANN",
+        )
+        env = {"MLPSTORAGE_ORGNAME": "acme", "MLPSTORAGE_SYSTEMNAME": "rig01"}
+        result = capture_or_verify_code_image(args, env, log)
+        expected_code = (
+            tmp_path / "open" / "acme" / "results" / "rig01"
+            / "vector_database" / "DiskANN" / "code"
+        )
+        assert result == expected_code
+        # And the CLI name 'vectordb' must NOT appear as a path segment.
+        assert "vectordb" not in {p.name for p in result.parents}
+
+    def test_open_kvcache_uses_canonical_type_name(self, tmp_path, log):
+        """Same contract as vectordb: CLI name 'kvcache' must map to canonical
+        on-disk segment 'kv_cache' (BENCHMARK_TYPES.name)."""
+        args = _make_args(
+            mode="open", command="run", results_dir=tmp_path,
+            benchmark="kvcache", model="llama3-8b",
+        )
+        env = {"MLPSTORAGE_ORGNAME": "acme", "MLPSTORAGE_SYSTEMNAME": "rig01"}
+        result = capture_or_verify_code_image(args, env, log)
+        expected_code = (
+            tmp_path / "open" / "acme" / "results" / "rig01"
+            / "kv_cache" / "llama3-8b" / "code"
+        )
+        assert result == expected_code
+        assert "kvcache" not in {p.name for p in result.parents}
+
 
 # ---------------------------------------------------------------------------
 # Verify path (VALR-01/03 success; VALR-02/04 mismatch; D-21 missing-json)
