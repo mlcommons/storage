@@ -322,12 +322,14 @@ class TestStruct05_RequiredSubdirectories:
         assert mock_logger.errors == []
 
     def test_missing_code_subdir(self, tmp_path, mock_logger):
+        # Plan 02-05: anchor renamed to requiredSubdirectoriesClosed per the
+        # Plan 02-03 mode-aware refactor (D-17).
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(tmp_path, missing_required_subdir="code")
         check = _make_check(root, mock_logger)
         result = run_one_check(check, "required_subdirectories_check", mock_logger)
         assert result is False
-        assert any("[2.1.5 requiredSubdirectories]" in m for m in mock_logger.errors)
+        assert any("[2.1.5 requiredSubdirectoriesClosed]" in m for m in mock_logger.errors), mock_logger.errors
 
     def test_missing_results_subdir(self, tmp_path, mock_logger):
         from mlpstorage_py.tests.conftest import build_submission
@@ -335,7 +337,7 @@ class TestStruct05_RequiredSubdirectories:
         check = _make_check(root, mock_logger)
         result = run_one_check(check, "required_subdirectories_check", mock_logger)
         assert result is False
-        assert any("[2.1.5 requiredSubdirectories]" in m for m in mock_logger.errors)
+        assert any("[2.1.5 requiredSubdirectoriesClosed]" in m for m in mock_logger.errors), mock_logger.errors
 
     def test_missing_systems_subdir(self, tmp_path, mock_logger):
         from mlpstorage_py.tests.conftest import build_submission
@@ -343,7 +345,7 @@ class TestStruct05_RequiredSubdirectories:
         check = _make_check(root, mock_logger)
         result = run_one_check(check, "required_subdirectories_check", mock_logger)
         assert result is False
-        assert any("[2.1.5 requiredSubdirectories]" in m for m in mock_logger.errors)
+        assert any("[2.1.5 requiredSubdirectoriesClosed]" in m for m in mock_logger.errors), mock_logger.errors
 
     def test_extra_submitter_subdir(self, tmp_path, mock_logger):
         from mlpstorage_py.tests.conftest import build_submission
@@ -351,7 +353,14 @@ class TestStruct05_RequiredSubdirectories:
         check = _make_check(root, mock_logger)
         result = run_one_check(check, "required_subdirectories_check", mock_logger)
         assert result is False
-        assert any("[2.1.5 requiredSubdirectories]" in m for m in mock_logger.errors)
+        assert any("[2.1.5 requiredSubdirectoriesClosed]" in m for m in mock_logger.errors), mock_logger.errors
+        # Plan 02-05: the legacy "only code/results/systems allowed" literal
+        # was replaced by the sorted-list-repr format from Plan 02-03 Task 2.
+        # Assert the new CLOSED required-set rendering is present.
+        assert any(
+            "allowed: ['code', 'results', 'systems']" in m
+            for m in mock_logger.errors
+        ), mock_logger.errors
 
     def test_dotfile_at_submitter_level_is_ignored(self, tmp_path, mock_logger):
         """Dot-prefixed entries (.DS_Store, .cache/) under closed/<submitter>/
@@ -385,9 +394,10 @@ class TestStruct05_RequiredSubdirectories:
         check = _make_check(root, mock_logger)
         result = run_one_check(check, "required_subdirectories_check", mock_logger)
         assert result is False
+        # Plan 02-05: anchor renamed per Plan 02-03 D-17 mode-aware refactor.
         wrapping_msgs = [
             m for m in mock_logger.errors
-            if "[2.1.5 requiredSubdirectories]" in m
+            if "[2.1.5 requiredSubdirectoriesClosed]" in m
             and "nested one level deeper than expected" in m
         ]
         assert len(wrapping_msgs) == 1, mock_logger.errors
@@ -958,6 +968,146 @@ class TestStruct05_ModeAwareRequiredSubdirectories:
             and "nested one level deeper than expected" in m
         ]
         assert len(hint_msgs) == 1, mock_logger.errors
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 Plan 02-05 — TestStruct05_OpenSubmitter
+# Mode-aware required_subdirectories_check (TEST-11)
+# Regression suite for the Gemini HIGH cross-plan finding (REVIEWS.md).
+# ---------------------------------------------------------------------------
+
+def _build_minimal_open_submitter(root, submitter, *, with_code=False,
+                                  with_results=True, with_systems=True):
+    """Build a minimal open/<submitter>/{code?,results?,systems?}/ tree."""
+    sub = os.path.join(root, "open", submitter)
+    os.makedirs(sub, exist_ok=True)
+    if with_code:
+        os.makedirs(os.path.join(sub, "code"), exist_ok=True)
+    if with_results:
+        os.makedirs(os.path.join(sub, "results"), exist_ok=True)
+    if with_systems:
+        os.makedirs(os.path.join(sub, "systems"), exist_ok=True)
+    return sub
+
+
+def _build_minimal_closed_submitter(root, submitter, *, with_code=True,
+                                    with_results=True, with_systems=True):
+    """Build a minimal closed/<submitter>/{code?,results?,systems?}/ tree."""
+    sub = os.path.join(root, "closed", submitter)
+    os.makedirs(sub, exist_ok=True)
+    if with_code:
+        os.makedirs(os.path.join(sub, "code"), exist_ok=True)
+    if with_results:
+        os.makedirs(os.path.join(sub, "results"), exist_ok=True)
+    if with_systems:
+        os.makedirs(os.path.join(sub, "systems"), exist_ok=True)
+    return sub
+
+
+class TestStruct05_OpenSubmitter:
+    """Mode-aware required_subdirectories_check per Plan 02-03 Task 2 (D-17).
+
+    Regression suite for the Gemini HIGH cross-plan finding (REVIEWS.md):
+    before the mode-aware refactor, EVERY OPEN submission would have been
+    flagged as having a missing code/ at the submitter level. These tests
+    directly exercise the new sub-rule anchors `requiredSubdirectoriesClosed`
+    and `requiredSubdirectoriesOpen` and the new "allowed: [...]" violation
+    message format from Plan 02-03 Task 2.
+    """
+
+    def test_closed_required_set_unchanged(self, tmp_path, mock_logger):
+        """CLOSED no-regression: {code, results, systems} still required."""
+        _build_minimal_closed_submitter(str(tmp_path), "Acme")
+        check = _make_check(str(tmp_path), mock_logger)
+        run_one_check(check, "required_subdirectories_check", mock_logger)
+        # No 2.1.5 violations under EITHER anchor.
+        v25 = [m for m in mock_logger.errors if "[2.1.5 " in m]
+        assert v25 == [], v25
+
+    def test_open_happy_path_results_systems_passes(self, tmp_path, mock_logger):
+        """KEY TEST — Gemini HIGH regression target.
+
+        OPEN submitter with {results, systems} only (no code/ at submitter
+        level) must pass STRUCT-05. Without the mode-aware refactor, this
+        would have been flagged with "required subdirectory 'code' missing".
+        """
+        _build_minimal_open_submitter(str(tmp_path), "Acme", with_code=False)
+        check = _make_check(str(tmp_path), mock_logger)
+        run_one_check(check, "required_subdirectories_check", mock_logger)
+        v25 = [m for m in mock_logger.errors if "[2.1.5 " in m]
+        assert v25 == [], v25
+
+    def test_open_with_code_at_submitter_level_flags_unexpected(self, tmp_path, mock_logger):
+        """OPEN with code/ at submitter level → unexpected violation routed
+        through requiredSubdirectoriesOpen with the new "allowed: [...]"
+        message format.
+        """
+        _build_minimal_open_submitter(str(tmp_path), "Acme", with_code=True)
+        check = _make_check(str(tmp_path), mock_logger)
+        run_one_check(check, "required_subdirectories_check", mock_logger)
+        v25 = [m for m in mock_logger.errors if "[2.1.5 " in m]
+        assert len(v25) == 1, v25
+        assert "unexpected subdirectory 'code' in open/Acme" in v25[0]
+        assert "requiredSubdirectoriesOpen" in v25[0]
+        assert "allowed: ['results', 'systems']" in v25[0]
+
+    def test_open_missing_results_fails(self, tmp_path, mock_logger):
+        _build_minimal_open_submitter(
+            str(tmp_path), "Acme",
+            with_code=False, with_results=False, with_systems=True,
+        )
+        check = _make_check(str(tmp_path), mock_logger)
+        run_one_check(check, "required_subdirectories_check", mock_logger)
+        v25 = [m for m in mock_logger.errors if "[2.1.5 " in m]
+        assert any(
+            "required subdirectory 'results' missing from open/Acme" in m
+            for m in v25
+        ), v25
+        assert any("requiredSubdirectoriesOpen" in m for m in v25), v25
+
+    def test_open_missing_systems_fails(self, tmp_path, mock_logger):
+        _build_minimal_open_submitter(
+            str(tmp_path), "Acme",
+            with_code=False, with_results=True, with_systems=False,
+        )
+        check = _make_check(str(tmp_path), mock_logger)
+        run_one_check(check, "required_subdirectories_check", mock_logger)
+        v25 = [m for m in mock_logger.errors if "[2.1.5 " in m]
+        assert any(
+            "required subdirectory 'systems' missing from open/Acme" in m
+            for m in v25
+        ), v25
+        assert any("requiredSubdirectoriesOpen" in m for m in v25), v25
+
+    def test_closed_missing_code_routes_through_closed_anchor(self, tmp_path, mock_logger):
+        """CLOSED missing code/ routes through requiredSubdirectoriesClosed."""
+        _build_minimal_closed_submitter(str(tmp_path), "Acme", with_code=False)
+        check = _make_check(str(tmp_path), mock_logger)
+        run_one_check(check, "required_subdirectories_check", mock_logger)
+        v25 = [m for m in mock_logger.errors if "[2.1.5 " in m]
+        assert any(
+            "required subdirectory 'code' missing from closed/Acme" in m
+            for m in v25
+        ), v25
+        assert any("requiredSubdirectoriesClosed" in m for m in v25), v25
+
+    def test_open_nesting_hint_works(self, tmp_path, mock_logger):
+        """open/Acme/benchmarks/{results,systems} — nested one level too deep.
+
+        The wrapping-hint diagnostic mentions the OPEN required-set elements.
+        """
+        root = str(tmp_path)
+        sub = os.path.join(root, "open", "Acme")
+        wrap = os.path.join(sub, "benchmarks")
+        os.makedirs(os.path.join(wrap, "results"), exist_ok=True)
+        os.makedirs(os.path.join(wrap, "systems"), exist_ok=True)
+        check = _make_check(root, mock_logger)
+        run_one_check(check, "required_subdirectories_check", mock_logger)
+        v25 = [m for m in mock_logger.errors if "[2.1.5 " in m]
+        assert any(
+            "the submission appears to be nested one level deeper than expected" in m
+            for m in v25
+        ), v25
 
 
 # ---------------------------------------------------------------------------
