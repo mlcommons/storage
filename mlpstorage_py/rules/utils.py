@@ -10,6 +10,15 @@ import sys
 from typing import Tuple, List, Optional
 
 from mlpstorage_py.config import BENCHMARK_TYPES, DATETIME_STR
+from mlpstorage_py.errors import ConfigurationError, ErrorCode
+
+# Env-var names used by the Phase 2 CLI dispatch layer to source orgname/systemname (D-01, D-02).
+# generate_output_location itself does NOT read these; the helper in
+# mlpstorage_py/submission_checker/tools/code_image.py reads + validates them and threads
+# the values through as keyword arguments. The names are exported here so the helper has a
+# single source of truth for the env-var spelling.
+MLPSTORAGE_ORGNAME_ENVVAR = "MLPSTORAGE_ORGNAME"
+MLPSTORAGE_SYSTEMNAME_ENVVAR = "MLPSTORAGE_SYSTEMNAME"
 
 
 def calculate_training_data_size(args, cluster_information, dataset_params, reader_params, logger,
@@ -118,28 +127,61 @@ def calculate_training_data_size(args, cluster_information, dataset_params, read
     return int(required_file_count), int(required_subfolders_count), int(total_disk_bytes)
 
 
-def generate_output_location(benchmark, datetime_str=None, **kwargs) -> str:
+def generate_output_location(
+    benchmark,
+    datetime_str=None,
+    *,
+    orgname: Optional[str] = None,
+    systemname: Optional[str] = None,
+    **kwargs,
+) -> str:
     """
     Generate a standardized output location for benchmark results.
 
     Output structure follows this pattern:
-    RESULTS_DIR:
-        <benchmark_name>:
-            <model>:
-                <command>:
-                        <datetime>:
-                            run_<run_number> (Optional)
+
+      CLOSED (args.mode == "closed"):
+        <results_dir>/closed/<orgname>/<benchmark_name>/<model>/<command>/<datetime>/
+
+      OPEN (args.mode == "open"):
+        <results_dir>/open/<orgname>/results/<systemname>/<benchmark_name>/<model>/<command>/<datetime>/
+
+      Legacy (args.mode not in {"closed", "open"}, or attribute missing —
+      e.g. whatif, programmatic callers from tests):
+        <results_dir>/<benchmark_name>/<model>/<command>/<datetime>/
+
+    The per-``BENCHMARK_TYPES`` tail (training/checkpointing/vector_database/
+    kv_cache) is unchanged below the new prefix.
 
     Args:
         benchmark: Benchmark instance.
         datetime_str: Optional datetime string for the run.
-        **kwargs: Additional benchmark-specific parameters.
+        orgname: Keyword-only. Submitter organization name; required when
+            ``benchmark.args.mode`` is "closed" or "open". The CLI dispatch
+            layer (Plan 02-02) reads ``MLPSTORAGE_ORGNAME`` from the
+            environment, validates it per Rules.md §2.1.1, and threads the
+            validated value through as this keyword argument. This function
+            does NOT read ``os.environ`` — passing the value explicitly is a
+            trust-contract requirement so programmatic callers (tests,
+            future tooling) receive a typed ``ConfigurationError`` if they
+            forget to thread it through, rather than a hidden ``KeyError``.
+        systemname: Keyword-only. System name; required when
+            ``benchmark.args.mode`` is "open". Same trust-contract semantics
+            as ``orgname``; sourced from ``MLPSTORAGE_SYSTEMNAME`` by the
+            dispatch layer.
+        **kwargs: Additional benchmark-specific parameters (reserved).
 
     Returns:
         Full path to the output location.
 
     Raises:
-        ValueError: If required parameters are missing.
+        ValueError: If required parameters are missing (e.g. ``args.model``
+            for training/checkpointing benchmarks).
+        ConfigurationError: If ``benchmark.args.mode`` is "closed" or "open"
+            but ``orgname`` (and, for "open", ``systemname``) was not threaded
+            through by the caller. The ``parameter`` attribute identifies the
+            missing kwarg; the ``suggestion`` field references the
+            ``MLPSTORAGE_*`` env-var the dispatch layer must read.
     """
     if datetime_str is None:
         datetime_str = DATETIME_STR
@@ -150,6 +192,45 @@ def generate_output_location(benchmark, datetime_str=None, **kwargs) -> str:
         run_number = benchmark.run_number
     else:
         run_number = 0
+
+    # New D-03 prefix: insert {closed|open}/<orgname>[/results/<systemname>]/
+    # before the legacy per-type chain. The values are explicit kwargs threaded
+    # by the CLI dispatch layer (Plan 02-02); env-var reading is owned by that
+    # helper, not this function (see module-level constants above for the
+    # env-var-name source of truth).
+    mode = getattr(benchmark.args, "mode", None)
+    if mode in ("closed", "open"):
+        if not orgname:
+            raise ConfigurationError(
+                "orgname is required when args.mode in {closed, open} but was "
+                "not provided to generate_output_location",
+                parameter="orgname",
+                suggestion=(
+                    f"The CLI dispatch layer should read {MLPSTORAGE_ORGNAME_ENVVAR}"
+                    f"={MLPSTORAGE_ORGNAME_ENVVAR!r} from the environment "
+                    "and thread it through as the orgname keyword. "
+                    "Programmatic callers must pass orgname= explicitly."
+                ),
+                code=ErrorCode.CONFIG_MISSING_REQUIRED,
+            )
+        output_location = os.path.join(output_location, mode, orgname)
+
+        if mode == "open":
+            if not systemname:
+                raise ConfigurationError(
+                    "systemname is required when args.mode == 'open' but was "
+                    "not provided to generate_output_location",
+                    parameter="systemname",
+                    suggestion=(
+                        f"The CLI dispatch layer should read "
+                        f"{MLPSTORAGE_SYSTEMNAME_ENVVAR}"
+                        f"={MLPSTORAGE_SYSTEMNAME_ENVVAR!r} from the environment "
+                        "and thread it through as the systemname keyword. "
+                        "Programmatic callers must pass systemname= explicitly."
+                    ),
+                    code=ErrorCode.CONFIG_MISSING_REQUIRED,
+                )
+            output_location = os.path.join(output_location, "results", systemname)
 
     # Handle different benchmark types
     if benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.training:

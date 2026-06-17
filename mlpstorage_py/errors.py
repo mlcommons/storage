@@ -147,6 +147,13 @@ class ConfigurationError(MLPStorageException):
             expected=expected,
             actual=actual
         )
+        # Expose the missing/invalid parameter name as a direct attribute so
+        # the CLI dispatch layer (and tests) can inspect it without poking at
+        # the structured-error context dict. Documented use case: the Phase 2
+        # generate_output_location trust-contract raises ConfigurationError
+        # with parameter="orgname" or "systemname" so the dispatch helper
+        # can map it back to the MLPSTORAGE_* env-var the user must set.
+        self.parameter = parameter
 
     @staticmethod
     def _default_suggestion(code: ErrorCode) -> str:
