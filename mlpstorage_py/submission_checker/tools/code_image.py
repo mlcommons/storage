@@ -44,6 +44,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mlpstorage_py import __version__ as MLPSTORAGE_VERSION
+from mlpstorage_py.errors import ConfigurationError, ErrorCode
+from mlpstorage_py.rules.utils import (
+    MLPSTORAGE_ORGNAME_ENVVAR,
+    MLPSTORAGE_SYSTEMNAME_ENVVAR,
+)
 from .code_checksum import compute_code_tree_md5
 from ..constants import MD5_EXCLUDE_FILENAMES, MD5_EXCLUDE_PREFIXES
 
@@ -83,6 +88,19 @@ _ALGORITHM = "md5-tree-v1"
 _GIT_TIMEOUT_SEC = 5
 _HASH_HEX_LEN = 32
 _GIT_SHA_LEN = 40
+
+# POSIX-safe name pattern per Rules.md §2.1.1 + path-traversal guard for `.` / `..`
+# (D-05; T-02-02-05 mitigation made INLINE per Gemini + plan-checker consensus, REVIEWS.md):
+_SUBMITTER_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+# The regex above MATCHES the literal strings "." and "..". An additional explicit
+# reject is required to prevent path-traversal exploits (Gemini + plan-checker
+# consensus, REVIEWS.md). This is checked INLINE in capture_or_verify_code_image,
+# not deferred to a follow-up.
+_RESERVED_PATH_SEGMENTS = frozenset({".", ".."})
+
+# Submission-mode gating sets (D-10).
+_SUBMISSION_MODES = frozenset({"closed", "open"})
+_SUBMISSION_COMMANDS = frozenset({"datasize", "datagen", "run"})
 
 
 def find_source_root(start: Path | None = None) -> Path:
@@ -366,3 +384,184 @@ def _resolve_git_sha(source_root: Path, log) -> str | None:
 def _now_utc_iso() -> str:
     """Return canonical ISO-8601 UTC 'Z' timestamp (D-10)."""
     return datetime.datetime.now(tz=datetime.UTC).isoformat(timespec="seconds").replace("+00:00", "Z")
+
+
+# ---------------------------------------------------------------------------
+# CLI dispatch helper (Phase 2 — D-07..D-10, D-20, D-21)
+# ---------------------------------------------------------------------------
+
+def capture_or_verify_code_image(args, env, log):
+    """Capture-or-verify the code image at the submission tree (D-07..D-10).
+
+    The single CLI dispatch chokepoint that owns the entire CAP/VALR contract:
+
+    - Gates on `(args.mode, args.command)`: returns None unless mode is in
+      {closed, open} AND command is in {datasize, datagen, run} (D-10).
+    - Reads + validates MLPSTORAGE_ORGNAME (and MLPSTORAGE_SYSTEMNAME for OPEN)
+      from `env` — this helper is the SOLE reader of those env vars in the
+      codebase (Gemini MEDIUM trust-contract finding closed; D-05).
+    - Applies POSIX regex (Rules.md §2.1.1) AND inline `.`/`..` path-traversal
+      guard for both orgname and systemname (T-02-02-05 mitigation, REVIEWS.md
+      consensus finding).
+    - Computes the image-parent path matching `generate_output_location`'s
+      prefix (Plan 01, D-03). Stores validated values on `args` so downstream
+      `generate_output_location` callers can read them without re-reading env.
+    - Captures (CAP-01/02/06) on first call, verifies (VALR-01/03 success,
+      VALR-02/04 mismatch) on subsequent calls. Re-raises Phase 1 typed errors
+      (MissingHashFile, MalformedHashFile) after logging the D-21 recovery
+      message; mismatch raises CodeImageError with the literal spec string.
+
+    Args:
+        args: argparse.Namespace-like with attributes `mode`, `command`,
+            `results_dir`, `benchmark`, `model`.
+        env: Mapping (e.g., os.environ) used to look up MLPSTORAGE_* env vars.
+        log: Logger object with status/error/info/warning/debug methods.
+
+    Returns:
+        Path | None: The captured/verified `code/` directory path, or None
+        when gated off.
+
+    Raises:
+        ConfigurationError: Missing or invalid MLPSTORAGE_* env var.
+        CodeImageError: Hash mismatch (VALR-02/04) — main() maps to
+            EXIT_CODE.CODE_IMAGE_ERROR.
+        MissingHashFile / MalformedHashFile: Existing code/ has missing or
+            unparseable .code-hash.json (D-21) — main() maps to exit code 2.
+        SourceRootNotFound: Live source tree could not be located/hashed.
+
+    Notes:
+        D-07..D-10, D-20, D-21; inline path-traversal guard per REVIEWS.md
+        consensus finding (T-02-02-05). This helper is the SOLE reader of
+        MLPSTORAGE_ORGNAME / MLPSTORAGE_SYSTEMNAME env vars.
+    """
+    # 1. Gate by mode (D-10) — return None for whatif/reports/validate/etc.
+    mode = getattr(args, "mode", None)
+    if mode not in _SUBMISSION_MODES:
+        return None
+
+    # 2. Gate by command (D-10) — return None for configview/etc. under
+    # closed|open modes (e.g., `mlpstorage closed configview`).
+    command = getattr(args, "command", None)
+    if command not in _SUBMISSION_COMMANDS:
+        return None
+
+    # 3. Read + validate orgname (D-04, D-05).
+    orgname = env.get(MLPSTORAGE_ORGNAME_ENVVAR)
+    if not orgname:
+        raise ConfigurationError(
+            "MLPSTORAGE_ORGNAME environment variable is required for closed|open runs",
+            parameter=MLPSTORAGE_ORGNAME_ENVVAR,
+            suggestion=(
+                "export MLPSTORAGE_ORGNAME=<your_org>  "
+                "# future: mlpstorage init <orgname> <results_dir>"
+            ),
+            code=ErrorCode.CONFIG_MISSING_REQUIRED,
+        )
+    if not _SUBMITTER_NAME_RE.match(orgname):
+        raise ConfigurationError(
+            f"MLPSTORAGE_ORGNAME={orgname!r} is not a POSIX-filename-safe identifier "
+            f"(Rules.md §2.1.1: ^[A-Za-z0-9._-]+$)",
+            parameter=MLPSTORAGE_ORGNAME_ENVVAR,
+            suggestion="Use only letters, digits, '.', '_', or '-'",
+            code=ErrorCode.CONFIG_INVALID_VALUE,
+        )
+    # INLINE path-traversal guard for orgname (CONSENSUS FINDING — REVIEWS.md).
+    # The regex `^[A-Za-z0-9._-]+$` accepts `.` and `..` literally, so an
+    # additional explicit reject is REQUIRED. The substring `"'.' and '..'
+    # are reserved path segments"` is the spec contract used by Plan 05's tests.
+    if orgname in _RESERVED_PATH_SEGMENTS:
+        raise ConfigurationError(
+            f"MLPSTORAGE_ORGNAME={orgname!r} is not a permitted value: "
+            f"'.' and '..' are reserved path segments",
+            parameter=MLPSTORAGE_ORGNAME_ENVVAR,
+            suggestion="Choose an orgname that is not '.' or '..'",
+            code=ErrorCode.CONFIG_INVALID_VALUE,
+        )
+
+    # 4. For OPEN, also read + validate systemname.
+    systemname = None
+    if mode == "open":
+        systemname = env.get(MLPSTORAGE_SYSTEMNAME_ENVVAR)
+        if not systemname:
+            raise ConfigurationError(
+                "MLPSTORAGE_SYSTEMNAME environment variable is required for open runs",
+                parameter=MLPSTORAGE_SYSTEMNAME_ENVVAR,
+                suggestion=(
+                    "export MLPSTORAGE_SYSTEMNAME=<your_system>  "
+                    "# future: per-command --system-name flag"
+                ),
+                code=ErrorCode.CONFIG_MISSING_REQUIRED,
+            )
+        if not _SUBMITTER_NAME_RE.match(systemname):
+            raise ConfigurationError(
+                f"MLPSTORAGE_SYSTEMNAME={systemname!r} is not a POSIX-filename-safe identifier "
+                f"(Rules.md §2.1.1: ^[A-Za-z0-9._-]+$)",
+                parameter=MLPSTORAGE_SYSTEMNAME_ENVVAR,
+                suggestion="Use only letters, digits, '.', '_', or '-'",
+                code=ErrorCode.CONFIG_INVALID_VALUE,
+            )
+        # INLINE path-traversal guard for systemname (CONSENSUS FINDING — REVIEWS.md).
+        if systemname in _RESERVED_PATH_SEGMENTS:
+            raise ConfigurationError(
+                f"MLPSTORAGE_SYSTEMNAME={systemname!r} is not a permitted value: "
+                f"'.' and '..' are reserved path segments",
+                parameter=MLPSTORAGE_SYSTEMNAME_ENVVAR,
+                suggestion="Choose a systemname that is not '.' or '..'",
+                code=ErrorCode.CONFIG_INVALID_VALUE,
+            )
+
+    # 5. Stash validated values on args so downstream generate_output_location
+    # callers can consume them without re-reading env (closes the Gemini MEDIUM
+    # trust-contract finding — this helper remains the sole env reader).
+    args._validated_orgname = orgname
+    args._validated_systemname = systemname
+
+    # 6. Compute image_parent — MUST match Plan 01's generate_output_location
+    # prefix. The helper only creates the {closed|open}/<orgname>/.../code/
+    # subtree inside the already-existing results-directory (D-06); creating
+    # the results-directory itself is reserved for the future
+    # `mlpstorage init` command.
+    results_dir = Path(args.results_dir)
+    if mode == "closed":
+        image_parent = results_dir / "closed" / orgname
+    else:  # mode == "open"
+        image_parent = (
+            results_dir / "open" / orgname / "results" / systemname
+            / getattr(args, "benchmark") / getattr(args, "model")
+        )
+    image_parent.mkdir(parents=True, exist_ok=True)
+
+    # 7. Branch capture-vs-verify (D-08).
+    code_dir = image_parent / _CODE_DIRNAME
+    source_root = find_source_root()
+
+    if not code_dir.exists():
+        capture_code_image(source_root, image_parent, log)
+        log.status(f"Captured code image at {code_dir}")
+        return code_dir
+
+    # code_dir exists → verify path. Catch missing/malformed .code-hash.json
+    # so we can attach the D-21 actionable recovery message before re-raising.
+    try:
+        matched = verify_source_against_image(source_root, code_dir, log)
+    except (MissingHashFile, MalformedHashFile) as e:
+        log.error(str(e))
+        log.error(f"code image at: {code_dir}")
+        log.error(
+            "either delete `code/` and re-run to re-capture, "
+            "or restore the original capture."
+        )
+        raise
+
+    if matched:
+        log.status(f"code unchanged from on-file image at {code_dir}")
+        return code_dir
+
+    # Hash mismatch — emit the literal spec string by mode (VALR-02 / VALR-04).
+    if mode == "closed":
+        msg = "changes to the codebase are not allowed in a CLOSED run"
+    else:  # mode == "open"
+        msg = "all runs of this type must use the same codebase"
+    log.error(msg)
+    log.error(f"code image at: {code_dir}")
+    raise CodeImageError(msg)

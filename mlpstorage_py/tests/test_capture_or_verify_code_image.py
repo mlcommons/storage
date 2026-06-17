@@ -225,7 +225,18 @@ class TestCapturePath:
 # ---------------------------------------------------------------------------
 
 class TestVerifyPath:
-    def test_matching_code_image_verifies_silently(self, tmp_path, log):
+    def test_matching_code_image_verifies_silently(self, tmp_path, log, monkeypatch):
+        # Use an isolated source tree to keep the live-source hash deterministic
+        # (the real repo's untracked / non-copytree-able files would otherwise
+        # diverge between capture-via-shutil and live-source hashing).
+        src = tmp_path / "iso_src"
+        src.mkdir()
+        (src / "a.py").write_bytes(b"A\n")
+        (src / "pyproject.toml").write_bytes(b"# stub\n")
+
+        import mlpstorage_py.submission_checker.tools.code_image as mod
+        monkeypatch.setattr(mod, "find_source_root", lambda: src)
+
         # First call captures.
         args = _make_args(mode="closed", command="datasize", results_dir=tmp_path)
         env = {"MLPSTORAGE_ORGNAME": "acme"}
