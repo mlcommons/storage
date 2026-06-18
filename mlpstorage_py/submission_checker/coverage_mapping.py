@@ -32,10 +32,12 @@ depend on this module (D-S3).
 OUT_OF_SCOPE_RULES: dict[str, str] = {}
 
 
-# D-A1/D-S3: lists are empty because Rules.md §5 (VDB) and §6 (KVCache)
-# are empty at Phase 3 land time. Populate the lists when those sections
-# gain IDs (e.g., ``"VdbCheck": ["5.1.1", "5.1.2"]``).
+# Stub-class coverage advertisement: maps stub class name -> list of Rules.md
+# rule IDs the stub stands in for. VdbCheck used to live here when Rules.md
+# §5 was empty; after Phase 4 Plan 04-02 (D-01) it carries real
+# ``@rule``-decorated methods for every §5 ID (5.1.1-5.6.5) and
+# ``discover_rules`` picks them up directly, so the VdbCheck entry has been
+# removed. KVCacheCheck stays until Rules.md §6 (KVCache) gains IDs.
 STUB_COVERAGE: dict[str, list[str]] = {
-    "VdbCheck": [],       # populated when Rules.md §5 (VDB) gains IDs
     "KVCacheCheck": [],   # populated when Rules.md §6 (KVCache) gains IDs
 }
