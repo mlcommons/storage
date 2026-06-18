@@ -71,7 +71,7 @@ The `mlpstorage` tool must be used to run the benchmarks, submitters are not all
 
 2.1.5.b. **requiredSubdirectoriesOpen** -- Within an OPEN submitter directory, there must be exactly two directories: "results" and "systems".  These names are case-sensitive.  The "code" directory does NOT appear at the OPEN submitter level; instead, a "code" directory is captured at each leaf inside `results/`.  The leaf shape is per-benchmark-type:
 - For "training" and "checkpointing" the leaf is `results/<systemname>/<type>/<model>/` (one capture per model).
-- For "vector_database" the leaf is `results/<systemname>/<type>/<index_type>/` (one capture per index type, because results across index types — e.g. AISAQ vs DISKANN vs HNSW — are not comparable and must live in separate trees).
+- For "vdb_bench" the leaf is `results/<systemname>/vdb_bench/<display_index>/` where `<display_index>` is one of the mixed-case display directory names `DiskANN`, `HNSW`, or `AiSAQ` per the §5.6 dual-representation callout (one capture per index type, because results across index types — e.g. AiSAQ vs DiskANN vs HNSW — are not comparable and must live in separate trees).
 - For "kv_cache" the leaf is currently `results/<systemname>/<type>/` (one capture per type).  This is transitional pending finalization of the kv_cache directory structure below the type prefix.
 
 See §2.1.6 and §2.1.27.
