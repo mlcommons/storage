@@ -69,7 +69,7 @@ The `mlpstorage` tool must be used to run the benchmarks, submitters are not all
 
 2.1.5.a. **requiredSubdirectoriesClosed** -- Within a CLOSED submitter directory, there must be exactly three directories: "code", "results", and "systems".  These names are case-sensitive.
 
-2.1.5.b. **requiredSubdirectoriesOpen** -- Within an OPEN submitter directory, there must be exactly two directories: "results" and "systems".  These names are case-sensitive.  The "code" directory does NOT appear at the OPEN submitter level; instead, a "code" directory is captured at each `results/<systemname>/<type>/<model>/` leaf (see §2.1.6 and §2.1.27).
+2.1.5.b. **requiredSubdirectoriesOpen** -- Within an OPEN submitter directory, there must be exactly two directories: "results" and "systems".  These names are case-sensitive.  The "code" directory does NOT appear at the OPEN submitter level; instead, a "code" directory is captured at each leaf inside `results/`.  For "training" and "checkpointing" the leaf is `results/<systemname>/<type>/<model>/` (one capture per model).  For "vector_database" and "kv_cache" the leaf is `results/<systemname>/<type>/` (one capture per type, because the runtime output for these benchmarks does not include a `<model>` segment).  See §2.1.6 and §2.1.27.
 
 2.1.6. **codeDirectoryContents** -- Each "code" directory in the submission package must be a captured copy of the MLPerf Storage source tree that was used to generate the corresponding results, accompanied by a top-level ".code-hash.json" file that records the captured tree's hash and metadata.
 
@@ -300,22 +300,20 @@ root_folder (or any name you prefer)
 	  	│		│		└── YYYYMMDD_HHmmss
 	  	│		│	 		└── dlio_config
 	  	│	 	└── vector_database
+		|			├── code  # captured per-type (no <model> in runtime output path)
 		|			├── AiSEQ
-	  	│	 		|	├── code  # captured per-leaf
 	  	│	 		|	├── YYYYMMDD_HHmmss
 	  	│			|	│	└── summary.json
 	  	│			|	... (5x Runs total)
 	  	│			|	└── YYYYMMDD_HHmmss
 	  	│			|		└── summary.json
 		|			├── DiskANN
-	  	│	 		|	├── code  # captured per-leaf
 	  	│	 		|	├── YYYYMMDD_HHmmss
 	  	│			|	│	└── summary.json
 	  	│			|	... (5x Runs total)
 	  	│			|	└── YYYYMMDD_HHmmss
 	  	│			|		└── summary.json
 		|			└── HNSW
-	  	│	 			├── code  # captured per-leaf
 	  	│	 			├── YYYYMMDD_HHmmss
 	  	│				│	└── summary.json
 	  	│				... (5x Runs total)
