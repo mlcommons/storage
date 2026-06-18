@@ -22,6 +22,13 @@ After the fix:
   which is the intended behavior.
 
 These tests pin those invariants so the regression cannot reappear.
+
+Post-CLI-redesign note: the three-mode positional parser (closed/open/whatif)
+moved the storage-type from an option (``--file`` / ``--object``) to a single
+positional ``data_access_protocol`` with ``choices=['file', 'object']``. The
+duplicate-registration invariant that drove issue #376 is preserved by
+checking that the universal adder never registers the storage-type surface,
+while the storage-type adder is the sole registrant.
 """
 
 import argparse
@@ -41,25 +48,24 @@ def test_universal_then_storage_type_does_not_conflict():
     )
 
     parser = argparse.ArgumentParser()
-    add_universal_arguments(parser)
+    add_universal_arguments(parser, req_results=False)
     # Pre-fix this line raised:
     #   argparse.ArgumentError: argument --file: conflicting option string: --file
     add_storage_type_arguments(parser)
 
-    ns = parser.parse_args(["--file"])
-    assert ns.file is True
-    assert ns.object is None
+    ns = parser.parse_args(["file"])
+    assert ns.data_access_protocol == "file"
 
 
 def test_file_declared_in_exactly_one_adder():
-    """``--file`` must live in add_storage_type_arguments only."""
+    """The ``file``/``object`` storage-type surface must live in add_storage_type_arguments only."""
     from mlpstorage_py.cli.common_args import (
         add_universal_arguments,
         add_storage_type_arguments,
     )
 
     universal_parser = argparse.ArgumentParser()
-    add_universal_arguments(universal_parser)
+    add_universal_arguments(universal_parser, req_results=False)
     universal_opts = {
         opt for action in universal_parser._actions for opt in action.option_strings
     }
@@ -68,14 +74,24 @@ def test_file_declared_in_exactly_one_adder():
         "issue #376 because every benchmark subparser then registers --file twice."
     )
     assert "--object" not in universal_opts
+    universal_dests = {action.dest for action in universal_parser._actions}
+    assert "data_access_protocol" not in universal_dests, (
+        "data_access_protocol leaked into add_universal_arguments; this would "
+        "re-introduce the duplicate-positional variant of issue #376."
+    )
 
     storage_parser = argparse.ArgumentParser()
     add_storage_type_arguments(storage_parser)
-    storage_opts = {
-        opt for action in storage_parser._actions for opt in action.option_strings
+    storage_dests = {action.dest for action in storage_parser._actions}
+    storage_choices = {
+        choice
+        for action in storage_parser._actions
+        if action.choices
+        for choice in action.choices
     }
-    assert "--file" in storage_opts
-    assert "--object" in storage_opts
+    assert "data_access_protocol" in storage_dests
+    assert "file" in storage_choices
+    assert "object" in storage_choices
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +128,7 @@ def test_benchmark_subparser_builds_without_argparse_conflict(module_path, build
     cmd_parser = sub_programs.add_parser(builder_attr.replace("add_", "").replace("_arguments", ""))
 
     # If this raises argparse.ArgumentError, the regression is back.
-    builder(cmd_parser)
+    builder(cmd_parser, "closed")
 
 
 # ---------------------------------------------------------------------------
@@ -128,8 +144,8 @@ def test_debug_flag_parses_after_fix():
     )
 
     parser = argparse.ArgumentParser()
-    add_universal_arguments(parser)
+    add_universal_arguments(parser, req_results=False)
     add_storage_type_arguments(parser)
 
-    ns = parser.parse_args(["--file", "--debug"])
+    ns = parser.parse_args(["file", "--debug"])
     assert ns.debug is True
