@@ -67,6 +67,17 @@ _CLI_BENCHMARK_TO_TYPE: dict[str, BENCHMARK_TYPES] = {
     "kvcache": BENCHMARK_TYPES.kv_cache,
 }
 
+# Benchmark types whose runtime output path has NO <model> segment
+# (generate_output_location writes <type>/<command>/<datetime>/ for these).
+# Their captured code/ must therefore live at <type>/code/ — one level
+# shallower than training/checkpointing — so the code image stays inside
+# the same on-disk tree that results write into. vectordb additionally has
+# no --model CLI arg at all, so the model attribute may be absent on args.
+_TYPES_WITHOUT_MODEL_SEGMENT: frozenset[BENCHMARK_TYPES] = frozenset({
+    BENCHMARK_TYPES.vector_database,
+    BENCHMARK_TYPES.kv_cache,
+})
+
 
 class CodeImageError(Exception):
     """Base for all code-image capture/verify failures (D-03)."""
@@ -548,16 +559,23 @@ def capture_or_verify_code_image(args, env, log):
         # a different tree than the runtime's results.
         cli_benchmark = getattr(args, "benchmark")
         try:
-            type_segment = _CLI_BENCHMARK_TO_TYPE[cli_benchmark].name
+            benchmark_type = _CLI_BENCHMARK_TO_TYPE[cli_benchmark]
         except KeyError:
             raise CodeImageError(
                 f"Unknown benchmark CLI name {cli_benchmark!r} — "
                 f"expected one of {sorted(_CLI_BENCHMARK_TO_TYPE)}"
             ) from None
-        image_parent = (
+        leaf_dir = (
             results_dir / "open" / orgname / "results" / systemname
-            / type_segment / getattr(args, "model")
+            / benchmark_type.name
         )
+        # Per-type leaf shape: training/checkpointing capture once per
+        # <type>/<model> (matches their runtime tree); vector_database and
+        # kv_cache capture once per <type> because their runtime output has
+        # no <model> segment.
+        if benchmark_type not in _TYPES_WITHOUT_MODEL_SEGMENT:
+            leaf_dir = leaf_dir / getattr(args, "model")
+        image_parent = leaf_dir
     image_parent.mkdir(parents=True, exist_ok=True)
 
     # 7. Branch capture-vs-verify (D-08).

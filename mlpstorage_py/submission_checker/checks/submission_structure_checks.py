@@ -45,6 +45,14 @@ _SUBMITTER_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 # Allowed top-level divisions (case-sensitive, PITFALLS.md #2)
 _VALID_DIVISIONS = frozenset({"closed", "open"})
 
+# Benchmark-type directory names that have NO <model> segment in OPEN.
+# Their runtime output writes <type>/<command>/<datetime>/ (per
+# generate_output_location), so the captured code/ also lives directly at
+# <type>/code/ rather than <type>/<model>/code/. Mirror set kept inline
+# (rather than imported from tools.code_image) to avoid pulling the helper
+# module's runtime dependencies into the validator.
+_OPEN_TYPES_WITHOUT_MODEL = frozenset({"vector_database", "kv_cache"})
+
 # Mode-aware required submitter-level subdirectory sets per Rules.md §2.1.5 split (D-17).
 # CLOSED: {code, results, systems} at the submitter level.
 # OPEN:   {results, systems} at the submitter level; code/ lives at each
@@ -126,12 +134,19 @@ class SubmissionStructureCheck(BaseCheck):
                 yield division, submitter, os.path.join(div_path, submitter)
 
     def _iter_open_code_dirs(self, submitter_path):
-        """Yield each results/<sys>/<type>/<model>/code path under an OPEN submitter (D-15).
+        """Yield each per-leaf code/ path under an OPEN submitter (D-15).
+
+        The leaf shape depends on the benchmark type:
+
+        - training, checkpointing → results/<sys>/<type>/<model>/code/
+          (runtime output is keyed per model).
+        - vector_database, kv_cache → results/<sys>/<type>/code/
+          (runtime output has no <model> segment per
+          generate_output_location, so code lives one level shallower).
 
         Per Rules.md §2.1.27 OPEN subtree, code/ lives at each leaf rather
-        than at the submitter level. This generator walks the nested
-        results/<sys>/<type>/<model>/ shape and yields the absolute code/
-        path for every leaf — whether or not the directory currently
+        than at the submitter level. This generator yields the absolute
+        code/ path for every leaf — whether or not the directory currently
         exists on disk (the caller decides what to do with the path).
         """
         results = os.path.join(submitter_path, "results")
@@ -144,6 +159,11 @@ class SubmissionStructureCheck(BaseCheck):
             for wtype in list_dir(sys_path):
                 wtype_path = os.path.join(sys_path, wtype)
                 if not os.path.isdir(wtype_path):
+                    continue
+                if wtype in _OPEN_TYPES_WITHOUT_MODEL:
+                    # vector_database / kv_cache: code/ is a direct child of
+                    # <type>/ — no <model> level between them.
+                    yield os.path.join(wtype_path, "code")
                     continue
                 for model in list_dir(wtype_path):
                     model_path = os.path.join(wtype_path, model)
