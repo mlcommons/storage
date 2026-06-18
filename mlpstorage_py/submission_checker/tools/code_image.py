@@ -186,9 +186,24 @@ def capture_code_image(source_root: Path, target_dir: Path, log) -> CodeImage:
         A CodeImage instance representing the new capture.
 
     Raises:
+        ConfigurationError: If MLPSTORAGE_VERSION resolved to the literal
+            "unknown" sentinel (no installed dist metadata and no readable
+            pyproject.toml) — refusing to stamp a degenerate version into
+            .code-hash.json that would degrade submission-time forensics.
         CodeImageError: If target_dir/code/ already exists (D-16).
         SourceRootNotFound: If source_root is missing or hashing fails.
     """
+    # Refuse to capture with a degenerate mlpstorage_version sentinel — fail
+    # before any filesystem work so we leave no partial state behind.
+    if MLPSTORAGE_VERSION == "unknown":
+        raise ConfigurationError(
+            "mlpstorage version could not be resolved (no installed distribution "
+            "metadata and no readable pyproject.toml); refusing to capture with "
+            "mlpstorage_version=\"unknown\" — install the package "
+            "(pip install -e . / uv sync) or run from a checkout with pyproject.toml",
+            code=ErrorCode.CONFIG_MISSING_REQUIRED,
+        )
+
     code_dir = target_dir / _CODE_DIRNAME
     code_tmp = target_dir / _TMP_SUFFIX
 

@@ -216,12 +216,30 @@ class TestCaptureCodeImage:
 
         src = tmp_path / "src"
         write_binary(src / "a.py", b"A\n")
-        
+
         out = tmp_path / "out"
         (out / "code").mkdir(parents=True)
-        
+
         with pytest.raises(CodeImageError, match="[Cc]ode image already exists"):
             capture_code_image(src, out, mock_logger)
+
+    def test_capture_rejects_unknown_mlpstorage_version(self, tmp_path, mock_logger, monkeypatch):
+        """CAP-05 hardening: refuse to stamp degenerate mlpstorage_version="unknown" — happens when
+        the package isn't installed AND pyproject.toml is unreadable. Fail before any FS work."""
+        from mlpstorage_py.errors import ConfigurationError
+        import mlpstorage_py.submission_checker.tools.code_image as code_image_mod
+
+        monkeypatch.setattr(code_image_mod, "MLPSTORAGE_VERSION", "unknown")
+
+        src = tmp_path / "src"
+        write_binary(src / "a.py", b"A\n")
+        out = tmp_path / "out"
+
+        with pytest.raises(ConfigurationError, match="mlpstorage version could not be resolved"):
+            code_image_mod.capture_code_image(src, out, mock_logger)
+
+        assert not (out / "code").exists(), "capture must not leave a partial code/ dir"
+        assert not (out / "code.tmp").exists(), "capture must not leave a partial code.tmp/ dir"
 
 
 class TestLoadCodeImage:
