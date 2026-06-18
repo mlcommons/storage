@@ -223,16 +223,22 @@ class TestCapturePath:
         """The CLI subparser is named 'vectordb', but generate_output_location and
         Rules.md write the on-disk segment as 'vector_database' (BENCHMARK_TYPES.name).
         The helper must emit the same canonical segment so the captured code/ lives
-        in the same submission tree the runtime writes results into."""
-        args = _make_args(
-            mode="open", command="run", results_dir=tmp_path,
-            benchmark="vectordb", model="DiskANN",
+        in the same submission tree the runtime writes results into.
+
+        vector_database has no <model> segment in its runtime output path
+        (generate_output_location writes <type>/<command>/<datetime>/), so the
+        captured code/ lives directly under <type>/, NOT under <type>/<model>/.
+        """
+        # Note: vectordb has no --model CLI arg, so args.model must be absent.
+        args = SimpleNamespace(
+            mode="open", command="run", results_dir=str(tmp_path),
+            benchmark="vectordb",
         )
         env = {"MLPSTORAGE_ORGNAME": "acme", "MLPSTORAGE_SYSTEMNAME": "rig01"}
         result = capture_or_verify_code_image(args, env, log)
         expected_code = (
             tmp_path / "open" / "acme" / "results" / "rig01"
-            / "vector_database" / "DiskANN" / "code"
+            / "vector_database" / "code"
         )
         assert result == expected_code
         # And the CLI name 'vectordb' must NOT appear as a path segment.
@@ -240,7 +246,14 @@ class TestCapturePath:
 
     def test_open_kvcache_uses_canonical_type_name(self, tmp_path, log):
         """Same contract as vectordb: CLI name 'kvcache' must map to canonical
-        on-disk segment 'kv_cache' (BENCHMARK_TYPES.name)."""
+        on-disk segment 'kv_cache' (BENCHMARK_TYPES.name).
+
+        Like vector_database, kv_cache writes <type>/<command>/<datetime>/ —
+        no <model> in the runtime path — so the captured code/ also lives
+        directly under <type>/.
+        """
+        # kvcache does have --model in CLI, but the helper must ignore it
+        # because the runtime path-shape has no model segment.
         args = _make_args(
             mode="open", command="run", results_dir=tmp_path,
             benchmark="kvcache", model="llama3-8b",
@@ -249,10 +262,12 @@ class TestCapturePath:
         result = capture_or_verify_code_image(args, env, log)
         expected_code = (
             tmp_path / "open" / "acme" / "results" / "rig01"
-            / "kv_cache" / "llama3-8b" / "code"
+            / "kv_cache" / "code"
         )
         assert result == expected_code
         assert "kvcache" not in {p.name for p in result.parents}
+        # model segment must not appear in the captured path.
+        assert "llama3-8b" not in {p.name for p in result.parents}
 
 
 # ---------------------------------------------------------------------------

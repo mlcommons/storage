@@ -8,6 +8,7 @@ Run with:
 
 import json
 import os
+import shutil
 import pytest
 from pathlib import Path
 
@@ -828,6 +829,50 @@ class TestStruct06_OpenCodeDirectory:
             if "reference checksum not configured" in w
         ]
         assert unconfigured == [], unconfigured
+
+    # ----- vector_database / kv_cache: no <model> level under <type> -----
+    def test_open_vector_database_code_dir_at_type_level(self, tmp_path, mock_logger):
+        """vector_database has no <model> segment in its runtime output path
+        (generate_output_location writes <type>/<command>/<datetime>/), so the
+        captured code/ lives at results/<sys>/vector_database/code/ — one level
+        shallower than training/checkpointing. _iter_open_code_dirs must yield
+        the 2-level path for this type, or the validator will silently miss it."""
+        leaf = tmp_path / "open" / "Acme" / "results" / "sys-1" / "vector_database"
+        leaf.mkdir(parents=True)
+        code_path = leaf / "code"
+        code_path.mkdir()
+        (code_path / "mod.py").write_bytes(b"# vdb\n")
+        _write_valid_hash_json(code_path, mock_logger)
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is True, mock_logger.errors
+        # And the missing variant: vector_database with no code/ must emit one
+        # missing-code violation at the type level.
+        shutil.rmtree(code_path)
+        mock_logger.errors.clear()
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is False
+        missing_msgs = [
+            m for m in mock_logger.errors
+            if "[2.1.6 codeDirectoryContents]" in m
+            and "required code/ directory missing at" in m
+            and m.rstrip().endswith("/vector_database/code")
+        ]
+        assert len(missing_msgs) == 1, mock_logger.errors
+
+    def test_open_kv_cache_code_dir_at_type_level(self, tmp_path, mock_logger):
+        """Same contract as vector_database: kv_cache's runtime output omits the
+        <model> level (writes <type>/<command>/<datetime>/), so the captured
+        code/ lives at results/<sys>/kv_cache/code/."""
+        leaf = tmp_path / "open" / "Acme" / "results" / "sys-1" / "kv_cache"
+        leaf.mkdir(parents=True)
+        code_path = leaf / "code"
+        code_path.mkdir()
+        (code_path / "mod.py").write_bytes(b"# kvcache\n")
+        _write_valid_hash_json(code_path, mock_logger)
+        check = _make_check(tmp_path, mock_logger)
+        result = run_one_check(check, "code_directory_contents_check", mock_logger)
+        assert result is True, mock_logger.errors
 
     # ----- Multiple OPEN model leaves each get their own per-leaf violation -----
     def test_open_multiple_models_each_get_their_own_violation(self, tmp_path, mock_logger):
