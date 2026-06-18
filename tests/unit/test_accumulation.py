@@ -396,8 +396,10 @@ class TestPreviewBenchmarkAccumulation:
     VectorDB (PR 3) records an engine and KVCache (PR 4) records the model
     as the distinguishing component in path and metadata."""
 
-    def test_vectordb_path_includes_engine(self, tmp_path):
-        """generate_output_location produces vector_database/<engine>/<command>/<datetime>/."""
+    def test_vectordb_path_includes_index_type(self, tmp_path):
+        """generate_output_location produces vector_database/<index_type>/<command>/<datetime>/
+        per Rules.md §2.1.27 — results are split by index_type because AISAQ is not
+        comparable to DISKANN/HNSW and must live in separate on-disk trees."""
         from types import SimpleNamespace
 
         from mlpstorage_py.config import BENCHMARK_TYPES as _BT
@@ -408,16 +410,17 @@ class TestPreviewBenchmarkAccumulation:
             args=SimpleNamespace(
                 results_dir=str(tmp_path),
                 command="run",
-                vdb_engine="milvus",
+                index_type="DISKANN",
             ),
         )
         location = generate_output_location(fake_benchmark, datetime_str="20250111_160000")
         assert location == str(
-            tmp_path / "vector_database" / "milvus" / "run" / "20250111_160000"
+            tmp_path / "vector_database" / "DISKANN" / "run" / "20250111_160000"
         )
 
-    def test_vectordb_path_requires_engine(self, tmp_path):
-        """Without vdb_engine, generate_output_location refuses to build a path."""
+    def test_vectordb_path_requires_index_type(self, tmp_path):
+        """Without args.index_type, generate_output_location refuses to build a path
+        per Rules.md §2.1.27."""
         from types import SimpleNamespace
 
         from mlpstorage_py.config import BENCHMARK_TYPES as _BT
@@ -428,10 +431,10 @@ class TestPreviewBenchmarkAccumulation:
             args=SimpleNamespace(
                 results_dir=str(tmp_path),
                 command="run",
-                # no vdb_engine
+                # no index_type
             ),
         )
-        with pytest.raises(ValueError, match="VectorDB engine is required"):
+        with pytest.raises(ValueError, match="args.index_type is required"):
             generate_output_location(fake_benchmark, datetime_str="20250111_160000")
 
     def test_vectordb_runs_distinguished_by_engine(self, tmp_path, mock_logger):
