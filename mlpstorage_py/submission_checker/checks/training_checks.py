@@ -4,7 +4,7 @@ from ..constants import *
 from ..configuration.configuration import Config
 from ..loader import SubmissionLogs
 from ..rule_registry import rule
-from .helpers import _check_filesystem_separation
+from .helpers import _check_filesystem_separation, _check_code_image_layered
 
 import os
 import hashlib
@@ -483,16 +483,52 @@ class TrainingCheck(BaseCheck):
 
     @rule("3.6.1", "trainingClosedSubmissionChecksum")
     def closed_submission_checksum(self):
-        """
-        For CLOSED submissions, verify code directory MD5 checksum.
+        """For CLOSED submissions, verify code directory MD5 checksum.
+
         (Rules.md 3.6.1)
 
-        Stub: body currently returns True (decorator-only retrofit per Plan 03-02
-        Task 1 step 1 — "decorator only, no body change"). The real implementation
-        will leverage the QUAL-05 MD5 predicate landed in Phase 1.
+        Phase 4 CD-04: delegates to the shared
+        ``helpers._check_code_image_layered`` helper so the §3.6.1 and §5.6.1
+        rules enforce an identical layered model (self-consistency +
+        upstream-identity) without duplicating the implementation across
+        check classes. STRUCT-06 (§2.1.6) keeps its own inline implementation
+        because it has additional surrounding logic (per-leaf walker, the
+        ``expected is None`` warning) that does not belong in the helper.
+
+        Walk-up: ``self.path`` is the per-leaf training path
+        (``<root>/closed/<orgname>/results/<system>/training/<model>``). The
+        CLOSED ``code/`` lives at ``<root>/closed/<orgname>/code/``, four
+        levels above ``self.path`` (model → type → system → results →
+        ``<orgname>``). Missing ``code/`` is NOT logged here — STRUCT-06
+        already owns the VALS-01 missing-code/ violation under §2.1.6, so
+        re-firing under §3.6.1 would double-count.
         """
-        # TODO
-        return True
+        if self.mode != "training":
+            return True
+
+        # OPEN handled at STRUCT-06 self-consistency loop, not here.
+        if self.submissions_logs.loader_metadata.division != "closed":
+            return True
+
+        # Walk up from <root>/closed/<orgname>/results/<system>/training/<model>
+        # to <root>/closed/<orgname>, then append "code".
+        submitter_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(self.path))))
+        code_path = os.path.join(submitter_path, "code")
+
+        # STRUCT-06 owns missing-code/ under §2.1.6; do not duplicate the violation here.
+        if not os.path.isdir(code_path):
+            return True
+
+        expected = self.config.get_reference_checksum()
+        return _check_code_image_layered(
+            code_path,
+            "closed",
+            expected,
+            self.log,
+            self.log_violation,
+            "3.6.1",
+            "trainingClosedSubmissionChecksum",
+        )
     
     @rule("3.6.2", "trainingClosedSubmissionParameters")
     def closed_submission_parameters(self):

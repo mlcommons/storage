@@ -1,25 +1,40 @@
 """Shared pure-function helpers for Phase 2 check methods.
 
 This module is LOG-FREE: helpers return status tuples and never call
-``log_violation`` or ``self.log.error`` directly. Callers emit violations
-using the standard ``BaseCheck.log_violation`` / ``warn_violation`` pattern
+``log_violation`` or ``self.log.error`` directly (with the exception of
+``_check_code_image_layered``, which invokes a caller-supplied
+``log_violation_cb`` so the caller's rule ID/name are carried into the
+violation message — see CD-04 below). Callers emit violations using the
+standard ``BaseCheck.log_violation`` / ``warn_violation`` pattern
 (Pitfall #11, PROJECT.md accumulate-don't-abort principle).
 
 Exports:
   DF_HEADER_RE          — compiled regex matching the ``df`` header line (D-B1)
   _check_filesystem_separation — filesystem-separation helper (D-B1..B5)
+  _check_code_image_layered    — benchmark-agnostic layered code-image helper
+                                  (Phase 4 CD-04; shared by §3.6.1 and §5.6.1)
   _pair_checkpoint_runs — write/read run pairing helper (D-D2)
   _parse_iso_gap        — ISO-timestamp gap helper (D-D2, CHKPT-03)
 
 References:
   - D-B1..B7 in Phase 2 CONTEXT.md (df parsing, longest-prefix mount match)
   - D-D2 in Phase 2 CONTEXT.md (pairing write/read checkpoint runs)
+  - Phase 4 CONTEXT.md D-06 / CD-04 (layered helper extraction)
   - RESEARCH.md §Shared Helpers
 """
 
 import datetime
 import os
 import re
+from pathlib import Path
+
+from ..tools.code_checksum import compute_code_tree_md5
+from ..tools.code_image import (
+    verify_image_self_consistent,
+    CodeImageError,
+    MissingHashFile,
+    MalformedHashFile,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -148,6 +163,104 @@ def _check_filesystem_separation(
 
     # Same mount → violation
     return (data_mount != results_mount, True)
+
+
+# ---------------------------------------------------------------------------
+# _check_code_image_layered (Phase 4 CD-04)
+# ---------------------------------------------------------------------------
+
+def _check_code_image_layered(
+    code_path: str,
+    division: str,
+    expected: str | None,
+    log,
+    log_violation_cb,
+    rule_id: str,
+    rule_name: str,
+) -> bool:
+    """Benchmark-agnostic layered code-image check (self-consistency + upstream-identity).
+
+    Mirrors the two inner branches of STRUCT-06
+    (``submission_structure_checks.code_directory_contents_check``) so the
+    same layered model is enforced under multiple rule IDs without duplicating
+    the implementation across check classes:
+
+      * ``2.1.6 codeDirectoryContents`` — STRUCT-06 itself, calls
+        ``self.log_violation`` directly with its own ID/name.
+      * ``3.6.1 trainingClosedSubmissionChecksum`` — TrainingCheck, calls this
+        helper with the 3.6.1 rule ID/name pair.
+      * ``5.6.1 vdbClosedSubmissionChecksum``     — VdbCheck, calls this helper
+        with the 5.6.1 rule ID/name pair.
+
+    The duplication of rule IDs is intentional (Phase 4 D-06): downstream
+    tooling must be able to tell whether a code-image mismatch fired under
+    §2.1.6 (structural), §3.6.1 (Training CLOSED), or §5.6.1 (VDB CLOSED). The
+    *implementation* of the check is unified here (CD-04); the *attribution*
+    stays per-rule via the caller-supplied ``rule_id`` / ``rule_name``.
+
+    The helper performs the same two-step check defined for STRUCT-06 at
+    ``submission_structure_checks.py:442-470``:
+
+      1. Self-consistency: try ``verify_image_self_consistent(code_path, log)``.
+         If it returns False, log a violation and set ``valid = False``. Catch
+         ``MissingHashFile`` / ``MalformedHashFile`` / ``CodeImageError`` and log
+         the exception message as a violation.
+      2. Upstream-identity (CLOSED only, D-06 + D-07): if ``division == "closed"``
+         AND ``expected is not None``, compute ``compute_code_tree_md5`` and
+         compare against ``expected``. Mismatch → log a violation.
+
+    Args:
+        code_path: Absolute on-disk path to the ``code/`` directory to validate.
+        division: ``"closed"`` or ``"open"``. The upstream-identity branch fires
+            only for ``"closed"`` (matches STRUCT-06 L467 + D-06).
+        expected: The reference digest returned by
+            ``Config.get_reference_checksum()``. ``None`` means upstream-identity
+            is skipped (matches STRUCT-06 L417 + D-12 single-warning behavior).
+        log: Logger instance, passed through to ``verify_image_self_consistent``
+            and ``compute_code_tree_md5``.
+        log_violation_cb: A callable with the same signature as
+            ``BaseCheck.log_violation`` —
+            ``(rule_id, rule_name, path, fmt, *args)``. Decoupling the helper
+            from a specific check class is what makes it benchmark-agnostic.
+        rule_id: The caller's Rules.md rule ID (e.g., ``"3.6.1"``, ``"5.6.1"``).
+            Passed through to every ``log_violation_cb`` call so violations
+            carry the CALLER's rule ID, not a generic helper ID.
+        rule_name: The caller's camelCase Rules.md rule name (e.g.,
+            ``"trainingClosedSubmissionChecksum"``, ``"vdbClosedSubmissionChecksum"``).
+
+    Returns:
+        ``True`` if every branch passed; ``False`` if any violation was logged.
+    """
+    valid = True
+
+    # 1. Self-consistency branch (STRUCT-06 L448-L464 analog).
+    try:
+        if not verify_image_self_consistent(Path(code_path), log):
+            log_violation_cb(
+                rule_id, rule_name, code_path,
+                "code tree hash does not match .code-hash.json at %s",
+                code_path,
+            )
+            valid = False
+    except (MissingHashFile, MalformedHashFile, CodeImageError) as e:
+        log_violation_cb(
+            rule_id, rule_name, code_path,
+            "%s", str(e),
+        )
+        valid = False
+
+    # 2. Upstream-identity branch (STRUCT-06 L466-L476 analog; CLOSED + expected only).
+    if division == "closed" and expected is not None:
+        digest = compute_code_tree_md5(code_path, log)
+        if digest != expected:
+            log_violation_cb(
+                rule_id, rule_name, code_path,
+                "code tree MD5 mismatch: expected %s, got %s",
+                expected, digest,
+            )
+            valid = False
+
+    return valid
 
 
 # ---------------------------------------------------------------------------
