@@ -196,23 +196,35 @@ root_folder (or any name you prefer)
 │	  	│		│	 		└── dlio_config
 │	  	│	 	└── vdb_bench
 |		|			├── AiSAQ
-│	  	│	 		|	├── YYYYMMDD_HHmmss
-│	  	│			|	│	└── summary.json
-│	  	│			|	... (5x Runs total)
-│	  	│			|	└── YYYYMMDD_HHmmss
-│	  	│			|		└── summary.json
+│	  	│	 		|	├── datagen
+│	  	│			|	│	└── YYYYMMDD_HHmmss
+│	  	│			|	│		└── summary.json
+│	  	│			|	└── run
+│	  	│			|		├── YYYYMMDD_HHmmss
+│	  	│			|		│	└── summary.json
+│	  	│			|		... (5x Runs total)
+│	  	│			|		└── YYYYMMDD_HHmmss
+│	  	│			|			└── summary.json
 |		|			├── DiskANN
-│	  	│	 		|	├── YYYYMMDD_HHmmss
-│	  	│			|	│	└── summary.json
-│	  	│			|	... (5x Runs total)
-│	  	│			|	└── YYYYMMDD_HHmmss
-│	  	│			|		└── summary.json
+│	  	│	 		|	├── datagen
+│	  	│			|	│	└── YYYYMMDD_HHmmss
+│	  	│			|	│		└── summary.json
+│	  	│			|	└── run
+│	  	│			|		├── YYYYMMDD_HHmmss
+│	  	│			|		│	└── summary.json
+│	  	│			|		... (5x Runs total)
+│	  	│			|		└── YYYYMMDD_HHmmss
+│	  	│			|			└── summary.json
 |		|			└── HNSW
-│	  	│	 			├── YYYYMMDD_HHmmss
-│	  	│				│	└── summary.json
-│	  	│				... (5x Runs total)
-│	  	│				└── YYYYMMDD_HHmmss
-│	  	│					└── summary.json
+│	  	│	 			├── datagen
+│	  	│				│	└── YYYYMMDD_HHmmss
+│	  	│				│		└── summary.json
+│	  	│				└── run
+│	  	│					├── YYYYMMDD_HHmmss
+│	  	│					│	└── summary.json
+│	  	│					... (5x Runs total)
+│	  	│					└── YYYYMMDD_HHmmss
+│	  	│						└── summary.json
 │	  	└── systems
 │	  		├──system-name-1.yaml
 │	  		├──system-name-1.pdf
@@ -282,25 +294,38 @@ root_folder (or any name you prefer)
 	  	│		│	 		└── dlio_config
 	  	│	 	└── vdb_bench
 		|			├── AiSAQ
-	  	│	 		|	├── YYYYMMDD_HHmmss
-	  	│			|	│	└── summary.json
-	  	│			|	... (5x Runs total)
-	  	│			|	└── YYYYMMDD_HHmmss
-	  	│			|		└── summary.json
+	  	│	 		|	├── code  # captured per-leaf
+	  	│	 		|	├── datagen
+	  	│			|	│	└── YYYYMMDD_HHmmss
+	  	│			|	│		└── summary.json
+	  	│			|	└── run
+	  	│			|		├── YYYYMMDD_HHmmss
+	  	│			|		│	└── summary.json
+	  	│			|		... (5x Runs total)
+	  	│			|		└── YYYYMMDD_HHmmss
+	  	│			|			└── summary.json
 		|			├── DiskANN
 	  	│	 		|	├── code  # captured per-leaf
-	  	│	 		|	├── YYYYMMDD_HHmmss
-	  	│			|	│	└── summary.json
-	  	│			|	... (5x Runs total)
-	  	│			|	└── YYYYMMDD_HHmmss
-	  	│			|		└── summary.json
+	  	│	 		|	├── datagen
+	  	│			|	│	└── YYYYMMDD_HHmmss
+	  	│			|	│		└── summary.json
+	  	│			|	└── run
+	  	│			|		├── YYYYMMDD_HHmmss
+	  	│			|		│	└── summary.json
+	  	│			|		... (5x Runs total)
+	  	│			|		└── YYYYMMDD_HHmmss
+	  	│			|			└── summary.json
 		|			└── HNSW
 	  	│	 			├── code  # captured per-leaf
-	  	│	 			├── YYYYMMDD_HHmmss
-	  	│				│	└── summary.json
-	  	│				... (5x Runs total)
-	  	│				└── YYYYMMDD_HHmmss
-	  	│					└── summary.json
+	  	│	 			├── datagen
+	  	│				│	└── YYYYMMDD_HHmmss
+	  	│				│		└── summary.json
+	  	│				└── run
+	  	│					├── YYYYMMDD_HHmmss
+	  	│					│	└── summary.json
+	  	│					... (5x Runs total)
+	  	│					└── YYYYMMDD_HHmmss
+	  	│						└── summary.json
 		└── systems
 			├──system-name-1.yaml
 			├──system-name-1.pdf
