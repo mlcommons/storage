@@ -45,13 +45,21 @@ _SUBMITTER_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 # Allowed top-level divisions (case-sensitive, PITFALLS.md #2)
 _VALID_DIVISIONS = frozenset({"closed", "open"})
 
-# Benchmark-type directory names that have NO <model> segment in OPEN.
-# Their runtime output writes <type>/<command>/<datetime>/ (per
-# generate_output_location), so the captured code/ also lives directly at
-# <type>/code/ rather than <type>/<model>/code/. Mirror set kept inline
-# (rather than imported from tools.code_image) to avoid pulling the helper
-# module's runtime dependencies into the validator.
-_OPEN_TYPES_WITHOUT_MODEL = frozenset({"vector_database", "kv_cache"})
+# Benchmark-type directory names whose OPEN leaf shape has no per-leaf
+# segment between <type>/ and code/ — code/ lives directly at <type>/code/.
+#
+# vector_database is NOT in this set: AISAQ results are not comparable to
+# DISKANN/HNSW, so its leaf shape is <type>/<index_type>/code/ — same
+# 3-level walk as training (<model>) and checkpointing (<model>).
+#
+# kv_cache stays here transitionally — its directory/file structure below
+# the <type>/ prefix will be finalized in a follow-up plan. Once the
+# per-(model, operation) split is specified, this entry will move into the
+# standard 3-level walk too.
+#
+# Mirror set kept inline (rather than imported from tools.code_image) to
+# avoid pulling the helper module's runtime dependencies into the validator.
+_OPEN_TYPES_WITHOUT_MODEL = frozenset({"kv_cache"})
 
 # Mode-aware required submitter-level subdirectory sets per Rules.md §2.1.5 split (D-17).
 # CLOSED: {code, results, systems} at the submitter level.

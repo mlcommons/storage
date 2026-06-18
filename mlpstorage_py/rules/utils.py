@@ -243,7 +243,17 @@ def generate_output_location(
         output_location = os.path.join(output_location, datetime_str)
 
     elif benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.vector_database:
+        # Results split by index_type because AISAQ is not comparable to
+        # DISKANN/HNSW — they must live in separate on-disk trees so
+        # submission validation and downstream tooling never collate them.
+        if not hasattr(benchmark.args, "index_type"):
+            raise ValueError(
+                "args.index_type is required for vector_database benchmark "
+                "output location (per Rules.md §2.1.27 — results split by "
+                "index type because they are not comparable across types)"
+            )
         output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
+        output_location = os.path.join(output_location, benchmark.args.index_type)
         output_location = os.path.join(output_location, benchmark.args.command)
         output_location = os.path.join(output_location, datetime_str)
 

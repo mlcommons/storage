@@ -67,16 +67,26 @@ _CLI_BENCHMARK_TO_TYPE: dict[str, BENCHMARK_TYPES] = {
     "kvcache": BENCHMARK_TYPES.kv_cache,
 }
 
-# Benchmark types whose runtime output path has NO <model> segment
-# (generate_output_location writes <type>/<command>/<datetime>/ for these).
-# Their captured code/ must therefore live at <type>/code/ — one level
-# shallower than training/checkpointing — so the code image stays inside
-# the same on-disk tree that results write into. vectordb additionally has
-# no --model CLI arg at all, so the model attribute may be absent on args.
-_TYPES_WITHOUT_MODEL_SEGMENT: frozenset[BENCHMARK_TYPES] = frozenset({
-    BENCHMARK_TYPES.vector_database,
-    BENCHMARK_TYPES.kv_cache,
-})
+# Per-type "leaf attribute" on args. The OPEN capture/verify path includes
+# this segment between <type>/ and code/ so each leaf — what the submitter
+# would consider a single comparable result group — has its own code image.
+#
+#   training, checkpointing : per-<model>      → uses args.model
+#   vector_database         : per-<index_type> → uses args.index_type
+#                             (AISAQ results are not comparable to DISKANN
+#                              or HNSW, so they live in separate trees)
+#   kv_cache                : transitional —   → None (no leaf segment)
+#                             code lives at <type>/code/ until the kv_cache
+#                             directory/file structure below the prefix is
+#                             finalized (per follow-up plan).
+#
+# None means "no leaf segment" — code is captured per benchmark type only.
+_TYPE_TO_LEAF_ATTR: dict[BENCHMARK_TYPES, str | None] = {
+    BENCHMARK_TYPES.training: "model",
+    BENCHMARK_TYPES.checkpointing: "model",
+    BENCHMARK_TYPES.vector_database: "index_type",
+    BENCHMARK_TYPES.kv_cache: None,
+}
 
 
 class CodeImageError(Exception):
@@ -569,12 +579,11 @@ def capture_or_verify_code_image(args, env, log):
             results_dir / "open" / orgname / "results" / systemname
             / benchmark_type.name
         )
-        # Per-type leaf shape: training/checkpointing capture once per
-        # <type>/<model> (matches their runtime tree); vector_database and
-        # kv_cache capture once per <type> because their runtime output has
-        # no <model> segment.
-        if benchmark_type not in _TYPES_WITHOUT_MODEL_SEGMENT:
-            leaf_dir = leaf_dir / getattr(args, "model")
+        # Per-type leaf segment (see _TYPE_TO_LEAF_ATTR for the design rationale).
+        leaf_attr = _TYPE_TO_LEAF_ATTR[benchmark_type]
+        if leaf_attr is not None:
+            leaf_value = getattr(args, leaf_attr)
+            leaf_dir = leaf_dir / leaf_value
         image_parent = leaf_dir
     image_parent.mkdir(parents=True, exist_ok=True)
 
