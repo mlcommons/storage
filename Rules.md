@@ -545,7 +545,7 @@ System:
 
 ## 5.3.  VDB Run Options
 
-5.3.1. **vdbRunCount** -- Within each *index directory* (named "DiskANN", "HNSW", or "AiSAQ") under "vdb_bench", there must be exactly five *timestamp directories*, each containing a "summary.json". (see Rules.md 2.1 directory diagram)
+5.3.1. **vdbRunCount** -- Within each `vdb_bench/<display_index>/run/` directory (where `<display_index>` is one of `DiskANN`, `HNSW`, or `AiSAQ` per the §5.6 dual-representation callout), there must be exactly five `<datetime>` timestamp directories, each containing a `summary.json`. The count rule applies to query runs only — `datagen` is governed by §5.2. (see §2.1.27 directory diagram.)
 
 5.3.2. **vdbRecallReported** -- Each run's `summary.json` (or its rank-local `recall_stats.json`) must report a recall value computed outside the timed query loop. The *submission validator* must verify a recall field is present and that recall meets or exceeds the minimum recall target defined for the chosen scale/metric.
 
@@ -570,7 +570,7 @@ System:
 > `mlpstorage_py/config.py`. The corresponding *index directory* names in the §2.1
 > directory diagram use the display spellings "DiskANN", "HNSW", and "AiSAQ".
 
-5.6.1. **vdbClosedSubmissionChecksum** -- For CLOSED submissions of this benchmark, the MLPerf Storage codebase cannot be changed, so the *submission validation checker* SHOULD do an `md5sum` of the code directory hierarchy in the submission package and verify that it matches a precalculated checksum stored as a literal in the validator's codebase.
+5.6.1. **vdbClosedSubmissionChecksum** -- For CLOSED VDB submissions, the *submission validator* enforces the same layered code-image check defined in §3.6.1: self-consistency against `.code-hash.json` always, plus upstream-identity against `REFERENCE_CHECKSUMS` (or `--reference-checksum`) for CLOSED. See §2.1.6 for the `.code-hash.json` schema and exclusion set.
 
 5.6.2. **vdbClosedDatabaseBackend** -- For CLOSED submissions, the vector database backend must be Milvus. The *submission validator* must read the `database.database` field from the run's `config.json`/`summary.json` and fail validation if any backend other than `milvus` is recorded.
 
