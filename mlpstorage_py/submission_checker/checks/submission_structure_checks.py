@@ -48,9 +48,13 @@ _VALID_DIVISIONS = frozenset({"closed", "open"})
 # Benchmark-type directory names whose OPEN leaf shape has no per-leaf
 # segment between <type>/ and code/ — code/ lives directly at <type>/code/.
 #
-# vector_database is NOT in this set: AISAQ results are not comparable to
-# DISKANN/HNSW, so its leaf shape is <type>/<index_type>/code/ — same
-# 3-level walk as training (<model>) and checkpointing (<model>).
+# vdb_bench is NOT in this set: AiSAQ results are not comparable to
+# DiskANN/HNSW, so its leaf shape is vdb_bench/<DisplayIndex>/code/ — same
+# 3-level walk as training (<model>) and checkpointing (<model>). Per
+# Phase 4 D-02 the on-disk type segment is "vdb_bench" (Rules.md §5.3.1 /
+# §2.1.27), and per D-03 the index directory uses mixed-case display
+# spellings (DiskANN, HNSW, AiSAQ) — the UPPERCASE form (DISKANN, HNSW,
+# AISAQ) lives only in summary.json / CLI / config.
 #
 # kv_cache stays here transitionally — its directory/file structure below
 # the <type>/ prefix will be finalized in a follow-up plan. Once the
@@ -148,9 +152,11 @@ class SubmissionStructureCheck(BaseCheck):
 
         - training, checkpointing → results/<sys>/<type>/<model>/code/
           (runtime output is keyed per model).
-        - vector_database → results/<sys>/<type>/<index_type>/code/
-          (results split by index type — AISAQ/DISKANN/HNSW results are not
-          comparable and live in separate trees).
+        - vdb_bench → results/<sys>/vdb_bench/<DisplayIndex>/code/
+          (results split by index type — AiSAQ/DiskANN/HNSW results are not
+          comparable and live in separate trees; per Phase 4 D-02 the
+          on-disk type segment is `vdb_bench`, per D-03 the index directory
+          uses display-case spellings).
         - kv_cache → results/<sys>/<type>/code/
           (transitional shape — kv_cache directory structure below the
           <type>/ prefix will be finalized in a follow-up plan).
