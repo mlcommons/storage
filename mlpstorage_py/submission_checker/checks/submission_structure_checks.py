@@ -148,9 +148,12 @@ class SubmissionStructureCheck(BaseCheck):
 
         - training, checkpointing → results/<sys>/<type>/<model>/code/
           (runtime output is keyed per model).
-        - vector_database, kv_cache → results/<sys>/<type>/code/
-          (runtime output has no <model> segment per
-          generate_output_location, so code lives one level shallower).
+        - vector_database → results/<sys>/<type>/<index_type>/code/
+          (results split by index type — AISAQ/DISKANN/HNSW results are not
+          comparable and live in separate trees).
+        - kv_cache → results/<sys>/<type>/code/
+          (transitional shape — kv_cache directory structure below the
+          <type>/ prefix will be finalized in a follow-up plan).
 
         Per Rules.md §2.1.27 OPEN subtree, code/ lives at each leaf rather
         than at the submitter level. This generator yields the absolute
@@ -169,8 +172,8 @@ class SubmissionStructureCheck(BaseCheck):
                 if not os.path.isdir(wtype_path):
                     continue
                 if wtype in _OPEN_TYPES_WITHOUT_MODEL:
-                    # vector_database / kv_cache: code/ is a direct child of
-                    # <type>/ — no <model> level between them.
+                    # kv_cache (transitional): code/ is a direct child of
+                    # <type>/ — no per-leaf segment yet (see _OPEN_TYPES_WITHOUT_MODEL).
                     yield os.path.join(wtype_path, "code")
                     continue
                 for model in list_dir(wtype_path):
