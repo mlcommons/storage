@@ -160,13 +160,17 @@ def make_vectordb_run(
     include_summary: bool = True,
 ) -> Path:
     """Create one vectordb run at
-    results_dir/vector_database/<engine>/<command>/<datetime>/.
+    results_dir/vdb_bench/<engine>/<command>/<datetime>/.
+
+    Per Phase 4 D-02 the on-disk type segment is `vdb_bench`; the metadata
+    benchmark_type field stays at the canonical Python enum name
+    `vector_database` (D-02 explicitly keeps the enum identity unchanged).
 
     The engine is recorded as model in metadata (matches how
     VectorDBBenchmark.__init__ mirrors args.vdb_engine into args.model so
     grouping by (model, accelerator) treats engines as distinct workloads).
     """
-    run_dir = results_dir / "vector_database" / engine / command / run_datetime
+    run_dir = results_dir / "vdb_bench" / engine / command / run_datetime
     return _write_run(
         run_dir,
         benchmark_type="vector_database",
@@ -397,9 +401,13 @@ class TestPreviewBenchmarkAccumulation:
     as the distinguishing component in path and metadata."""
 
     def test_vectordb_path_includes_index_type(self, tmp_path):
-        """generate_output_location produces vector_database/<index_type>/<command>/<datetime>/
-        per Rules.md §2.1.27 — results are split by index_type because AISAQ is not
-        comparable to DISKANN/HNSW and must live in separate on-disk trees."""
+        """generate_output_location produces vdb_bench/<DisplayIndex>/<command>/<datetime>/
+        per Rules.md §2.1.27 / §5.3.1 — results are split by index_type because AiSAQ is
+        not comparable to DiskANN/HNSW and must live in separate on-disk trees.
+
+        Per Phase 4 D-02 the on-disk type segment is `vdb_bench` (not the enum value
+        `vector_database`); per D-03 the index directory uses display-case spellings
+        (here `DiskANN`) while ``args.index_type`` stays UPPERCASE."""
         from types import SimpleNamespace
 
         from mlpstorage_py.config import BENCHMARK_TYPES as _BT
@@ -415,7 +423,7 @@ class TestPreviewBenchmarkAccumulation:
         )
         location = generate_output_location(fake_benchmark, datetime_str="20250111_160000")
         assert location == str(
-            tmp_path / "vector_database" / "DISKANN" / "run" / "20250111_160000"
+            tmp_path / "vdb_bench" / "DiskANN" / "run" / "20250111_160000"
         )
 
     def test_vectordb_path_requires_index_type(self, tmp_path):

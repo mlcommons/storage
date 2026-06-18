@@ -220,17 +220,21 @@ class TestCapturePath:
         assert expected_code.is_dir()
 
     def test_open_vectordb_uses_canonical_type_name(self, tmp_path, log):
-        """The CLI subparser is named 'vectordb', but generate_output_location and
-        Rules.md write the on-disk segment as 'vector_database' (BENCHMARK_TYPES.name).
-        The helper must emit the same canonical segment so the captured code/ lives
-        in the same submission tree the runtime writes results into.
+        """The CLI subparser is named 'vectordb', but per Rules.md §5.3.1
+        the on-disk type segment is 'vdb_bench' (Phase 4 D-02; the Python
+        enum name 'vector_database' is unchanged). The helper must emit
+        that canonical on-disk segment so the captured code/ lives in the
+        same submission tree the runtime writes results into.
 
-        vector_database splits results by <index_type> because AISAQ results are
-        not comparable to DISKANN/HNSW. The captured code/ lives at
-        <type>/<index_type>/code/ — per-leaf, same depth as training/checkpointing.
+        vdb_bench splits results by <index_type> because AiSAQ results are
+        not comparable to DiskANN/HNSW. The captured code/ lives at
+        vdb_bench/<DisplayIndex>/code/ — per-leaf, same depth as
+        training/checkpointing. Per D-03 the on-disk index directory uses
+        display-case spellings (DiskANN/HNSW/AiSAQ); the CLI / summary.json
+        token (args.index_type) stays UPPERCASE.
         """
         # vectordb has no --model CLI arg but DOES have --index-type
-        # (argparse stores --index-type as args.index_type).
+        # (argparse stores --index-type as args.index_type, UPPERCASE).
         args = SimpleNamespace(
             mode="open", command="run", results_dir=str(tmp_path),
             benchmark="vectordb", index_type="DISKANN",
@@ -239,7 +243,7 @@ class TestCapturePath:
         result = capture_or_verify_code_image(args, env, log)
         expected_code = (
             tmp_path / "open" / "acme" / "results" / "rig01"
-            / "vector_database" / "DISKANN" / "code"
+            / "vdb_bench" / "DiskANN" / "code"
         )
         assert result == expected_code
         # And the CLI name 'vectordb' must NOT appear as a path segment.
@@ -249,7 +253,7 @@ class TestCapturePath:
         """Same contract as vectordb: CLI name 'kvcache' must map to canonical
         on-disk segment 'kv_cache' (BENCHMARK_TYPES.name).
 
-        Like vector_database, kv_cache writes <type>/<command>/<datetime>/ —
+        Like vdb_bench, kv_cache writes <type>/<command>/<datetime>/ —
         no <model> in the runtime path — so the captured code/ also lives
         directly under <type>/.
         """

@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mlpstorage_py import __version__ as MLPSTORAGE_VERSION
-from mlpstorage_py.config import BENCHMARK_TYPES
+from mlpstorage_py.config import BENCHMARK_TYPES, INDEX_TYPE_TOKEN_TO_DIR
 from mlpstorage_py.errors import ConfigurationError, ErrorCode
 from mlpstorage_py.rules.utils import (
     MLPSTORAGE_ORGNAME_ENVVAR,
@@ -54,12 +54,15 @@ from .code_checksum import compute_code_tree_md5
 from ..constants import MD5_EXCLUDE_FILENAMES, MD5_EXCLUDE_PREFIXES
 
 
-# CLI subparser name → canonical on-disk type segment (BENCHMARK_TYPES.name).
-# generate_output_location() writes the BENCHMARK_TYPES.name segment, so the
-# captured code/ must use the same name to live in the same submission tree.
-# For training/checkpointing the CLI name and BENCHMARK_TYPES.name happen to
-# match; for vectordb/kvcache they diverge ('vectordb'→'vector_database',
-# 'kvcache'→'kv_cache').
+# CLI subparser name → canonical on-disk type segment.
+# generate_output_location() writes this same segment, so the captured code/
+# must use it to live in the same submission tree. For training and
+# checkpointing the CLI name and the on-disk segment happen to match the
+# BENCHMARK_TYPES.name. For vectordb and kvcache they diverge:
+#   * 'vectordb'  → on-disk 'vdb_bench' (Phase 4 D-02; BENCHMARK_TYPES.name
+#                   is 'vector_database' but Rules.md §5.3.1 / §2.1.27
+#                   pin the on-disk segment to 'vdb_bench').
+#   * 'kvcache'   → on-disk 'kv_cache' (matches BENCHMARK_TYPES.name).
 _CLI_BENCHMARK_TO_TYPE: dict[str, BENCHMARK_TYPES] = {
     "training": BENCHMARK_TYPES.training,
     "checkpointing": BENCHMARK_TYPES.checkpointing,
@@ -67,14 +70,29 @@ _CLI_BENCHMARK_TO_TYPE: dict[str, BENCHMARK_TYPES] = {
     "kvcache": BENCHMARK_TYPES.kv_cache,
 }
 
+# Per Phase 4 D-02 the on-disk type segment for vector_database is
+# 'vdb_bench' rather than the BENCHMARK_TYPES.name 'vector_database'.
+# Generators (this helper and rules/utils.py::generate_output_location) hold
+# the divergence at the path-construction boundary; the enum identity is
+# unchanged everywhere else (CLI dispatch, registry, history, summary.json).
+_TYPE_TO_ONDISK_SEGMENT: dict[BENCHMARK_TYPES, str] = {
+    BENCHMARK_TYPES.training: BENCHMARK_TYPES.training.name,
+    BENCHMARK_TYPES.checkpointing: BENCHMARK_TYPES.checkpointing.name,
+    BENCHMARK_TYPES.vector_database: "vdb_bench",
+    BENCHMARK_TYPES.kv_cache: BENCHMARK_TYPES.kv_cache.name,
+}
+
 # Per-type "leaf attribute" on args. The OPEN capture/verify path includes
 # this segment between <type>/ and code/ so each leaf — what the submitter
 # would consider a single comparable result group — has its own code image.
 #
 #   training, checkpointing : per-<model>      → uses args.model
-#   vector_database         : per-<index_type> → uses args.index_type
-#                             (AISAQ results are not comparable to DISKANN
-#                              or HNSW, so they live in separate trees)
+#   vector_database         : per-<DisplayIndex> → uses args.index_type
+#                             routed through INDEX_TYPE_TOKEN_TO_DIR
+#                             (AiSAQ results are not comparable to DiskANN
+#                              or HNSW, so they live in separate trees;
+#                              D-03 routes the UPPERCASE token to its
+#                              mixed-case on-disk display spelling).
 #   kv_cache                : transitional —   → None (no leaf segment)
 #                             code lives at <type>/code/ until the kv_cache
 #                             directory/file structure below the prefix is
@@ -576,12 +594,14 @@ def capture_or_verify_code_image(args, env, log):
     if mode == "closed":
         image_parent = results_dir / "closed" / orgname
     else:  # mode == "open"
-        # Canonicalize the per-type segment via _CLI_BENCHMARK_TO_TYPE so the
-        # captured code/ shares the on-disk tree with generate_output_location's
-        # output (which uses BENCHMARK_TYPES.name). The CLI subparser names
-        # 'vectordb' and 'kvcache' diverge from the canonical 'vector_database'
-        # and 'kv_cache' — without this lookup the captured code/ would live in
-        # a different tree than the runtime's results.
+        # Canonicalize the per-type segment via _CLI_BENCHMARK_TO_TYPE +
+        # _TYPE_TO_ONDISK_SEGMENT so the captured code/ shares the on-disk
+        # tree with generate_output_location's output. The CLI subparser
+        # names 'vectordb' and 'kvcache' diverge from the on-disk segments
+        # ('vdb_bench' and 'kv_cache') — without these lookups the captured
+        # code/ would live in a different tree than the runtime's results.
+        # Per Phase 4 D-02 the vector_database type segment on disk is
+        # 'vdb_bench', not BENCHMARK_TYPES.vector_database.name.
         cli_benchmark = getattr(args, "benchmark")
         try:
             benchmark_type = _CLI_BENCHMARK_TO_TYPE[cli_benchmark]
@@ -590,14 +610,23 @@ def capture_or_verify_code_image(args, env, log):
                 f"Unknown benchmark CLI name {cli_benchmark!r} — "
                 f"expected one of {sorted(_CLI_BENCHMARK_TO_TYPE)}"
             ) from None
+        ondisk_segment = _TYPE_TO_ONDISK_SEGMENT[benchmark_type]
         leaf_dir = (
             results_dir / "open" / orgname / "results" / systemname
-            / benchmark_type.name
+            / ondisk_segment
         )
         # Per-type leaf segment (see _TYPE_TO_LEAF_ATTR for the design rationale).
         leaf_attr = _TYPE_TO_LEAF_ATTR[benchmark_type]
         if leaf_attr is not None:
             leaf_value = getattr(args, leaf_attr)
+            # Phase 4 D-03: for vector_database the on-disk index directory
+            # uses display-case spellings (DiskANN/HNSW/AiSAQ); args.index_type
+            # is UPPERCASE (the CLI / summary.json form). Route via the
+            # mapping so the captured code/ sits at the same path the runtime
+            # writes. Non-vdb types and OPEN-extended vdb tokens fall through
+            # unchanged via .get().
+            if benchmark_type == BENCHMARK_TYPES.vector_database:
+                leaf_value = INDEX_TYPE_TOKEN_TO_DIR.get(leaf_value, leaf_value)
             leaf_dir = leaf_dir / leaf_value
         image_parent = leaf_dir
     image_parent.mkdir(parents=True, exist_ok=True)

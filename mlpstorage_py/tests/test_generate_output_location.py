@@ -35,7 +35,10 @@ def _benchmark(mode: str, model: str = "unet3d", command: str = "datagen",
 
     ``index_type`` is set for vector_database benchmarks; the runtime path for
     that type includes a per-index_type segment so AISAQ results are kept
-    separate from DISKANN/HNSW (they're not comparable).
+    separate from DISKANN/HNSW (they're not comparable). Per Phase 4 D-02 /
+    D-03 the on-disk type segment is `vdb_bench` and the on-disk index
+    directory uses display-case spellings (DiskANN / HNSW / AiSAQ), while
+    ``args.index_type`` itself stays UPPERCASE (the CLI / summary.json form).
     """
     args = types.SimpleNamespace(
         mode=mode,
@@ -116,7 +119,11 @@ def test_open_training_prefix():
 def test_open_vector_database_prefix_includes_index_type():
     """vector_database results are split by index_type because AISAQ results
     are not comparable to DISKANN/HNSW results. The runtime path must include
-    the <index_type> segment between <type> and <command> for OPEN."""
+    the <index_type> segment between <type> and <command> for OPEN.
+
+    Per Phase 4 D-02 the on-disk type segment is `vdb_bench` (not
+    `vector_database`). Per D-03 the index directory is the display-case
+    spelling `DiskANN` while ``args.index_type`` stays UPPERCASE `DISKANN`."""
     from mlpstorage_py.rules.utils import generate_output_location
 
     b = _benchmark(
@@ -129,13 +136,17 @@ def test_open_vector_database_prefix_includes_index_type():
         b, datetime_str="X", orgname="acme", systemname="sys-1",
     )
     assert path.startswith(
-        "/tmp/r/open/acme/results/sys-1/vector_database/DISKANN/run/"
+        "/tmp/r/open/acme/results/sys-1/vdb_bench/DiskANN/run/"
     ), path
 
 
 def test_closed_vector_database_prefix_includes_index_type():
     """Same contract on the CLOSED side: <index_type> sits between <type>
-    and <command>."""
+    and <command>.
+
+    Per Phase 4 D-02 / D-03 the type segment is `vdb_bench` and the index
+    directory is the display-case spelling `AiSAQ`; the CLI/summary.json
+    token `args.index_type` stays UPPERCASE `AISAQ`."""
     from mlpstorage_py.rules.utils import generate_output_location
 
     b = _benchmark(
@@ -146,7 +157,7 @@ def test_closed_vector_database_prefix_includes_index_type():
     )
     path = generate_output_location(b, datetime_str="X", orgname="acme")
     assert path.startswith(
-        "/tmp/r/closed/acme/vector_database/AISAQ/run/"
+        "/tmp/r/closed/acme/vdb_bench/AiSAQ/run/"
     ), path
 
 
