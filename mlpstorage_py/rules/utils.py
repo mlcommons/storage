@@ -9,7 +9,7 @@ import os
 import sys
 from typing import Tuple, List, Optional
 
-from mlpstorage_py.config import BENCHMARK_TYPES, DATETIME_STR
+from mlpstorage_py.config import BENCHMARK_TYPES, DATETIME_STR, INDEX_TYPE_TOKEN_TO_DIR
 from mlpstorage_py.errors import ConfigurationError, ErrorCode
 
 # Env-var names used by the Phase 2 CLI dispatch layer to source orgname/systemname (D-01, D-02).
@@ -252,8 +252,15 @@ def generate_output_location(
                 "output location (per Rules.md §2.1.27 — results split by "
                 "index type because they are not comparable across types)"
             )
-        output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
-        output_location = os.path.join(output_location, benchmark.args.index_type)
+        # Rules.md §5.3.1: on-disk type segment is "vdb_bench", not the enum
+        # value "vector_database" (Phase 4 D-02; the Python enum
+        # BENCHMARK_TYPES.vector_database name is unchanged).
+        output_location = os.path.join(output_location, "vdb_bench")
+        # D-03: mixed-case display spelling on disk for the CLOSED triad;
+        # UPPERCASE passthrough for OPEN-extended types (IVF_FLAT, IVF_SQ8,
+        # FLAT) which lack established display spellings.
+        index_dir = INDEX_TYPE_TOKEN_TO_DIR.get(benchmark.args.index_type, benchmark.args.index_type)
+        output_location = os.path.join(output_location, index_dir)
         output_location = os.path.join(output_location, benchmark.args.command)
         output_location = os.path.join(output_location, datetime_str)
 
