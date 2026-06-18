@@ -50,6 +50,14 @@ class VectorDBBenchmark(Benchmark):
     SUMMARY_PREFIX = "VDB_MULTI_NODE_SUMMARY_JSON="
 
     def __init__(self, args, **kwargs):
+        # Mirror the engine into args.model so the existing
+        # metadata extractor (BenchmarkInstanceExtractor) and workload
+        # grouping (ReportGenerator._process_workload_groups, keyed on
+        # (model, accelerator)) treat distinct engines as distinct
+        # workloads — accumulated runs from milvus vs a future engine
+        # stay correctly separated.
+        if hasattr(args, "vdb_engine") and getattr(args, "model", None) is None:
+            args.model = args.vdb_engine
         super().__init__(args, **kwargs)
 
         self.command_method_map = {
@@ -974,7 +982,11 @@ class VectorDBBenchmark(Benchmark):
             {
                 "vectordb_config": self.config_name,
                 "vectordb_config_file": self.config_file,
-                "model": self.config_name,
+                # NB: do NOT set "model" here — the base class records the
+                # engine (via args.model = args.vdb_engine in __init__) and
+                # downstream workload grouping in ReportGenerator keys on it.
+                # Overwriting with config_name would merge distinct engines
+                # that happen to share a config file into one workload.
                 "host": getattr(self.args, "host", "127.0.0.1"),
                 "port": getattr(self.args, "port", 19530),
                 "collection": getattr(self.args, "collection", None),

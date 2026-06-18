@@ -3,6 +3,7 @@ import os
 import os.path
 import pprint
 import sys
+from urllib.parse import urlparse
 
 from mlpstorage_py.benchmarks.base import Benchmark
 from mlpstorage_py.config import (CONFIGS_ROOT_DIR, BENCHMARK_TYPES, EXEC_TYPE, MPIRUN, MLPSTORAGE_BIN_NAME,
@@ -216,8 +217,33 @@ class DLIOBenchmark(Benchmark, abc.ABC):
             f'uri_scheme={uri_scheme}, force_path_style={is_http_scheme and bool(endpoint_url)})'
         )
 
+    @staticmethod
+    def _strip_uri_scheme(value):
+        # DLIO obj_store_lib treats storage_root as a bare bucket/prefix and
+        # unconditionally prepends a scheme when constructing object URIs.
+        # Strip any leading <scheme>:// so DLIO doesn't produce s3://s3://...
+        # See issue #392.
+        if '://' not in value:
+            return value
+        parsed = urlparse(value)
+        if not parsed.scheme:
+            return value
+        normalized = (parsed.netloc + parsed.path).rstrip('/')
+        return normalized or parsed.netloc
+
     def process_dlio_params(self, config_file):
         params_dict = dict() if not self.args.params else {k: v for k, v in (item.split("=") for item in self.args.params)}
+
+        storage_root = params_dict.get('storage.storage_root')
+        if storage_root:
+            normalized = DLIOBenchmark._strip_uri_scheme(storage_root)
+            if normalized != storage_root:
+                self.logger.debug(
+                    f"Normalized storage.storage_root: {storage_root!r} -> {normalized!r} "
+                    f"(scheme stripped to avoid DLIO double-prefix bug, issue #392)"
+                )
+                params_dict['storage.storage_root'] = normalized
+
         yaml_params = read_config_from_file(os.path.join(self.DLIO_CONFIG_PATH, "workload", config_file))
         combined_params = update_nested_dict(yaml_params, create_nested_dict(params_dict))
 

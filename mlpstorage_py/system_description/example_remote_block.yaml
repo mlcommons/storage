@@ -41,11 +41,20 @@ system_under_test:
               - vendor_name: Micron
                 model_name: X9000 TLC
                 interface: nvme
+                media_type: TLC
                 capacity_in_GB: 8000
                 unit_count: 8
+                performance:
+                    seq_read_MBps: 14000
+                    seq_write_MBps: 10000
+                    random_read_IOPS: 2700000
+                    random_write_IOPS: 400000
+                    form_factor: U.2
+                    interface_speed: PCIe Gen5 x4
               - vendor_name: Micron
                 model_name: X1650 QLC
                 interface: nvme
+                media_type: QLC
                 capacity_in_GB: 24000
                 unit_count: 8
           operating_system:

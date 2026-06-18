@@ -38,7 +38,7 @@ class ResultsDirectoryValidator:
     Expected structure:
     results_dir/
         <benchmark_type>/           # training, checkpointing, vector_database, kv_cache
-            <model>/                # unet3d, resnet50, llama3-8b, etc.
+            <model>/                # unet3d, retinanet, llama3-8b, etc.
                 <command>/          # run, datagen (for training)
                     <datetime>/     # YYYYMMDD_HHMMSS format
                         *_metadata.json
@@ -245,6 +245,12 @@ Expected results directory structure:
           20250115_150000/
             checkpointing_llama3-8b_metadata.json
             summary.json
+
+    vector_database/
+      milvus/                          # VDB engine (--vdb-engine)
+        run/
+          20250115_160000/
+            vector_database_20250115_160000_metadata.json
 
     kv_cache/
       llama3.1-8b/

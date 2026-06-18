@@ -1797,7 +1797,7 @@ def generate_output_location(benchmark, datetime_str=None, **kwargs):
         benchmark (Benchmark): benchmark (e.g., 'training', 'vectordb', 'checkpoint')
         datetime_str (str, optional): Datetime string for the run. If None, current datetime is used.
         **kwargs: Additional benchmark-specific parameters:
-            - model (str): For training benchmarks, the model name (e.g., 'unet3d', 'resnet50')
+            - model (str): For training benchmarks, the model name (e.g., 'unet3d', 'retinanet')
             - category (str): For vectordb benchmarks, the category (e.g., 'throughput', 'latency')
 
     Returns:

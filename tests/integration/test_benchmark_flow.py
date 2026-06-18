@@ -608,7 +608,6 @@ class TestKVCacheRunIntegration:
             closed=False, open=False,
         )
         output_dir = str(tmp_path / 'run_output')
-        os.makedirs(output_dir, exist_ok=True)
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen, \
              patch('mlpstorage_py.benchmarks.kvcache.KVCacheBenchmark._collect_cluster_information',
                    return_value=None):

@@ -19,10 +19,13 @@ dataset:
   record_length_bytes_stdev: 68341808
   record_length_bytes_resize: 2097152
   
-reader: 
+reader:
   data_loader: pytorch
   batch_size: 7
   read_threads: 4
+  # Avoid spawn-context SemLock reap by systemd-logind RemoveIPC=yes. See #447.
+  # DLIO auto-promotes fork->spawn for s3dlio / s3torchconnector.
+  multiprocessing_context: fork
   file_shuffle: seed
   sample_shuffle: seed
 

@@ -733,6 +733,12 @@ class DLIOResultParser:
             benchmark_type = BENCHMARK_TYPES.checkpointing
             command = "run"
 
+        if benchmark_type is None:
+            raise ValueError(
+                f"Could not determine benchmark type for {result_dir}: "
+                "summary.json lacks workflow signal and no Hydra configs found"
+            )
+
         model = hydra_workload_config.get('model', {}).get("name")
         if model:
             model = model.replace("llama_", "llama3-")

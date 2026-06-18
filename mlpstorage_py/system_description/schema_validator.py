@@ -85,6 +85,27 @@ class DriveInterface(str, Enum):
     other = 'other'
 
 
+class DriveMediaType(str, Enum):
+    HDD   = 'HDD'
+    TLC   = 'TLC'
+    QLC   = 'QLC'
+    other = 'other'
+
+
+class DriveFormFactor(str, Enum):
+    U_2     = 'U.2'
+    U_3     = 'U.3'
+    M_2     = 'M.2'
+    E1_S    = 'E1.S'
+    E1_L    = 'E1.L'
+    E3_S    = 'E3.S'
+    E3_L    = 'E3.L'
+    in_2_5  = '2.5in'
+    in_3_5  = '3.5in'
+    AIC     = 'AIC'
+    other   = 'other'
+
+
 class PowerEfficiency(str, Enum):
     Standard = 'Standard'
     Bronze   = 'Bronze'
@@ -138,13 +159,29 @@ class NetworkPort(StrictModel):
     traffic:     List[TrafficType] = Field(min_length=1)
 
 
-class DriveInstance(StrictModel):
+class DrivePerformance(BaseModel):
+    """Vendor-published spec-sheet performance for a drive.
+
+    Whole block is optional on DriveInstance; if present, the four throughput/IOPS
+    fields are required.  form_factor and interface_speed remain optional.
+    """
+    seq_read_MBps:      int                        = Field(ge=1)   # base-10 MB/s
+    seq_write_MBps:     int                        = Field(ge=1)   # base-10 MB/s
+    random_read_IOPS:   int                        = Field(ge=1)   # 4KB random
+    random_write_IOPS:  int                        = Field(ge=1)   # 4KB random
+    form_factor:        Optional[DriveFormFactor]  = None
+    interface_speed:    Optional[str]              = Field(default=None, min_length=1)
+
+
+class DriveInstance(BaseModel):
     """One homogeneous group of storage drives sharing the same model and configuration."""
-    unit_count:      int            = Field(ge=1)
-    vendor_name:     str            = Field(min_length=1)
-    model_name:      str            = Field(min_length=1)
+    unit_count:      int                          = Field(ge=1)
+    vendor_name:     str                          = Field(min_length=1)
+    model_name:      str                          = Field(min_length=1)
     interface:       DriveInterface
-    capacity_in_GB:  int            = Field(ge=1)  # base-10 GB
+    media_type:      DriveMediaType                              # HDD vs flash cell type
+    capacity_in_GB:  int                          = Field(ge=1)  # base-10 GB
+    performance:     Optional[DrivePerformance]   = None
 
 
 # ---------------------------------------------------------------------------

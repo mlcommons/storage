@@ -39,7 +39,7 @@ class Config:
         # .get returns None for unknown model names — the caller decides
         # whether the per-model lookup is critical (skip with a diagnostic)
         # or expected to always resolve. Non-conforming workload directory
-        # names (e.g. "unet3d_a100", "cosmoflow-20N-6PPN-A100") flagged by
+        # names (e.g. "unet3d_a100", "retinanet-20N-6PPN-A100") flagged by
         # 2.1.11 trainingWorkloads would otherwise crash this dict lookup.
         return NUM_DATASET_TRAIN_FILES.get(model)
 

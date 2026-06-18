@@ -76,7 +76,7 @@ _REQUIRED_SUBMITTER_SUBDIRS = _REQUIRED_SUBMITTER_SUBDIRS_CLOSED
 _VALID_WORKLOAD_CATEGORIES = frozenset({"training", "checkpointing"})
 
 # Valid training workload names under training/
-_VALID_TRAINING_WORKLOADS = frozenset({"unet3d", "resnet50", "cosmoflow"})
+_VALID_TRAINING_WORKLOADS = frozenset({"unet3d", "retinanet"})
 
 # Valid training phase directories under training/<workload>/
 _VALID_TRAINING_PHASES = frozenset({"datagen", "run"})
@@ -853,7 +853,7 @@ class SubmissionStructureCheck(BaseCheck):
 
     @rule("2.1.11", "trainingWorkloads")
     def training_workloads_check(self):
-        """STRUCT-11: training/ must contain only {unet3d, resnet50, cosmoflow}."""
+        """STRUCT-11: training/ must contain only {unet3d, retinanet}."""
         valid = True
         for _division, _submitter, sub_path in self._iter_submitter_dirs():
             results_path = os.path.join(sub_path, "results")
@@ -871,7 +871,7 @@ class SubmissionStructureCheck(BaseCheck):
                             "2.1.11", "trainingWorkloads",
                             os.path.join(training_path, workload),
                             "unknown training workload %r "
-                            "(valid: unet3d, resnet50, cosmoflow)",
+                            "(valid: unet3d, retinanet)",
                             workload,
                         )
                         valid = False

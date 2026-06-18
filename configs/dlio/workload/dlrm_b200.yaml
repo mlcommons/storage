@@ -629,6 +629,9 @@ reader:
   batch_size: 12288
   prefetch_size: 0
   read_threads: 0   # single-process, no IPC overhead; ThreadPoolExecutor handles I/O
+  # Avoid spawn-context SemLock reap by systemd-logind RemoveIPC=yes. See #447.
+  # DLIO auto-promotes fork->spawn for s3dlio / s3torchconnector.
+  multiprocessing_context: fork
   file_shuffle: seed
 
 train:

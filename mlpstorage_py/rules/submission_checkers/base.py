@@ -92,3 +92,26 @@ class MultiRunRulesChecker(RulesChecker):
                 actual=list(models)
             )
         return None
+
+    def check_benchmark_type_consistency(self) -> Optional[Issue]:
+        """
+        Verify all runs share the same benchmark_type.
+
+        BenchmarkVerifier already rejects mixed-type inputs in its dispatch
+        (verifier.py:_create_rules_checker), but a caller that constructs a
+        MultiRunRulesChecker directly bypasses that guard. Enforcing it here
+        defends against silent grouping bugs when a model name happens to
+        coincide across benchmark types.
+        """
+        types = {run.benchmark_type for run in self.benchmark_runs}
+        if len(types) > 1:
+            return Issue(
+                validation=PARAM_VALIDATION.INVALID,
+                message="Inconsistent benchmark types across runs in submission",
+                parameter="benchmark_type",
+                expected="Single benchmark_type",
+                actual=sorted(
+                    t.name if t is not None else "None" for t in types
+                ),
+            )
+        return None

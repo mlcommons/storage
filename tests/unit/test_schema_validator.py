@@ -121,6 +121,32 @@ def _switch(rack_units=2, unit_count=1) -> dict:
     }
 
 
+def _drive_performance() -> dict:
+    return {
+        "seq_read_MBps": 14000,
+        "seq_write_MBps": 10000,
+        "random_read_IOPS": 2700000,
+        "random_write_IOPS": 400000,
+        "form_factor": "U.2",
+        "interface_speed": "PCIe Gen5 x4",
+    }
+
+
+def _drive(with_performance=False, **overrides) -> dict:
+    d = {
+        "unit_count": 8,
+        "vendor_name": "Micron",
+        "model_name": "X9000 TLC",
+        "interface": "nvme",
+        "media_type": "TLC",
+        "capacity_in_GB": 8000,
+    }
+    if with_performance:
+        d["performance"] = _drive_performance()
+    d.update(overrides)
+    return d
+
+
 def _capabilities(sw=True, sr=True, remap=0) -> dict:
     return {
         "multi_host": True,
@@ -415,7 +441,7 @@ class TestBaseSchemaValidation:
         doc = _onprem_doc()
         doc["system_under_test"]["product_nodes"][0]["drives"] = [{
             "unit_count": 1, "vendor_name": "Micron", "model_name": "9400",
-            "interface": "fibrechannel", "capacity_in_GB": 8000,
+            "interface": "fibrechannel", "media_type": "TLC", "capacity_in_GB": 8000,
         }]
         fail(doc)
 
@@ -866,3 +892,102 @@ class TestNetworkingRequirements:
         doc = _cloud_doc()
         del doc["system_under_test"]["clients"][0]["networking"]
         fail(doc, "clients[0].networking")
+
+
+# ---------------------------------------------------------------------------
+# DriveInstance: media_type required; performance block optional but, if
+# present, its four throughput/IOPS fields are required.
+# ---------------------------------------------------------------------------
+
+class TestDriveInstance:
+    def _doc_with_drives(self, *drives) -> dict:
+        doc = _onprem_doc()
+        doc["system_under_test"]["product_nodes"][0]["drives"] = list(drives)
+        return doc
+
+    # ----- media_type (required) -----
+
+    def test_drive_without_performance_passes(self):
+        ok(self._doc_with_drives(_drive()))
+
+    def test_drive_missing_media_type_fails(self):
+        d = _drive()
+        del d["media_type"]
+        fail(self._doc_with_drives(d), "media_type")
+
+    def test_drive_invalid_media_type_fails(self):
+        fail(self._doc_with_drives(_drive(media_type="SLC")), "media_type")
+
+    def test_drive_media_type_HDD_passes(self):
+        ok(self._doc_with_drives(_drive(media_type="HDD")))
+
+    def test_drive_media_type_QLC_passes(self):
+        ok(self._doc_with_drives(_drive(media_type="QLC")))
+
+    def test_drive_media_type_other_passes(self):
+        ok(self._doc_with_drives(_drive(media_type="other")))
+
+    # ----- performance block (optional) -----
+
+    def test_drive_with_full_performance_passes(self):
+        ok(self._doc_with_drives(_drive(with_performance=True)))
+
+    def test_drive_performance_without_optional_fields_passes(self):
+        d = _drive(with_performance=True)
+        del d["performance"]["form_factor"]
+        del d["performance"]["interface_speed"]
+        ok(self._doc_with_drives(d))
+
+    def test_drive_performance_missing_seq_read_fails(self):
+        d = _drive(with_performance=True)
+        del d["performance"]["seq_read_MBps"]
+        fail(self._doc_with_drives(d), "seq_read_MBps")
+
+    def test_drive_performance_missing_seq_write_fails(self):
+        d = _drive(with_performance=True)
+        del d["performance"]["seq_write_MBps"]
+        fail(self._doc_with_drives(d), "seq_write_MBps")
+
+    def test_drive_performance_missing_random_read_fails(self):
+        d = _drive(with_performance=True)
+        del d["performance"]["random_read_IOPS"]
+        fail(self._doc_with_drives(d), "random_read_IOPS")
+
+    def test_drive_performance_missing_random_write_fails(self):
+        d = _drive(with_performance=True)
+        del d["performance"]["random_write_IOPS"]
+        fail(self._doc_with_drives(d), "random_write_IOPS")
+
+    def test_drive_performance_zero_seq_read_fails(self):
+        d = _drive(with_performance=True)
+        d["performance"]["seq_read_MBps"] = 0
+        fail(self._doc_with_drives(d), "seq_read_MBps")
+
+    def test_drive_performance_negative_iops_fails(self):
+        d = _drive(with_performance=True)
+        d["performance"]["random_write_IOPS"] = -1
+        fail(self._doc_with_drives(d), "random_write_IOPS")
+
+    def test_drive_performance_invalid_form_factor_fails(self):
+        d = _drive(with_performance=True)
+        d["performance"]["form_factor"] = "PCIe"
+        fail(self._doc_with_drives(d), "form_factor")
+
+    def test_drive_performance_valid_form_factors(self):
+        for ff in ["U.2", "U.3", "M.2", "E1.S", "E1.L", "E3.S", "E3.L",
+                   "2.5in", "3.5in", "AIC", "other"]:
+            d = _drive(with_performance=True)
+            d["performance"]["form_factor"] = ff
+            ok(self._doc_with_drives(d))
+
+    def test_drive_performance_empty_interface_speed_fails(self):
+        d = _drive(with_performance=True)
+        d["performance"]["interface_speed"] = ""
+        fail(self._doc_with_drives(d), "interface_speed")
+
+    def test_mixed_drive_groups(self):
+        """Drives list can mix entries with and without the performance block."""
+        ok(self._doc_with_drives(
+            _drive(with_performance=True),
+            _drive(model_name="X1650 QLC", media_type="QLC", capacity_in_GB=24000),
+        ))

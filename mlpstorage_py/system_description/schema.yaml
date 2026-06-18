@@ -98,7 +98,23 @@ drive_instance:
     vendor_name:                str( min=1 )        # The name of the vendor who supplies this drive
     model_name:                 str( min=1 )        # The vendor's model name for this drive
     interface:                  enum( 'nvme', 'SAS', 'SATA', 'other' )
+    media_type:                 enum( 'HDD', 'TLC', 'QLC', 'other' )    # Spinning disk or NAND cell type
     capacity_in_GB:             int( min=1 )        # in base 10 GB, not in GiB
+    performance:                include( 'drive_performance', required=False )
+
+---
+#
+# Vendor-published (spec-sheet) performance numbers for a drive.  This whole block is
+# optional; if you include it, the four throughput/IOPS values are required.  These
+# describe nameplate capability of an individual drive, not measured benchmark results.
+#
+drive_performance:
+    seq_read_MBps:              int( min=1 )        # Sequential read throughput, MB/s (base 10)
+    seq_write_MBps:             int( min=1 )        # Sequential write throughput, MB/s (base 10)
+    random_read_IOPS:           int( min=1 )        # 4KB random read IOPS
+    random_write_IOPS:          int( min=1 )        # 4KB random write IOPS
+    form_factor:                enum( 'U.2', 'U.3', 'M.2', 'E1.S', 'E1.L', 'E3.S', 'E3.L', '2.5in', '3.5in', 'AIC', 'other', required=False )
+    interface_speed:            str( min=1, required=False )    # Negotiated link, eg "PCIe Gen5 x4", "SAS-4 24G", "SATA 6G"
 
 ---
 #

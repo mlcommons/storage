@@ -99,27 +99,23 @@ CHECKPOINT_REQUIRED_FOLDERS = {
 
 # TODO: Ask for correct values
 NUM_DATASET_TRAIN_FILES = {
-    "cosmoflow": 524288,
-    "resnet50": 10391,
-    "unet3d": 14000
+    "unet3d": 14000,
+    "retinanet": 0
 }
 
 NUM_DATASET_EVAL_FILES = {
-    "cosmoflow": 0,
-    "resnet50": 0,
-    "unet3d": 0
+    "unet3d": 0,
+    "retinanet": 0
 }
 
 NUM_DATASET_TRAIN_FOLDERS = {
-    "cosmoflow": 0,
-    "resnet50": 0,
-    "unet3d": 0
+    "unet3d": 0,
+    "retinanet": 0
 }
 
 NUM_DATASET_EVAL_FOLDERS = {
-    "cosmoflow": 0,
-    "resnet50": 0,
-    "unet3d": 0
+    "unet3d": 0,
+    "retinanet": 0
 }
 
 CHECKPOINT_FILE_MAP = {

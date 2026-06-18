@@ -26,6 +26,7 @@ from mlpstorage_py.benchmarks.base import Benchmark
 from mlpstorage_py.config import (
     BENCHMARK_TYPES,
     KVCACHE_DEFAULT_DURATION,
+    KVCACHE_MODEL_DEFAULT,
 )
 from mlpstorage_py.interfaces import BenchmarkCommand
 from mlpstorage_py.utils import generate_mpi_prefix_cmd, MLPSJsonEncoder
@@ -77,6 +78,13 @@ class KVCacheBenchmark(Benchmark):
             cluster_collector: Optional cluster collector for DI.
             validator: Optional validator for DI.
         """
+        # Closed-mode kvcache CLI does not expose --model (the model is fixed),
+        # so args.model may be absent. The model is required as a path
+        # component (kv_cache/<model>/<command>/<datetime>/) and as a
+        # workload-grouping key, so guarantee args.model is set with the
+        # closed-mode default before the base class computes the output path.
+        if getattr(args, "model", None) is None:
+            args.model = KVCACHE_MODEL_DEFAULT
         super().__init__(args, logger, run_datetime, run_number,
                          cluster_collector, validator)
 
@@ -93,8 +101,8 @@ class KVCacheBenchmark(Benchmark):
             "datasize": self._execute_datasize,
         }
 
-        # Store key parameters
-        self.model = getattr(args, 'model', 'llama3.1-8b')
+        # Store key parameters. args.model is guaranteed above.
+        self.model = args.model
         self.num_users = getattr(args, 'num_users', 100)
         self.duration = getattr(args, 'duration', KVCACHE_DEFAULT_DURATION)
 

@@ -409,10 +409,20 @@ class MultiTierCache:
 
                 with self.stats_lock:
                     self.stats['evictions'] += 1
+
+                    # An eviction reads the entry out of from_tier and writes
+                    # it into to_tier.  Track both so the per-tier byte counters
+                    # (and the bandwidth derived from them) reflect data that
+                    # reaches a tier via eviction, not just direct allocation.
+                    from_stats_name = 'storage' if from_tier == 'nvme' else from_tier
+                    self.stats[f'tier_{from_stats_name}_kv_bytes_read'] += size
+
                     if to_tier == 'cpu':
                         self.stats['offloads_cpu'] += 1
+                        self.stats['tier_cpu_kv_bytes_written'] += size
                     elif to_tier == 'nvme':
                         self.stats['offloads_storage'] += 1
+                        self.stats['tier_storage_kv_bytes_written'] += size
                         bytes_per_token = (self.model_config.kv_cache_size_per_token
                                           // max(1, self.tensor_parallel))
                         if bytes_per_token > 0:
@@ -826,7 +836,8 @@ class MultiTierCache:
                         self.stats['storage_read_host_latencies'].append(timing.host)
 
                         if self.model_config.kv_cache_size_per_token > 0:
-                            num_tokens = entry_size / self.model_config.kv_cache_size_per_token
+                            sharded_bytes_per_token = self.model_config.kv_cache_size_per_token / max(1, self.tensor_parallel)
+                            num_tokens = entry_size / sharded_bytes_per_token
                             self.stats['storage_tokens_processed'] += num_tokens
 
                 return location, timing.total

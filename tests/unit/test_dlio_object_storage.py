@@ -409,6 +409,42 @@ class TestProcessDlioParams:
         params_dict, _, _ = DLIOBenchmark.process_dlio_params(obj, 'fake.yaml')
         assert params_dict == {}
 
+    # ----- Issue #392: storage_root scheme stripping ------------------------
+
+    @pytest.mark.parametrize('raw,expected', [
+        ('s3://mlperf-data/unet3d', 'mlperf-data/unet3d'),
+        ('s3://mlperf-data/unet3d/', 'mlperf-data/unet3d'),
+        ('s3://mybucket', 'mybucket'),
+        ('s3://mybucket/', 'mybucket'),
+        ('az://container/path', 'container/path'),
+        ('gs://bucket/prefix/deeper', 'bucket/prefix/deeper'),
+        ('mybucket', 'mybucket'),
+        ('mybucket/prefix', 'mybucket/prefix'),
+    ])
+    def test_strip_uri_scheme(self, raw, expected):
+        assert DLIOBenchmark._strip_uri_scheme(raw) == expected
+
+    @patch('mlpstorage_py.benchmarks.dlio.read_config_from_file')
+    def test_storage_root_scheme_stripped_when_passed_full_uri(self, mock_rcf):
+        # Reporter's #392 command: storage.storage_root=s3://mlperf-data/unet3d
+        # must be normalized so DLIO doesn't produce s3://s3://... object URIs.
+        mock_rcf.return_value = _YAML_FIXTURE
+        obj = _make_chain_obj(params=[
+            'storage.storage_library=s3dlio',
+            'storage.storage_type=s3',
+            'storage.storage_root=s3://mlperf-data/unet3d',
+        ])
+        params_dict, _, _ = DLIOBenchmark.process_dlio_params(obj, 'fake.yaml')
+        assert params_dict['storage.storage_root'] == 'mlperf-data/unet3d'
+        assert params_dict['storage.storage_type'] == 's3'
+
+    @patch('mlpstorage_py.benchmarks.dlio.read_config_from_file')
+    def test_storage_root_bare_bucket_passes_through(self, mock_rcf):
+        mock_rcf.return_value = _YAML_FIXTURE
+        obj = _make_chain_obj(params=['storage.storage_root=mybucket'])
+        params_dict, _, _ = DLIOBenchmark.process_dlio_params(obj, 'fake.yaml')
+        assert params_dict['storage.storage_root'] == 'mybucket'
+
 
 class TestProcessDlioParamsFullChain:
     """

@@ -17,32 +17,40 @@ system_under_test:
     clients:
         - friendly_description: Data
           quantity: 1
-          chassis: 
-             model_name: Supermicro 2U Hyper A+ Server (AS -2125HS-TNR)
-             rack_units: 2
-             cpu_model: AMD EPYC 9354 32-Core Processor
+          chassis:
+             model_name: Dell7680
+             rack_units: 1
+             cpu_model: XEON 90000
              cpu_qty: 2
-             cpu_cores: 32
+             cpu_cores: 96
              memory_capacity: 256
              power:
                 min_psus_active: 1
                 psus_configured:
-                    - nameplate_power_watts: 1600
+                    - nameplate_power_watts: 1800
                       inlet_voltage: 120
                       efficiency: Platinum
                       unit_count: 2
+          drives:
+              - vendor_name: Micron
+                model_name: X9000 TLC
+                interface: nvme
+                media_type: TLC
+                capacity_in_GB: 8000
+                unit_count: 1
+                performance:
+                    seq_read_MBps: 14000
+                    seq_write_MBps: 10000
+                    random_read_IOPS: 2700000
+                    random_write_IOPS: 400000
+                    form_factor: U.2
+                    interface_speed: PCIe Gen5 x4
           networking:
              - unit_count: 1
                type: ethernet
                speed: 1
                traffic:
                   - management
-          drives:
-             - unit_count: 1
-               vendor_name: Sandisk
-               model_name: SN861
-               interface: nvme
-               capacity_in_GB: 15360
           operating_system:
              name: Ubuntu
              version: "24.04.2 LTS"

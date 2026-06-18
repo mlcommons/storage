@@ -355,7 +355,7 @@ def _main_impl():
         print_run_summary(args)
 
     # For other commands, run the benchmark
-    for i in range(args.loops):
+    for i in range(getattr(args, 'loops', 1)):
         if signal_received:
             logger.warning('Caught signal, exiting...')
             return EXIT_CODE.INTERRUPTED

@@ -2492,6 +2492,43 @@ class TestThreeTierEvictionCascade:
         assert cache.stats['offloads_storage'] > 0, \
             "At least one CPU → NVMe demotion should have occurred"
 
+        # --- Per-tier byte counters must reflect eviction-driven I/O ---
+        # New entries are always admitted to GPU (the top tier); data only
+        # reaches CPU and NVMe here via _demote_entry().  Regression guard for
+        # issue #408: those demote paths must increment the destination tier's
+        # written-bytes counter (and the source tier's read-bytes counter),
+        # otherwise tier_{cpu,storage}_kv_bytes_written_gb report 0 even though
+        # offloads_{cpu,storage} prove data is moving.
+        assert cache.stats['tier_cpu_kv_bytes_written'] > 0, \
+            "GPU → CPU demotions must increment tier_cpu_kv_bytes_written"
+        assert cache.stats['tier_storage_kv_bytes_written'] > 0, \
+            "CPU → NVMe demotions must increment tier_storage_kv_bytes_written"
+        assert cache.stats['tier_gpu_kv_bytes_read'] > 0, \
+            "GPU → CPU demotions read out of GPU; tier_gpu_kv_bytes_read must rise"
+        assert cache.stats['tier_cpu_kv_bytes_read'] > 0, \
+            "CPU → NVMe demotions read out of CPU; tier_cpu_kv_bytes_read must rise"
+
+        # Byte conservation: this test only allocates (no access_cache reads),
+        # and every admit lands on GPU, so the only reads out of GPU/CPU are
+        # demotions and the only writes into CPU/NVMe are demotions.  Each
+        # demote moves exactly `size` bytes from from_tier to to_tier, so the
+        # read-out total of a tier must equal the written-in total of the tier
+        # below it.  This pins the accounting to demotion specifically.
+        assert cache.stats['tier_gpu_kv_bytes_read'] == cache.stats['tier_cpu_kv_bytes_written'], \
+            "Every byte read out of GPU during demotion must be written into CPU"
+        assert cache.stats['tier_cpu_kv_bytes_read'] == cache.stats['tier_storage_kv_bytes_written'], \
+            "Every byte read out of CPU during demotion must be written into NVMe"
+
+        # The user-facing summary (results.json → cache_stats) must expose the
+        # non-zero GB values and the bandwidth derived from them.
+        summary = cache.get_stats(duration=1.0)
+        assert summary['tier_cpu_kv_bytes_written_gb'] > 0, \
+            "tier_cpu_kv_bytes_written_gb must be non-zero when CPU receives evictions"
+        assert summary['tier_storage_kv_bytes_written_gb'] > 0, \
+            "tier_storage_kv_bytes_written_gb must be non-zero when NVMe receives evictions"
+        assert summary['tier_storage_write_bandwidth_gbps'] > 0, \
+            "tier_storage_write_bandwidth_gbps is derived from the byte counter and must be non-zero"
+
         # --- Phase 3: Verify early keys were deleted from all tiers ---
         # With 50 entries and ~24 capacity, about half should be gone
         total_entries = len(cache.cache_entries)
@@ -3976,6 +4013,53 @@ class TestValidateNewTraceArgs:
         valid_args.replay_cycles = 5
         result = validate_args(valid_args)
         assert result.replay_cycles == 5
+
+
+# =============================================================================
+# Regression: storage_tokens_processed under tensor_parallel > 1 (PR #402)
+# =============================================================================
+
+class TestStorageTokensProcessedTensorParallel:
+    """storage_tokens_processed counts logical tokens, independent of
+    tensor_parallel. Per-token storage bytes are sharded across TP ranks, but
+    the token count itself is invariant. The NVMe-read path previously
+    referenced an undefined ``kv_cache_size_per_token`` (missing the
+    ``self.model_config.`` prefix); this regression covers both that bug and
+    the original tensor_parallel undercount.
+    """
+
+    @pytest.mark.parametrize("tensor_parallel", [1, 2, 4])
+    def test_nvme_write_adds_logical_token_count(self, tiny_model_config, tensor_parallel, tmp_path):
+        cache = MultiTierCache(
+            model_config=tiny_model_config,
+            gpu_memory_gb=0, cpu_memory_gb=0,
+            cache_dir=str(tmp_path),
+            tensor_parallel=tensor_parallel, seed=42,
+        )
+        num_tokens = 64
+        ok, loc, _ = cache.allocate_cache("k", num_tokens=num_tokens,
+                                          phase=InferencePhase.PREFILL)
+        assert ok and loc == 'nvme'
+        assert cache.stats['storage_tokens_processed'] == num_tokens
+
+    @pytest.mark.parametrize("tensor_parallel", [1, 2, 4])
+    def test_nvme_read_adds_logical_token_count(self, tiny_model_config, tensor_parallel, tmp_path):
+        cache = MultiTierCache(
+            model_config=tiny_model_config,
+            gpu_memory_gb=0, cpu_memory_gb=0,
+            cache_dir=str(tmp_path),
+            tensor_parallel=tensor_parallel, seed=42,
+        )
+        num_tokens = 64
+        ok, loc, _ = cache.allocate_cache("k", num_tokens=num_tokens,
+                                          phase=InferencePhase.PREFILL)
+        assert ok and loc == 'nvme'
+
+        before = cache.stats['storage_tokens_processed']
+        read_loc, _ = cache.access_cache("k", phase=InferencePhase.DECODE)
+        assert read_loc == 'nvme'
+        delta = cache.stats['storage_tokens_processed'] - before
+        assert delta == pytest.approx(num_tokens, rel=1e-9)
 
 
 # =============================================================================
