@@ -28,9 +28,14 @@ from mlpstorage_py.errors import ConfigurationError
 
 
 def _benchmark(mode: str, model: str = "unet3d", command: str = "datagen",
-               benchmark_type=BENCHMARK_TYPES.training, results_dir: str = "/tmp/r"):
+               benchmark_type=BENCHMARK_TYPES.training, results_dir: str = "/tmp/r",
+               index_type: str | None = None):
     """Build a minimal benchmark stand-in with the attributes
     ``generate_output_location`` reads.
+
+    ``index_type`` is set for vector_database benchmarks; the runtime path for
+    that type includes a per-index_type segment so AISAQ results are kept
+    separate from DISKANN/HNSW (they're not comparable).
     """
     args = types.SimpleNamespace(
         mode=mode,
@@ -38,6 +43,8 @@ def _benchmark(mode: str, model: str = "unet3d", command: str = "datagen",
         model=model,
         command=command,
     )
+    if index_type is not None:
+        args.index_type = index_type
     return types.SimpleNamespace(args=args, BENCHMARK_TYPE=benchmark_type)
 
 
@@ -106,22 +113,40 @@ def test_open_training_prefix():
     ), path
 
 
-def test_open_vector_database_prefix():
-    """OPEN with vector_database type also gets the closed/open + systemname
-    prefix; legacy per-type tail (vector_database/<command>/<datetime>) is
-    preserved."""
+def test_open_vector_database_prefix_includes_index_type():
+    """vector_database results are split by index_type because AISAQ results
+    are not comparable to DISKANN/HNSW results. The runtime path must include
+    the <index_type> segment between <type> and <command> for OPEN."""
     from mlpstorage_py.rules.utils import generate_output_location
 
     b = _benchmark(
         mode="open",
         command="run",
         benchmark_type=BENCHMARK_TYPES.vector_database,
+        index_type="DISKANN",
     )
     path = generate_output_location(
         b, datetime_str="X", orgname="acme", systemname="sys-1",
     )
     assert path.startswith(
-        "/tmp/r/open/acme/results/sys-1/vector_database/run/"
+        "/tmp/r/open/acme/results/sys-1/vector_database/DISKANN/run/"
+    ), path
+
+
+def test_closed_vector_database_prefix_includes_index_type():
+    """Same contract on the CLOSED side: <index_type> sits between <type>
+    and <command>."""
+    from mlpstorage_py.rules.utils import generate_output_location
+
+    b = _benchmark(
+        mode="closed",
+        command="run",
+        benchmark_type=BENCHMARK_TYPES.vector_database,
+        index_type="AISAQ",
+    )
+    path = generate_output_location(b, datetime_str="X", orgname="acme")
+    assert path.startswith(
+        "/tmp/r/closed/acme/vector_database/AISAQ/run/"
     ), path
 
 

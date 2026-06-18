@@ -830,14 +830,16 @@ class TestStruct06_OpenCodeDirectory:
         ]
         assert unconfigured == [], unconfigured
 
-    # ----- vector_database / kv_cache: no <model> level under <type> -----
-    def test_open_vector_database_code_dir_at_type_level(self, tmp_path, mock_logger):
-        """vector_database has no <model> segment in its runtime output path
-        (generate_output_location writes <type>/<command>/<datetime>/), so the
-        captured code/ lives at results/<sys>/vector_database/code/ — one level
-        shallower than training/checkpointing. _iter_open_code_dirs must yield
-        the 2-level path for this type, or the validator will silently miss it."""
-        leaf = tmp_path / "open" / "Acme" / "results" / "sys-1" / "vector_database"
+    # ----- vector_database: per-<index_type> leaf (NOT comparable across types) -----
+    def test_open_vector_database_code_dir_at_index_type_level(self, tmp_path, mock_logger):
+        """vector_database results split by index_type because AISAQ results are
+        not comparable to DISKANN/HNSW. _iter_open_code_dirs must walk down to
+        the <index_type> level (same 3-level walk as training/checkpointing's
+        <model> level), yielding results/<sys>/vector_database/<index_type>/code/."""
+        leaf = (
+            tmp_path / "open" / "Acme" / "results" / "sys-1"
+            / "vector_database" / "DISKANN"
+        )
         leaf.mkdir(parents=True)
         code_path = leaf / "code"
         code_path.mkdir()
@@ -846,8 +848,8 @@ class TestStruct06_OpenCodeDirectory:
         check = _make_check(tmp_path, mock_logger)
         result = run_one_check(check, "code_directory_contents_check", mock_logger)
         assert result is True, mock_logger.errors
-        # And the missing variant: vector_database with no code/ must emit one
-        # missing-code violation at the type level.
+        # And the missing variant: vector_database/<index_type>/ with no code/
+        # must emit a missing-code violation at the index_type level.
         shutil.rmtree(code_path)
         mock_logger.errors.clear()
         result = run_one_check(check, "code_directory_contents_check", mock_logger)
@@ -856,10 +858,11 @@ class TestStruct06_OpenCodeDirectory:
             m for m in mock_logger.errors
             if "[2.1.6 codeDirectoryContents]" in m
             and "required code/ directory missing at" in m
-            and m.rstrip().endswith("/vector_database/code")
+            and m.rstrip().endswith("/vector_database/DISKANN/code")
         ]
         assert len(missing_msgs) == 1, mock_logger.errors
 
+    # ----- kv_cache: transitional per-type (no <model> level) -----
     def test_open_kv_cache_code_dir_at_type_level(self, tmp_path, mock_logger):
         """Same contract as vector_database: kv_cache's runtime output omits the
         <model> level (writes <type>/<command>/<datetime>/), so the captured

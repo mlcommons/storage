@@ -225,20 +225,21 @@ class TestCapturePath:
         The helper must emit the same canonical segment so the captured code/ lives
         in the same submission tree the runtime writes results into.
 
-        vector_database has no <model> segment in its runtime output path
-        (generate_output_location writes <type>/<command>/<datetime>/), so the
-        captured code/ lives directly under <type>/, NOT under <type>/<model>/.
+        vector_database splits results by <index_type> because AISAQ results are
+        not comparable to DISKANN/HNSW. The captured code/ lives at
+        <type>/<index_type>/code/ — per-leaf, same depth as training/checkpointing.
         """
-        # Note: vectordb has no --model CLI arg, so args.model must be absent.
+        # vectordb has no --model CLI arg but DOES have --index-type
+        # (argparse stores --index-type as args.index_type).
         args = SimpleNamespace(
             mode="open", command="run", results_dir=str(tmp_path),
-            benchmark="vectordb",
+            benchmark="vectordb", index_type="DISKANN",
         )
         env = {"MLPSTORAGE_ORGNAME": "acme", "MLPSTORAGE_SYSTEMNAME": "rig01"}
         result = capture_or_verify_code_image(args, env, log)
         expected_code = (
             tmp_path / "open" / "acme" / "results" / "rig01"
-            / "vector_database" / "code"
+            / "vector_database" / "DISKANN" / "code"
         )
         assert result == expected_code
         # And the CLI name 'vectordb' must NOT appear as a path segment.
