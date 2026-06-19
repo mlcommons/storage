@@ -611,7 +611,14 @@ def capture_or_verify_code_image(args, env, log):
         # code/ would live in a different tree than the runtime's results.
         # Per Phase 4 D-02 the vector_database type segment on disk is
         # 'vdb_bench', not BENCHMARK_TYPES.vector_database.name.
-        cli_benchmark = getattr(args, "benchmark")
+        # Use getattr(..., None) + typed raise rather than bare getattr.
+        # A bare getattr surfaces AttributeError, which the main.py exit-code
+        # mapping treats as an unhandled crash rather than CodeImageError.
+        cli_benchmark = getattr(args, "benchmark", None)
+        if cli_benchmark is None:
+            raise CodeImageError(
+                "args.benchmark is required for capture-or-verify in OPEN mode"
+            )
         try:
             benchmark_type = _CLI_BENCHMARK_TO_TYPE[cli_benchmark]
         except KeyError:
@@ -627,7 +634,12 @@ def capture_or_verify_code_image(args, env, log):
         # Per-type leaf segment (see _TYPE_TO_LEAF_ATTR for the design rationale).
         leaf_attr = _TYPE_TO_LEAF_ATTR[benchmark_type]
         if leaf_attr is not None:
-            leaf_value = getattr(args, leaf_attr)
+            leaf_value = getattr(args, leaf_attr, None)
+            if leaf_value is None:
+                raise CodeImageError(
+                    f"args.{leaf_attr} is required for "
+                    f"{benchmark_type.name} OPEN capture"
+                )
             # Phase 4 D-03: for vector_database the on-disk index directory
             # uses display-case spellings (DiskANN/HNSW/AiSAQ); args.index_type
             # is UPPERCASE (the CLI / summary.json form). Route via the
