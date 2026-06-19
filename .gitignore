@@ -46,6 +46,7 @@ CLAUDE.md
 .roomodes
 LOCAL_BRANCH_NOTES.md
 .planning/
+.gsd-tmp/
 
 # DLIO test artifacts — created in cwd when running dlio_benchmark tests
 output/
