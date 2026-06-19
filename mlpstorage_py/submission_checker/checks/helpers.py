@@ -24,9 +24,12 @@ References:
 """
 
 import datetime
+import logging
 import os
 import re
 from pathlib import Path
+
+_LOG = logging.getLogger(__name__)
 
 from ..tools.code_checksum import compute_code_tree_md5
 from ..tools.code_image import (
@@ -157,8 +160,19 @@ def _check_filesystem_separation(
     data_mount = _best_mount(real_data)
     results_mount = _best_mount(real_results)
 
-    # If either path cannot be matched to a mount → cannot determine violation; pass
+    # If either path cannot be matched to a mount → indeterminate.
+    # Emit a warning so the gap is grep-visible (a typo'd data_dir would
+    # otherwise silent-pass this check). The pass return is preserved so we
+    # don't false-positive on weird mount tables that nonetheless contain
+    # a legitimate data_dir / results_dir pair the regex can't resolve.
     if data_mount is None or results_mount is None:
+        _LOG.warning(
+            "_check_filesystem_separation: could not match data_dir=%s "
+            "(realpath %s) or results_dir=%s (realpath %s) to any df mount "
+            "in %s; treating as pass (data_mount=%s, results_mount=%s)",
+            data_dir, real_data, results_dir, real_results, logfile_path,
+            data_mount, results_mount,
+        )
         return (True, True)
 
     # Same mount → violation
