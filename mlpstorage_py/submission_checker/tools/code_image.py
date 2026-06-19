@@ -368,8 +368,10 @@ def verify_image_self_consistent(image_dir: Path, log) -> bool:
 def _atomic_capture(source_root: Path, target_dir: Path, log) -> None:
     """Copy source_root to target_dir using identical exclusion logic as hashing (Behavior 5)."""
     source_str = str(source_root)
-    target_dir.mkdir(parents=True, exist_ok=True)
-    
+    # shutil.copytree(..., dirs_exist_ok=True) below creates target_dir on its
+    # own (Python ≥3.8). No need to pre-mkdir — keeping the call shrinks the
+    # window in which target_dir can be in a partial state when copytree starts.
+
     # We use shutil.copytree with a custom ignore function to replicate the
     # predicate's exclusion logic exactly.
     def ignore_logic(curr_dir, contents):
