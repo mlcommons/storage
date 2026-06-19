@@ -235,26 +235,35 @@ def capture_code_image(source_root: Path, target_dir: Path, log) -> CodeImage:
     # Behavior 5: Exclusion delegated to identical logic as hash
     _atomic_capture(source_root, code_tmp, log)
 
-    # Behavior 3/4: Hash the captured copy
-    digest = compute_code_tree_md5(str(code_tmp), log)
-    if digest is None:
-        # This shouldn't happen if _atomic_capture succeeded, but for safety:
-        raise SourceRootNotFound(f"Failed to hash captured tree at {code_tmp}")
+    # D-17 atomicity contract: code.tmp/ must be removed on ANY failure
+    # between copy and rename — otherwise the next attempt finds a stale
+    # tmp tree and only logs a warning. Wrap hash + JSON-write + rename in
+    # try/except BaseException so KeyboardInterrupt / SystemExit also clean up.
+    try:
+        # Behavior 3/4: Hash the captured copy
+        digest = compute_code_tree_md5(str(code_tmp), log)
+        if digest is None:
+            # This shouldn't happen if _atomic_capture succeeded, but for safety:
+            raise SourceRootNotFound(f"Failed to hash captured tree at {code_tmp}")
 
-    # Behavior 6: Build payload
-    payload = {
-        "hash": digest,
-        "algorithm": _ALGORITHM,
-        "captured_at": _now_utc_iso(),
-        "mlpstorage_version": MLPSTORAGE_VERSION,
-        "git_sha": _resolve_git_sha(source_root, log),
-    }
+        # Behavior 6: Build payload
+        payload = {
+            "hash": digest,
+            "algorithm": _ALGORITHM,
+            "captured_at": _now_utc_iso(),
+            "mlpstorage_version": MLPSTORAGE_VERSION,
+            "git_sha": _resolve_git_sha(source_root, log),
+        }
 
-    # Behavior 6: Write JSON
-    _write_hash_file(code_tmp, payload, log)
+        # Behavior 6: Write JSON
+        _write_hash_file(code_tmp, payload, log)
 
-    # Behavior 4: Atomic rename
-    os.rename(str(code_tmp), str(code_dir))
+        # Behavior 4: Atomic rename
+        os.rename(str(code_tmp), str(code_dir))
+    except BaseException:
+        if code_tmp.exists():
+            shutil.rmtree(code_tmp, ignore_errors=True)
+        raise
 
     return CodeImage(path=code_dir, **payload)
 
