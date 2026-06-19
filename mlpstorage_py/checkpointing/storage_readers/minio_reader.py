@@ -12,6 +12,7 @@ import re
 from typing import Dict, Any, List, Optional
 
 from .base import StorageReader
+from mlpstorage_py.storage_config import resolve_object_storage_config
 
 
 class MinIOStorageReader(StorageReader):
@@ -28,31 +29,9 @@ class MinIOStorageReader(StorageReader):
 
     @staticmethod
     def _detect_endpoint() -> Optional[str]:
-        """Mirror endpoint detection from MinIOStorageWriter."""
-        uris_str = os.environ.get('S3_ENDPOINT_URIS')
-        if uris_str:
-            endpoints = [u.strip() for u in uris_str.split(',') if u.strip()]
-            if endpoints:
-                return endpoints[0]
-
-        template = os.environ.get('S3_ENDPOINT_TEMPLATE')
-        if template:
-            endpoints = MinIOStorageReader._expand_template(template)
-            if endpoints:
-                return endpoints[0]
-
-        endpoint_file = os.environ.get('S3_ENDPOINT_FILE')
-        if endpoint_file:
-            try:
-                with open(endpoint_file) as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith('#'):
-                            return line
-            except OSError:
-                pass
-
-        return None
+        """Resolve endpoint via centralized resolver (first non-empty value)."""
+        val, _src = resolve_object_storage_config()['endpoint']
+        return val or None
 
     def __init__(self, uri: str, chunk_size: int = None):
         if not uri.startswith('s3://'):
@@ -77,7 +56,9 @@ class MinIOStorageReader(StorageReader):
         if not access_key or not secret_key:
             raise ValueError("AWS_ACCESS_KEY_ID and AWS_SECRET_ACCESS_KEY must be set")
 
-        endpoint = self._detect_endpoint() or os.environ.get('AWS_ENDPOINT_URL') or os.environ.get('S3_ENDPOINT')
+        _s3cfg = resolve_object_storage_config()
+        endpoint_val, _src = _s3cfg['endpoint']
+        endpoint = endpoint_val or None
 
         if not endpoint:
             endpoint = 's3.amazonaws.com'
@@ -93,7 +74,7 @@ class MinIOStorageReader(StorageReader):
 
         # Support custom CA certificate via AWS_CA_BUNDLE (same env var as s3dlio/boto3).
         http_client = None
-        ca_bundle = os.environ.get('AWS_CA_BUNDLE')
+        ca_bundle = _s3cfg['aws_ca_bundle']
         if secure and ca_bundle:
             import urllib3
             http_client = urllib3.PoolManager(
@@ -111,7 +92,7 @@ class MinIOStorageReader(StorageReader):
             access_key=access_key,
             secret_key=secret_key,
             secure=secure,
-            region=os.environ.get('AWS_REGION', 'us-east-1'),
+            region=_s3cfg['aws_region'],
             http_client=http_client,
         )
         print(f"[MinIOReader] endpoint={endpoint}, bucket={self.bucket_name}, key={self.object_name}")

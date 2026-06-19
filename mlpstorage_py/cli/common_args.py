@@ -8,11 +8,47 @@ This module contains:
 - Validation utilities
 """
 
+import argparse
+
 from mlpstorage_py.config import (
-    CHECKPOINT_RANKS_STRINGS, MODELS, ACCELERATORS, DEFAULT_HOSTS,
+    CHECKPOINT_RANKS_STRINGS, MODELS, ACCELERATORS, ACCELERATORS_CLOSED, DEFAULT_HOSTS,
     LLM_MODELS_STRINGS, MPI_CMDS, EXEC_TYPE, DEFAULT_RESULTS_DIR,
     VECTOR_DTYPES, DISTRIBUTIONS
 )
+
+
+class MLPStorageHelpFormatter(argparse.HelpFormatter):
+    """Argparse formatter for leaf-command help output.
+
+    Positionals (file|object, model, command) are already present in the
+    command path the user typed — the same way ``closed``, ``training``, and
+    ``run`` live in the _prog prefix and never appear again.  This formatter:
+
+    1. Excludes positionals from both the usage line and the detailed sections.
+    2. Lists required options before optional options (both alphabetically)
+       in the usage line and in every argument group.
+    """
+
+    @staticmethod
+    def _sort_opts(actions):
+        required = sorted(
+            [a for a in actions if a.option_strings and a.required],
+            key=lambda a: a.option_strings[0].lstrip('-').lower()
+        )
+        optional = sorted(
+            [a for a in actions if a.option_strings and not a.required],
+            key=lambda a: a.option_strings[0].lstrip('-').lower()
+        )
+        return required + optional
+
+    def _format_usage(self, usage, actions, groups, prefix):
+        return super()._format_usage(
+            usage, self._sort_opts(actions), groups, prefix
+        )
+
+    def add_arguments(self, actions):
+        # Positionals are suppressed — they are already consumed in the command path.
+        super().add_arguments(self._sort_opts(actions))
 
 
 # Help messages dictionary - shared across all argument builders
@@ -51,11 +87,15 @@ HELP_MESSAGES = {
     ),
     'client_hosts': (
         "Space-separated list of IP addresses or hostnames of the participating hosts. "
-        "\nExample: '--hosts 192.168.1.1 192.168.1.2 192.168.1.3' or '--hosts host1 host2 host3'. Slots can "
+        "\nExample: '--hosts 192.168.1.1 192.168.1.2 192.168.1.3' or '--hosts host1 host2 host3'. "
+        "Comma-separated values are also accepted: '--hosts host1,host2,host3'. "
+        "Slots can "
         "be specified by appending ':<num_slots>' to a hostname like so: '--hosts host1:2 host2:2'. This "
         "example will run 2 accelerators on each host. If slots are not specified the number of processes "
         "will be equally distributed across the hosts with any remainder being distributed evenly on the "
-        "remaining hosts in the order they are listed."
+        "remaining hosts in the order they are listed. "
+        "\nDo NOT use '--hosts=h1 h2' (with '=' and space); argparse will only bind 'h1' to --hosts "
+        "and treat 'h2' as a stray positional argument. Use '--hosts h1 h2' or '--hosts=h1,h2' instead."
     ),
     'category': "Benchmark category to be submitted.",
     'results_dir': "Directory where the benchmark results will be saved.",
@@ -163,60 +203,34 @@ PROGRAM_DESCRIPTIONS = {
 }
 
 
-def add_universal_arguments(parser):
+def add_universal_arguments(parser, req_results):
     """Add arguments common to all benchmarks and commands.
 
     Args:
         parser: Argparse parser to add arguments to.
+        req_results: Whether --results-dir is required.
     """
     standard_args = parser.add_argument_group("Standard Arguments")
-    standard_args.add_argument(
-        '--results-dir', '-rd',
-        type=str,
-        default=DEFAULT_RESULTS_DIR,
-        help=HELP_MESSAGES['results_dir']
-    )
-    standard_args.add_argument(
-        '--loops',
-        type=int,
-        default=1,
-        help="Number of times to run the benchmark"
-    )
+    if req_results:
+        standard_args.add_argument(
+            '--results-dir', '-rd',
+            type=str,
+            required=True,
+            default=DEFAULT_RESULTS_DIR,
+            help=HELP_MESSAGES['results_dir']
+        )
+    else:
+        standard_args.add_argument(
+            '--results-dir', '-rd',
+            type=str,
+            default=DEFAULT_RESULTS_DIR,
+            help=HELP_MESSAGES['results_dir']
+        )
+
     standard_args.add_argument(
         '--config-file', '-c',
         type=str,
         help="Path to YAML file with argument overrides"
-    )
-
-    # Create a mutually exclusive group for file/object options
-    access_proto = standard_args.add_mutually_exclusive_group(required=True)
-    access_proto.add_argument(
-        "--file",
-        action="store_true",
-        help="Use POSIX files as the data access method"
-    )
-    access_proto.add_argument(
-        "--object",
-        nargs="?",
-        type=str,
-        const="s3",
-        choices=["s3"],
-        help="Use the given Object API as the data access method, defaults to S3"
-    )
-
-    # Create a mutually exclusive group for closed/open options
-    submission_group = standard_args.add_mutually_exclusive_group()
-    submission_group.add_argument(
-        "--open",
-        action="store_false",
-        dest="closed",
-        default=False,
-        help="Run as an open submission"
-    )
-    submission_group.add_argument(
-        "--closed",
-        action="store_true",
-        help="Run as a closed submission"
     )
 
     output_control = parser.add_argument_group("Output Control")
@@ -236,16 +250,16 @@ def add_universal_arguments(parser):
         default="INFO"
     )
     output_control.add_argument(
-        "--allow-invalid-params", "-aip",
-        action="store_true",
-        help="Do not fail on invalid parameters."
+        '--quiet',
+        action='store_true',
+        help='Suppress run configuration summary table'
     )
 
     view_only_args = parser.add_argument_group("View Only")
     view_only_args.add_argument(
-        "--what-if",
+        "--dry-run",
         action="store_true",
-        help="View the configuration that would execute and the associated command."
+        help="View the configuration that would execute and the associated command. Does not execute."
     )
 
     validation_args = parser.add_argument_group("Validation")
@@ -284,11 +298,56 @@ def add_mpi_arguments(parser):
         action="store_true"
     )
     mpi_options.add_argument(
+        '--mpi-btl',
+        choices=['auto', 'vader', 'tcp'],
+        default='auto',
+        help=(
+            "MPI Byte Transport Layer for single-host runs. "
+            "'auto' lets OpenMPI select automatically (default; works on most systems). "
+            "'vader' forces POSIX shared-memory transport (fast; may fail in containers or as root). "
+            "'tcp' forces TCP loopback transport (universally compatible; recommended for containers "
+            "and root environments). Has no effect on multi-host runs."
+        )
+    )
+    mpi_options.add_argument(
         '--mpi-params',
-        nargs="+",
-        type=str,
         action="append",
-        help="Other MPI parameters that will be passed to MPI"
+        type=str,
+        default=None,
+        metavar="MPI_PARAMS",
+        help=(
+            "Additional parameters passed verbatim to the MPI launcher. "
+            "Pass them as a single quoted string, e.g. "
+            "--mpi-params=\"-genv PMI_VERSION=2 -genv FI_PROVIDER=tcp\". "
+            "Because MPI flags begin with '-', use the '--mpi-params=...' "
+            "(equals) form so argparse does not mistake them for options. "
+            "May be supplied multiple times; values are concatenated."
+        )
+    )
+
+
+def add_storage_type_arguments(parser, required=False):
+    """Add file|object storage-type positional to a subcommand parser.
+
+    Registers 'data_access_protocol' as an optional positional with
+    choices=['file', 'object'], matching the CLI grammar:
+      mlpstorage closed training unet3d run file
+
+    Commands that require storage type (datagen, run, configview) should
+    call this with required=True. Commands that forbid it (datasize) should
+    not call this function at all.
+
+    Args:
+        parser: Argparse subcommand parser to add the positional to.
+        required: Whether the positional is required. Defaults to False.
+    """
+    parser.add_argument(
+        "data_access_protocol",
+        nargs=None if required else "?",
+        choices=["file", "object"],
+        metavar="file|object",
+        default=None,
+        help="Storage access method: 'file' for POSIX filesystem, 'object' for S3-compatible object storage."
     )
 
 
@@ -319,13 +378,12 @@ def add_dlio_arguments(parser):
         type=str,
         help="Path to DLIO binary. Default is the same as mlpstorage binary path"
     )
-    parser.add_argument(
-        '--params', '-p',
-        nargs="+",
-        type=str,
-        action="append",
-        help=HELP_MESSAGES['params']
-    )
+    # --params lives on the per-benchmark builder, not here, because its allowed
+    # keys differ by benchmark and by mode (per the *RunRulesChecker
+    # *_ALLOWED_PARAMS lists and Rules.md §N.6 tables). Builders that need a
+    # CLOSED-allowed dotted-key surface (training — see issue #433) register
+    # --params in their core args; builders without CLOSED-tunable dotted keys
+    # may keep it in open args only.
 
 
 def add_timeseries_arguments(parser):
@@ -333,6 +391,10 @@ def add_timeseries_arguments(parser):
 
     These arguments control the collection of time-series host metrics
     during benchmark execution (HOST-04, HOST-05 requirements).
+
+    This function always adds all three timeseries arguments. It should
+    only be called from open/whatif tier builders — closed builders simply
+    do not call it, ensuring the arguments are absent in closed mode.
 
     Args:
         parser: Argparse parser to add arguments to.

@@ -1,0 +1,64 @@
+system_under_test:
+    solution:
+        submission_name: NAS_Example
+        friendly_description: A generic example of an Enterprise NAS solution
+        architecture:
+            storage_location: remote
+            benchmark_API: file
+            product_API: file
+            client_footprint: open_source
+            client_installation: in_box
+        capabilities:
+            multi_host: true
+            simultaneous_write: true
+            simultaneous_read: true
+            remap_time_in_seconds: 0
+    deployment: "cloud"
+    product_nodes:
+        - friendly_description: NAS Node
+          quantity: 4
+          chassis: 
+             model_name: I7i
+             cpu_model: Emerald Rapids
+             cpu_qty: 2
+             cpu_cores: 96
+             memory_capacity: 256
+          networking:
+              - type: ethernet
+                speed: 100
+                traffic:
+                    - management
+                    - metadata
+                    - data
+                unit_count: 2
+          operating_system:
+             name: Rocky Linux
+             version: "9.5"
+          environment:
+              - name: foobar
+                value: "12"
+              - name: foobarbaz
+                value: "13"
+          sysctl:
+              - name: barfoo
+                value: "21"
+              - name: bazbarfoo
+                value: "31"
+    clients:
+        - friendly_description: Benchmark load system
+          quantity: 16
+          chassis: 
+             model_name: I7i
+             cpu_model: Emerald Rapids
+             cpu_qty: 2
+             cpu_cores: 96
+             memory_capacity: 256
+          networking:
+             - type: ethernet
+               speed: 100
+               traffic:
+                   - data
+               unit_count: 1
+          operating_system:
+              name: Rocky Linux
+              version: "9.5"

@@ -197,8 +197,23 @@ def generate_vectors(num_vectors, dim, distribution='uniform'):
     return vectors
 
 
-def insert_data(collection, vectors, batch_size=10000):
-    """Insert vectors into the collection in batches"""
+def insert_data(collection, vectors, batch_size=10000, start_id=0):
+    """Insert vectors into the collection in batches.
+
+    Args:
+        collection: The Milvus collection to insert into.
+        vectors: A numpy array (or list) of vectors to insert.
+        batch_size: Number of vectors to send per insert() call.
+        start_id: Global ID offset for the primary key. When the caller is
+            generating data in chunks and calling ``insert_data`` once per
+            chunk, ``start_id`` MUST be set to the number of vectors already
+            inserted across previous chunks. Without this offset, every chunk
+            would re-use primary keys 0..len(vectors)-1, producing duplicate
+            PKs (see issue #375).
+
+    Returns:
+        Tuple of (total_inserted, elapsed_seconds).
+    """
     total_vectors = len(vectors)
     num_batches = (total_vectors + batch_size - 1) // batch_size
 
@@ -210,8 +225,9 @@ def insert_data(collection, vectors, batch_size=10000):
         batch_end = min((i + 1) * batch_size, total_vectors)
         batch_size_actual = batch_end - batch_start
 
-        # Prepare batch data
-        ids = list(range(batch_start, batch_end))
+        # Prepare batch data — IDs must be globally unique across chunks,
+        # hence the start_id offset (see docstring + issue #375).
+        ids = list(range(start_id + batch_start, start_id + batch_end))
         batch_vectors = vectors[batch_start:batch_end]
 
         # Insert batch
@@ -225,7 +241,8 @@ def insert_data(collection, vectors, batch_size=10000):
             rate = total_inserted / elapsed if elapsed > 0 else 0
 
             logger.info(f"Inserted batch {i+1}/{num_batches}: {progress:.2f}% complete, "
-                        f"rate: {rate:.2f} vectors/sec")
+                        f"rate: {rate:.2f} vectors/sec, "
+                        f"id_range=[{ids[0]}, {ids[-1]}]")
 
         except Exception as e:
             logger.error(f"Error inserting batch {i+1}: {str(e)}")
@@ -332,7 +349,11 @@ def main():
         vectors = []
         remaining = args.num_vectors
         chunks_processed = 0
-        
+        # Running global offset for primary keys. This is the FIX for
+        # issue #375: without it each chunk re-inserts IDs 0..chunk_size-1,
+        # producing duplicate PKs and a too-small flat_gt collection.
+        global_id_offset = 0
+
         while remaining > 0:
             chunk_size = min(args.chunk_size, remaining)
             logger.info(f"Generating chunk {chunks_processed+1}: {chunk_size:,} vectors")
@@ -344,11 +365,17 @@ def main():
                         f"Progress: {(args.num_vectors - remaining):,}/{args.num_vectors:,} vectors "
                         f"({(args.num_vectors - remaining) / args.num_vectors * 100:.1f}%)")
 
-            # Insert data
-            logger.info(f"Inserting {args.num_vectors} vectors into collection '{args.collection_name}'")
-            total_inserted, insert_time = insert_data(collection, chunk_vectors, args.batch_size)
+            # Insert data — pass the running global_id_offset so PKs are
+            # unique across chunks.
+            logger.info(f"Inserting chunk {chunks_processed+1} ({chunk_size:,} vectors) into "
+                        f"collection '{args.collection_name}' starting at id={global_id_offset}")
+            total_inserted, insert_time = insert_data(
+                collection, chunk_vectors, args.batch_size,
+                start_id=global_id_offset,
+            )
             logger.info(f"Inserted {total_inserted} vectors in {insert_time:.2f} seconds")
 
+            global_id_offset += chunk_size
             remaining -= chunk_size
             chunks_processed += 1
     else:
@@ -356,7 +383,7 @@ def main():
         vectors = generate_vectors(args.num_vectors, args.dimension, args.distribution)
         # Insert data
         logger.info(f"Inserting {args.num_vectors} vectors into collection '{args.collection_name}'")
-        total_inserted, insert_time = insert_data(collection, vectors, args.batch_size)
+        total_inserted, insert_time = insert_data(collection, vectors, args.batch_size, start_id=0)
         logger.info(f"Inserted {total_inserted} vectors in {insert_time:.2f} seconds")
 
     gen_time = time.time() - start_gen_time

@@ -1,2 +1,12 @@
-#! /bin/bash
-uv run python3 -m mlpstorage_py.main $*
+#!/usr/bin/env bash
+# Wrapper for running mlpstorage directly from a checkout via `uv run`.
+# Preferred install path is `uv pip install -e .` (uses [project.scripts]).
+#
+# IMPORTANT fixes vs prior version (see issue #322):
+#   - "$@" (not $*) preserves argument quoting; args with spaces stay intact.
+#   - `--` separator prevents `uv run` from intercepting flags meant for mlpstorage
+#     (e.g. --project, --directory, --no-sync, --python).
+#   - --project pins the uv project to this checkout regardless of $PWD.
+set -euo pipefail
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+exec uv run --project "$SCRIPT_DIR" -- python3 -m mlpstorage_py.main "$@"

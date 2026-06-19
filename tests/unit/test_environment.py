@@ -15,7 +15,7 @@ import pytest
 import subprocess
 from unittest.mock import patch, MagicMock
 
-from mlpstorage.environment import (
+from mlpstorage_py.environment import (
     OSInfo,
     detect_os,
     get_install_instruction,
@@ -372,8 +372,8 @@ class TestValidateSshConnectivity:
     def test_raises_validation_issue_when_ssh_not_found(self):
         """Should raise ValidationIssue when SSH binary not found."""
         with patch('shutil.which', return_value=None):
-            with patch('mlpstorage.environment.detect_os') as mock_detect:
-                with patch('mlpstorage.environment.get_install_instruction') as mock_hint:
+            with patch('mlpstorage_py.environment.detect_os') as mock_detect:
+                with patch('mlpstorage_py.environment.get_install_instruction') as mock_hint:
                     mock_detect.return_value = OSInfo(
                         system='Linux', release='5.4.0', machine='x86_64',
                         distro_id='ubuntu', distro_name='Ubuntu', distro_version='22.04'
@@ -392,8 +392,8 @@ class TestValidateSshConnectivity:
     def test_validation_issue_has_os_specific_install_command(self):
         """Should include OS-specific install command in ValidationIssue."""
         with patch('shutil.which', return_value=None):
-            with patch('mlpstorage.environment.detect_os') as mock_detect:
-                with patch('mlpstorage.environment.get_install_instruction') as mock_hint:
+            with patch('mlpstorage_py.environment.detect_os') as mock_detect:
+                with patch('mlpstorage_py.environment.get_install_instruction') as mock_hint:
                     # Mock RHEL system
                     mock_detect.return_value = OSInfo(
                         system='Linux', release='4.18.0', machine='x86_64',
@@ -429,6 +429,31 @@ class TestValidateSshConnectivity:
                 assert results[0][0] == '127.0.0.1'
                 assert results[0][1] is True
                 assert 'skipped' in results[0][2].lower()
+                mock_run.assert_not_called()
+
+    def test_rejects_whitespace_token_without_running_ssh(self):
+        """Regression for #322: a host token with whitespace must fail fast, not call ssh."""
+        with patch('shutil.which', return_value='/usr/bin/ssh'):
+            with patch('subprocess.run') as mock_run:
+                results = validate_ssh_connectivity(['srt017-e0 srt018-e0'])
+
+                assert len(results) == 1
+                host, ok, message = results[0]
+                assert host == 'srt017-e0 srt018-e0'
+                assert ok is False
+                # Message should point the user at the argparse pitfall,
+                # not leave them guessing about SSH.
+                assert 'whitespace' in message.lower() or 'invalid host token' in message.lower()
+                mock_run.assert_not_called()
+
+    def test_rejects_empty_token_without_running_ssh(self):
+        """An empty or whitespace-only host token should be rejected, not passed to ssh."""
+        with patch('shutil.which', return_value='/usr/bin/ssh'):
+            with patch('subprocess.run') as mock_run:
+                results = validate_ssh_connectivity(['   '])
+
+                assert len(results) == 1
+                assert results[0][1] is False
                 mock_run.assert_not_called()
 
     def test_parses_host_slots_format(self):

@@ -45,9 +45,11 @@ from typing import Tuple, Dict, Any, List, Optional, Callable, Set, TYPE_CHECKIN
 
 from functools import wraps
 
-from pyarrow.ipc import open_stream
-
 from mlpstorage_py.config import PARAM_VALIDATION, DATETIME_STR, MLPS_DEBUG, EXEC_TYPE
+from mlpstorage_py.run_directory import (
+    DEFAULT_COLLISION_BUMP_BUDGET,
+    reserve_run_directory,
+)
 from mlpstorage_py.debug import debug_tryer_wrapper
 from mlpstorage_py.interfaces import BenchmarkInterface, BenchmarkConfig, BenchmarkCommand
 from mlpstorage_py.mlps_logging import setup_logging, apply_logging_options
@@ -134,8 +136,7 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         self.cmd_executor = CommandExecutor(logger=self.logger, debug=args.debug)
 
         self.command_output_files = list()
-        self.run_result_output = self.generate_output_location()
-        os.makedirs(self.run_result_output, exist_ok=True)
+        self.run_result_output = self._reserve_run_directory()
 
         self.metadata_filename = f"{self.BENCHMARK_TYPE.value}_{self.run_datetime}_metadata.json"
         self.metadata_file_path = os.path.join(self.run_result_output, self.metadata_filename)
@@ -262,9 +263,9 @@ class Benchmark(BenchmarkInterface, abc.ABC):
 
         self.__dict__.update({'executed_command': command})
 
-        if self.args.what_if:
-            self.logger.debug(f'Executing command in --what-if mode means no execution will be performed.')
-            log_message = f'What-if mode: \nCommand: {command}'
+        if getattr(self.args, 'dry_run', False) or getattr(self.args, 'what_if', False):
+            self.logger.debug(f'Executing command in --dry-run/--what-if mode means no execution will be performed.')
+            log_message = f'Dry-run mode: \nCommand: {command}'
             if self.debug:
                 log_message += f'\n\nParameters: \n{pprint.pformat(vars(self.args))}'
             self.logger.info(log_message)
@@ -294,6 +295,27 @@ class Benchmark(BenchmarkInterface, abc.ABC):
 
             return stdout, stderr, return_code
 
+    @staticmethod
+    def _apply_dotted_overrides(params, overrides):
+        """Merge override_parameters (dotted keys) into a nested params dict.
+
+        Fixes #365: combined_params is frozen at __init__ time from YAML
+        defaults + args.params. Subclasses that call add_checkpoint_params()
+        afterwards only write into params_dict, leaving combined_params with
+        stale YAML defaults. This method folds params_dict back in so that
+        metadata['parameters'] reflects the effective run configuration that
+        the submission checker reads.
+        """
+        import copy
+        out = copy.deepcopy(params)
+        for dotted, value in (overrides or {}).items():
+            parts = dotted.split('.')
+            cur = out
+            for p in parts[:-1]:
+                cur = cur.setdefault(p, {})
+            cur[parts[-1]] = value
+        return out
+
     @property
     def metadata(self) -> Dict[str, Any]:
         """Generate metadata dict capturing the benchmark run configuration.
@@ -322,9 +344,12 @@ class Benchmark(BenchmarkInterface, abc.ABC):
             'result_dir': self.run_result_output,
         }
 
-        # Parameters - prefer combined_params if available (includes YAML + overrides)
+        # Parameters - YAML defaults with CLI overrides folded in (fixes #365).
+        # combined_params alone omits overrides added after __init__ (e.g.
+        # checkpoint.num_checkpoints_*), causing split-phase runs to double-count.
         if hasattr(self, 'combined_params'):
-            metadata['parameters'] = self.combined_params
+            metadata['parameters'] = self._apply_dotted_overrides(
+                self.combined_params, getattr(self, 'params_dict', {}))
         else:
             metadata['parameters'] = {}
 
@@ -442,15 +467,22 @@ class Benchmark(BenchmarkInterface, abc.ABC):
             mpi_bin = getattr(self.args, 'mpi_bin', 'mpirun')
             allow_run_as_root = getattr(self.args, 'allow_run_as_root', False)
             timeout = getattr(self.args, 'cluster_collection_timeout', 60)
+            ssh_username = getattr(self.args, 'ssh_username', None)
+            shared_staging_dir = getattr(self.args, 'shared_staging_dir', None)
 
-            # Collect cluster info
+            # Collect cluster info. ``results_dir`` is required by
+            # ``collect_cluster_info`` for staging the helper script under
+            # ``<results_dir>/collector-staging/`` (see issue #363).
             collected_data = collect_cluster_info(
                 hosts=self.args.hosts,
                 mpi_bin=mpi_bin,
                 logger=self.logger,
+                results_dir=self.run_result_output,
                 allow_run_as_root=allow_run_as_root,
                 timeout_seconds=timeout,
-                fallback_to_local=True
+                fallback_to_local=True,
+                shared_staging_dir=shared_staging_dir,
+                ssh_username=ssh_username,
             )
 
             # Create ClusterInformation from collected data
@@ -565,15 +597,16 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         host_count = len(hosts) if hosts else 1
 
         self.logger.debug(f"Collecting cluster info ({host_count} host{'s' if host_count != 1 else ''})...")
-        
-        if self._should_use_ssh_collection():
-            self.logger.debug("Collecting via SSH...")
-            self._cluster_info_start = self._collect_via_ssh()
-            self._collection_method = 'ssh'
-        else:
-            self.logger.debug("Collecting via MPI...")
-            self._cluster_info_start = self._collect_cluster_information()
-            self._collection_method = 'mpi'
+
+        with progress_context("Collecting cluster info...", total=None) as (_, set_desc):
+            if self._should_use_ssh_collection():
+                set_desc("Collecting via SSH...")
+                self._cluster_info_start = self._collect_via_ssh()
+                self._collection_method = 'ssh'
+            else:
+                set_desc("Collecting via MPI...")
+                self._cluster_info_start = self._collect_cluster_information()
+                self._collection_method = 'mpi'
 
         if self._cluster_info_start:
             self.logger.debug(f'Collected start cluster info via {self._collection_method}')
@@ -589,13 +622,14 @@ class Benchmark(BenchmarkInterface, abc.ABC):
             return
 
         self.logger.debug("Collecting end cluster info...")
-        
-        if self._collection_method == 'ssh':
-            self.logger.debug("Collecting via SSH...")
-            self._cluster_info_end = self._collect_via_ssh()
-        else:
-            self.logger.debug("Collecting via MPI...")
-            self._cluster_info_end = self._collect_cluster_information()
+
+        with progress_context("Collecting cluster info...", total=None) as (_, set_desc):
+            if self._collection_method == 'ssh':
+                set_desc("Collecting via SSH...")
+                self._cluster_info_end = self._collect_via_ssh()
+            else:
+                set_desc("Collecting via MPI...")
+                self._cluster_info_end = self._collect_cluster_information()
 
         if self._cluster_info_end:
             self.logger.debug(f'Collected end cluster info via {self._collection_method}')
@@ -624,8 +658,8 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         if hasattr(self.args, 'command') and self.args.command not in ('run',):
             return False
 
-        # Skip in what-if mode
-        if hasattr(self.args, 'what_if') and self.args.what_if:
+        # Skip in dry-run/what-if mode
+        if getattr(self.args, 'dry_run', False) or getattr(self.args, 'what_if', False):
             return False
 
         return True
@@ -769,6 +803,23 @@ class Benchmark(BenchmarkInterface, abc.ABC):
             raise ValueError('No benchmark specified. Unable to generate output location')
         return generate_output_location(self, self.run_datetime)
 
+    _COLLISION_BUMP_BUDGET = DEFAULT_COLLISION_BUMP_BUDGET
+
+    def _reserve_run_directory(self) -> str:
+        """Atomically reserve a unique run directory, updating run_datetime
+        if a collision pushes the timestamp forward. See
+        mlpstorage_py.benchmarks.run_directory.reserve_run_directory.
+        """
+        def _path_for(dt: str) -> str:
+            self.run_datetime = dt
+            return self.generate_output_location()
+
+        reserved, final_dt = reserve_run_directory(
+            self.run_datetime, _path_for, budget=self._COLLISION_BUMP_BUDGET
+        )
+        self.run_datetime = final_dt
+        return reserved
+
     def verify_benchmark(self) -> bool:
         """Verify benchmark parameters meet OPEN or CLOSED requirements.
 
@@ -786,8 +837,15 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         self.verification = self.benchmark_run_verifier.verify()
         self.logger.verboser(f'Benchmark verification result: {self.verification}')
 
-        if not self.args.closed and not hasattr(self.args, "open"):
-            self.logger.warning(f'Running the benchmark without verification for open or closed configurations. These results are not valid for submission. Use --open or --closed to specify a configuration.')
+        # Use getattr so we're resilient to args objects built in tests that
+        # may not define one or both attributes. Neither flag set => warn and
+        # skip formal verification (fixes #349: --open was previously
+        # indistinguishable from "nothing passed").
+        closed_mode = getattr(self.args, 'closed', False)
+        open_mode = getattr(self.args, 'open', False)
+
+        if not closed_mode and not open_mode:
+            self.logger.warning(f'Running the benchmark without verification for open or closed configurations. These results are not valid for submission. Use closed or open as the first positional argument to specify a configuration.')
             return True
         if not self.BENCHMARK_TYPE:
             raise ValueError(f'No benchmark specified. Unable to verify benchmark')
@@ -806,11 +864,11 @@ class Benchmark(BenchmarkInterface, abc.ABC):
                 sys.exit(1)
 
         if self.verification == PARAM_VALIDATION.OPEN:
-            if self.args.closed == False:
-                # "--open" was passed
+            if open_mode:
                 self.logger.status(f'Running as allowed open configuration')
                 return True
             else:
+                # closed_mode is True here
                 self.logger.warning(f'Parameters allowed for open but not closed. Use --open and rerun the benchmark.')
                 sys.exit(1)
 

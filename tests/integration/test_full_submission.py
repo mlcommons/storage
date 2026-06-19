@@ -9,8 +9,8 @@ import os
 import pytest
 from pathlib import Path
 
-from mlpstorage.config import BENCHMARK_TYPES
-from mlpstorage.rules import (
+from mlpstorage_py.config import BENCHMARK_TYPES
+from mlpstorage_py.rules import (
     BenchmarkRun,
     get_runs_files,
     BenchmarkVerifier,
@@ -95,7 +95,7 @@ class TestFullSubmissionVerification:
 
     def test_verifier_can_verify_runs(self, submission_results_dir):
         """BenchmarkVerifier can verify runs from submission directory."""
-        from mlpstorage.mlps_logging import setup_logging
+        from mlpstorage_py.mlps_logging import setup_logging
 
         logger = setup_logging(name='test_verifier')
         runs = get_runs_files(str(submission_results_dir), logger=logger)
@@ -111,7 +111,7 @@ class TestFullSubmissionVerification:
         result = verifier.verify()
 
         # Result should be a valid PARAM_VALIDATION value
-        from mlpstorage.config import PARAM_VALIDATION
+        from mlpstorage_py.config import PARAM_VALIDATION
         assert result in [PARAM_VALIDATION.CLOSED, PARAM_VALIDATION.OPEN, PARAM_VALIDATION.INVALID]
 
 

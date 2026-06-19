@@ -9,6 +9,13 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+import pytest
+
+
+@pytest.fixture(params=["s3dlio"])
+def library_name(request):
+    return request.param
+
 
 def test_library(library_name):
     """Test basic S3Client operations with specified library"""

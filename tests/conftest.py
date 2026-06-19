@@ -1,5 +1,5 @@
 """
-Shared pytest fixtures for mlpstorage tests.
+Shared pytest fixtures for mlpstorage_py tests.
 
 These fixtures provide mock data, loggers, and test utilities that can be
 used across all test modules without requiring DLIO to be installed.
@@ -12,6 +12,7 @@ used across all test modules without requiring DLIO to be installed.
 collect_ignore_glob = [
     "integration/test_s3_connectivity.py",  # argparse.parse_args() at module level
     "integration/test_compat_runtime.py",   # full S3 smoke-test at module level
+    "integration/test_dlio_storage.py",     # standalone script; StorageType.S3DLIO not in installed package
 ]
 
 import json
@@ -24,7 +25,7 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mlpstorage.config import BENCHMARK_TYPES, PARAM_VALIDATION
+from mlpstorage_py.config import BENCHMARK_TYPES, PARAM_VALIDATION
 
 # Import from fixtures package
 from tests.fixtures import (
@@ -293,7 +294,7 @@ def sample_checkpointing_parameters() -> Dict[str, Any]:
 @pytest.fixture
 def sample_cluster_info(mock_logger):
     """Create a sample ClusterInformation object."""
-    from mlpstorage.rules import ClusterInformation, HostInfo, HostMemoryInfo
+    from mlpstorage_py.rules import ClusterInformation, HostInfo, HostMemoryInfo
 
     host_info_list = [
         HostInfo(
@@ -313,7 +314,7 @@ def sample_cluster_info(mock_logger):
 @pytest.fixture
 def sample_benchmark_run_data(sample_training_parameters, sample_cluster_info):
     """Create a sample BenchmarkRunData for testing."""
-    from mlpstorage.rules import BenchmarkRunData
+    from mlpstorage_py.rules import BenchmarkRunData
 
     return BenchmarkRunData(
         benchmark_type=BENCHMARK_TYPES.training,
@@ -480,7 +481,7 @@ def mock_benchmark_instance(training_run_args, sample_training_parameters, sampl
 @pytest.fixture
 def clean_env(monkeypatch):
     """
-    Remove mlpstorage-related environment variables.
+    Remove mlpstorage_py-related environment variables.
 
     Usage:
         def test_check_env_default(clean_env):

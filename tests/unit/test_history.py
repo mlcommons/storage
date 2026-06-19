@@ -16,8 +16,8 @@ import pytest
 from unittest.mock import MagicMock, patch
 from argparse import Namespace
 
-from mlpstorage.history import HistoryTracker
-from mlpstorage.config import EXIT_CODE
+from mlpstorage_py.history import HistoryTracker
+from mlpstorage_py.config import EXIT_CODE
 
 
 class TestHistoryTrackerInit:
@@ -31,7 +31,7 @@ class TestHistoryTrackerInit:
 
     def test_uses_default_history_file(self):
         """Should use default history file path."""
-        with patch('mlpstorage.history.HISTFILE', '/tmp/test_history'):
+        with patch('mlpstorage_py.history.HISTFILE', '/tmp/test_history'):
             with patch('os.path.exists', return_value=True):
                 tracker = HistoryTracker()
                 assert tracker.history_file == '/tmp/test_history'
@@ -338,7 +338,7 @@ class TestCreateArgsFromCommand:
         tracker.add_entry("mlpstorage training datasize --model unet3d --max-accelerators 8 --accelerator-type h100 --client-host-memory-in-gb 128")
 
         # Mock parse_arguments to capture what's passed
-        with patch('mlpstorage.cli_parser.parse_arguments') as mock_parse:
+        with patch('mlpstorage_py.cli_parser.parse_arguments') as mock_parse:
             mock_parse.return_value = Namespace(program='training')
             tracker.create_args_from_command(1)
             # Verify sys.argv was set without the script name at front

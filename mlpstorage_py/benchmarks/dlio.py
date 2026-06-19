@@ -3,6 +3,7 @@ import os
 import os.path
 import pprint
 import sys
+from urllib.parse import urlparse
 
 from mlpstorage_py.benchmarks.base import Benchmark
 from mlpstorage_py.config import (CONFIGS_ROOT_DIR, BENCHMARK_TYPES, EXEC_TYPE, MPIRUN, MLPSTORAGE_BIN_NAME,
@@ -11,6 +12,7 @@ from mlpstorage_py.config import (CONFIGS_ROOT_DIR, BENCHMARK_TYPES, EXEC_TYPE, 
 from mlpstorage_py.dependency_check import validate_benchmark_dependencies
 from mlpstorage_py.rules import calculate_training_data_size, HostInfo, HostMemoryInfo, HostCPUInfo, ClusterInformation
 from mlpstorage_py.utils import (read_config_from_file, create_nested_dict, update_nested_dict, generate_mpi_prefix_cmd)
+from mlpstorage_py.storage_config import resolve_object_storage_config
 
 
 class DLIOBenchmark(Benchmark, abc.ABC):
@@ -34,8 +36,8 @@ class DLIOBenchmark(Benchmark, abc.ABC):
         self.per_host_mem_kB = None
         self.total_mem_kB = None
 
-        # Fail-fast dependency validation (skip for what-if mode)
-        if not getattr(args, 'what_if', False):
+        # Fail-fast dependency validation (skip for dry-run/what-if mode)
+        if not getattr(args, 'dry_run', False) and not getattr(args, 'what_if', False):
             self._validate_dependencies(args)
 
         if args.command != "datagen":
@@ -118,8 +120,130 @@ class DLIOBenchmark(Benchmark, abc.ABC):
     def config_name(self, config_name):
         self._config_name = config_name
 
+    def _apply_object_storage_params(self):
+        """When --object is used, load .env and inject required DLIO storage params.
+
+        The following params are injected into self.params_dict (only if not already
+        set by the user via --params):
+          storage.storage_type          = 's3'
+          storage.storage_root          = $BUCKET
+          storage.storage_options.storage_library = $STORAGE_LIBRARY
+          storage.s3_force_path_style   = 'true'  (when AWS_ENDPOINT_URL is set)
+
+        Credentials (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY) and the endpoint
+        (AWS_ENDPOINT_URL) are read directly from the environment by obj_store_lib.py
+        and do not need to be passed as DLIO params.  We load .env here so that
+        the parent process environment is populated before mpirun spawns workers.
+        """
+        protocol = getattr(self.args, 'data_access_protocol', None)
+        if protocol is None or protocol == 'file':
+            return  # file mode or flag not supplied: nothing to do
+
+        # Load .env into the process environment.  Values already set in the shell
+        # take priority (override=False is the default).
+        try:
+            from dotenv import load_dotenv
+
+            # Locate the .env file: CWD first, then relative to the script directory.
+            env_file_cwd = os.path.abspath('.env')
+            env_file_script = os.path.normpath(
+                os.path.join(os.path.dirname(sys.argv[0]), '..', '.env')
+            )
+
+            if os.path.exists(env_file_cwd):
+                self.logger.info(f'--object mode: loading credentials from {env_file_cwd}')
+                load_dotenv(env_file_cwd)
+            elif os.path.exists(env_file_script):
+                self.logger.info(f'--object mode: loading credentials from {env_file_script}')
+                load_dotenv(env_file_script)
+            else:
+                # Try dotenv's own upward search as a last resort
+                found = load_dotenv()  # returns True if a file was found and loaded
+                if found:
+                    self.logger.info(
+                        '--object mode: loaded credentials from .env file found by directory search'
+                    )
+                else:
+                    raise FileNotFoundError(
+                        '--object mode requires a .env file with object storage credentials, '
+                        'but no .env file was found in the current directory '
+                        f'({os.getcwd()}) or the script directory. '
+                        'Create a .env file (see .env.example) or export the required '
+                        'environment variables (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, '
+                        'AWS_ENDPOINT_URL, BUCKET, STORAGE_LIBRARY) before running.'
+                    )
+        except ImportError:
+            self.logger.warning(
+                'python-dotenv not installed; .env file will not be loaded automatically. '
+                'Ensure AWS_ENDPOINT_URL, AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, '
+                'BUCKET, and STORAGE_LIBRARY are set in the environment.'
+            )
+
+        _s3cfg = resolve_object_storage_config()
+        bucket = _s3cfg['bucket']
+        storage_library = _s3cfg['storage_library']
+        # STORAGE_URI_SCHEME controls the URI prefix used by s3dlio:
+        #   s3     — standard S3 (requires endpoint + credentials)
+        #   direct — O_DIRECT filesystem via s3dlio (BUCKET is the base path, no HTTP)
+        #   file   — buffered filesystem via s3dlio (BUCKET is the base path, no HTTP)
+        uri_scheme = _s3cfg['uri_scheme']
+        endpoint_url, _src = _s3cfg['endpoint']
+        endpoint_url = endpoint_url or ''  # preserve empty-string semantics downstream
+
+        if not bucket:
+            raise ValueError(
+                'BUCKET environment variable is required for --object mode. '
+                'Set it in .env or export it before running mlpstorage.'
+            )
+
+        # Inject params; respect any value the user already supplied via --params
+        if 'storage.storage_type' not in self.params_dict:
+            self.params_dict['storage.storage_type'] = 's3'
+        if 'storage.storage_root' not in self.params_dict:
+            self.params_dict['storage.storage_root'] = bucket
+        if 'storage.storage_options.storage_library' not in self.params_dict:
+            self.params_dict['storage.storage_options.storage_library'] = storage_library
+        if 'storage.storage_options.uri_scheme' not in self.params_dict:
+            self.params_dict['storage.storage_options.uri_scheme'] = uri_scheme
+        # Force path-style addressing for non-AWS S3 endpoints (MinIO, s3-ultra, VAST, Ceph…)
+        # Not applicable for direct:// or file:// — those don't use HTTP at all.
+        is_http_scheme = uri_scheme not in ('direct', 'file')
+        if is_http_scheme and endpoint_url and 'storage.s3_force_path_style' not in self.params_dict:
+            self.params_dict['storage.s3_force_path_style'] = 'true'
+
+        self.logger.info(
+            f'--object mode: injected storage params '
+            f'(storage_type=s3, storage_root={bucket}, library={storage_library}, '
+            f'uri_scheme={uri_scheme}, force_path_style={is_http_scheme and bool(endpoint_url)})'
+        )
+
+    @staticmethod
+    def _strip_uri_scheme(value):
+        # DLIO obj_store_lib treats storage_root as a bare bucket/prefix and
+        # unconditionally prepends a scheme when constructing object URIs.
+        # Strip any leading <scheme>:// so DLIO doesn't produce s3://s3://...
+        # See issue #392.
+        if '://' not in value:
+            return value
+        parsed = urlparse(value)
+        if not parsed.scheme:
+            return value
+        normalized = (parsed.netloc + parsed.path).rstrip('/')
+        return normalized or parsed.netloc
+
     def process_dlio_params(self, config_file):
         params_dict = dict() if not self.args.params else {k: v for k, v in (item.split("=") for item in self.args.params)}
+
+        storage_root = params_dict.get('storage.storage_root')
+        if storage_root:
+            normalized = DLIOBenchmark._strip_uri_scheme(storage_root)
+            if normalized != storage_root:
+                self.logger.debug(
+                    f"Normalized storage.storage_root: {storage_root!r} -> {normalized!r} "
+                    f"(scheme stripped to avoid DLIO double-prefix bug, issue #392)"
+                )
+                params_dict['storage.storage_root'] = normalized
+
         yaml_params = read_config_from_file(os.path.join(self.DLIO_CONFIG_PATH, "workload", config_file))
         combined_params = update_nested_dict(yaml_params, create_nested_dict(params_dict))
 
@@ -172,10 +296,14 @@ class DLIOBenchmark(Benchmark, abc.ABC):
             self.logger.debug(f'Generating MPI Command with binary "{self.args.mpi_bin}"')
             mpi_prefix = generate_mpi_prefix_cmd(self.args.mpi_bin, self.args.hosts, self.args.num_processes,
                                                  self.args.oversubscribe, self.args.allow_run_as_root,
-                                                 self.args.mpi_params, self.logger)
+                                                 self.args.mpi_params, self.logger,
+                                                 mpi_btl=getattr(self.args, 'mpi_btl', 'auto'))
             cmd = f"{mpi_prefix} {cmd}"
 
         return cmd
+
+    def generate_command(self, command: str) -> str:
+        return self.generate_dlio_command()
 
 
 class TrainingBenchmark(DLIOBenchmark):
@@ -199,6 +327,10 @@ class TrainingBenchmark(DLIOBenchmark):
         self.config_name = f"{under_model}_{config_suffix}"
 
         self.params_dict, self.yaml_params, self.combined_params = self.process_dlio_params(self.config_file)
+
+        # Inject object storage params before add_datadir_param (which reads storage_type
+        # from params_dict to decide whether to create local directories).
+        self._apply_object_storage_params()
 
         if self.args.command not in ("datagen", "datasize"):
             self.verify_benchmark()
@@ -251,53 +383,80 @@ class TrainingBenchmark(DLIOBenchmark):
 
     def generate_datagen_benchmark_command(self, num_files_train, num_subfolders_train):
         """
-        This function will generate the command to use to call this program with the training & datagen parameters.
+        Build the mlpstorage datagen command that mirrors this datasize run.
+
+        The emitted string must round-trip through `parse_arguments()` — see
+        the unit test in tests/unit/test_datagen_command_generation.py. The
+        shape is:
+
+            mlpstorage <mode> training <model> datagen <file|object> \\
+                --hosts=... --exec-type=... \\
+                --num-processes=... --results-dir=... --data-dir=... \\
+                --params key1=val1 key2=val2 ...
+
+        All dotted-key DLIO parameter overrides funnel through --params;
+        they are not real CLI flags individually. The storage-protocol
+        positional defaults to 'file' since datasize does not collect one.
         """
-        kv_map = {
-            "dataset.num_files_train": num_files_train,
-            "dataset.num_subfolders_train": num_subfolders_train,
-        }
+        params_kv = dict(self.params_dict) if self.params_dict else {}
+        if num_files_train:
+            params_kv['dataset.num_files_train'] = num_files_train
+        if num_subfolders_train:
+            params_kv['dataset.num_subfolders_train'] = num_subfolders_train
 
-        cmd = f"{MLPSTORAGE_BIN_NAME} training datagen"
+        # datasize does not collect a storage protocol; default to 'file' for the hint.
+        storage_protocol = "file"
+
+        parts = [
+            MLPSTORAGE_BIN_NAME,
+            self.args.mode,
+            "training",
+            self.args.model,
+            "datagen",
+            storage_protocol,
+        ]
+
         if self.args.hosts:
-            cmd += f" --hosts={','.join(self.args.hosts)}"
-        cmd += f" --model={self.args.model}"
-        cmd += f" --exec-type={self.args.exec_type}"
-
-        if self.params_dict:
-            for key, value in self.params_dict.items():
-                if key in kv_map.keys():
-                    continue
-                cmd += f" --{key}={value}"
-
-        for key, value in kv_map.items():
-            if value == 0:
-                continue
-            cmd += f" --param {key}={value}"
-
-        # During datasize, this will be set to max_accelerators
-        cmd += f" --num-processes={self.args.num_processes}"
-        cmd += f" --results-dir={self.args.results_dir}"
-
+            # --hosts uses nargs='+'; emit as separate tokens so the parser sees
+            # a real list. Comma-joining produces a single-element list on parse.
+            parts.append("--hosts")
+            parts.extend(self.args.hosts)
+        parts.append(f"--exec-type={self.args.exec_type}")
+        # During datasize, num_processes is populated from max_accelerators.
+        parts.append(f"--num-processes={self.args.num_processes}")
+        parts.append(f"--results-dir={self.args.results_dir}")
         if self.args.data_dir:
-            cmd += f" --data-dir={self.args.data_dir}"
+            parts.append(f"--data-dir={self.args.data_dir}")
         else:
-            cmd += f" --data-dir=<INSERT_DATA_DIR>"
+            parts.append("--data-dir=<INSERT_DATA_DIR>")
 
-        return cmd
+        if params_kv:
+            params_str = " ".join(f"{k}={v}" for k, v in params_kv.items())
+            parts.append(f"--params {params_str}")
+
+        return " ".join(parts)
 
 
     def datasize(self):
         num_files_train, num_subfolders_train, total_disk_bytes = calculate_training_data_size(
             self.args, self.cluster_information, self.combined_params['dataset'], self.combined_params['reader'], self.logger
         )
+
+        # Persist calculated sizing into params_dict so the values flow into the
+        # written metadata file via the dotted-key override mechanism in
+        # Benchmark.metadata (#208). Without this, the metadata reflects only
+        # the YAML defaults and downstream automation cannot read back the
+        # num_files_train that datasize reported on stderr.
+        self.params_dict['dataset.num_files_train'] = num_files_train
+        self.params_dict['dataset.num_subfolders_train'] = num_subfolders_train
+
         self.logger.result(f'Number of training files: {num_files_train}')
         self.logger.result(f'Number of training subfolders: {num_subfolders_train}')
         self.logger.result(f'Total disk space required for training: {total_disk_bytes / 1024**3:.2f}GiB')
 
         if num_files_train > 10000:
             self.logger.warning(
-                f'The number of files required may be excessive for some filesystems. You can use the num_subfolders_train parameter to shard the dataset. To keep near 10,000 files per folder use "{int(num_files_train / 10000)}x" subfolders by adding "--param dataset.num_subfolders_train={int(num_files_train / 10000)}"')
+                f'The number of files required may be excessive for some filesystems. You can use the num_subfolders_train parameter to shard the dataset. To keep near 10,000 files per folder use "{int(num_files_train / 10000)}x" subfolders by adding "--params dataset.num_subfolders_train={int(num_files_train / 10000)}"')
 
         cmd = self.generate_datagen_benchmark_command(num_files_train, num_subfolders_train)
         self.logger.result(f'Run the following command to generate data: \n{cmd}')
@@ -323,6 +482,7 @@ class CheckpointingBenchmark(DLIOBenchmark):
         self.config_name = f'{args.model.replace("-", "_")}'
         self.config_file = f'{self.config_name}.yaml'
         self.params_dict, self.yaml_params, self.combined_params = self.process_dlio_params(self.config_file)
+        self._apply_object_storage_params()
         self.verify_benchmark()
         self.add_checkpoint_params()
         self.logger.status(f'Instantiated the Checkpointing Benchmark...')
@@ -338,7 +498,8 @@ class CheckpointingBenchmark(DLIOBenchmark):
 
         self.params_dict['checkpoint.num_checkpoints_read'] = self.args.num_checkpoints_read
         self.params_dict['checkpoint.num_checkpoints_write'] = self.args.num_checkpoints_write
-        self.params_dict['checkpoint.checkpoint_folder'] = os.path.join(self.args.checkpoint_folder, self.args.model)
+        if self.args.checkpoint_folder:
+            self.params_dict['checkpoint.checkpoint_folder'] = os.path.join(self.args.checkpoint_folder, self.args.model)
 
 
     def add_workflow_to_cmd(self, cmd) -> str:
@@ -347,12 +508,21 @@ class CheckpointingBenchmark(DLIOBenchmark):
         # We're now using the workflow defined in the yaml file only
         return cmd
 
+    def _run_configview(self):
+        """Display the final DLIO config without executing."""
+        cmd = self.generate_dlio_command()
+        self.logger.status(f"Configuration view:\n{cmd}")
+        print(cmd)
+        return EXIT_CODE.SUCCESS
+
     def _run(self):
         try:
             if self.args.command == "run":
                 self.execute_command()
             elif self.args.command == "datasize":
                 self.datasize()
+            elif self.args.command == "configview":
+                return self._run_configview()
             else:
                 self.logger.error(f'Invalid command: {self.args.command}')
                 return EXIT_CODE.INVALID_ARGUMENTS

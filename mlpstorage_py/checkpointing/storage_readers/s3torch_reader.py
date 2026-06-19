@@ -34,6 +34,7 @@ import re
 from typing import Dict, Any, List, Optional
 
 from .base import StorageReader
+from mlpstorage_py.storage_config import resolve_object_storage_config
 
 
 class S3TorchStorageReader(StorageReader):
@@ -50,27 +51,9 @@ class S3TorchStorageReader(StorageReader):
 
     @staticmethod
     def _detect_endpoint() -> Optional[str]:
-        uris_str = os.environ.get('S3_ENDPOINT_URIS')
-        if uris_str:
-            endpoints = [u.strip() for u in uris_str.split(',') if u.strip()]
-            if endpoints:
-                return endpoints[0]
-        template = os.environ.get('S3_ENDPOINT_TEMPLATE')
-        if template:
-            endpoints = S3TorchStorageReader._expand_template(template)
-            if endpoints:
-                return endpoints[0]
-        endpoint_file = os.environ.get('S3_ENDPOINT_FILE')
-        if endpoint_file:
-            try:
-                with open(endpoint_file) as f:
-                    for line in f:
-                        line = line.strip()
-                        if line and not line.startswith('#'):
-                            return line
-            except OSError:
-                pass
-        return None
+        """Resolve endpoint via centralized resolver (first non-empty value)."""
+        val, _src = resolve_object_storage_config()['endpoint']
+        return val or None
 
     def __init__(self, uri: str, chunk_size: int = 32 * 1024 * 1024):
         if not uri.startswith('s3://'):
@@ -93,10 +76,10 @@ class S3TorchStorageReader(StorageReader):
         self.chunk_size  = chunk_size
         self.total_bytes = 0
 
-        region   = os.environ.get('AWS_REGION', 'us-east-1')
-        endpoint = (self._detect_endpoint()
-                    or os.environ.get('AWS_ENDPOINT_URL')
-                    or os.environ.get('S3_ENDPOINT'))
+        _s3cfg = resolve_object_storage_config()
+        region = _s3cfg['aws_region']
+        endpoint_val, _src = _s3cfg['endpoint']
+        endpoint = endpoint_val or None  # None means use AWS S3 directly
 
         s3_client_config = S3ClientConfig(
             force_path_style=bool(endpoint),
@@ -208,5 +191,4 @@ class S3TorchStorageReader(StorageReader):
 
     def close(self) -> Dict[str, Any]:
         self._close_stream()
-        return {'backend': 's3torchconnector', 'total_bytes': self.total_bytes}
         return {'backend': 's3torchconnector', 'total_bytes': self.total_bytes}

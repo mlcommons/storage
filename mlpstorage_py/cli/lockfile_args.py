@@ -54,7 +54,7 @@ def add_lockfile_arguments(parser):
         dest="generate_all",
         help="Generate both requirements.txt and requirements-full.txt",
     )
-    add_universal_arguments(generate_parser)
+    add_universal_arguments(generate_parser, req_results=True)
 
     # Verify subcommand
     verify_parser = subparsers.add_parser(
@@ -83,6 +83,6 @@ def add_lockfile_arguments(parser):
         action="store_true",
         help="Fail on any difference (default: fail only on version mismatch)",
     )
-    add_universal_arguments(verify_parser)
+    add_universal_arguments(verify_parser, req_results=True)
 
     return parser

@@ -20,12 +20,12 @@ class TestCoreImports:
 
     def test_import_main(self):
         """Should be able to import main module."""
-        from mlpstorage.main import main
+        from mlpstorage_py.main import main
         assert callable(main)
 
     def test_import_config(self):
         """Should be able to import config module."""
-        from mlpstorage.config import (
+        from mlpstorage_py.config import (
             BENCHMARK_TYPES,
             PARAM_VALIDATION,
             MODELS,
@@ -37,7 +37,7 @@ class TestCoreImports:
 
     def test_import_errors(self):
         """Should be able to import error classes."""
-        from mlpstorage.errors import (
+        from mlpstorage_py.errors import (
             MLPStorageException,
             ConfigurationError,
             BenchmarkExecutionError,
@@ -61,13 +61,13 @@ class TestReportingImports:
 
     def test_import_report_generator(self):
         """Should be able to import ReportGenerator from report_generator module."""
-        from mlpstorage.report_generator import ReportGenerator, Result
+        from mlpstorage_py.report_generator import ReportGenerator, Result
         assert ReportGenerator is not None
         assert Result is not None
 
     def test_import_reporting_package(self):
         """Should be able to import from reporting package."""
-        from mlpstorage.reporting import (
+        from mlpstorage_py.reporting import (
             ResultsDirectoryValidator,
             ValidationMessageFormatter,
             ClosedRequirementsFormatter,
@@ -82,7 +82,7 @@ class TestRulesImports:
 
     def test_import_rules_package(self):
         """Should be able to import from rules package."""
-        from mlpstorage.rules import (
+        from mlpstorage_py.rules import (
             BenchmarkVerifier,
             BenchmarkRun,
             BenchmarkRunData,
@@ -97,7 +97,7 @@ class TestRulesImports:
 
     def test_import_rules_checkers(self):
         """Should be able to import rules checkers."""
-        from mlpstorage.rules import (
+        from mlpstorage_py.rules import (
             RulesChecker,
             RunRulesChecker,
             MultiRunRulesChecker,
@@ -109,7 +109,7 @@ class TestRulesImports:
 
     def test_import_submission_checkers(self):
         """Should be able to import submission checkers."""
-        from mlpstorage.rules import (
+        from mlpstorage_py.rules import (
             TrainingSubmissionRulesChecker,
             CheckpointSubmissionRulesChecker,
         )
@@ -122,7 +122,7 @@ class TestBenchmarkImports:
 
     def test_import_benchmarks(self):
         """Should be able to import benchmark classes."""
-        from mlpstorage.benchmarks import (
+        from mlpstorage_py.benchmarks import (
             TrainingBenchmark,
             CheckpointingBenchmark,
             VectorDBBenchmark,
@@ -132,7 +132,7 @@ class TestBenchmarkImports:
 
     def test_import_benchmark_registry(self):
         """Should be able to import BenchmarkRegistry."""
-        from mlpstorage.registry import BenchmarkRegistry
+        from mlpstorage_py.registry import BenchmarkRegistry
         assert BenchmarkRegistry is not None
 
 
@@ -141,7 +141,7 @@ class TestDependencyCheckImports:
 
     def test_import_dependency_check(self):
         """Should be able to import dependency check functions."""
-        from mlpstorage.dependency_check import (
+        from mlpstorage_py.dependency_check import (
             check_executable_available,
             check_mpi_available,
             check_dlio_available,
@@ -157,7 +157,7 @@ class TestCLIImports:
 
     def test_import_cli_parser(self):
         """Should be able to import CLI parser."""
-        from mlpstorage.cli_parser import parse_arguments
+        from mlpstorage_py.cli_parser import parse_arguments
         assert callable(parse_arguments)
 
 
@@ -166,7 +166,7 @@ class TestUtilityImports:
 
     def test_import_utils(self):
         """Should be able to import utility functions."""
-        from mlpstorage.utils import (
+        from mlpstorage_py.utils import (
             CommandExecutor,
             read_config_from_file,
             flatten_nested_dict,
@@ -176,5 +176,5 @@ class TestUtilityImports:
 
     def test_import_logging(self):
         """Should be able to import logging utilities."""
-        from mlpstorage.mlps_logging import setup_logging
+        from mlpstorage_py.mlps_logging import setup_logging
         assert callable(setup_logging)

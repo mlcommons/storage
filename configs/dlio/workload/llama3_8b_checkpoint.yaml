@@ -1,0 +1,75 @@
+# LLaMA 3 8B — Generic Checkpoint Workload Config
+#
+# WORKLOAD PARAMETERS ONLY — no runtime/environment configuration here.
+# Runtime parameters (endpoint, bucket, storage library) are supplied via
+# environment variables, a .env file, or Hydra overrides on the command line.
+#
+# Model sizing (ZeRO-3, 8 ranks, fp16 model + fp32 optimizer):
+#   Total model+optimizer: 15 GB + 90 GB = 105 GB
+#   Per-rank write:  105 GB / 8 ranks ≈ 13.1 GB
+#   Per-checkpoint total I/O: ~105 GB write + ~105 GB read = ~210 GB
+#
+# Usage (via run_checkpointing.sh):
+#   cd /path/to/mlp-storage
+#   LIBRARY=s3dlio BUCKET=my-bucket bash tests/object-store/run_checkpointing.sh
+#
+# Usage (direct, with Hydra overrides):
+#   cd /path/to/mlp-storage
+#   source .env && source .venv/bin/activate
+#   DLIO_S3_IMPLEMENTATION=mlp \
+#   mpirun -n 1 --allow-run-as-root \
+#     .venv/bin/dlio_benchmark \
+#     workload=llama3_8b_checkpoint \
+#     ++workload.storage.storage_root=${BUCKET} \
+#     ++workload.storage.storage_library=${LIBRARY} \
+#     ++workload.storage.storage_options.endpoint_url=${AWS_ENDPOINT_URL} \
+#     "++workload.checkpoint.checkpoint_folder=s3://${BUCKET}/${LIBRARY}/llama3-8b" \
+#     --config-dir=/path/to/mlp-storage/configs/dlio
+
+model:
+  name: llama_8b
+  type: transformer
+  num_layers: 32
+  model_datatype: fp16
+  optimizer_datatype: fp32
+  parallelism:
+    pipeline: 1
+    tensor: 1
+    zero_stage: 3
+  transformer:
+    vocab_size: 128256
+    hidden_size: 4096
+    ffn_hidden_size: 14336
+    num_attention_heads: 32
+    num_kv_heads: 8
+
+framework: pytorch
+
+workflow:
+  generate_data: False
+  train: False
+  checkpoint: True
+
+# ---------------------------------------------------------------------------
+# Storage — values here are PLACEHOLDERS only.
+# All storage runtime parameters MUST be supplied via Hydra overrides.
+# See run_checkpointing.sh or the Usage section above.
+# ---------------------------------------------------------------------------
+storage:
+  storage_type: s3
+  storage_root: BUCKET_PLACEHOLDER      # override: ++workload.storage.storage_root=<bucket>
+  storage_library: LIBRARY_PLACEHOLDER  # override: ++workload.storage.storage_library=s3dlio|minio
+
+  storage_options:
+    endpoint_url: ENDPOINT_PLACEHOLDER  # override: ++workload.storage.storage_options.endpoint_url=https://...
+    # All other storage_options (region, s3_force_path_style, credentials)
+    # are supplied at runtime via Hydra overrides in run_checkpointing.sh
+
+# ---------------------------------------------------------------------------
+# Checkpoint
+# ---------------------------------------------------------------------------
+checkpoint:
+  checkpoint_folder: s3://BUCKET_PLACEHOLDER/LIBRARY_PLACEHOLDER/llama3-8b  # override at runtime
+  time_between_checkpoints: 5
+  num_checkpoints_write: 2
+  num_checkpoints_read: 2

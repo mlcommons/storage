@@ -30,7 +30,6 @@ storage:
   use_mpi_endpoint_distribution: true
   
   storage_options:
-    region: us-east-1
 
 reader: 
   data_loader: pytorch

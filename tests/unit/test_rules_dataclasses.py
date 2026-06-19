@@ -15,8 +15,8 @@ Tests cover:
 import pytest
 from unittest.mock import MagicMock
 
-from mlpstorage.config import PARAM_VALIDATION, BENCHMARK_TYPES
-from mlpstorage.rules import (
+from mlpstorage_py.config import PARAM_VALIDATION, BENCHMARK_TYPES
+from mlpstorage_py.rules import (
     Issue,
     RunID,
     ProcessedRun,

@@ -130,10 +130,11 @@ def setup_logging(name=__name__, stream_log_level=DEFAULT_STREAM_LOG_LEVEL):
     _logger = logging.getLogger(name)
     _logger.setLevel(logging.DEBUG)
 
-    stream_handler = logging.StreamHandler()
-    stream_handler.setFormatter(ColoredStandardFormatter())
-    stream_handler.setLevel(stream_log_level)  # Adjust this level as needed
-    _logger.addHandler(stream_handler)
+    if not _logger.handlers:
+        stream_handler = logging.StreamHandler()
+        stream_handler.setFormatter(ColoredStandardFormatter())
+        stream_handler.setLevel(stream_log_level)
+        _logger.addHandler(stream_handler)
 
     return _logger
 

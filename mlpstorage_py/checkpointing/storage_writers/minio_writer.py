@@ -16,6 +16,7 @@ from io import BytesIO
 from typing import Optional, Dict, Any, List
 
 from .base import StorageWriter
+from mlpstorage_py.storage_config import resolve_object_storage_config
 
 
 class MinIOStorageWriter(StorageWriter):
@@ -87,52 +88,9 @@ class MinIOStorageWriter(StorageWriter):
     
     @staticmethod
     def _detect_and_select_endpoint() -> Optional[str]:
-        """Detect multi-endpoint configuration and select based on MPI rank.
-        
-        Priority order:
-        1. S3_ENDPOINT_URIS - Comma-separated list
-        2. S3_ENDPOINT_TEMPLATE - Template with {N...M} expansion
-        3. S3_ENDPOINT_FILE - File with one URI per line
-        
-        Returns:
-            Selected endpoint URI or None if no multi-endpoint config
-        """
-        endpoints = []
-        
-        # Option 1: Explicit URI list
-        uris_str = os.environ.get('S3_ENDPOINT_URIS')
-        if uris_str:
-            endpoints = [u.strip() for u in uris_str.split(',') if u.strip()]
-        
-        # Option 2: Template expansion
-        if not endpoints:
-            template = os.environ.get('S3_ENDPOINT_TEMPLATE')
-            if template:
-                endpoints = MinIOStorageWriter._expand_template(template)
-        
-        # Option 3: File with URIs
-        if not endpoints:
-            file_path = os.environ.get('S3_ENDPOINT_FILE')
-            if file_path and os.path.exists(file_path):
-                with open(file_path, 'r') as f:
-                    endpoints = [line.strip() for line in f if line.strip() and not line.startswith('#')]
-        
-        if not endpoints:
-            return None
-        
-        # Select endpoint based on MPI rank (round-robin)
-        mpi_rank = MinIOStorageWriter._get_mpi_rank()
-        if mpi_rank is not None and len(endpoints) > 1:
-            selected = endpoints[mpi_rank % len(endpoints)]
-            print(f"[MinIOWriter] MPI rank {mpi_rank}: selected endpoint {selected} from {len(endpoints)} endpoints")
-            return selected
-        elif len(endpoints) == 1:
-            return endpoints[0]
-        else:
-            # No MPI but multiple endpoints - use first one with warning
-            print(f"[MinIOWriter] WARNING: Multiple endpoints configured but no MPI rank detected")
-            print(f"[MinIOWriter]          Using first endpoint: {endpoints[0]}")
-            return endpoints[0]
+        """Resolve endpoint via centralized resolver (first non-empty value)."""
+        val, _src = resolve_object_storage_config()['endpoint']
+        return val or None
     
     def __init__(
         self,
@@ -185,19 +143,21 @@ class MinIOStorageWriter(StorageWriter):
         # Get S3 credentials from environment
         access_key = os.environ.get('AWS_ACCESS_KEY_ID')
         secret_key = os.environ.get('AWS_SECRET_ACCESS_KEY')
-        
-        # Check for multi-endpoint configuration first
-        endpoint = self._detect_and_select_endpoint()
-        if not endpoint:
-            # Fall back to single endpoint from AWS_ENDPOINT_URL
-            endpoint = os.environ.get('AWS_ENDPOINT_URL', os.environ.get('S3_ENDPOINT'))
-        
+
+        # Resolve all S3 config once — avoids 3 redundant env-var scans and
+        # ensures consistent state if env changes between calls.
+        _s3cfg = resolve_object_storage_config()
+        endpoint_val, _endpoint_src = _s3cfg['endpoint']
+        endpoint = endpoint_val or None
+        ca_bundle = _s3cfg['aws_ca_bundle']
+        region = _s3cfg['aws_region']
+
         if not access_key or not secret_key:
             raise ValueError(
                 "AWS credentials required in environment: "
                 "AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY"
             )
-        
+
         if not endpoint:
             # Default to AWS S3
             endpoint = "s3.amazonaws.com"
@@ -213,12 +173,11 @@ class MinIOStorageWriter(StorageWriter):
             else:
                 # No protocol specified, assume http
                 secure = False
-        
+
         # Initialize MinIO client
         # Support custom CA certificate via AWS_CA_BUNDLE (same env var as s3dlio/boto3).
         # Required when the MinIO server uses a self-signed or private CA certificate.
         http_client = None
-        ca_bundle = os.environ.get('AWS_CA_BUNDLE')
         if secure and ca_bundle:
             import urllib3
             http_client = urllib3.PoolManager(
@@ -236,7 +195,7 @@ class MinIOStorageWriter(StorageWriter):
             access_key=access_key,
             secret_key=secret_key,
             secure=secure,
-            region=os.environ.get('AWS_REGION', 'us-east-1'),
+            region=region,
             http_client=http_client,
         )
         

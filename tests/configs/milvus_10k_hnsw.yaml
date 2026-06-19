@@ -1,0 +1,42 @@
+backend: milvus
+mode: both
+
+database:
+  host: 127.0.0.1
+  port: 19530
+
+dataset:
+  collection_name: pr316_milvus_hnsw_10k
+  num_vectors: 10000
+  dimension: 128
+  distribution: uniform
+  block_size: 2000
+  batch_size: 500
+  seed: 42
+
+query:
+  num_query_vectors: 200
+  query_seed: 99
+
+ground_truth:
+  truth_k: 50
+
+index:
+  index_type: HNSW
+  metric_type: COSINE
+  index_params:
+    M: 16
+    efConstruction: 100
+  num_shards: 1
+
+search:
+  search_k: 10
+  num_search_rounds: 2
+  search_batch_size: 10
+  search_params:
+    ef: 64
+
+workflow:
+  force: true
+  compact: true
+  monitor_interval: 2

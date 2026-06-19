@@ -1,0 +1,46 @@
+# ---------------------------------------------------------------
+# 1M-vector HNSW benchmark  (Elasticsearch)
+# ---------------------------------------------------------------
+backend: elasticsearch
+mode: both
+
+database:
+  host: http://localhost:9200
+  # api_key: ""       # set via ELASTICSEARCH__API_KEY env var
+  # cloud_id: ""      # set via ELASTICSEARCH__CLOUD_ID env var
+
+dataset:
+  collection_name: bench_1m_hnsw
+  num_vectors: 1_000_000
+  dimension: 1536
+  distribution: uniform
+  block_size: 100_000
+  batch_size: 10_000
+  seed: 42
+
+query:
+  num_query_vectors: 10_000
+  query_seed: 99
+
+ground_truth:
+  truth_k: 100
+
+index:
+  index_type: HNSW
+  metric_type: COSINE
+  index_params:
+    m: 16
+    ef_construction: 200
+  num_shards: 1
+
+search:
+  search_k: 10
+  num_search_rounds: 1
+  search_batch_size: 1
+  search_params:
+    num_candidates: 128
+
+workflow:
+  force: false
+  compact: true
+  monitor_interval: 5

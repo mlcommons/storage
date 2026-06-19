@@ -77,7 +77,7 @@ def progress_context(
     if not is_interactive_terminal():
         # Non-interactive: log status and provide no-op functions
         if logger is not None:
-            logger.status(f"{description}...")
+            logger.info(f"{description}...")
 
         def noop_update(advance: int = 1, completed: Optional[int] = None) -> None:
             """No-op update function for non-interactive mode."""
@@ -178,7 +178,7 @@ def create_stage_progress(
         current_stage_idx = 0
 
         if logger is not None:
-            logger.status(f"Stage 1/{len(stages)}: {stages[0]}...")
+            logger.info(f"Stage 1/{len(stages)}: {stages[0]}...")
 
         def advance_stage_noninteractive(stage_name: Optional[str] = None) -> None:
             nonlocal current_stage_idx
@@ -186,7 +186,7 @@ def create_stage_progress(
             if current_stage_idx < len(stages):
                 if logger is not None:
                     desc = stage_name if stage_name else stages[current_stage_idx]
-                    logger.status(
+                    logger.info(
                         f"Stage {current_stage_idx + 1}/{len(stages)}: {desc}..."
                     )
 

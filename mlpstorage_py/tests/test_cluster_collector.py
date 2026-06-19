@@ -520,7 +520,8 @@ class TestMPIClusterCollector:
         collector = MPIClusterCollector(
             hosts=["host1", "host2"],
             mpi_bin="mpirun",
-            logger=mock_logger
+            logger=mock_logger,
+            results_dir='/tmp'
         )
         assert collector.hosts == ["host1", "host2"]
         assert collector.mpi_bin == "mpirun"
@@ -531,7 +532,8 @@ class TestMPIClusterCollector:
         collector = MPIClusterCollector(
             hosts=["host1:4", "host2:4", "host1:4"],
             mpi_bin="mpirun",
-            logger=mock_logger
+            logger=mock_logger,
+            results_dir='/tmp'
         )
         unique = collector._get_unique_hosts()
         assert len(unique) == 2
@@ -543,7 +545,8 @@ class TestMPIClusterCollector:
         collector = MPIClusterCollector(
             hosts=["host1", "host2"],
             mpi_bin="mpirun",
-            logger=mock_logger
+            logger=mock_logger,
+            results_dir='/tmp'
         )
         cmd = collector._generate_mpi_command("/tmp/script.py", "/tmp/output.json")
         assert "mpirun" in cmd
@@ -559,6 +562,7 @@ class TestMPIClusterCollector:
             hosts=["host1"],
             mpi_bin="mpirun",
             logger=mock_logger,
+            results_dir='/tmp',
             allow_run_as_root=True
         )
         cmd = collector._generate_mpi_command("/tmp/script.py", "/tmp/output.json")
@@ -569,7 +573,8 @@ class TestMPIClusterCollector:
         collector = MPIClusterCollector(
             hosts=["host1"],
             mpi_bin="mpirun",
-            logger=mock_logger
+            logger=mock_logger,
+            results_dir='/tmp'
         )
         with tempfile.TemporaryDirectory() as tmpdir:
             script_path = os.path.join(tmpdir, "collector.py")
@@ -586,7 +591,8 @@ class TestMPIClusterCollector:
         collector = MPIClusterCollector(
             hosts=["host1"],
             mpi_bin="mpirun",
-            logger=mock_logger
+            logger=mock_logger,
+            results_dir='/tmp'
         )
         result = collector.collect_local_only()
         assert isinstance(result, dict)
@@ -606,6 +612,7 @@ class TestCollectClusterInfo:
             hosts=["localhost"],
             mpi_bin="mpirun",
             logger=mock_logger,
+            results_dir='/tmp',
             fallback_to_local=True,
             timeout_seconds=5
         )
@@ -619,6 +626,7 @@ class TestCollectClusterInfo:
             hosts=["localhost"],
             mpi_bin="mpirun",
             logger=mock_logger,
+            results_dir='/tmp',
             fallback_to_local=True,
             timeout_seconds=5
         )
@@ -671,7 +679,8 @@ class TestMPIImportErrorHandling:
         collector = MPIClusterCollector(
             hosts=["host1"],
             mpi_bin="mpirun",
-            logger=mock_logger
+            logger=mock_logger,
+            results_dir='/tmp'
         )
 
         # Simulate what the script writes when mpi4py is missing
@@ -709,12 +718,6 @@ class TestMPIImportErrorHandling:
 
     def test_collector_returns_valid_data_without_error_marker(self, mock_logger):
         """Collector should return data normally when no error marker present."""
-        collector = MPIClusterCollector(
-            hosts=["host1"],
-            mpi_bin="mpirun",
-            logger=mock_logger
-        )
-
         # Valid output without error marker
         valid_output = {
             'host1': {
@@ -724,27 +727,39 @@ class TestMPIImportErrorHandling:
         }
 
         with tempfile.TemporaryDirectory() as tmpdir:
+            # Use shared_staging_dir so collect() stages everything under tmpdir.
+            # output_path = <shared_staging_dir>/cluster_info.json — pre-create
+            # it so collect() finds it after the (mocked) subprocess.run.
+            import subprocess
+            from unittest.mock import patch, MagicMock
+
+            collector = MPIClusterCollector(
+                hosts=["host1"],
+                mpi_bin="mpirun",
+                logger=mock_logger,
+                results_dir=tmpdir,
+                shared_staging_dir=tmpdir,
+            )
+
             output_path = os.path.join(tmpdir, 'cluster_info.json')
             with open(output_path, 'w') as f:
                 json.dump(valid_output, f)
-
-            import subprocess
-            from unittest.mock import patch, MagicMock
 
             mock_result = MagicMock()
             mock_result.returncode = 0
             mock_result.stderr = ""
 
-            with patch('subprocess.run', return_value=mock_result):
+            with patch('mlpstorage_py.cluster_collector.subprocess.run',
+                       return_value=mock_result):
                 with patch.object(collector, '_write_collector_script'):
-                    with patch.object(collector, '_generate_mpi_command', return_value="mpirun test"):
-                        with patch('tempfile.TemporaryDirectory') as mock_tmpdir:
-                            mock_tmpdir.return_value.__enter__.return_value = tmpdir
+                    with patch.object(
+                        collector, '_generate_mpi_command',
+                        return_value="mpirun test",
+                    ):
+                        result = collector.collect()
 
-                            result = collector.collect()
-
-                            assert 'host1' in result
-                            assert result['host1']['hostname'] == 'host1'
+                        assert 'host1' in result
+                        assert result['host1']['hostname'] == 'host1'
 
 
 # =============================================================================

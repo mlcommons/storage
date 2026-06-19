@@ -8,6 +8,7 @@ import os
 import time
 from typing import Dict, Any, List, Optional
 from .base import StorageWriter
+from mlpstorage_py.storage_config import resolve_object_storage_config
 
 
 class S3DLIOStorageWriter(StorageWriter):
@@ -87,7 +88,7 @@ class S3DLIOStorageWriter(StorageWriter):
         self.multi_endpoint_mode = False
         
         # Check for multi-endpoint configuration (S3/Azure/GCS only)
-        endpoint_uris = self._detect_multi_endpoint_config() if use_multi_endpoint else None
+        endpoint_uris = self._configure_multi_endpoint() if use_multi_endpoint else None
         
         # Initialize writer based on URI scheme
         if uri.startswith('s3://') or uri.startswith('gs://'):
@@ -124,55 +125,64 @@ class S3DLIOStorageWriter(StorageWriter):
                 f"Supported: file://, direct://, s3://, az://, gs://"
             )
     
-    def _detect_multi_endpoint_config(self) -> Optional[List[str]]:
-        """Detect multi-endpoint configuration from environment variables.
-        
+    def _configure_multi_endpoint(self) -> Optional[List[str]]:
+        """Detect multi-endpoint configuration using the centralized S3 resolver.
+
+        Reads S3_ENDPOINT_URIS, S3_ENDPOINT_TEMPLATE, and S3_ENDPOINT_FILE via
+        resolve_object_storage_config() (no direct os.environ reads here).
+
         Priority order:
         1. S3_ENDPOINT_URIS - Comma-separated list
-        2. S3_ENDPOINT_TEMPLATE - Template with {N...M} expansion  
+        2. S3_ENDPOINT_TEMPLATE - Template with {N...M} expansion
         3. S3_ENDPOINT_FILE - File with one URI per line
-        4. MPI rank-based single endpoint selection from AWS_ENDPOINT_URL
-        
+        4. MPI rank-based single endpoint selection (uses resolved endpoint value)
+
         Returns:
             List of endpoint URIs if multi-endpoint configured, None otherwise
         """
-        # Option 1: Explicit URI list
-        uris_str = os.environ.get('S3_ENDPOINT_URIS')
-        if uris_str:
-            uris = [u.strip() for u in uris_str.split(',') if u.strip()]
+        config = resolve_object_storage_config()
+        endpoint_val, endpoint_src = config['endpoint']
+
+        if not endpoint_val:
+            return None
+
+        # Option 1: Explicit URI list from S3_ENDPOINT_URIS
+        if endpoint_src == 'S3_ENDPOINT_URIS':
+            uris = [u.strip() for u in endpoint_val.split(',') if u.strip()]
             if len(uris) > 1:
                 print(f"[S3DLIOWriter] Multi-endpoint mode: {len(uris)} endpoints from S3_ENDPOINT_URIS")
                 return uris
-        
-        # Option 2: Template expansion
-        template = os.environ.get('S3_ENDPOINT_TEMPLATE')
-        if template:
-            uris = self._expand_template(template)
+            # Single URI in S3_ENDPOINT_URIS — fall through to MPI path below
+            mpi_rank = self._get_mpi_rank()
+            if mpi_rank is not None and uris:
+                selected = uris[mpi_rank % len(uris)]
+                print(f"[S3DLIOWriter] MPI mode: rank {mpi_rank} using endpoint {selected}")
+                # Sets AWS_ENDPOINT_URL for MPI worker subprocesses — intentional side-effect.
+                os.environ['AWS_ENDPOINT_URL'] = selected
+            return None
+
+        # Option 2: Template expansion from S3_ENDPOINT_TEMPLATE
+        if endpoint_src == 'S3_ENDPOINT_TEMPLATE':
+            uris = self._expand_template(endpoint_val)
             if len(uris) > 1:
                 print(f"[S3DLIOWriter] Multi-endpoint mode: {len(uris)} endpoints from template")
                 return uris
-        
-        # Option 3: File with URIs
-        file_path = os.environ.get('S3_ENDPOINT_FILE')
-        if file_path and os.path.exists(file_path):
+            return None
+
+        # Option 3: File with URIs from S3_ENDPOINT_FILE
+        if endpoint_src == 'S3_ENDPOINT_FILE':
+            file_path = endpoint_val
+            if not os.path.exists(file_path):
+                print(f"[S3DLIOWriter] WARNING: S3_ENDPOINT_FILE={file_path!r} not found; falling back to single-endpoint mode")
+                return None
             with open(file_path, 'r') as f:
                 uris = [line.strip() for line in f if line.strip() and not line.startswith('#')]
             if len(uris) > 1:
                 print(f"[S3DLIOWriter] Multi-endpoint mode: {len(uris)} endpoints from file")
                 return uris
-        
-        # Option 4: MPI rank-based single endpoint (distributed mode)
-        mpi_rank = self._get_mpi_rank()
-        if mpi_rank is not None and uris_str:
-            # Select endpoint based on rank (round-robin)
-            uris = [u.strip() for u in uris_str.split(',') if u.strip()]
-            if len(uris) > 1:
-                selected = uris[mpi_rank % len(uris)]
-                print(f"[S3DLIOWriter] MPI mode: rank {mpi_rank} using endpoint {selected}")
-                # Return single endpoint (no multi-endpoint store needed)
-                os.environ['AWS_ENDPOINT_URL'] = selected
-        
-        return None  # No multi-endpoint configuration
+            return None
+
+        return None  # AWS_ENDPOINT_URL or S3_ENDPOINT — single endpoint, handled elsewhere
     
     def _get_mpi_rank(self) -> Optional[int]:
         """Get MPI rank from Open MPI environment variables.
@@ -231,7 +241,7 @@ class S3DLIOStorageWriter(StorageWriter):
     
     def _init_multi_endpoint_s3(self, uri: str, endpoint_uris: List[str]):
         """Initialize multi-endpoint S3 writer with load balancing."""
-        strategy = os.environ.get('S3_LOAD_BALANCE_STRATEGY', 'round_robin')
+        strategy = resolve_object_storage_config()['load_balance_strategy']
         
         print(f"[S3DLIOWriter] Using MultiEndpointStore")
         print(f"[S3DLIOWriter]   endpoints={len(endpoint_uris)}, strategy={strategy}")
@@ -256,7 +266,7 @@ class S3DLIOStorageWriter(StorageWriter):
     
     def _init_multi_endpoint_azure(self, uri: str, endpoint_uris: List[str]):
         """Initialize multi-endpoint Azure writer with load balancing."""
-        strategy = os.environ.get('S3_LOAD_BALANCE_STRATEGY', 'round_robin')
+        strategy = resolve_object_storage_config()['load_balance_strategy']
         
         print(f"[S3DLIOWriter] Using MultiEndpointStore for Azure")
         print(f"[S3DLIOWriter]   endpoints={len(endpoint_uris)}, strategy={strategy}")

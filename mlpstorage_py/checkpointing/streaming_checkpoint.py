@@ -170,19 +170,32 @@ class StreamingCheckpointing:
         if self.use_direct_io:
             print(f"[Main] ⚠ Disabling O_DIRECT (shared_memory buffers not page-aligned)")
         
-        # Setup IPC
-        buffer_queue = mp.Queue(maxsize=self.num_buffers)
-        stop_event = mp.Event()
-        stats_queue = mp.Queue()
-        
-        # Start writer process with fork context (Linux only)
+        # Start writer process with fork context (Linux only).
         # Uses 'fork' to inherit environment variables (AWS credentials, etc.)
-        # Falls back to default 'spawn' on non-Linux platforms
+        # and to avoid MPI re-initialization deadlocks that occur with 'spawn'
+        # (spawned children inherit OMPI_COMM_WORLD_* and block trying to
+        # re-join the MPI communicator).
+        #
+        # CRITICAL: IPC objects (Queue, Event) MUST be created from the SAME
+        # context as the child process — mixing contexts (e.g. fork-context
+        # semaphores passed to a spawn-context child) causes:
+        #   RuntimeError: A SemLock created in a fork context is being shared
+        #                 with a process in a spawn context.
+        # Always create IPC objects from ctx BEFORE ctx.Process().
+        #
+        # Fork safety: the writer child does NOT call dgen-py or s3dlio from the
+        # parent's Rust runtimes — it creates fresh StorageWriter instances after
+        # fork, so Tokio/Rayon are initialized cleanly in the child.
         try:
             ctx = mp.get_context('fork')
         except ValueError:
-            # Fork not available (Windows/macOS), use default spawn
-            ctx = mp.get_context()
+            # Fork not available (Windows/macOS) — fall back to spawn.
+            ctx = mp.get_context('spawn')
+
+        # Setup IPC using the same context as the child process.
+        buffer_queue = ctx.Queue(maxsize=self.num_buffers)
+        stop_event = ctx.Event()
+        stats_queue = ctx.Queue()
         
         writer_proc = ctx.Process(
             target=self._writer_process,

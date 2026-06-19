@@ -18,6 +18,17 @@ if rank == 0:
     print(f"Endpoint assignment will be: rank % 4")
     print("="*60 + "\n")
 
+    if size == 1:
+        # The script was very likely started with plain `python ...` instead
+        # of an MPI launcher. It still runs (rank 0 only), but that is not a
+        # meaningful multi-endpoint test, so make the correct invocation
+        # explicit rather than letting the user puzzle over single-rank output.
+        print("NOTE: only 1 MPI process detected. This test is meant to run "
+              "under an MPI launcher.")
+        print("      Example: mpirun -np 8 python tests/integration/test_dlio_mpi.py")
+        print("      If the host has fewer cores than -np, add --oversubscribe "
+              "(or --use-hwthread-cpus).\n")
+
 # Add DLIO to path
 sys.path.insert(0, '/home/eval/Documents/Code/s3dlio/python')
 
@@ -52,9 +63,13 @@ try:
         "http://endpoint4:9000",
     ]
     
-    # Since we have OMPI_COMM_WORLD_RANK set by mpirun, simulate the selection
-    ompi_rank = int(os.environ['OMPI_COMM_WORLD_RANK'])
-    endpoint_index = ompi_rank % len(endpoints)
+    # Endpoint selection is driven by the MPI rank. Use comm.Get_rank()
+    # (already captured above) rather than the OpenMPI-specific
+    # OMPI_COMM_WORLD_RANK environment variable, which is unset under plain
+    # `python`, MPICH, or srun and previously raised a bare KeyError. That env
+    # var is now only displayed for diagnostics, read safely with a default.
+    ompi_rank = os.environ.get('OMPI_COMM_WORLD_RANK', 'not set')
+    endpoint_index = rank % len(endpoints)
     selected_endpoint = endpoints[endpoint_index]
     
     print(f"Rank {rank:2d}: OMPI_COMM_WORLD_RANK={ompi_rank} → endpoint[{endpoint_index}] = {selected_endpoint}")

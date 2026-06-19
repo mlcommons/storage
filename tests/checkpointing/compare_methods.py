@@ -19,7 +19,7 @@ import subprocess
 sys.path.insert(0, '/home/eval/Documents/Code/mlp-storage')
 
 import dgen_py
-from mlpstorage.checkpointing import StreamingCheckpointing
+from mlpstorage_py.checkpointing import StreamingCheckpointing
 
 
 def drop_caches():

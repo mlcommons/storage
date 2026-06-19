@@ -52,12 +52,15 @@ DLRM = "dlrm"
 RETINANET = "retinanet"
 FLUX = "flux"
 MODELS = [COSMOFLOW, RESNET, UNET, DLRM, RETINANET, FLUX]
+MODELS_CLOSED = [UNET, RETINANET]
+MODELS_OPEN   = [UNET, RETINANET]
 
 H100 = "h100"
 A100 = "a100"
 B200 = "b200"
 MI355 = "mi355"
 ACCELERATORS = [H100, A100, B200, MI355]
+ACCELERATORS_CLOSED = [B200, MI355]
 
 OPEN = "open"
 CLOSED = "closed"
@@ -68,6 +71,7 @@ LLAMA3_70B = 'llama3-70b'
 LLAMA3_405B = 'llama3-405b'
 LLAMA3_1T = 'llama3-1t'
 LLM_MODELS = [LLAMA3_70B, LLAMA3_405B, LLAMA3_1T, LLAMA3_8B]
+LLM_MODELS_CLOSED = LLM_MODELS
 
 LLM_SUBSET_PROCS = 8
 # Defined as (MinProcs, ZeroLevel, GPU per Data Parallel Instance, Closed GPU Count)
@@ -93,6 +97,7 @@ CHECKPOINT_RANKS_STRINGS = "\n    ".join(
 LLM_MODELS_STRINGS = "\n    ".join(LLM_MODELS)
 
 # KV Cache benchmark model configurations
+KVCACHE_MODEL_DEFAULT = 'llama3.1-8b'
 KVCACHE_MODELS = [
     'tiny-1b',
     'mistral-7b',
@@ -112,8 +117,14 @@ KVCACHE_DEFAULT_DURATION = 60
 
 # VDB Benchmark Configuration
 VDB_INDEX_TYPES = ["DISKANN", "HNSW", "AISAQ", "IVF_FLAT", "IVF_SQ8", "FLAT"]
+VDB_INDEX_TYPES_CLOSED = ["DISKANN", "HNSW", "AISAQ"]
 VDB_ORCHESTRATION_MODES = ["ssh", "mpi"]
 VDB_BENCHMARK_MODES = ["timed", "query_count", "sweep"]
+# Vector-database engines. Only milvus is wired up today; the slot exists so
+# accumulated results from multiple engines can coexist in one results-dir
+# (path: vector_database/<engine>/<command>/<datetime>/).
+VDB_ENGINES = ["milvus"]
+VDB_ENGINE_DEFAULT = "milvus"
 
 MPIRUN = "mpirun"
 MPIEXEC = "mpiexec"
@@ -131,7 +142,10 @@ ALLOW_RUN_AS_ROOT = True
 
 MAX_NUM_FILES_TRAIN = 128*1024
 
-DEFAULT_RESULTS_DIR = os.path.join(tempfile.gettempdir(), f"mlperf_storage_results")
+DEFAULT_RESULTS_DIR = os.environ.get(
+    "MLPERF_RESULTS_DIR",
+    os.path.join(tempfile.gettempdir(), "mlperf_storage_results"),
+)
 
 import enum
 
@@ -144,7 +158,7 @@ class EXIT_CODE(enum.IntEnum):
     CONFIGURATION_ERROR = 5
     FAILURE = 6
     TIMEOUT = 7
-    # Add more as needed
+    INTERRUPTED = 8
     
     def __str__(self):
         return f"{self.name} ({self.value})"
