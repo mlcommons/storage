@@ -801,7 +801,18 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         """
         if not self.BENCHMARK_TYPE:
             raise ValueError('No benchmark specified. Unable to generate output location')
-        return generate_output_location(self, self.run_datetime)
+        # Thread the validated orgname/systemname stashed by
+        # capture_or_verify_code_image (code_image.py: args._validated_orgname /
+        # args._validated_systemname) so generate_output_location's
+        # OPEN/CLOSED ConfigurationError path doesn't fire. For legacy /
+        # whatif modes these attrs are absent (getattr default None) and the
+        # function's mode check skips the orgname/systemname requirement.
+        return generate_output_location(
+            self,
+            self.run_datetime,
+            orgname=getattr(self.args, "_validated_orgname", None),
+            systemname=getattr(self.args, "_validated_systemname", None),
+        )
 
     _COLLISION_BUMP_BUDGET = DEFAULT_COLLISION_BUMP_BUDGET
 
