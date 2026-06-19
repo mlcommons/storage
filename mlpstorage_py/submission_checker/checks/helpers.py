@@ -246,6 +246,14 @@ def _check_code_image_layered(
         ``True`` if every branch passed; ``False`` if any violation was logged.
     """
     valid = True
+    # When .code-hash.json is absent, the per-tree integrity anchor does not
+    # exist — the upstream-identity branch would re-walk the entire tree and
+    # log a SECOND, contradictory violation per leaf with no diagnostic value
+    # over the first ("missing .code-hash.json"). MalformedHashFile and
+    # CodeImageError are different: the JSON parses but the hash mismatches
+    # or refers to an absent root — keep dual-violation behavior for those
+    # so the upstream-identity walk still adds signal.
+    hashfile_present = True
 
     # 1. Self-consistency branch (STRUCT-06 L448-L464 analog).
     try:
@@ -256,7 +264,14 @@ def _check_code_image_layered(
                 code_path,
             )
             valid = False
-    except (MissingHashFile, MalformedHashFile, CodeImageError) as e:
+    except MissingHashFile as e:
+        hashfile_present = False
+        log_violation_cb(
+            rule_id, rule_name, code_path,
+            "%s", str(e),
+        )
+        valid = False
+    except (MalformedHashFile, CodeImageError) as e:
         log_violation_cb(
             rule_id, rule_name, code_path,
             "%s", str(e),
@@ -264,7 +279,10 @@ def _check_code_image_layered(
         valid = False
 
     # 2. Upstream-identity branch (STRUCT-06 L466-L476 analog; CLOSED + expected only).
-    if division == "closed" and expected is not None:
+    # Skip the O(tree) re-walk when no .code-hash.json anchored step 1 — the
+    # caller already knows the leaf is broken; a redundant violation here
+    # just adds noise without surfacing new information.
+    if division == "closed" and expected is not None and hashfile_present:
         digest = compute_code_tree_md5(code_path, log)
         if digest != expected:
             log_violation_cb(
