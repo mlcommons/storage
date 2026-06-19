@@ -59,10 +59,14 @@ class TestRulesCoverageReconciliation:
         )
 
     def test_reconcile_returns_rows_for_every_rules_md_id(self):
-        """Row count covers every Rules.md §2/§3/§4 ID (>= 50; current 57)."""
+        """Row count covers every Rules.md §2/§3/§4/§5/§6 ID.
+
+        Pre-Phase-4 baseline was >= 50 (then 57). Phase 4 added 16 §5 IDs
+        via Plan 04-03's Rules.md edits, so the floor rises to >= 66.
+        """
         result = reconcile()
-        assert len(result["rows"]) >= 50, (
-            "Expected at least 50 rows, got {}".format(len(result["rows"]))
+        assert len(result["rows"]) >= 66, (
+            "Expected at least 66 rows, got {}".format(len(result["rows"]))
         )
 
     def test_struct_2_1_2_is_check_method_disposition(self):
@@ -110,7 +114,7 @@ class TestRulesCoverageReconciliation:
         """
         fake_md = tmp_path / "fake.md"
         original = RULES_MD_PATH.read_text(encoding="utf-8")
-        # Locked regex: ^([234]\.\d+\.\d+)\.\s+\*\*([a-zA-Z][a-zA-Z0-9]+)\*\*
+        # Locked regex: ^([23456]\.\d+\.\d+)\.\s+\*\*([a-zA-Z][a-zA-Z0-9]+)\*\*
         fake_md.write_text(
             original + "\n2.1.99. **fakeRule** -- placeholder for testing\n",
             encoding="utf-8",
