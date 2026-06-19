@@ -46,14 +46,13 @@ all = [
   "python-dotenv>=1.0.0",
 ]
 
+mpi = [
+  "mpi4py>=4.0.0",
+]
+
 [project.urls]
 "Homepage" = "https://github.com/mlcommons/storage/tree/main/vdb_benchmark"
 "Bug Tracker" = "https://github.com/mlcommons/storage/issues"
-
-[project.optional-dependencies]
-mpi = [
-    "mpi4py>=4.0.0",
-]
 
 [project.scripts]
 compact-and-watch = "vdbbench.compact_and_watch:main"
