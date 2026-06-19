@@ -309,14 +309,23 @@ def verify_source_against_image(source_root: Path, image_dir: Path, log) -> bool
         True if hashes match, False otherwise.
 
     Raises:
-        SourceRootNotFound: If source_root cannot be hashed.
-        CodeImageError: If image_dir is malformed.
+        CodeTreeUnreadable: If source_root exists but the hashing walk could
+            not complete (permission error mid-walk, etc.).
+        MissingHashFile / MalformedHashFile: If image_dir is missing or has
+            an invalid `.code-hash.json` (via load_code_image).
     """
     img = load_code_image(image_dir, log)
     current_hash = compute_code_tree_md5(str(source_root), log)
     if current_hash is None:
-        raise SourceRootNotFound(f"Source root not found or unreadable: {source_root}")
-    
+        # IN-02: previously raised SourceRootNotFound, but that exception is
+        # reserved for "walked to filesystem root without finding pyproject.toml"
+        # (D-05) — a structural CLI / config error. compute_code_tree_md5
+        # returning None means the walk itself failed, not that source_root
+        # is structurally invalid. Use CodeTreeUnreadable instead.
+        raise CodeTreeUnreadable(
+            f"Source root could not be hashed (unreadable or vanished mid-walk): {source_root}"
+        )
+
     return current_hash == img.hash
 
 
