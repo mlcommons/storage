@@ -499,15 +499,25 @@ class SubmissionStructureCheck(BaseCheck):
                         valid = False
 
         # D-11/D-12 preserved: emit the "not pinned" warning exactly once per
-        # run when REFERENCE_CHECKSUMS is unset AND a closed/ subtree exists.
-        if expected is None and os.path.isdir(os.path.join(self.root_path, "closed")):
-            self.warn_violation(
-                "2.1.6", "codeDirectoryContents",
-                os.path.join(self.root_path, "closed"),
-                "reference checksum not configured "
-                "(use --reference-checksum or populate REFERENCE_CHECKSUMS); "
-                "upstream-identity check skipped (self-consistency check still ran)",
+        # run when REFERENCE_CHECKSUMS is unset AND a closed/ subtree exists
+        # AND that subtree actually contains a submitter (any non-dot entry).
+        # An empty closed/ — or one with only dotfiles like .DS_Store — has no
+        # code/ checks to skip, so the warning would be noise.
+        closed_path = os.path.join(self.root_path, "closed")
+        if expected is None and os.path.isdir(closed_path):
+            has_closed_submitter = any(
+                not name.startswith(".")
+                and os.path.isdir(os.path.join(closed_path, name))
+                for name in list_dir(closed_path)
             )
+            if has_closed_submitter:
+                self.warn_violation(
+                    "2.1.6", "codeDirectoryContents",
+                    closed_path,
+                    "reference checksum not configured "
+                    "(use --reference-checksum or populate REFERENCE_CHECKSUMS); "
+                    "upstream-identity check skipped (self-consistency check still ran)",
+                )
         return valid
 
     # -----------------------------------------------------------------------
