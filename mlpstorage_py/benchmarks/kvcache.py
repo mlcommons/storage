@@ -21,6 +21,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Dict, Any, List
+from statistics import fmean
 
 from mlpstorage_py.benchmarks.base import Benchmark
 from mlpstorage_py.config import (
@@ -397,10 +398,10 @@ class KVCacheBenchmark(Benchmark):
 
         return {
             'option': option,
-            'aggregated_read_bandwidth_gbps': sum(all_read_bw),
-            'aggregated_write_bandwidth_gbps': sum(all_write_bw),
-            'aggregated_avg_throughput_tokens_per_sec': sum(all_avg_throughput),
-            'aggregated_storage_throughput_tokens_per_sec': sum(all_storage_throughput),
+            'aggregated_read_bandwidth_gbps': fmean(all_read_bw),
+            'aggregated_write_bandwidth_gbps': fmean(all_write_bw),
+            'aggregated_avg_throughput_tokens_per_sec': fmean(all_avg_throughput),
+            'aggregated_storage_throughput_tokens_per_sec': fmean(all_storage_throughput),
             'aggregated_p95_latency_ms': max(all_p95_latency) if all_p95_latency else None,
             'rank_count': expected_rank_count,
             'trial_count': len(trial_dirs),
