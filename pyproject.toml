@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlpstorage"
-version = "3.0.13"
+version = "3.0.14"
 description = "MLPerf Storage Benchmark Suite"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -132,7 +132,7 @@ torchaudio = [{ index = "pytorch-cpu" }]
 #   - DLIO PR #23 fix for storage #391 part 2 (sudo -n + warn-once for drop_caches)
 #   - DLIO PR #24 fix for storage #448 (per-node worker-memory budget)
 #   - DLIO PR #25 fix for storage #455 (sampler floor division — equal per-rank shards)
-dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "cbe200103b05fb65f04110157a7d0dd6d6d88ead" }
+dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "ef58613b59d4ad510f467dd53b2b326f25829f1b" }
 
 [dependency-groups]
 dev = [
