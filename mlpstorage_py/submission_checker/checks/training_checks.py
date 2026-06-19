@@ -66,12 +66,13 @@ class TrainingCheck(BaseCheck):
         system_file = getattr(self.submissions_logs, "system_file", None)
         if not system_file:
             return "file"
-        return (
-            system_file.get("system_under_test", {})
-                       .get("solution", {})
-                       .get("architecture", {})
-                       .get("benchmark_API", "file")
-        )
+        # `.get(key, {})` only catches missing keys — if the YAML serializes
+        # an intermediate node as `null`, the chained .get raises AttributeError
+        # on NoneType. `or {}` collapses both absent and null to a safe default.
+        sut = system_file.get("system_under_test") or {}
+        solution = sut.get("solution") or {}
+        architecture = solution.get("architecture") or {}
+        return architecture.get("benchmark_API", "file")
 
     @rule("3.1.1", "trainingVerifyDatasizeUsage")
     def verify_datasize_usage(self):

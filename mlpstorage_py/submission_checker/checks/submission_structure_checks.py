@@ -613,16 +613,14 @@ class SubmissionStructureCheck(BaseCheck):
                     )
                     valid = False
                 else:
-                    # Parse YAML and check submission_name == name (D-17)
+                    # Parse YAML and check submission_name == name (D-17).
+                    # Use `or {}` rather than `.get(key, {})` so a YAML node
+                    # that serializes as null (not just absent) also collapses
+                    # to a safe default instead of raising AttributeError mid-chain.
                     system_yaml = YamlParser(yaml_path, "System").get_dict()
-                    try:
-                        submission_name = (
-                            system_yaml.get("system_under_test", {})
-                            .get("solution", {})
-                            .get("submission_name")
-                        )
-                    except AttributeError:
-                        submission_name = None
+                    sut = system_yaml.get("system_under_test") or {}
+                    solution = sut.get("solution") or {}
+                    submission_name = solution.get("submission_name")
 
                     if submission_name != name:
                         self.log_violation(
