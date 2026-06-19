@@ -446,8 +446,12 @@ def main():
         logger.error(f"Unexpected error: {str(e)}")
         logger.error(format_error('INTERNAL_ERROR', error=str(e)))
 
-        # Show traceback if in debug mode
-        if MLPS_DEBUG:
+        # Show traceback if in debug mode. MLPS_DEBUG is the env-var path
+        # (read at import time); also check `--debug` directly via sys.argv
+        # so the CLI flag emits a trace even though `args` is not in scope
+        # here. `--debug` is store_true so a bare-token check suffices.
+        debug_cli = '--debug' in sys.argv
+        if MLPS_DEBUG or debug_cli:
             logger.debug("Stack trace:")
             traceback.print_exc()
         else:
