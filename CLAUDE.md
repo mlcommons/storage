@@ -9,33 +9,25 @@ MLPerf Storage Benchmark Suite (v2.0.0b1) - a Python framework for benchmarking 
 ## Common Commands
 
 ```bash
-
 # Install for development
-
 pip install -e .
 
 # Install with test dependencies
-
 pip install -e ".[test]"
 
 # Install with full DLIO support for running benchmarks
-
 pip install -e ".[full]"
 
 # Run all unit tests
-
 pytest tests/unit -v
 
 # Run a single test file
-
 pytest tests/unit/test_cli.py -v
 
 # Run tests with coverage
-
 pytest tests/unit -v --cov=mlpstorage --cov-report=xml
 
 # Run integration tests
-
 pytest tests/integration -v
 ```
 
@@ -44,27 +36,22 @@ pytest tests/integration -v
 The main entry point is `mlpstorage` with nested subcommands:
 
 ```bash
-
 # Training benchmarks (unet3d, resnet50, cosmoflow)
-
 mlpstorage training datasize ...   # Calculate required dataset size
 mlpstorage training datagen ...    # Generate synthetic data
 mlpstorage training run ...        # Execute benchmark
 mlpstorage training configview ... # View final configuration
 
 # Checkpointing benchmarks (llama3-8b, llama3-70b, llama3-405b, llama3-1t)
-
 mlpstorage checkpointing run ...
 mlpstorage checkpointing datagen ...
 mlpstorage checkpointing validate ...
 
 # Other benchmarks
-
 mlpstorage vectordb run ...        # Vector database (PREVIEW)
 mlpstorage kvcache run ...         # KV cache
 
 # Utilities
-
 mlpstorage reports reportgen ...   # Generate submission reports
 mlpstorage history list/replay ... # Command history
 ```
@@ -74,13 +61,11 @@ mlpstorage history list/replay ... # Command history
 ### Benchmark System
 
 All benchmarks inherit from `Benchmark` base class (`mlpstorage/benchmarks/base.py`):
-
 - Subclasses implement `_run()` method and set `BENCHMARK_TYPE` class attribute
 - Base class handles cluster info collection, result directories, metadata, and signal handling
 - Supports dependency injection for cluster collectors and validators (for testing)
 
 Concrete implementations in `mlpstorage/benchmarks/`:
-
 - `TrainingBenchmark`, `CheckpointingBenchmark` - DLIO-based benchmarks
 - `VectorDBBenchmark` - Vector database operations
 - `KVCacheBenchmark` - LLM KV cache management
@@ -99,7 +84,6 @@ Concrete implementations in `mlpstorage/benchmarks/`:
 ### Validation System
 
 Located in `mlpstorage/rules/`:
-
 - **Run Checkers** (`run_checkers/`) - Real-time validation during execution
 - **Submission Checkers** (`submission_checkers/`) - Post-run compliance validation
 - **BenchmarkVerifier** (`verifier.py`) - Orchestrates all validation
@@ -133,7 +117,6 @@ Located in `mlpstorage/rules/`:
 ## Testing
 
 Tests use pytest with fixtures in `tests/fixtures/`:
-
 - `mock_collector.py` - Mock cluster collector
 - `mock_executor.py` - Mock command executor
 - `mock_logger.py` - Mock logger
@@ -142,16 +125,13 @@ Tests use pytest with fixtures in `tests/fixtures/`:
 ### Test Environment
 
 When running the `mlpstorage` CLI for manual testing or integration tests, use:
-
 - **Data directory**: `/databases/mlps-v3.0/data/`
 - **Results directory**: `/databases/mlps-v3.0/results/`
 
 #### Example Commands
 
 ```bash
-
 # Generate dataset for unet3d with 4 processes
-
 mlpstorage training datagen \
     --model unet3d \
     --num-processes 4 \
@@ -159,7 +139,6 @@ mlpstorage training datagen \
     --results-dir /databases/mlps-v3.0/results
 
 # Run training benchmark for unet3d with 2 h100 accelerators
-
 mlpstorage training run \
     --model unet3d \
     --num-accelerators 2 \
@@ -170,22 +149,17 @@ mlpstorage training run \
 ```
 
 **Note**: These benchmarks require MPI (OpenMPI) to be installed. Install with:
-
 ```bash
-
 # Ubuntu/Debian
-
 sudo apt-get install openmpi-bin
 
 # RHEL/CentOS
-
 sudo yum install openmpi
 ```
 
 ## Key Constants
 
 From `mlpstorage/config.py`:
-
 - Training models: `cosmoflow`, `resnet50`, `unet3d`
 - LLM models (checkpointing): `llama3-8b`, `llama3-70b`, `llama3-405b`, `llama3-1t`
 - Accelerators: `h100`, `a100`
@@ -204,73 +178,3 @@ This project uses Get Shit Done (GSD) for structured development. Planning artif
 /gsd-transition         # Complete phase, update PROJECT.md and STATE.md
 /gsd-progress           # Check current progress
 /gsd-explore            # Open-ended Socratic ideation session
-
-<!-- GSD:project-start source:PROJECT.md -->
-
-## Project
-
-**MLPerf Storage — Code-Image Capture & Validation**
-
-An extension to the MLPerf Storage Benchmark Suite (mlpstorage, currently 3.0.9) that captures a frozen "code image" of the benchmark source tree into the results directory the first time a `closed` or `open` submission category runs `datasize`, `datagen`, or `run`, and validates on subsequent invocations that the running code matches the captured image. Submission validation is extended to require the code image and verify its hash. This work serves MLPerf Storage submitters who must prove that the codebase used to generate their results is fixed within a category — and, for CLOSED, identical to the frozen upstream release.
-
-**Core Value:** When a submission is validated, we can prove that every result in that submission was generated by exactly the source tree captured in `.../code/`, and a CLOSED submission used the unmodified upstream codebase.
-
-### Constraints
-
-- **Tech stack:** Python ≥3.12, <3.13 (per `pyproject.toml`); no new runtime dependencies should be needed — `hashlib`, `os`, `shutil`, `json` cover the new capture work.
-- **Compatibility:** existing `compute_code_tree_md5` digest output must remain stable for submissions captured before this change; exclusion-set changes (adding `test/`, `tests/`) will change digests of trees that contain those dirs, so the new behavior must be the only path used post-release. (The new run-time capture is the first writer of `.code-hash.json` in the results tree, so there are no pre-existing files to invalidate.)
-- **Submission structure:** changes to Rules.md graphics must match the actual on-disk paths the new capture writes — these are tied together and ship as one unit.
-- **Release artifacts:** `pyproject.toml` version bump and `uv.lock` regeneration must accompany the code change in the same commit / phase, so installers see consistent metadata.
-
-<!-- GSD:project-end -->
-
-<!-- GSD:stack-start source:STACK.md -->
-
-## Technology Stack
-
-Technology stack not yet documented. Will populate after codebase mapping or first phase.
-<!-- GSD:stack-end -->
-
-<!-- GSD:conventions-start source:CONVENTIONS.md -->
-
-## Conventions
-
-Conventions not yet established. Will populate as patterns emerge during development.
-<!-- GSD:conventions-end -->
-
-<!-- GSD:architecture-start source:ARCHITECTURE.md -->
-
-## Architecture
-
-Architecture not yet mapped. Follow existing patterns found in the codebase.
-<!-- GSD:architecture-end -->
-
-<!-- GSD:skills-start source:skills/ -->
-
-## Project Skills
-
-No project skills found. Add skills to any of: `.claude/skills/`, `.agents/skills/`, `.cursor/skills/`, `.github/skills/`, or `.codex/skills/` with a `SKILL.md` index file.
-<!-- GSD:skills-end -->
-
-<!-- GSD:workflow-start source:GSD defaults -->
-
-## GSD Workflow Enforcement
-
-Before using Edit, Write, or other file-changing tools, start work through a GSD command so planning artifacts and execution context stay in sync.
-
-Use these entry points:
-
-- `/gsd-quick` for small fixes, doc updates, and ad-hoc tasks
-- `/gsd-debug` for investigation and bug fixing
-- `/gsd-execute-phase` for planned phase work
-
-Do not make direct repo edits outside a GSD workflow unless the user explicitly asks to bypass it.
-<!-- GSD:workflow-end -->
-
-<!-- GSD:profile-start -->
-
-## Developer Profile
-
-> Profile not yet configured. Run `/gsd-profile-user` to generate your developer profile.
-> This section is managed by `generate-claude-profile` -- do not edit manually.
-<!-- GSD:profile-end -->
