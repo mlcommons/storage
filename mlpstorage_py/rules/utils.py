@@ -206,10 +206,11 @@ def generate_output_location(
                 "not provided to generate_output_location",
                 parameter="orgname",
                 suggestion=(
-                    f"The CLI dispatch layer should read {MLPSTORAGE_ORGNAME_ENVVAR}"
-                    f"={MLPSTORAGE_ORGNAME_ENVVAR!r} from the environment "
-                    "and thread it through as the orgname keyword. "
-                    "Programmatic callers must pass orgname= explicitly."
+                    f"The CLI dispatch layer should read the "
+                    f"{MLPSTORAGE_ORGNAME_ENVVAR} environment variable and "
+                    "thread the validated value through as the orgname "
+                    "keyword. Programmatic callers must pass orgname= "
+                    "explicitly."
                 ),
                 code=ErrorCode.CONFIG_MISSING_REQUIRED,
             )
@@ -222,11 +223,11 @@ def generate_output_location(
                     "not provided to generate_output_location",
                     parameter="systemname",
                     suggestion=(
-                        f"The CLI dispatch layer should read "
-                        f"{MLPSTORAGE_SYSTEMNAME_ENVVAR}"
-                        f"={MLPSTORAGE_SYSTEMNAME_ENVVAR!r} from the environment "
-                        "and thread it through as the systemname keyword. "
-                        "Programmatic callers must pass systemname= explicitly."
+                        f"The CLI dispatch layer should read the "
+                        f"{MLPSTORAGE_SYSTEMNAME_ENVVAR} environment "
+                        "variable and thread the validated value through "
+                        "as the systemname keyword. Programmatic callers "
+                        "must pass systemname= explicitly."
                     ),
                     code=ErrorCode.CONFIG_MISSING_REQUIRED,
                 )
