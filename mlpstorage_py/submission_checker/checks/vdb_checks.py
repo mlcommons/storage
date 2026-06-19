@@ -706,9 +706,16 @@ class VdbCheck(BaseCheck):
                 )
                 valid = False
                 continue
-            # S3-compatible backends commonly use "s3" / "s3-compatible" / "minio" / "ceph" prefixes.
+            # S3-compatible backends: accept exact names or `s3-` prefix
+            # (e.g. "s3-compatible", "s3-express"). Substring match is too
+            # loose — "non-s3-storage" / "s3-incompatible-fork" should fail.
             backend_lc = str(backend).lower()
-            if "s3" not in backend_lc and backend_lc not in {"minio", "ceph"}:
+            _S3_COMPATIBLE_NAMES = frozenset({"s3", "s3-compatible", "minio", "ceph"})
+            _S3_COMPATIBLE_PREFIXES = ("s3-",)
+            if (
+                backend_lc not in _S3_COMPATIBLE_NAMES
+                and not backend_lc.startswith(_S3_COMPATIBLE_PREFIXES)
+            ):
                 self.log_violation(
                     "5.5.1", "vdbObjectStorageBackend", self.path,
                     "vdbObjectStorageBackend: object-API submission must record an "
