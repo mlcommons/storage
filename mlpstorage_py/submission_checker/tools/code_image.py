@@ -632,6 +632,19 @@ def capture_or_verify_code_image(args, env, log):
     # the results-directory itself is reserved for the future
     # `mlpstorage init` command.
     results_dir = Path(args.results_dir)
+    # IN-03: enforce the "results_dir must already exist" contract from the
+    # comment above. Without this gate, image_parent.mkdir(parents=True, ...)
+    # below silently creates results_dir if absent, diverging from the
+    # documented behavior.
+    if not results_dir.exists():
+        raise ConfigurationError(
+            f"results_dir {str(results_dir)!r} does not exist; the code-image "
+            f"helper does not create it (reserved for future `mlpstorage init`)",
+            parameter="--results-dir",
+            suggestion=f"mkdir -p {str(results_dir)!r} before running, "
+                       f"or point --results-dir at an existing directory",
+            code=ErrorCode.CONFIG_INVALID_VALUE,
+        )
     if mode == "closed":
         image_parent = results_dir / "closed" / orgname
     else:  # mode == "open"
