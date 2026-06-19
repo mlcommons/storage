@@ -170,10 +170,17 @@ class SubmissionStructureCheck(BaseCheck):
         if not os.path.isdir(results):
             return
         for sys_name in list_dir(results):
+            # Skip dot-prefixed entries (.git/, .github/, .cache/, .DS_Store, etc.) —
+            # every sibling check in this file already filters them, and yielding a
+            # synthetic code/ path under one produces a spurious 2.1.6 violation.
+            if sys_name.startswith("."):
+                continue
             sys_path = os.path.join(results, sys_name)
             if not os.path.isdir(sys_path):
                 continue
             for wtype in list_dir(sys_path):
+                if wtype.startswith("."):
+                    continue
                 wtype_path = os.path.join(sys_path, wtype)
                 if not os.path.isdir(wtype_path):
                     continue
@@ -183,6 +190,8 @@ class SubmissionStructureCheck(BaseCheck):
                     yield os.path.join(wtype_path, "code")
                     continue
                 for model in list_dir(wtype_path):
+                    if model.startswith("."):
+                        continue
                     model_path = os.path.join(wtype_path, model)
                     if not os.path.isdir(model_path):
                         continue
