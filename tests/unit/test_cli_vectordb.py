@@ -4,6 +4,7 @@ Tests for VectorDB benchmark CLI argument parsing.
 Tests cover:
 - VectorDB subcommand structure (run, datagen)
 - Common arguments (host, port, collection, config)
+- --vdb-index parsing and --index-type normalization
 - Datagen-specific arguments (dimension, num_vectors, distribution, etc.)
 - Run-specific arguments (num_query_processes, batch_size, runtime, queries)
 """
@@ -11,8 +12,35 @@ Tests cover:
 import argparse
 import pytest
 
-from mlpstorage_py.cli.vectordb_args import add_vectordb_arguments
-from mlpstorage_py.config import VECTOR_DTYPES, DISTRIBUTIONS
+from mlpstorage_py.cli.vectordb_args import (
+    add_vectordb_arguments,
+    validate_vectordb_arguments,
+)
+from mlpstorage_py.config import (
+    DISTRIBUTIONS,
+    VDB_INDEX_DEFAULT,
+    VDB_INDEX_TYPES,
+    VDB_INDEX_TYPES_CLOSED,
+    VECTOR_DTYPES,
+)
+
+
+def _parse_and_validate(parser, argv, *, mode="open"):
+    """Parse VectorDB arguments and run post-parse normalization."""
+    args = parser.parse_args(argv)
+    # The isolated parser used in this unit module does not have the outer
+    # closed/open/whatif parser that normally supplies args.mode.
+    args.mode = mode
+    validate_vectordb_arguments(args)
+    return args
+
+
+def _vdb_argv(command, *options):
+    """Build argv; datasize has no file/object storage subcommand."""
+    argv = [command, '--results-dir', '/tmp', *options]
+    if command in ('datagen', 'run'):
+        argv.append('file')
+    return argv
 
 
 class TestVectorDBSubcommands:
@@ -427,6 +455,111 @@ class TestVectorDBFullCommandParsing:
         assert args.runtime is None
 
 
+class TestVectorDBIndexArguments:
+    """Tests for --vdb-index and --index-type normalization."""
+
+    @pytest.fixture
+    def parser(self):
+        parser = argparse.ArgumentParser()
+        add_vectordb_arguments(parser, 'open')
+        return parser
+
+    @pytest.mark.parametrize("command", ["datasize", "datagen", "run"])
+    def test_vdb_index_is_registered_on_all_subcommands(self, parser, command):
+        """All VectorDB commands expose --vdb-index."""
+        args = parser.parse_args(
+            _vdb_argv(command, '--vdb-index', 'HNSW')
+        )
+
+        assert args.vdb_index == 'HNSW'
+
+    @pytest.mark.parametrize("command", ["datasize", "datagen"])
+    def test_parser_keeps_both_index_defaults_unresolved(self, parser, command):
+        """Parser-level None defaults preserve whether either flag was given."""
+        args = parser.parse_args(_vdb_argv(command))
+
+        assert args.vdb_index is None
+        assert args.index_type is None
+
+    @pytest.mark.parametrize("command", ["datasize", "datagen"])
+    def test_neither_flag_uses_default_for_both_names(self, parser, command):
+        args = _parse_and_validate(parser, _vdb_argv(command))
+
+        assert args.vdb_index == VDB_INDEX_DEFAULT
+        assert args.index_type == VDB_INDEX_DEFAULT
+
+    @pytest.mark.parametrize("command", ["datasize", "datagen"])
+    def test_vdb_index_supplies_milvus_index_type(self, parser, command):
+        args = _parse_and_validate(
+            parser,
+            _vdb_argv(command, '--vdb-index', 'HNSW'),
+        )
+
+        assert args.vdb_index == 'HNSW'
+        assert args.index_type == 'HNSW'
+
+    @pytest.mark.parametrize("command", ["datasize", "datagen"])
+    def test_legacy_index_type_supplies_result_identity(self, parser, command):
+        """Existing commands using only --index-type remain correctly labeled."""
+        args = _parse_and_validate(
+            parser,
+            _vdb_argv(command, '--index-type', 'AISAQ'),
+        )
+
+        assert args.index_type == 'AISAQ'
+        assert args.vdb_index == 'AISAQ'
+
+    @pytest.mark.parametrize("command", ["datasize", "datagen"])
+    def test_matching_index_flags_are_accepted(self, parser, command):
+        args = _parse_and_validate(
+            parser,
+            _vdb_argv(
+                command,
+                '--vdb-index',
+                'HNSW',
+                '--index-type',
+                'HNSW',
+            ),
+        )
+
+        assert args.vdb_index == args.index_type == 'HNSW'
+
+    @pytest.mark.parametrize("command", ["datasize", "datagen"])
+    def test_conflicting_index_flags_are_rejected(
+        self, parser, command, capsys
+    ):
+        args = parser.parse_args(
+            _vdb_argv(
+                command,
+                '--vdb-index',
+                'DISKANN',
+                '--index-type',
+                'HNSW',
+            )
+        )
+        args.mode = 'open'
+
+        with pytest.raises(SystemExit):
+            validate_vectordb_arguments(args)
+
+        assert "must match" in capsys.readouterr().err
+
+    def test_run_defaults_vdb_index_during_validation(self, parser):
+        args = _parse_and_validate(parser, _vdb_argv('run'))
+
+        assert args.vdb_index == VDB_INDEX_DEFAULT
+        assert not hasattr(args, 'index_type')
+
+    def test_run_preserves_explicit_vdb_index(self, parser):
+        args = _parse_and_validate(
+            parser,
+            _vdb_argv('run', '--vdb-index', 'HNSW'),
+        )
+
+        assert args.vdb_index == 'HNSW'
+        assert not hasattr(args, 'index_type')
+
+
 class TestVectorDBClosedMode:
     """Tests for add_vectordb_arguments in closed mode."""
 
@@ -455,3 +588,21 @@ class TestVectorDBClosedMode:
         if open_only:
             with pytest.raises(SystemExit):
                 parser.parse_args(['datasize', '--index-type', open_only[0]])
+
+    def test_closed_mode_restricts_vdb_index_choices(self, parser):
+        """Closed mode rejects open-only --vdb-index values on every command."""
+        open_only = [
+            value
+            for value in VDB_INDEX_TYPES
+            if value not in VDB_INDEX_TYPES_CLOSED
+        ]
+        if open_only:
+            for command in ('datasize', 'datagen', 'run'):
+                with pytest.raises(SystemExit):
+                    parser.parse_args(
+                        _vdb_argv(
+                            command,
+                            '--vdb-index',
+                            open_only[0],
+                        )
+                    )

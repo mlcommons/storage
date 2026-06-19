@@ -1,3 +1,6 @@
+# Quick Reference Manpage
+## [`ManPage.md`](https://github.com/mlcommons/storage/blob/main/ManPage.md)
+
 # MLPerf Storage Benchmark Suite
 MLPerf® Storage is a benchmark suite to characterize the performance of storage systems that support machine learning workloads.
 

@@ -122,9 +122,10 @@ VDB_ORCHESTRATION_MODES = ["ssh", "mpi"]
 VDB_BENCHMARK_MODES = ["timed", "query_count", "sweep"]
 # Vector-database engines. Only milvus is wired up today; the slot exists so
 # accumulated results from multiple engines can coexist in one results-dir
-# (path: vector_database/<engine>/<command>/<datetime>/).
+# (path: vector_database/<engine>/<index>/<command>/<datetime>/).
 VDB_ENGINES = ["milvus"]
 VDB_ENGINE_DEFAULT = "milvus"
+VDB_INDEX_DEFAULT = "DISKANN"
 
 MPIRUN = "mpirun"
 MPIEXEC = "mpiexec"

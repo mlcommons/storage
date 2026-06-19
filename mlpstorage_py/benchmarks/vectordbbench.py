@@ -36,7 +36,11 @@ from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional
 
 from mlpstorage_py.benchmarks.base import Benchmark
-from mlpstorage_py.config import BENCHMARK_TYPES, CONFIGS_ROOT_DIR
+from mlpstorage_py.config import (
+    BENCHMARK_TYPES,
+    CONFIGS_ROOT_DIR,
+    VDB_INDEX_DEFAULT,
+)
 from mlpstorage_py.utils import generate_mpi_prefix_cmd, read_config_from_file
 
 
@@ -49,15 +53,62 @@ class VectorDBBenchmark(Benchmark):
 
     SUMMARY_PREFIX = "VDB_MULTI_NODE_SUMMARY_JSON="
 
+    @staticmethod
+    def _resolve_vdb_index_arguments(args) -> str:
+        """Normalize ``vdb_index`` and the Milvus ``index_type`` argument.
+
+        CLI validation normally performs this resolution. Repeating the small,
+        deterministic normalization here keeps direct benchmark construction
+        (for example, unit tests or API callers) safe and ensures ``vdb_index``
+        exists before ``Benchmark.__init__`` creates the results directory.
+
+        For ``datasize`` and ``datagen``:
+          * neither value supplied -> both use ``VDB_INDEX_DEFAULT``;
+          * only ``vdb_index`` supplied -> ``index_type`` follows it;
+          * only ``index_type`` supplied -> ``vdb_index`` follows it;
+          * conflicting explicit values -> fail rather than mislabel results.
+
+        For ``run``, no index is built, so only ``vdb_index`` is required to
+        identify the index already loaded in the target collection.
+        """
+        command = getattr(args, "command", None)
+        vdb_index = getattr(args, "vdb_index", None)
+
+        if command in ("datasize", "datagen"):
+            index_type = getattr(args, "index_type", None)
+
+            if vdb_index is None and index_type is None:
+                vdb_index = VDB_INDEX_DEFAULT
+                index_type = VDB_INDEX_DEFAULT
+            elif vdb_index is None:
+                vdb_index = index_type
+            elif index_type is None:
+                index_type = vdb_index
+            elif vdb_index != index_type:
+                raise ValueError(
+                    f"--vdb-index ({vdb_index}) and --index-type "
+                    f"({index_type}) must match for the '{command}' command."
+                )
+
+            args.vdb_index = vdb_index
+            args.index_type = index_type
+            return str(vdb_index)
+
+        args.vdb_index = vdb_index or VDB_INDEX_DEFAULT
+        return str(args.vdb_index)
+
     def __init__(self, args, **kwargs):
-        # Mirror the engine into args.model so the existing
-        # metadata extractor (BenchmarkInstanceExtractor) and workload
-        # grouping (ReportGenerator._process_workload_groups, keyed on
-        # (model, accelerator)) treat distinct engines as distinct
-        # workloads — accumulated runs from milvus vs a future engine
-        # stay correctly separated.
-        if hasattr(args, "vdb_engine") and getattr(args, "model", None) is None:
-            args.model = args.vdb_engine
+        # Resolve the index before the base initializer calls
+        # generate_output_location(); the VectorDB path includes vdb_index.
+        vdb_index = self._resolve_vdb_index_arguments(args)
+
+        # Mirror engine + index into args.model so the existing metadata
+        # extractor and workload grouping (keyed on (model, accelerator)) do
+        # not merge, for example, milvus/DISKANN and milvus/HNSW results.
+        vdb_engine = getattr(args, "vdb_engine", None)
+        if vdb_engine and getattr(args, "model", None) is None:
+            args.model = f"{vdb_engine}_{vdb_index}"
+
         super().__init__(args, **kwargs)
 
         self.command_method_map = {
@@ -224,6 +275,32 @@ class VectorDBBenchmark(Benchmark):
             "VectorDB collection name is required. "
             "Pass --collection or set dataset.collection_name in the config."
         )
+
+    def _effective_index_type(self) -> str:
+        """Return the effective index used by datasize/datagen.
+
+        ``vdb_index`` is the benchmark/result identity, while ``index_type``
+        is the concrete Milvus argument. They must describe the same index for
+        commands that estimate or build an index.
+        """
+        vdb_index = getattr(self.args, "vdb_index", None)
+        index_type = getattr(self.args, "index_type", None)
+
+        if vdb_index and index_type and vdb_index != index_type:
+            raise ValueError(
+                f"--vdb-index ({vdb_index}) and --index-type ({index_type}) "
+                f"must match for the '{self.command}' command."
+            )
+
+        effective_index = index_type or vdb_index or VDB_INDEX_DEFAULT
+
+        # Keep both names synchronized for metadata, command generation, and
+        # callers that construct the benchmark without CLI validation.
+        if self.command in ("datasize", "datagen"):
+            self.args.vdb_index = effective_index
+            self.args.index_type = effective_index
+
+        return str(effective_index)
 
     # ------------------------------------------------------------------
     # Shell helpers
@@ -585,7 +662,7 @@ class VectorDBBenchmark(Benchmark):
         dim = self.args.dimension
         num_vectors = self.args.num_vectors
         dtype_bytes = 4
-        index_type = getattr(self.args, "index_type", "DISKANN")
+        index_type = self._effective_index_type()
         num_shards = getattr(self.args, "num_shards", 1)
 
         raw_bytes = num_vectors * dim * dtype_bytes
@@ -623,6 +700,8 @@ class VectorDBBenchmark(Benchmark):
 
     def _execute_datagen_single_node(self) -> int:
         """Execute existing single-node load-vdb path."""
+        index_type = self._effective_index_type()
+
         additional_params = {
             "collection-name": self._collection_name(),
             "dimension": self.args.dimension,
@@ -632,7 +711,7 @@ class VectorDBBenchmark(Benchmark):
             "distribution": self.args.distribution,
             "batch-size": self.args.batch_size,
             "chunk-size": self.args.chunk_size,
-            "index-type": getattr(self.args, "index_type", None),
+            "index-type": index_type,
             "metric-type": getattr(self.args, "metric_type", None),
             "max-degree": getattr(self.args, "max_degree", None),
             "search-list-size": getattr(self.args, "search_list_size", None),
@@ -658,6 +737,7 @@ class VectorDBBenchmark(Benchmark):
 
     def _execute_datagen_distributed(self) -> int:
         """Execute distributed VectorDB load through MPI wrapper."""
+        index_type = self._effective_index_type()
         base_output_dir = self._base_output_dir("load")
         world_size = self._mpi_world_size()
         os.makedirs(base_output_dir, exist_ok=True)
@@ -687,7 +767,7 @@ class VectorDBBenchmark(Benchmark):
             "distribution": self.args.distribution,
             "batch-size": self.args.batch_size,
             "chunk-size": self.args.chunk_size,
-            "index-type": getattr(self.args, "index_type", None),
+            "index-type": index_type,
             "metric-type": getattr(self.args, "metric_type", None),
             "max-degree": getattr(self.args, "max_degree", None),
             "search-list-size": getattr(self.args, "search_list_size", None),
@@ -982,11 +1062,16 @@ class VectorDBBenchmark(Benchmark):
             {
                 "vectordb_config": self.config_name,
                 "vectordb_config_file": self.config_file,
+                "vdb_engine": getattr(self.args, "vdb_engine", None),
+                "vdb_index": (
+                    getattr(self.args, "vdb_index", None)
+                    or VDB_INDEX_DEFAULT
+                ),
                 # NB: do NOT set "model" here — the base class records the
-                # engine (via args.model = args.vdb_engine in __init__) and
+                # composite engine/index identity prepared in __init__, and
                 # downstream workload grouping in ReportGenerator keys on it.
-                # Overwriting with config_name would merge distinct engines
-                # that happen to share a config file into one workload.
+                # Overwriting model with config_name would merge distinct VDB
+                # engines or index families that share a config file.
                 "host": getattr(self.args, "host", "127.0.0.1"),
                 "port": getattr(self.args, "port", 19530),
                 "collection": getattr(self.args, "collection", None),
@@ -1006,7 +1091,7 @@ class VectorDBBenchmark(Benchmark):
                 {
                     "dimension": getattr(self.args, "dimension", None),
                     "num_vectors": getattr(self.args, "num_vectors", None),
-                    "index_type": getattr(self.args, "index_type", None),
+                    "index_type": self._effective_index_type(),
                     "num_shards": getattr(self.args, "num_shards", None),
                 }
             )
@@ -1021,7 +1106,7 @@ class VectorDBBenchmark(Benchmark):
                     "distribution": getattr(self.args, "distribution", None),
                     "batch_size": getattr(self.args, "batch_size", None),
                     "chunk_size": getattr(self.args, "chunk_size", None),
-                    "index_type": getattr(self.args, "index_type", None),
+                    "index_type": self._effective_index_type(),
                     "metric_type": getattr(self.args, "metric_type", None),
                     "seed": getattr(self.args, "seed", None),
                 }
@@ -1045,6 +1130,5 @@ class VectorDBBenchmark(Benchmark):
                     "recall_k": getattr(self.args, "recall_k", None),
                 }
             )
-
 
         return base_metadata

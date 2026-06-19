@@ -5,6 +5,7 @@ Tests cover:
 - Command method map structure
 - Metadata generation for history integration
 - Command-specific metadata fields
+- VectorDB index normalization and command generation
 """
 
 import os
@@ -98,6 +99,7 @@ class TestVectorDBMetadata:
             command='run',
             config='10m',
             vdb_engine='milvus',
+            vdb_index='DISKANN',
             host='192.168.1.100',
             port=19531,
             collection='test_collection',
@@ -121,6 +123,8 @@ class TestVectorDBMetadata:
             command='datagen',
             config='default',
             vdb_engine='milvus',
+            vdb_index='HNSW',
+            index_type=None,
             host='127.0.0.1',
             port=19530,
             collection='gen_collection',
@@ -169,10 +173,12 @@ class TestVectorDBMetadata:
             bm = VectorDBBenchmark(run_args)
             meta = bm.metadata
 
-        assert 'vectordb_config' in meta
-        assert 'host' in meta
-        assert 'port' in meta
-        assert 'collection' in meta
+        assert meta['vectordb_config'] == '10m'
+        assert meta['vdb_engine'] == 'milvus'
+        assert meta['vdb_index'] == 'DISKANN'
+        assert meta['host'] == '192.168.1.100'
+        assert meta['port'] == 19531
+        assert meta['collection'] == 'test_collection'
 
     def test_metadata_model_is_engine_config_preserved_separately(
         self, run_args, tmp_path
@@ -194,7 +200,9 @@ class TestVectorDBMetadata:
             bm = VectorDBBenchmark(run_args)
             meta = bm.metadata
 
-        assert meta['model'] == 'milvus'
+        assert meta['model'] == 'milvus_DISKANN'
+        assert meta['vdb_engine'] == 'milvus'
+        assert meta['vdb_index'] == 'DISKANN'
         assert meta['vectordb_config'] == '10m'
 
     def test_metadata_run_command_fields(self, run_args, tmp_path):
@@ -240,6 +248,10 @@ class TestVectorDBMetadata:
         assert meta['vector_dtype'] == 'FLOAT_VECTOR'
         assert 'distribution' in meta
         assert meta['distribution'] == 'normal'
+        assert meta['vdb_engine'] == 'milvus'
+        assert meta['vdb_index'] == 'HNSW'
+        assert meta['index_type'] == 'HNSW'
+        assert meta['model'] == 'milvus_HNSW'
 
     def test_metadata_connection_info(self, run_args, tmp_path):
         """Verify host/port connection info in metadata."""
@@ -414,3 +426,196 @@ class TestVectorDBConfigHandling:
             bm = VectorDBBenchmark(basic_args)
 
         assert bm.config_name == 'default'
+
+
+class TestVectorDBIndexResolution:
+    """Tests benchmark-side normalization for API/direct construction."""
+
+    @pytest.mark.parametrize("command", ["datasize", "datagen"])
+    def test_default_index_populates_both_names(self, command):
+        from mlpstorage_py.benchmarks.vectordbbench import VectorDBBenchmark
+        from mlpstorage_py.config import VDB_INDEX_DEFAULT
+
+        args = Namespace(command=command, vdb_index=None, index_type=None)
+
+        resolved = VectorDBBenchmark._resolve_vdb_index_arguments(args)
+
+        assert resolved == VDB_INDEX_DEFAULT
+        assert args.vdb_index == VDB_INDEX_DEFAULT
+        assert args.index_type == VDB_INDEX_DEFAULT
+
+    @pytest.mark.parametrize("command", ["datasize", "datagen"])
+    def test_vdb_index_populates_index_type(self, command):
+        from mlpstorage_py.benchmarks.vectordbbench import VectorDBBenchmark
+
+        args = Namespace(command=command, vdb_index='HNSW', index_type=None)
+
+        resolved = VectorDBBenchmark._resolve_vdb_index_arguments(args)
+
+        assert resolved == 'HNSW'
+        assert args.vdb_index == args.index_type == 'HNSW'
+
+    @pytest.mark.parametrize("command", ["datasize", "datagen"])
+    def test_legacy_index_type_populates_vdb_index(self, command):
+        from mlpstorage_py.benchmarks.vectordbbench import VectorDBBenchmark
+
+        args = Namespace(command=command, vdb_index=None, index_type='AISAQ')
+
+        resolved = VectorDBBenchmark._resolve_vdb_index_arguments(args)
+
+        assert resolved == 'AISAQ'
+        assert args.vdb_index == args.index_type == 'AISAQ'
+
+    @pytest.mark.parametrize("command", ["datasize", "datagen"])
+    def test_conflicting_index_names_fail_before_result_dir_creation(
+        self, command
+    ):
+        from mlpstorage_py.benchmarks.vectordbbench import VectorDBBenchmark
+
+        args = Namespace(
+            command=command,
+            vdb_index='DISKANN',
+            index_type='HNSW',
+        )
+
+        with pytest.raises(ValueError, match='must match'):
+            VectorDBBenchmark._resolve_vdb_index_arguments(args)
+
+    def test_run_defaults_index_without_creating_index_type(self):
+        from mlpstorage_py.benchmarks.vectordbbench import VectorDBBenchmark
+        from mlpstorage_py.config import VDB_INDEX_DEFAULT
+
+        args = Namespace(command='run', vdb_index=None)
+
+        resolved = VectorDBBenchmark._resolve_vdb_index_arguments(args)
+
+        assert resolved == VDB_INDEX_DEFAULT
+        assert args.vdb_index == VDB_INDEX_DEFAULT
+        assert not hasattr(args, 'index_type')
+
+
+class TestVectorDBEffectiveIndexUse:
+    """Tests that datasize and datagen use the normalized Milvus index."""
+
+    @staticmethod
+    def _bare_benchmark(args):
+        from mlpstorage_py.benchmarks.vectordbbench import VectorDBBenchmark
+
+        benchmark = object.__new__(VectorDBBenchmark)
+        benchmark.args = args
+        benchmark.command = args.command
+        benchmark.logger = MagicMock()
+        benchmark.write_metadata = MagicMock()
+        return benchmark
+
+    @staticmethod
+    def _datagen_args(**overrides):
+        values = {
+            'command': 'datagen',
+            'vdb_index': 'HNSW',
+            'index_type': None,
+            'host': '127.0.0.1',
+            'port': 19530,
+            'dimension': 768,
+            'num_shards': 1,
+            'vector_dtype': 'FLOAT_VECTOR',
+            'num_vectors': 1000,
+            'distribution': 'uniform',
+            'batch_size': 100,
+            'chunk_size': 500,
+            'metric_type': None,
+            'max_degree': None,
+            'search_list_size': None,
+            'M': None,
+            'ef_construction': None,
+            'inline_pq': None,
+            'monitor_interval': None,
+            'compact': False,
+            'force': False,
+            'ready_timeout': 7200,
+            'coordination': 'filesystem',
+            'rank_output_dir': '/tmp/mlps_vdb',
+            'seed': 42,
+            'what_if': True,
+        }
+        values.update(overrides)
+        return Namespace(**values)
+
+    def test_datasize_uses_vdb_index_when_index_type_is_omitted(self):
+        args = Namespace(
+            command='datasize',
+            vdb_index='HNSW',
+            index_type=None,
+            dimension=128,
+            num_vectors=1000,
+            num_shards=1,
+        )
+        benchmark = self._bare_benchmark(args)
+
+        rc = benchmark.execute_datasize()
+
+        assert rc == 0
+        assert args.index_type == 'HNSW'
+        assert args.vdb_index == 'HNSW'
+        assert any(
+            'Index type: HNSW' in call.args[0]
+            for call in benchmark.logger.result.call_args_list
+        )
+        benchmark.write_metadata.assert_called_once_with()
+
+    def test_single_node_datagen_passes_effective_index_to_load_vdb(self):
+        args = self._datagen_args()
+        benchmark = self._bare_benchmark(args)
+        benchmark._collection_name = MagicMock(return_value='test_collection')
+        benchmark.build_command = MagicMock(return_value='uv run load-vdb')
+        benchmark._execute_command = MagicMock(return_value=('', '', 0))
+
+        rc = benchmark._execute_datagen_single_node()
+
+        assert rc == 0
+        script_name, additional_params = benchmark.build_command.call_args.args
+        assert script_name == 'load-vdb'
+        assert additional_params['index-type'] == 'HNSW'
+        assert args.index_type == args.vdb_index == 'HNSW'
+        benchmark._execute_command.assert_called_once()
+        benchmark.write_metadata.assert_called_once_with()
+
+    def test_distributed_datagen_passes_effective_index_to_wrapper(
+        self, tmp_path
+    ):
+        args = self._datagen_args()
+        benchmark = self._bare_benchmark(args)
+        benchmark.run_result_output = str(tmp_path / 'run')
+        benchmark.config_file = '/tmp/default.yaml'
+        benchmark._base_output_dir = MagicMock(
+            return_value=str(tmp_path / 'run' / 'vectordb' / 'load')
+        )
+        benchmark._mpi_world_size = MagicMock(return_value=2)
+        benchmark._mpi_prefix = MagicMock(return_value='mpiexec -n 2')
+        benchmark._get_uv_prefix = MagicMock(return_value='uv run ')
+        benchmark._coordination_backend = MagicMock(return_value='filesystem')
+        benchmark._rank_output_dir = MagicMock(return_value='/tmp/mlps_vdb')
+        benchmark._run_id = MagicMock(return_value='20250111_160000')
+        benchmark._collection_name = MagicMock(return_value='test_collection')
+        benchmark._execute_command = MagicMock(return_value=('', '', 0))
+        benchmark._run_aggregate = MagicMock(return_value=0)
+
+        rc = benchmark._execute_datagen_distributed()
+
+        assert rc == 0
+        command = benchmark._execute_command.call_args.args[0]
+        assert '--index-type HNSW' in command
+        assert args.index_type == args.vdb_index == 'HNSW'
+        benchmark._run_aggregate.assert_not_called()
+        benchmark.write_metadata.assert_called_once_with()
+
+    def test_effective_index_rejects_conflicting_values(self):
+        args = Namespace(
+            command='datagen',
+            vdb_index='DISKANN',
+            index_type='HNSW',
+        )
+        benchmark = self._bare_benchmark(args)
+
+        with pytest.raises(ValueError, match='must match'):
+            benchmark._effective_index_type()

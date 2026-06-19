@@ -111,7 +111,8 @@ class TestMain:
             return MagicMock(returncode=0)
 
         with patch('sys.argv', argv), \
-             patch.object(wrapper_module.subprocess, 'run', side_effect=fake_run):
+             patch.object(wrapper_module.subprocess, 'run', side_effect=fake_run), \
+             patch.object(wrapper_module.time, 'sleep'):
             with pytest.raises(SystemExit) as exc_info:
                 wrapper_module.main()
 

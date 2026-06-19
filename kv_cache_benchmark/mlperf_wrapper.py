@@ -11,10 +11,12 @@ import argparse
 import os
 import subprocess
 import sys
+import time
 from datetime import datetime
 from pathlib import Path
 
 BASE_SEED = 42
+TEST_DELAY = 90
 
 # MLPerf v3.0 fixed parameters per option.
 # All numeric values stored as int/float; converted to str when building cmd.
@@ -153,7 +155,15 @@ def main():
         '--generation-mode', params['generation-mode'],
     ]
 
+    print(f"KV Cache Wrapper - Start delay for {TEST_DELAY} seconds")
+    time.sleep(TEST_DELAY)
+    print(f"KV Cache Wrapper - Starting benchmark pass...")
+
     result = subprocess.run(cmd)
+    print(f"KV Cache Wrapper - End delay for {TEST_DELAY} seconds")
+    time.sleep(TEST_DELAY)
+    print(f"KV Cache Wrapper - Finished benchmark pass")
+
     sys.exit(result.returncode)
 
 

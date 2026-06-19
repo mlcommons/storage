@@ -168,8 +168,19 @@ def generate_output_location(benchmark, datetime_str=None, **kwargs) -> str:
                 "VectorDB engine is required for output location "
                 "(set --vdb-engine on the CLI)."
             )
+        vdb_index = (
+            getattr(benchmark.args, "vdb_index", None)
+            or getattr(benchmark.args, "index_type", None)
+        )
+        if not vdb_index:
+            raise ValueError(
+                "VectorDB index is required for output location "
+                "(set --vdb-index on the CLI)."
+            )
+        
         output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
         output_location = os.path.join(output_location, engine)
+        output_location = os.path.join(output_location, vdb_index)
         output_location = os.path.join(output_location, benchmark.args.command)
         output_location = os.path.join(output_location, datetime_str)
 
