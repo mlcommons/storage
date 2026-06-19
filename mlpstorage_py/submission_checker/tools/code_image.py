@@ -123,6 +123,17 @@ class SourceRootNotFound(CodeImageError):
     """find_source_root walked to filesystem root without finding pyproject.toml (D-05)."""
 
 
+class CodeTreeUnreadable(CodeImageError):
+    """compute_code_tree_md5 returned None for a tree that should be readable.
+
+    Raised when a code/ or source tree exists but the hashing walk could not
+    complete — e.g., a permission error mid-walk, or a path that is gone by
+    the time the walk reaches it. Distinct from MissingHashFile (the
+    `.code-hash.json` sidecar is missing) and SourceRootNotFound (no
+    pyproject.toml ancestor) so the caller can log the right diagnostic.
+    """
+
+
 @dataclass(frozen=True)
 class CodeImage:
     """In-memory representation of a captured code image (D-02)."""
@@ -320,12 +331,24 @@ def verify_image_self_consistent(image_dir: Path, log) -> bool:
 
     Returns:
         True if the tree hash matches .code-hash.json, False otherwise.
+
+    Raises:
+        MissingHashFile: If .code-hash.json is absent (via load_code_image).
+        MalformedHashFile: If .code-hash.json is unparseable (via load_code_image).
+        CodeTreeUnreadable: If the image_dir tree itself cannot be hashed
+            (permission error mid-walk, gone by the time we walk, etc.).
     """
     img = load_code_image(image_dir, log)
     actual_hash = compute_code_tree_md5(str(image_dir), log)
     if actual_hash is None:
-        raise MissingHashFile(f"Captured code directory is missing or unreadable: {image_dir}")
-    
+        # IN-01: previously raised MissingHashFile here, but load_code_image
+        # already succeeded — the JSON IS present. The real failure is that
+        # the tree itself didn't hash. Use CodeTreeUnreadable so the log
+        # message names the actual root cause.
+        raise CodeTreeUnreadable(
+            f"Captured code directory is missing or unreadable: {image_dir}"
+        )
+
     return actual_hash == img.hash
 
 
