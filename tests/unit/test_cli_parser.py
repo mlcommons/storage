@@ -195,6 +195,16 @@ class TestUpdateArgsAndConfig:
         update_args(args)
         assert args.params == ['key=val1', 'key=val2']
 
+    def test_update_args_rejects_space_separated_params(self):
+        """update_args should fail with a clear error when --param uses space instead of '='. (issue #469)"""
+        # Simulates `--param dataset.num_files_train 35000` — argparse with
+        # nargs="+" captures both tokens; without validation the missing '='
+        # surfaces later as "not enough values to unpack".
+        args = argparse.Namespace(params=[['dataset.num_files_train', '35000']])
+        with pytest.raises(SystemExit) as excinfo:
+            update_args(args)
+        assert excinfo.value.code == EXIT_CODE.INVALID_ARGUMENTS
+
     def test_yaml_config_overrides(self):
         """apply_yaml_config_overrides should update namespace attributes safely."""
         mock_yaml_content = """
