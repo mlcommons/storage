@@ -454,7 +454,13 @@ class SubmissionStructureCheck(BaseCheck):
                     valid = False
                     continue
 
-                # VALS-02 / VALS-04 — self-consistency (CLOSED and OPEN)
+                # VALS-02 / VALS-04 — self-consistency (CLOSED and OPEN).
+                # Same accumulate-don't-abort + short-circuit-on-missing-anchor
+                # pattern as _check_code_image_layered (helpers.py): a missing
+                # .code-hash.json already invalidates the leaf; the upstream-
+                # identity walk below would just add a contradictory second
+                # violation per leaf with no diagnostic value.
+                hashfile_present = True
                 try:
                     if not verify_image_self_consistent(Path(code_path), self.log):
                         self.log_violation(
@@ -464,7 +470,15 @@ class SubmissionStructureCheck(BaseCheck):
                             code_path,
                         )
                         valid = False
-                except (MissingHashFile, MalformedHashFile, CodeImageError) as e:
+                except MissingHashFile as e:
+                    hashfile_present = False
+                    self.log_violation(
+                        "2.1.6", "codeDirectoryContents",
+                        code_path,
+                        "%s", str(e),
+                    )
+                    valid = False
+                except (MalformedHashFile, CodeImageError) as e:
                     self.log_violation(
                         "2.1.6", "codeDirectoryContents",
                         code_path,
@@ -473,7 +487,7 @@ class SubmissionStructureCheck(BaseCheck):
                     valid = False
 
                 # D-11 layered: REFERENCE_CHECKSUMS upstream-identity (CLOSED only)
-                if division == "closed" and expected is not None:
+                if division == "closed" and expected is not None and hashfile_present:
                     digest = compute_code_tree_md5(code_path, self.log)
                     if digest != expected:
                         self.log_violation(
