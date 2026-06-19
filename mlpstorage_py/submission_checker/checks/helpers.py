@@ -121,6 +121,15 @@ def _check_filesystem_separation(
     # The regex match ends at the last char of "Mounted on" (before the newline),
     # so content[match.end():] starts with '\n'. We skip that initial newline by
     # starting after the end of the matched line.
+    #
+    # TODO(TODO-001): the current "scan df output of the log file" approach is
+    # planned to be superseded by capturing `stat -f -c '%i' "$data_dir"` per
+    # node at runtime — a single scalar FS identity stored alongside per-node
+    # metadata, compared for equality across nodes. That removes both this
+    # multi-line-device-name parse limitation and the substring-matching
+    # fragility called out in WR-06's silent-pass case. Until that migration
+    # lands, real submissions with wrapped device names hard-fail with
+    # "df output not found" (D-B4), which is the desired gap-surfacing behaviour.
     mounts = []
     header_end = content.find("\n", match.end())  # find the end of the header line
     if header_end == -1:
