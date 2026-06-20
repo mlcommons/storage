@@ -20,14 +20,18 @@ Distributed VectorDB terminology:
       written under --rank-output-dir on each node.
 """
 
+import sys
+
 from mlpstorage_py.config import (
     DISTRIBUTIONS,
+    EXIT_CODE,
     SEARCH_METRICS,
     VECTOR_DTYPES,
     VECTORDB_DEFAULT_RUNTIME,
     VDB_BENCHMARK_MODES,
     VDB_ENGINE_DEFAULT,
     VDB_ENGINES,
+    VDB_INDEX_DEFAULT,
     VDB_INDEX_TYPES,
     VDB_INDEX_TYPES_CLOSED,
 )
@@ -222,6 +226,24 @@ def _add_vectordb_core_args(parser, command, index_choices):
         ),
     )
 
+    # Keep the parser-level default as None so post-parse validation can tell
+    # whether --vdb-index was omitted. This preserves compatibility with the
+    # existing --index-type flag: for datasize/datagen, either flag can supply
+    # the index and the other is derived from it. After validation, vdb_index
+    # is always populated for every VectorDB command.
+    parser.add_argument(
+        '--vdb-index',
+        choices=index_choices,
+        default=None,
+        help=(
+            "Vector index family used to identify the measured workload and "
+            "partition results as vector_database/<vdb-engine>/<vdb-index>/"
+            "<command>/<datetime>. For datasize/datagen, --index-type defaults "
+            "to this value. For run, this identifies the index already loaded "
+            f"in the target collection. Defaults to {VDB_INDEX_DEFAULT}."
+        ),
+    )
+
     # ---- Common args for datagen and run ----
     if command in ("datagen", "run"):
         parser.add_argument(
@@ -263,8 +285,11 @@ def _add_vectordb_core_args(parser, command, index_choices):
         parser.add_argument(
             '--index-type',
             choices=index_choices,
-            default="DISKANN",
-            help="Index type for storage estimation",
+            default=None,
+            help=(
+                "Milvus index type used for storage estimation. "
+                "Defaults to --vdb-index when omitted."
+            ),
         )
         parser.add_argument(
             '--num-shards',
@@ -326,8 +351,11 @@ def _add_vectordb_core_args(parser, command, index_choices):
         parser.add_argument(
             '--index-type',
             choices=index_choices,
-            default="DISKANN",
-            help="Vector index type to create during load.",
+            default=None,
+            help=(
+                "Milvus index type to create during load. "
+                "Defaults to --vdb-index when omitted."
+            ),
         )
         parser.add_argument(
             '--force',
@@ -516,9 +544,92 @@ def _add_vectordb_open_args(parser, command):
         )
 
 
+def _resolve_vdb_index_arguments(args):
+    """Resolve --vdb-index and --index-type into a consistent namespace.
+
+    ``--vdb-index`` is the benchmark identity used by result paths, metadata,
+    and reporting. ``--index-type`` is the Milvus implementation argument used
+    by datasize/datagen. Keeping the parser defaults as ``None`` lets this
+    function preserve existing commands that only pass ``--index-type`` while
+    still making ``--vdb-index`` available to every VectorDB command.
+
+    Args:
+        args (argparse.Namespace): Parsed VectorDB arguments.
+
+    Raises:
+        ValueError: If datasize/datagen explicitly specify conflicting values.
+    """
+    command = getattr(args, 'command', None)
+    vdb_index = getattr(args, 'vdb_index', None)
+
+    if command in ('datasize', 'datagen'):
+        index_type = getattr(args, 'index_type', None)
+
+        if vdb_index is None and index_type is None:
+            vdb_index = VDB_INDEX_DEFAULT
+            index_type = VDB_INDEX_DEFAULT
+        elif vdb_index is None:
+            # Backward compatibility for existing invocations that only use
+            # --index-type. The result-path identity follows the actual index.
+            vdb_index = index_type
+        elif index_type is None:
+            # Preferred new behavior: --vdb-index is the source of truth and
+            # supplies the Milvus implementation argument.
+            index_type = vdb_index
+        elif vdb_index != index_type:
+            raise ValueError(
+                f"--vdb-index ({vdb_index}) and --index-type ({index_type}) "
+                f"must match for the '{command}' command."
+            )
+
+        args.vdb_index = vdb_index
+        args.index_type = index_type
+        return
+
+    # The run command does not build an index, but the value is required to
+    # identify the loaded collection/index in result paths and metadata.
+    args.vdb_index = vdb_index or VDB_INDEX_DEFAULT
+
+
 def validate_vectordb_arguments(args):
-    """Validate the whole set of args given that we're doing a vectordb benchmark.
+    """Validate and normalize arguments for the VectorDB benchmark.
 
     Args:
         args (argparse.Namespace): The parsed command-line arguments.
     """
+    error_messages = []
+
+    try:
+        _resolve_vdb_index_arguments(args)
+    except ValueError as exc:
+        error_messages.append(str(exc))
+
+    allowed_indexes = (
+        VDB_INDEX_TYPES_CLOSED
+        if getattr(args, 'mode', None) == 'closed'
+        else VDB_INDEX_TYPES
+    )
+
+    vdb_index = getattr(args, 'vdb_index', None)
+    if vdb_index not in allowed_indexes:
+        error_messages.append(
+            "Invalid VectorDB index '{}'. Supported indexes are: {}".format(
+                vdb_index,
+                ", ".join(allowed_indexes),
+            )
+        )
+
+    if getattr(args, 'command', None) in ('datasize', 'datagen'):
+        index_type = getattr(args, 'index_type', None)
+        if index_type not in allowed_indexes:
+            error_messages.append(
+                "Invalid Milvus index type '{}'. Supported indexes are: {}".format(
+                    index_type,
+                    ", ".join(allowed_indexes),
+                )
+            )
+
+    if error_messages:
+        for message in error_messages:
+            print(message, file=sys.stderr)
+        sys.exit(EXIT_CODE.INVALID_ARGUMENTS)

@@ -22,7 +22,7 @@ TEST_DELAY = 90
 # All numeric values stored as int/float; converted to str when building cmd.
 # 'generation-mode' is ALWAYS 'none' for MLPerf compliance — do NOT rely on
 # kv-cache.py defaults; the default may change in future versions.
-OPTION_PARAMS = {
+WORKLOAD_PARAMS = {
     1: {
         'model': 'llama3.1-8b',
         'num-users': 200,
@@ -135,7 +135,7 @@ def main():
     # D-02: config.yaml located relative to this script; user may override via --config
     config_path = args.config or str(Path(__file__).parent / 'config.yaml')
 
-    params = OPTION_PARAMS[args.option]
+    params = WORKLOAD_PARAMS[args.option]
 
     cmd = [
         sys.executable,

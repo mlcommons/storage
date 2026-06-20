@@ -21,6 +21,7 @@ import sys
 import time
 from pathlib import Path
 from typing import Dict, Any, List
+from statistics import fmean
 
 from mlpstorage_py.benchmarks.base import Benchmark
 from mlpstorage_py.config import (
@@ -355,9 +356,11 @@ class KVCacheBenchmark(Benchmark):
         """Aggregate per-rank JSON results for one option across all trials.
 
         Sums read/write bandwidth and token throughput across all rank files.
-        Takes max storage_io_latency_ms.p95. Records missing files without
-        crashing and sets partial_failure. When storage_entries == 0, logs
-        that the working set was served from the CPU tier.
+        Takes the mean of read/write bandwidth and token throughput across
+        the trials. Takes max storage_io_latency_ms.p95 across all ranks and
+        trials. Takes the max Records missing files without crashing and
+        sets partial_failure. When storage_entries == 0, logs that the
+        working set was served from the CPU tier.
         """
         all_read_bw = []
         all_write_bw = []
@@ -366,8 +369,12 @@ class KVCacheBenchmark(Benchmark):
         all_p95_latency = []
         missing_files = []
         cpu_tier_flags = []
-
         for trial_dir in trial_dirs:
+            trial_read_bw = []
+            trial_write_bw = []
+            trial_avg_throughput = []
+            trial_storage_throughput = []
+            trial_p95_latency = []
             for rank_idx in range(expected_rank_count):
                 rank_dir = Path(trial_dir) / f"rank_{rank_idx}"
                 result_file = next(rank_dir.glob('kvcache_results_*.json'), None)
@@ -386,21 +393,25 @@ class KVCacheBenchmark(Benchmark):
                         )
                         cpu_tier_flags.append(str(result_file))
                     # Include all values regardless (0 is correct for CPU-tier)
-                    all_read_bw.append(cache_stats.get('tier_storage_read_bandwidth_gbps', 0.0))
-                    all_write_bw.append(cache_stats.get('tier_storage_write_bandwidth_gbps', 0.0))
-                    all_avg_throughput.append(summary.get('avg_throughput_tokens_per_sec', 0.0))
-                    all_storage_throughput.append(summary.get('storage_throughput_tokens_per_sec', 0.0))
-                    all_p95_latency.append(summary.get('storage_io_latency_ms', {}).get('p95', 0.0))
+                    trial_read_bw.append(cache_stats.get('tier_storage_read_bandwidth_gbps', 0.0))
+                    trial_write_bw.append(cache_stats.get('tier_storage_write_bandwidth_gbps', 0.0))
+                    trial_avg_throughput.append(summary.get('avg_throughput_tokens_per_sec', 0.0))
+                    trial_storage_throughput.append(summary.get('storage_throughput_tokens_per_sec', 0.0))
+                    trial_p95_latency.append(summary.get('storage_io_latency_ms', {}).get('p95', 0.0))
                 except Exception as e:
                     self.logger.warning(f"Failed to parse {result_file}: {e}")
                     missing_files.append(str(result_file))
-
+            all_read_bw.append(sum(trial_read_bw))
+            all_write_bw.append(sum(trial_write_bw))
+            all_avg_throughput.append(sum(trial_avg_throughput))
+            all_storage_throughput.append(sum(trial_storage_throughput))
+            all_p95_latency.append(max(trial_p95_latency) if trial_p95_latency else 0.0)
         return {
             'option': option,
-            'aggregated_read_bandwidth_gbps': sum(all_read_bw),
-            'aggregated_write_bandwidth_gbps': sum(all_write_bw),
-            'aggregated_avg_throughput_tokens_per_sec': sum(all_avg_throughput),
-            'aggregated_storage_throughput_tokens_per_sec': sum(all_storage_throughput),
+            'aggregated_read_bandwidth_gbps': fmean(all_read_bw) if all_read_bw else 0.0,
+            'aggregated_write_bandwidth_gbps': fmean(all_write_bw) if all_write_bw else 0.0,
+            'aggregated_avg_throughput_tokens_per_sec': fmean(all_avg_throughput) if all_avg_throughput else 0.0,
+            'aggregated_storage_throughput_tokens_per_sec': fmean(all_storage_throughput) if all_storage_throughput else 0.0,
             'aggregated_p95_latency_ms': max(all_p95_latency) if all_p95_latency else None,
             'rank_count': expected_rank_count,
             'trial_count': len(trial_dirs),

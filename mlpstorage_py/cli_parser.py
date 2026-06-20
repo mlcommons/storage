@@ -338,15 +338,8 @@ def update_args(args):
             sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
         args.hosts = normalized
 
-    # args.hosts can be None when --hosts was not supplied (argparse leaves the
-    # attribute set to its None default). len(None) raises — match the
-    # normalization guard 20 lines above which already checks `is not None`.
-    if (
-        hasattr(args, 'hosts')
-        and args.hosts is not None
-        and getattr(args, 'num_client_hosts', None) is None
-    ):
-        setattr(args, "num_client_hosts", len(args.hosts))
+        if getattr(args, 'num_client_hosts', None) is None:
+            setattr(args, "num_client_hosts", len(args.hosts))
 
 
 if __name__ == "__main__":

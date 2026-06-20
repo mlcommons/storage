@@ -2,7 +2,7 @@
 
 Tests cover:
 - get_rank(): env var reading, OMPI precedence over PMI, invalid value fallback
-- BASE_SEED and OPTION_PARAMS constants
+- BASE_SEED and WORKLOAD_PARAMS constants
 - main(): rank dir creation, effective seed, output flag, option params, config path
 """
 
@@ -62,23 +62,23 @@ class TestBaseConstants:
 
 
 class TestOptionParams:
-    """Tests for OPTION_PARAMS fixed MLPerf values."""
+    """Tests for WORKLOAD_PARAMS fixed MLPerf values."""
 
     def test_option_keys_are_1_2_3(self, wrapper_module):
-        assert set(wrapper_module.OPTION_PARAMS.keys()) == {1, 2, 3}
+        assert set(wrapper_module.WORKLOAD_PARAMS.keys()) == {1, 2, 3}
 
     def test_option1_model_is_8b(self, wrapper_module):
-        assert wrapper_module.OPTION_PARAMS[1]['model'] == 'llama3.1-8b'
+        assert wrapper_module.WORKLOAD_PARAMS[1]['model'] == 'llama3.1-8b'
 
     def test_option3_model_is_70b(self, wrapper_module):
-        assert wrapper_module.OPTION_PARAMS[3]['model'] == 'llama3.1-70b-instruct'
+        assert wrapper_module.WORKLOAD_PARAMS[3]['model'] == 'llama3.1-70b-instruct'
 
     def test_generation_mode_always_none(self, wrapper_module):
         for opt in [1, 2, 3]:
-            assert wrapper_module.OPTION_PARAMS[opt]['generation-mode'] == 'none'
+            assert wrapper_module.WORKLOAD_PARAMS[opt]['generation-mode'] == 'none'
 
     def test_option2_cpu_mem_gb_is_4(self, wrapper_module):
-        assert wrapper_module.OPTION_PARAMS[2]['cpu-mem-gb'] == 4
+        assert wrapper_module.WORKLOAD_PARAMS[2]['cpu-mem-gb'] == 4
 
 
 class TestMain:
@@ -143,7 +143,7 @@ class TestMain:
         assert 'rank_0' in output_val
         assert 'kvcache_results_' in output_val
 
-    def test_option_params_injected_for_option1(self, wrapper_module, monkeypatch, tmp_path):
+    def test_workload_params_injected_for_option1(self, wrapper_module, monkeypatch, tmp_path):
         cmd, _, _ = self._run_main(wrapper_module, monkeypatch, tmp_path)
         assert '--model' in cmd
         model_idx = cmd.index('--model')

@@ -227,6 +227,26 @@ class TestUpdateArgsAndConfig:
         assert updated_args.duration == 999
         assert updated_args.hosts == ['node1', 'node2']  # Special yaml handling for hosts
 
+    def test_update_args_allows_none_hosts_for_single_node(self):
+        """Optional --hosts=None must remain valid for single-node benchmarks."""
+        args = argparse.Namespace(
+            hosts=None,
+            num_client_hosts=None,
+        )
+
+        update_args(args)
+
+        assert args.hosts is None
+        assert args.num_client_hosts is None
+
+    def test_update_args_allows_missing_num_client_hosts_with_none_hosts(self):
+        """A namespace with hosts=None must not evaluate len(None)."""
+        args = argparse.Namespace(hosts=None)
+
+        update_args(args)
+
+        assert args.hosts is None
+        assert not hasattr(args, "num_client_hosts")
 
 # =====================================================================
 # 5. args.mode and args.benchmark attributes
