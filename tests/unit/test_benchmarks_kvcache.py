@@ -546,8 +546,8 @@ class TestAggregateOptionResults:
 
         result = bm._aggregate_option_results(1, trial_dirs, expected_rank_count=1)
 
-        # 2 trials × 1 rank × 1.0 GBps = 2.0
-        assert result['aggregated_read_bandwidth_gbps'] == pytest.approx(2.0)
+        # 2 trials × 1 rank × 1.0 GBps each → fmean([1.0, 1.0]) = 1.0
+        assert result['aggregated_read_bandwidth_gbps'] == pytest.approx(1.0)
         assert result['trial_count'] == 2
 
     def test_uses_glob_not_constructed_filename(self, tmp_path):
@@ -571,7 +571,7 @@ class TestAggregateOptionResults:
         assert result['partial_failure'] is False
 
     def test_none_p95_when_no_successful_reads(self, tmp_path):
-        """aggregated_p95_latency_ms is None when all rank files are missing."""
+        """aggregated_p95_latency_ms is 0.0 when all rank files are missing."""
         bm = _make_run_benchmark(tmp_path)
         trial_dir = tmp_path / 'trial_0'
         # Both rank dirs exist but have no json files
@@ -580,7 +580,8 @@ class TestAggregateOptionResults:
 
         result = bm._aggregate_option_results(1, [str(trial_dir)], expected_rank_count=2)
 
-        assert result['aggregated_p95_latency_ms'] is None
+        # Empty trial contributes 0.0; fmean([0.0]) = 0.0
+        assert result['aggregated_p95_latency_ms'] == pytest.approx(0.0)
         assert result['partial_failure'] is True
 
 
