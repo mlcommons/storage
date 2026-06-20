@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlpstorage"
-version = "3.0.14"
+version = "3.0.15"
 description = "MLPerf Storage Benchmark Suite"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -126,13 +126,15 @@ environments = ["sys_platform == 'linux'"]
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
 torchaudio = [{ index = "pytorch-cpu" }]
-# Pinned to upstream main @ PR #24 merge — carries:
+# Pinned to upstream main @ PR #27 merge — carries:
 #   - DLIO PR #21 fix for storage #391 part 1 (TorchIterableDatasetSimple gating)
 #   - DLIO PR #22 fix for storage #415 (mpi4py auto-init in spawn workers)
 #   - DLIO PR #23 fix for storage #391 part 2 (sudo -n + warn-once for drop_caches)
 #   - DLIO PR #24 fix for storage #448 (per-node worker-memory budget)
 #   - DLIO PR #25 fix for storage #455 (sampler floor division — equal per-rank shards)
-dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "ef58613b59d4ad510f467dd53b2b326f25829f1b" }
+#   - DLIO PR #27 fix for storage #466 #472: skip_listing, S3 object storage,
+#     epoch-2+ AU, TFRecord via s3dlio, large-scale listing OOM prevention
+dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "7098cccdb1fe35ab6487705f33f229e3c125dd44" }
 
 [dependency-groups]
 dev = [
