@@ -2,10 +2,10 @@
 
 Implements all 16 rules from Rules.md §5 (5.1.1–5.6.5) as
 ``@rule``-decorated methods on a single ``BaseCheck`` subclass. Every
-rule body guards on ``self.mode != "vdb_bench"`` so the check is a
-no-op on non-vdb subtrees — the on-disk type-segment is ``vdb_bench``
+rule body guards on ``self.mode != "vector_database"`` so the check is a
+no-op on non-vdb subtrees — the on-disk type-segment is ``vector_database``
 (Phase 4 D-02), so the loader at ``loader.py:99-103`` yields
-``loader_metadata.mode == "vdb_bench"`` on those leaves.
+``loader_metadata.mode == "vector_database"`` on those leaves.
 
 §5.6.1 (``vdbClosedSubmissionChecksum``) delegates to the shared
 ``helpers._check_code_image_layered`` (Phase 4 CD-04 + D-06) — the same
@@ -22,7 +22,7 @@ UPPERCASE-vs-UPPERCASE per D-03 invariant.
 Loader caveat: at Phase 4 land time, ``loader.py`` has only two branches
 (``training`` and an ``else`` for checkpointing) and therefore does NOT
 populate ``submissions_logs.run_files`` / ``datagen_files`` for
-``vdb_bench`` mode. Rule bodies that depend on those fields detect the
+``vector_database`` mode. Rule bodies that depend on those fields detect the
 absence and emit ``warn_violation`` so the gap is grep-visible — see
 the Phase-4 invariant: "must NEVER be a ``return True`` stub." When the
 loader gains a vdb branch, the warn paths drop out automatically and the
@@ -150,7 +150,7 @@ class VdbCheck(BaseCheck):
 
         Phase 4 land time: ``Loader.load()`` only fills ``run_files`` /
         ``datagen_files`` for ``mode == "training"``; the ``else`` branch
-        fills ``checkpoint_files`` for everything else. For ``vdb_bench``
+        fills ``checkpoint_files`` for everything else. For ``vector_database``
         leaves this means ``run_files`` is ``None`` (the dataclass default).
         Rule methods consume this iterator instead of touching ``run_files``
         directly so they degrade to an empty walk without crashing.
@@ -185,7 +185,7 @@ class VdbCheck(BaseCheck):
         return architecture.get("benchmark_API", "file")
 
     def _vdb_loader_gap_warning(self, rule_id: str, rule_name: str) -> None:
-        """Emit a single warn_violation that the loader does not yet surface vdb_bench logs.
+        """Emit a single warn_violation that the loader does not yet surface vector_database logs.
 
         This is the grep-visible signal required by the Phase-4 invariant
         "must NEVER be a ``return True`` stub." When the loader gains a
@@ -194,9 +194,9 @@ class VdbCheck(BaseCheck):
         """
         self.warn_violation(
             rule_id, rule_name, self.path,
-            "vdb_bench summary/metadata not surfaced by Loader at this revision; "
+            "vector_database summary/metadata not surfaced by Loader at this revision; "
             "rule structure is in place but cannot fire — gap tracked for the "
-            "loader vdb_bench branch follow-up",
+            "loader vector_database branch follow-up",
         )
 
     # -----------------------------------------------------------------------
@@ -214,7 +214,7 @@ class VdbCheck(BaseCheck):
         but does not fire.
         """
         valid = True
-        if self.mode != "vdb_bench":
+        if self.mode != "vector_database":
             return valid
 
         # The defined-scale table is not yet in config.py; surface the gap.
@@ -261,7 +261,7 @@ class VdbCheck(BaseCheck):
         (Rules.md 5.1.2)
         """
         valid = True
-        if self.mode != "vdb_bench":
+        if self.mode != "vector_database":
             return valid
 
         load_dimensions = []
@@ -309,7 +309,7 @@ class VdbCheck(BaseCheck):
     def vdb_collection_populated(self):
         """Confirm inserted_vectors >= num_vectors at load. (Rules.md 5.2.1)"""
         valid = True
-        if self.mode != "vdb_bench":
+        if self.mode != "vector_database":
             return valid
 
         any_load = False
@@ -355,7 +355,7 @@ class VdbCheck(BaseCheck):
         the load-time index_type matches the run-time index_type. (Rules.md 5.2.2)
         """
         valid = True
-        if self.mode != "vdb_bench":
+        if self.mode != "vector_database":
             return valid
 
         load_index_types = []
@@ -408,7 +408,7 @@ class VdbCheck(BaseCheck):
         (Rules.md 5.3.1; Phase 4 D-04: count applies to run/, not datagen/.)
         """
         valid = True
-        if self.mode != "vdb_bench":
+        if self.mode != "vector_database":
             return valid
 
         # STRUCT layer owns missing-run/ structural violation.
@@ -440,7 +440,7 @@ class VdbCheck(BaseCheck):
         warn_violation.
         """
         valid = True
-        if self.mode != "vdb_bench":
+        if self.mode != "vector_database":
             return valid
 
         # The minimum-recall target table is not yet in config.py.
@@ -487,7 +487,7 @@ class VdbCheck(BaseCheck):
         is in place, threshold check deferred via warn_violation.
         """
         valid = True
-        if self.mode != "vdb_bench":
+        if self.mode != "vector_database":
             return valid
 
         self.warn_violation(
@@ -532,7 +532,7 @@ class VdbCheck(BaseCheck):
         (Rules.md 5.3.4)
         """
         valid = True
-        if self.mode != "vdb_bench":
+        if self.mode != "vector_database":
             return valid
 
         any_run = False
@@ -564,7 +564,7 @@ class VdbCheck(BaseCheck):
         (Rules.md 5.4.1)
         """
         valid = True
-        if self.mode != "vdb_bench":
+        if self.mode != "vector_database":
             return valid
 
         any_run = False
@@ -624,7 +624,7 @@ class VdbCheck(BaseCheck):
         submissions silent-pass (D-B7).
         """
         valid = True
-        if self.mode != "vdb_bench":
+        if self.mode != "vector_database":
             return valid
 
         if self._get_benchmark_api() == "object":
@@ -680,7 +680,7 @@ class VdbCheck(BaseCheck):
         and consistent with the declared API. (Rules.md 5.5.1)
         """
         valid = True
-        if self.mode != "vdb_bench":
+        if self.mode != "vector_database":
             return valid
 
         # Only applies under object API.
@@ -744,21 +744,21 @@ class VdbCheck(BaseCheck):
         once and attributed under the caller's rule ID/name.
 
         Walk-up: ``self.path`` is the per-leaf vdb path
-        (``<root>/closed/<orgname>/results/<system>/vdb_bench/<DisplayIndex>``).
+        (``<root>/closed/<orgname>/results/<system>/vector_database/<DisplayIndex>``).
         The CLOSED ``code/`` lives at ``<root>/closed/<orgname>/code/``,
-        four levels above ``self.path`` (DisplayIndex → vdb_bench → system
+        four levels above ``self.path`` (DisplayIndex → vector_database → system
         → results → ``<orgname>``).
 
         Missing ``code/`` is NOT logged here — STRUCT-06 (§2.1.6) owns the
         VALS-01 missing-code/ violation; re-firing here would double-count.
         """
-        if self.mode != "vdb_bench":
+        if self.mode != "vector_database":
             return True
         if self.division != "closed":
             return True
 
-        # <root>/closed/<orgname>/results/<system>/vdb_bench/<DisplayIndex>
-        # walk up four levels: DisplayIndex → vdb_bench → system → results → <orgname>
+        # <root>/closed/<orgname>/results/<system>/vector_database/<DisplayIndex>
+        # walk up four levels: DisplayIndex → vector_database → system → results → <orgname>
         submitter_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(self.path))))
         code_path = os.path.join(submitter_path, "code")
 
@@ -780,7 +780,7 @@ class VdbCheck(BaseCheck):
     def vdb_closed_database_backend(self):
         """For CLOSED, verify database.database == 'milvus'. (Rules.md 5.6.2)"""
         valid = True
-        if self.mode != "vdb_bench":
+        if self.mode != "vector_database":
             return valid
         if self.division != "closed":
             return valid
@@ -813,7 +813,7 @@ class VdbCheck(BaseCheck):
         (Rules.md 5.6.3; Phase 4 D-03 UPPERCASE-token comparison.)
         """
         valid = True
-        if self.mode != "vdb_bench":
+        if self.mode != "vector_database":
             return valid
         if self.division != "closed":
             return valid
@@ -869,7 +869,7 @@ class VdbCheck(BaseCheck):
         (Rules.md 5.6.4)
         """
         valid = True
-        if self.mode != "vdb_bench":
+        if self.mode != "vector_database":
             return valid
         if self.division != "closed":
             return valid
@@ -910,7 +910,7 @@ class VdbCheck(BaseCheck):
         relaxation is grep-visible.
         """
         valid = True
-        if self.mode != "vdb_bench":
+        if self.mode != "vector_database":
             return valid
         if self.division != "open":
             return valid

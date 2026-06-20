@@ -29,16 +29,17 @@ from mlpstorage_py.errors import ConfigurationError
 
 def _benchmark(mode: str, model: str = "unet3d", command: str = "datagen",
                benchmark_type=BENCHMARK_TYPES.training, results_dir: str = "/tmp/r",
-               index_type: str | None = None):
+               index_type: str | None = None, vdb_engine: str | None = None):
     """Build a minimal benchmark stand-in with the attributes
     ``generate_output_location`` reads.
 
     ``index_type`` is set for vector_database benchmarks; the runtime path for
     that type includes a per-index_type segment so AISAQ results are kept
-    separate from DISKANN/HNSW (they're not comparable). Per Phase 4 D-02 /
-    D-03 the on-disk type segment is `vdb_bench` and the on-disk index
-    directory uses display-case spellings (DiskANN / HNSW / AiSAQ), while
-    ``args.index_type`` itself stays UPPERCASE (the CLI / summary.json form).
+    separate from DISKANN/HNSW (they're not comparable). The on-disk index
+    directory uses display-case spellings (DiskANN / HNSW / AiSAQ) routed via
+    ``INDEX_TYPE_TOKEN_TO_DIR``, while ``args.index_type`` itself stays
+    UPPERCASE (the CLI / summary.json form). ``vdb_engine`` adds the engine
+    segment between <type> and <DisplayIndex>.
     """
     args = types.SimpleNamespace(
         mode=mode,
@@ -48,6 +49,8 @@ def _benchmark(mode: str, model: str = "unet3d", command: str = "datagen",
     )
     if index_type is not None:
         args.index_type = index_type
+    if vdb_engine is not None:
+        args.vdb_engine = vdb_engine
     return types.SimpleNamespace(args=args, BENCHMARK_TYPE=benchmark_type)
 
 
@@ -117,13 +120,13 @@ def test_open_training_prefix():
 
 
 def test_open_vector_database_prefix_includes_index_type():
-    """vector_database results are split by index_type because AISAQ results
-    are not comparable to DISKANN/HNSW results. The runtime path must include
-    the <index_type> segment between <type> and <command> for OPEN.
+    """vector_database results are split by engine/index_type because AISAQ
+    results are not comparable to DISKANN/HNSW. The runtime path includes
+    the <engine>/<DisplayIndex> segments between <type> and <command>.
 
-    Per Phase 4 D-02 the on-disk type segment is `vdb_bench` (not
-    `vector_database`). Per D-03 the index directory is the display-case
-    spelling `DiskANN` while ``args.index_type`` stays UPPERCASE `DISKANN`."""
+    On-disk type segment is `vector_database` (BENCHMARK_TYPES.name). The
+    index directory uses display-case spellings (e.g. `DiskANN`) while
+    ``args.index_type`` stays UPPERCASE."""
     from mlpstorage_py.rules.utils import generate_output_location
 
     b = _benchmark(
@@ -131,22 +134,23 @@ def test_open_vector_database_prefix_includes_index_type():
         command="run",
         benchmark_type=BENCHMARK_TYPES.vector_database,
         index_type="DISKANN",
+        vdb_engine="milvus",
     )
     path = generate_output_location(
         b, datetime_str="X", orgname="acme", systemname="sys-1",
     )
     assert path.startswith(
-        "/tmp/r/open/acme/results/sys-1/vdb_bench/DiskANN/run/"
+        "/tmp/r/open/acme/results/sys-1/vector_database/milvus/DiskANN/run/"
     ), path
 
 
 def test_closed_vector_database_prefix_includes_index_type():
-    """Same contract on the CLOSED side: <index_type> sits between <type>
-    and <command>.
+    """Same contract on the CLOSED side: <engine>/<DisplayIndex> sits between
+    <type> and <command>.
 
-    Per Phase 4 D-02 / D-03 the type segment is `vdb_bench` and the index
-    directory is the display-case spelling `AiSAQ`; the CLI/summary.json
-    token `args.index_type` stays UPPERCASE `AISAQ`."""
+    The type segment is `vector_database` and the index directory is the
+    display-case spelling `AiSAQ`; the CLI/summary.json token
+    ``args.index_type`` stays UPPERCASE `AISAQ`."""
     from mlpstorage_py.rules.utils import generate_output_location
 
     b = _benchmark(
@@ -154,10 +158,11 @@ def test_closed_vector_database_prefix_includes_index_type():
         command="run",
         benchmark_type=BENCHMARK_TYPES.vector_database,
         index_type="AISAQ",
+        vdb_engine="milvus",
     )
     path = generate_output_location(b, datetime_str="X", orgname="acme")
     assert path.startswith(
-        "/tmp/r/closed/acme/vdb_bench/AiSAQ/run/"
+        "/tmp/r/closed/acme/vector_database/milvus/AiSAQ/run/"
     ), path
 
 

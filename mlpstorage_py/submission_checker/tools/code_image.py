@@ -56,13 +56,9 @@ from ..constants import MD5_EXCLUDE_FILENAMES, MD5_EXCLUDE_PREFIXES
 
 # CLI subparser name → canonical on-disk type segment.
 # generate_output_location() writes this same segment, so the captured code/
-# must use it to live in the same submission tree. For training and
-# checkpointing the CLI name and the on-disk segment happen to match the
-# BENCHMARK_TYPES.name. For vectordb and kvcache they diverge:
-#   * 'vectordb'  → on-disk 'vdb_bench' (Phase 4 D-02; BENCHMARK_TYPES.name
-#                   is 'vector_database' but Rules.md §5.3.1 / §2.1.27
-#                   pin the on-disk segment to 'vdb_bench').
-#   * 'kvcache'   → on-disk 'kv_cache' (matches BENCHMARK_TYPES.name).
+# must use it to live in the same submission tree. CLI names map to the
+# BENCHMARK_TYPES enum value, whose .name is used as the on-disk segment for
+# all four types.
 _CLI_BENCHMARK_TO_TYPE: dict[str, BENCHMARK_TYPES] = {
     "training": BENCHMARK_TYPES.training,
     "checkpointing": BENCHMARK_TYPES.checkpointing,
@@ -70,15 +66,11 @@ _CLI_BENCHMARK_TO_TYPE: dict[str, BENCHMARK_TYPES] = {
     "kvcache": BENCHMARK_TYPES.kv_cache,
 }
 
-# Per Phase 4 D-02 the on-disk type segment for vector_database is
-# 'vdb_bench' rather than the BENCHMARK_TYPES.name 'vector_database'.
-# Generators (this helper and rules/utils.py::generate_output_location) hold
-# the divergence at the path-construction boundary; the enum identity is
-# unchanged everywhere else (CLI dispatch, registry, history, summary.json).
+# On-disk type segment is the BENCHMARK_TYPES.name for every benchmark type.
 _TYPE_TO_ONDISK_SEGMENT: dict[BENCHMARK_TYPES, str] = {
     BENCHMARK_TYPES.training: BENCHMARK_TYPES.training.name,
     BENCHMARK_TYPES.checkpointing: BENCHMARK_TYPES.checkpointing.name,
-    BENCHMARK_TYPES.vector_database: "vdb_bench",
+    BENCHMARK_TYPES.vector_database: BENCHMARK_TYPES.vector_database.name,
     BENCHMARK_TYPES.kv_cache: BENCHMARK_TYPES.kv_cache.name,
 }
 
@@ -654,10 +646,9 @@ def capture_or_verify_code_image(args, env, log):
         # _TYPE_TO_ONDISK_SEGMENT so the captured code/ shares the on-disk
         # tree with generate_output_location's output. The CLI subparser
         # names 'vectordb' and 'kvcache' diverge from the on-disk segments
-        # ('vdb_bench' and 'kv_cache') — without these lookups the captured
-        # code/ would live in a different tree than the runtime's results.
-        # Per Phase 4 D-02 the vector_database type segment on disk is
-        # 'vdb_bench', not BENCHMARK_TYPES.vector_database.name.
+        # ('vector_database' and 'kv_cache') — without these lookups the
+        # captured code/ would live in a different tree than the runtime's
+        # results.
         # Use getattr(..., None) + typed raise rather than bare getattr.
         # A bare getattr surfaces AttributeError, which the main.py exit-code
         # mapping treats as an unhandled crash rather than CodeImageError.

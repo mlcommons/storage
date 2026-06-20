@@ -126,7 +126,7 @@ VDB_INDEX_TYPES_CLOSED = ["DISKANN", "HNSW", "AISAQ"]
 #     by the CLI (`--index-type`), `summary.json.index_type`, and every Python
 #     string comparison against `args.index_type` / config constants.
 #   * Mixed-case display spellings (DiskANN, HNSW, AiSAQ) — the canonical
-#     ON-DISK convention used in directory names under `vdb_bench/<...>/...`,
+#     ON-DISK convention used in directory names under `vector_database/<...>/...`,
 #     matching the §2.1.27 OPEN subtree diagram and §5.3.1 prose.
 #
 # Path generators MUST route token -> dir; validators MUST route dir -> token

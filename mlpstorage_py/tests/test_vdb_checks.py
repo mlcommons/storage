@@ -3,7 +3,7 @@
 Exercises every ``@rule``-decorated method on ``VdbCheck`` (Phase 04 Plan 04-02)
 through direct instantiation of ``VdbCheck`` against synthesised
 ``SubmissionLogs`` / ``LoaderMetadata`` fakes plus an on-disk
-``vdb_bench/<DisplayIndex>/`` tree under ``tmp_path`` (Phase 04 Plan 04-01
+``vector_database/<DisplayIndex>/`` tree under ``tmp_path`` (Phase 04 Plan 04-01
 shape). One ``Test_<rule_id>_<RuleName>`` class per §5.1.1–5.6.5 rule, each
 with at least one happy-path case and one targeted-failure case. The 5.6.1
 class additionally proves the rule-id wiring through
@@ -56,10 +56,10 @@ def _build_vdb_leaf(
     datagen_timestamps=None,
     with_code_image: bool = False,
 ) -> Path:
-    """Synthesize a vdb_bench submission tree under tmp_path.
+    """Synthesize a vector_database submission tree under tmp_path.
 
     Shape (Phase 04 Plan 04-01):
-        <tmp_path>/<division>/<orgname>/results/<system>/vdb_bench/<display_index>/
+        <tmp_path>/<division>/<orgname>/results/<system>/vector_database/<display_index>/
             [code/.code-hash.json + payload   when with_code_image]
             datagen/<ts>/                     (one entry per datagen_timestamps)
             run/<ts>/                         (one entry per run_timestamps)
@@ -68,7 +68,7 @@ def _build_vdb_leaf(
     methods read from the in-memory tuples populated on SubmissionLogs.
     The disk tree only exists so the path-based rules (5.3.1 run count,
     5.6.3 dir-name → token) see something real. Returns the per-leaf path
-    (``.../vdb_bench/<display_index>``).
+    (``.../vector_database/<display_index>``).
     """
     if run_timestamps is None:
         run_timestamps = _DEFAULT_RUN_TIMESTAMPS
@@ -81,7 +81,7 @@ def _build_vdb_leaf(
         / orgname
         / "results"
         / system
-        / "vdb_bench"
+        / "vector_database"
         / display_index
     )
     (leaf / "datagen").mkdir(parents=True, exist_ok=True)
@@ -179,7 +179,7 @@ def _make_vdb_check(
     run_files=None,
     datagen_files=None,
     system_file=None,
-    mode: str = "vdb_bench",
+    mode: str = "vector_database",
     reference_checksum_override=None,
 ):
     """Instantiate VdbCheck against fake SubmissionLogs / LoaderMetadata."""
@@ -223,9 +223,9 @@ def _warnings(mock_logger, rule_id: str, rule_name: str):
 # ===========================================================================
 
 class TestModeGuardNoOpsOnNonVdbSubmissions:
-    """All 16 §5 rule methods must no-op when mode != "vdb_bench".
+    """All 16 §5 rule methods must no-op when mode != "vector_database".
 
-    Proves the post-Plan-04-01 guard string is "vdb_bench" (not
+    Proves the post-Plan-04-01 guard string is "vector_database" (not
     "vector_database"). A regression to the old guard string would
     cause every method to no-op on real vdb submissions too.
     """
