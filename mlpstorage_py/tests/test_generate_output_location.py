@@ -269,3 +269,76 @@ def test_function_does_not_read_mlpstorage_env_vars(monkeypatch):
     # Kwargs win: 'acme' appears, the env-var value does NOT.
     assert "/closed/acme/" in path, path
     assert "ENV-ORGNAME-WRONG" not in path, path
+
+
+# ---------------------------------------------------------------------------
+# Path-component safety: reject path-traversal / unsafe segments at the
+# trust boundary (defense in depth — argparse choices= covers the CLI
+# entrypoint; this catches programmatic callers that bypass argparse).
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("bad_orgname", [
+    "../etc",          # parent-dir traversal
+    "..",              # reserved
+    ".",               # reserved
+    "/absolute",       # absolute reset (would clobber results_dir via os.path.join)
+    "acme/sub",        # embedded separator
+    "acme\x00",        # null byte
+    "acme name",       # whitespace
+    "",                # empty
+])
+def test_orgname_rejects_unsafe_path_components(bad_orgname):
+    """orgname comes from MLPSTORAGE_ORGNAME (user-controlled env). The path
+    generator must reject anything that isn't a single safe segment, even if
+    the CLI dispatch layer somehow forwards it (defense in depth)."""
+    from mlpstorage_py.rules.utils import generate_output_location
+
+    b = _benchmark(mode="closed")
+    with pytest.raises((ValueError, ConfigurationError)):
+        generate_output_location(b, datetime_str="X", orgname=bad_orgname)
+
+
+@pytest.mark.parametrize("bad_systemname", ["../etc", "..", "/absolute", "sys/sub"])
+def test_systemname_rejects_unsafe_path_components(bad_systemname):
+    from mlpstorage_py.rules.utils import generate_output_location
+
+    b = _benchmark(mode="open")
+    with pytest.raises(ValueError):
+        generate_output_location(
+            b, datetime_str="X", orgname="acme", systemname=bad_systemname,
+        )
+
+
+@pytest.mark.parametrize("bad_index", ["../etc", "..", "/absolute", "DISKANN/sub"])
+def test_vdb_index_rejects_unsafe_path_components(bad_index):
+    """A programmatic caller (test fixture, future internal API) that
+    bypasses cli.vectordb_args.validate_vectordb_arguments and feeds an
+    arbitrary string as args.vdb_index must NOT land in a traversal path."""
+    from mlpstorage_py.rules.utils import generate_output_location
+
+    b = _benchmark(
+        mode="closed",
+        command="run",
+        benchmark_type=BENCHMARK_TYPES.vector_database,
+        index_type=bad_index,
+        vdb_engine="milvus",
+    )
+    with pytest.raises(ValueError):
+        generate_output_location(b, datetime_str="X", orgname="acme")
+
+
+@pytest.mark.parametrize("bad_value", ["../bad", "..", "/abs", "a/b"])
+def test_model_rejects_unsafe_path_components(bad_value):
+    from mlpstorage_py.rules.utils import generate_output_location
+
+    b = _benchmark(mode="closed", model=bad_value)
+    with pytest.raises(ValueError):
+        generate_output_location(b, datetime_str="X", orgname="acme")
+
+
+def test_datetime_str_rejects_unsafe_path_components():
+    from mlpstorage_py.rules.utils import generate_output_location
+
+    b = _benchmark(mode="closed")
+    with pytest.raises(ValueError):
+        generate_output_location(b, datetime_str="../escape", orgname="acme")

@@ -6,6 +6,7 @@ components for calculating requirements and generating output paths.
 """
 
 import os
+import re
 import sys
 from typing import Tuple, List, Optional
 
@@ -19,6 +20,30 @@ from mlpstorage_py.errors import ConfigurationError, ErrorCode
 # single source of truth for the env-var spelling.
 MLPSTORAGE_ORGNAME_ENVVAR = "MLPSTORAGE_ORGNAME"
 MLPSTORAGE_SYSTEMNAME_ENVVAR = "MLPSTORAGE_SYSTEMNAME"
+
+# Each path segment appended to results_dir by generate_output_location must
+# match this — POSIX-safe alphanumeric plus '.', '_', '-' — and must not be
+# '.' or '..'. Blocks path-traversal ('../') and absolute-path resets ('/')
+# at the trust boundary between args/env-var input and os.path.join, even
+# for callers that bypass the CLI's argparse choices= validation.
+_SAFE_PATH_COMPONENT_RE = re.compile(r"^[A-Za-z0-9._-]+$")
+
+
+def _check_safe_path_component(name: str, value: str) -> None:
+    """Raise ValueError if value is not safe as a single path segment.
+
+    Caller handles None/empty upstream as a separate "missing required arg"
+    failure mode; this helper assumes value is a non-empty string.
+    """
+    if value in (".", ".."):
+        raise ValueError(
+            f"{name}={value!r} is not a safe path component (reserved name)"
+        )
+    if not _SAFE_PATH_COMPONENT_RE.match(value):
+        raise ValueError(
+            f"{name}={value!r} is not a safe path component "
+            f"(must match {_SAFE_PATH_COMPONENT_RE.pattern})"
+        )
 
 
 def calculate_training_data_size(args, cluster_information, dataset_params, reader_params, logger,
@@ -214,6 +239,7 @@ def generate_output_location(
                 ),
                 code=ErrorCode.CONFIG_MISSING_REQUIRED,
             )
+        _check_safe_path_component("orgname", orgname)
         output_location = os.path.join(output_location, mode, orgname)
 
         if mode == "open":
@@ -231,13 +257,19 @@ def generate_output_location(
                     ),
                     code=ErrorCode.CONFIG_MISSING_REQUIRED,
                 )
+            _check_safe_path_component("systemname", systemname)
             output_location = os.path.join(output_location, "results", systemname)
+
+    # datetime_str is built into every per-type path below; validate once here.
+    _check_safe_path_component("datetime_str", datetime_str)
 
     # Handle different benchmark types
     if benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.training:
         if not hasattr(benchmark.args, "model"):
             raise ValueError("Model name is required for training benchmark output location")
 
+        _check_safe_path_component("model", benchmark.args.model)
+        _check_safe_path_component("command", benchmark.args.command)
         output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
         output_location = os.path.join(output_location, benchmark.args.model)
         output_location = os.path.join(output_location, benchmark.args.command)
@@ -264,6 +296,9 @@ def generate_output_location(
                 "(set --vdb-index on the CLI)."
             )
 
+        _check_safe_path_component("vdb_engine", engine)
+        _check_safe_path_component("vdb_index", vdb_index)
+        _check_safe_path_component("command", benchmark.args.command)
         output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
         output_location = os.path.join(output_location, engine)
         output_location = os.path.join(output_location, vdb_index)
@@ -278,6 +313,8 @@ def generate_output_location(
                 "args.model before calling generate_output_location "
                 "(KVCacheBenchmark.__init__ defaults this from KVCACHE_MODEL_DEFAULT)."
             )
+        _check_safe_path_component("model", model)
+        _check_safe_path_component("command", benchmark.args.command)
         output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
         output_location = os.path.join(output_location, model)
         output_location = os.path.join(output_location, benchmark.args.command)
@@ -287,6 +324,7 @@ def generate_output_location(
         if not hasattr(benchmark.args, "model"):
             raise ValueError("Model name is required for checkpointing benchmark output location")
 
+        _check_safe_path_component("model", benchmark.args.model)
         output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
         output_location = os.path.join(output_location, benchmark.args.model)
         output_location = os.path.join(output_location, datetime_str)
