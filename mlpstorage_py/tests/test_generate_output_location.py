@@ -36,10 +36,9 @@ def _benchmark(mode: str, model: str = "unet3d", command: str = "datagen",
     ``index_type`` is set for vector_database benchmarks; the runtime path for
     that type includes a per-index_type segment so AISAQ results are kept
     separate from DISKANN/HNSW (they're not comparable). The on-disk index
-    directory uses display-case spellings (DiskANN / HNSW / AiSAQ) routed via
-    ``INDEX_TYPE_TOKEN_TO_DIR``, while ``args.index_type`` itself stays
-    UPPERCASE (the CLI / summary.json form). ``vdb_engine`` adds the engine
-    segment between <type> and <DisplayIndex>.
+    directory uses the UPPERCASE token (DISKANN / HNSW / AISAQ), matching
+    ``args.index_type`` and ``summary.json.index_type``. ``vdb_engine`` adds
+    the engine segment between <type> and <index>.
     """
     args = types.SimpleNamespace(
         mode=mode,
@@ -122,11 +121,11 @@ def test_open_training_prefix():
 def test_open_vector_database_prefix_includes_index_type():
     """vector_database results are split by engine/index_type because AISAQ
     results are not comparable to DISKANN/HNSW. The runtime path includes
-    the <engine>/<DisplayIndex> segments between <type> and <command>.
+    the <engine>/<index_type> segments between <type> and <command>.
 
-    On-disk type segment is `vector_database` (BENCHMARK_TYPES.name). The
-    index directory uses display-case spellings (e.g. `DiskANN`) while
-    ``args.index_type`` stays UPPERCASE."""
+    On-disk type segment is `vector_database` (BENCHMARK_TYPES.name) and the
+    index directory is the UPPERCASE token (`DISKANN`), matching
+    ``args.index_type`` and ``summary.json.index_type``."""
     from mlpstorage_py.rules.utils import generate_output_location
 
     b = _benchmark(
@@ -140,17 +139,16 @@ def test_open_vector_database_prefix_includes_index_type():
         b, datetime_str="X", orgname="acme", systemname="sys-1",
     )
     assert path.startswith(
-        "/tmp/r/open/acme/results/sys-1/vector_database/milvus/DiskANN/run/"
+        "/tmp/r/open/acme/results/sys-1/vector_database/milvus/DISKANN/run/"
     ), path
 
 
 def test_closed_vector_database_prefix_includes_index_type():
-    """Same contract on the CLOSED side: <engine>/<DisplayIndex> sits between
+    """Same contract on the CLOSED side: <engine>/<index_type> sits between
     <type> and <command>.
 
     The type segment is `vector_database` and the index directory is the
-    display-case spelling `AiSAQ`; the CLI/summary.json token
-    ``args.index_type`` stays UPPERCASE `AISAQ`."""
+    UPPERCASE token `AISAQ`, matching ``args.index_type``."""
     from mlpstorage_py.rules.utils import generate_output_location
 
     b = _benchmark(
@@ -162,7 +160,7 @@ def test_closed_vector_database_prefix_includes_index_type():
     )
     path = generate_output_location(b, datetime_str="X", orgname="acme")
     assert path.startswith(
-        "/tmp/r/closed/acme/vector_database/milvus/AiSAQ/run/"
+        "/tmp/r/closed/acme/vector_database/milvus/AISAQ/run/"
     ), path
 
 

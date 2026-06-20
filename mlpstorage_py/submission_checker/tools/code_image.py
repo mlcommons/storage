@@ -44,7 +44,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from mlpstorage_py import __version__ as MLPSTORAGE_VERSION
-from mlpstorage_py.config import BENCHMARK_TYPES, INDEX_TYPE_TOKEN_TO_DIR
+from mlpstorage_py.config import BENCHMARK_TYPES
 from mlpstorage_py.errors import ConfigurationError, ErrorCode
 from mlpstorage_py.rules.utils import (
     MLPSTORAGE_ORGNAME_ENVVAR,
@@ -79,12 +79,11 @@ _TYPE_TO_ONDISK_SEGMENT: dict[BENCHMARK_TYPES, str] = {
 # would consider a single comparable result group — has its own code image.
 #
 #   training, checkpointing : per-<model>      → uses args.model
-#   vector_database         : per-<DisplayIndex> → uses args.index_type
-#                             routed through INDEX_TYPE_TOKEN_TO_DIR
-#                             (AiSAQ results are not comparable to DiskANN
-#                              or HNSW, so they live in separate trees;
-#                              D-03 routes the UPPERCASE token to its
-#                              mixed-case on-disk display spelling).
+#   vector_database         : per-<index_type> → uses args.index_type
+#                             (AISAQ results are not comparable to DISKANN
+#                              or HNSW, so they live in separate trees).
+#                             The index name is UPPERCASE on disk, matching
+#                             args.index_type and summary.json.index_type.
 #   kv_cache                : transitional —   → None (no leaf segment)
 #                             code lives at <type>/code/ until the kv_cache
 #                             directory/file structure below the prefix is
@@ -678,14 +677,6 @@ def capture_or_verify_code_image(args, env, log):
                     f"args.{leaf_attr} is required for "
                     f"{benchmark_type.name} OPEN capture"
                 )
-            # Phase 4 D-03: for vector_database the on-disk index directory
-            # uses display-case spellings (DiskANN/HNSW/AiSAQ); args.index_type
-            # is UPPERCASE (the CLI / summary.json form). Route via the
-            # mapping so the captured code/ sits at the same path the runtime
-            # writes. Non-vdb types and OPEN-extended vdb tokens fall through
-            # unchanged via .get().
-            if benchmark_type == BENCHMARK_TYPES.vector_database:
-                leaf_value = INDEX_TYPE_TOKEN_TO_DIR.get(leaf_value, leaf_value)
             leaf_dir = leaf_dir / leaf_value
         image_parent = leaf_dir
     image_parent.mkdir(parents=True, exist_ok=True)

@@ -13,11 +13,9 @@ helper TrainingCheck.3.6.1 uses — so the layered self-consistency +
 upstream-identity model is enforced once and attributed under the
 caller's rule ID.
 
-Index-type rules (5.3.1, 5.6.3) compare the on-disk display directory
-name (e.g., ``"DiskANN"``) against the canonical UPPERCASE token (e.g.,
-``"DISKANN"``) via ``INDEX_TYPE_DIR_TO_TOKEN`` (Phase 4 D-03 dual
-vocabulary). The comparison against ``summary.json.index_type`` is then
-UPPERCASE-vs-UPPERCASE per D-03 invariant.
+Index-type rules (5.3.1, 5.6.3) compare the on-disk directory name
+(UPPERCASE — e.g. ``"DISKANN"``) directly against the
+``summary.json.index_type`` token (also UPPERCASE).
 
 Loader caveat: at Phase 4 land time, ``loader.py`` has only two branches
 (``training`` and an ``else`` for checkpointing) and therefore does NOT
@@ -36,10 +34,7 @@ from ..configuration.configuration import Config
 from ..loader import SubmissionLogs
 from ..rule_registry import rule
 from .helpers import _check_code_image_layered, _check_filesystem_separation
-from mlpstorage_py.config import (
-    INDEX_TYPE_DIR_TO_TOKEN,
-    VDB_INDEX_TYPES_CLOSED,
-)
+from mlpstorage_py.config import VDB_INDEX_TYPES_CLOSED
 
 
 # Required latency / throughput fields each run's summary.json must report (§5.3.4).
@@ -809,8 +804,8 @@ class VdbCheck(BaseCheck):
     @rule("5.6.3", "vdbClosedIndexTypes")
     def vdb_closed_index_types(self):
         """For CLOSED, verify index type is DISKANN / HNSW / AISAQ and that
-        the on-disk display directory name matches the summary.json index_type.
-        (Rules.md 5.6.3; Phase 4 D-03 UPPERCASE-token comparison.)
+        the on-disk directory name matches the summary.json index_type.
+        (Rules.md 5.6.3.)
         """
         valid = True
         if self.mode != "vector_database":
@@ -818,10 +813,9 @@ class VdbCheck(BaseCheck):
         if self.division != "closed":
             return valid
 
-        # On-disk display index dir name → UPPERCASE token (D-03).
+        # On-disk directory name is the UPPERCASE token; compare directly.
         dir_name = os.path.basename(self.path.rstrip(os.sep))
-        token = INDEX_TYPE_DIR_TO_TOKEN.get(dir_name)
-        if token is None or token not in VDB_INDEX_TYPES_CLOSED:
+        if dir_name not in VDB_INDEX_TYPES_CLOSED:
             self.log_violation(
                 "5.6.3", "vdbClosedIndexTypes", self.path,
                 "vdbClosedIndexTypes: directory name %r is not a CLOSED index "
@@ -829,8 +823,8 @@ class VdbCheck(BaseCheck):
                 dir_name, list(VDB_INDEX_TYPES_CLOSED),
             )
             valid = False
-            # Skip per-run comparison; with no mapping, the comparison is meaningless.
             return valid
+        token = dir_name
 
         any_run = False
         for summary, metadata, ts in self._iter_run_files():

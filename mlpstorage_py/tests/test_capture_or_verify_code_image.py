@@ -220,21 +220,17 @@ class TestCapturePath:
         assert expected_code.is_dir()
 
     def test_open_vectordb_uses_canonical_type_name(self, tmp_path, log):
-        """The CLI subparser is named 'vectordb', but per Rules.md §5.3.1
-        the on-disk type segment is 'vector_database' (Phase 4 D-02; the Python
-        enum name 'vector_database' is unchanged). The helper must emit
-        that canonical on-disk segment so the captured code/ lives in the
-        same submission tree the runtime writes results into.
+        """The CLI subparser is named 'vectordb', but the on-disk type segment
+        is 'vector_database' (BENCHMARK_TYPES.name). The helper must emit that
+        canonical on-disk segment so the captured code/ lives in the same
+        submission tree the runtime writes results into.
 
-        vector_database splits results by <index_type> because AiSAQ results are
-        not comparable to DiskANN/HNSW. The captured code/ lives at
-        vector_database/<DisplayIndex>/code/ — per-leaf, same depth as
-        training/checkpointing. Per D-03 the on-disk index directory uses
-        display-case spellings (DiskANN/HNSW/AiSAQ); the CLI / summary.json
-        token (args.index_type) stays UPPERCASE.
+        vector_database splits results by <index_type> because AISAQ results
+        are not comparable to DISKANN/HNSW. The captured code/ lives at
+        vector_database/<index_type>/code/ — per-leaf, same depth as
+        training/checkpointing. The index directory is the UPPERCASE token,
+        matching args.index_type and summary.json.index_type.
         """
-        # vectordb has no --model CLI arg but DOES have --index-type
-        # (argparse stores --index-type as args.index_type, UPPERCASE).
         args = SimpleNamespace(
             mode="open", command="run", results_dir=str(tmp_path),
             benchmark="vectordb", index_type="DISKANN",
@@ -243,7 +239,7 @@ class TestCapturePath:
         result = capture_or_verify_code_image(args, env, log)
         expected_code = (
             tmp_path / "open" / "acme" / "results" / "rig01"
-            / "vector_database" / "DiskANN" / "code"
+            / "vector_database" / "DISKANN" / "code"
         )
         assert result == expected_code
         # And the CLI name 'vectordb' must NOT appear as a path segment.

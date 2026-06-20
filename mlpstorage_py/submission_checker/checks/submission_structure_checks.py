@@ -48,13 +48,11 @@ _VALID_DIVISIONS = frozenset({"closed", "open"})
 # Benchmark-type directory names whose OPEN leaf shape has no per-leaf
 # segment between <type>/ and code/ — code/ lives directly at <type>/code/.
 #
-# vector_database is NOT in this set: AiSAQ results are not comparable to
-# DiskANN/HNSW, so its leaf shape is vector_database/<DisplayIndex>/code/ — same
-# 3-level walk as training (<model>) and checkpointing (<model>). Per
-# Phase 4 D-02 the on-disk type segment is "vector_database" (Rules.md §5.3.1 /
-# §2.1.27), and per D-03 the index directory uses mixed-case display
-# spellings (DiskANN, HNSW, AiSAQ) — the UPPERCASE form (DISKANN, HNSW,
-# AISAQ) lives only in summary.json / CLI / config.
+# vector_database is NOT in this set: AISAQ results are not comparable to
+# DISKANN/HNSW, so its leaf shape is vector_database/<index_type>/code/ —
+# same 3-level walk as training (<model>) and checkpointing (<model>). The
+# index directory uses the UPPERCASE token (DISKANN/HNSW/AISAQ), matching
+# args.index_type and summary.json.index_type.
 #
 # kv_cache stays here transitionally — its directory/file structure below
 # the <type>/ prefix will be finalized in a follow-up plan. Once the
@@ -152,11 +150,10 @@ class SubmissionStructureCheck(BaseCheck):
 
         - training, checkpointing → results/<sys>/<type>/<model>/code/
           (runtime output is keyed per model).
-        - vector_database → results/<sys>/vector_database/<DisplayIndex>/code/
-          (results split by index type — AiSAQ/DiskANN/HNSW results are not
-          comparable and live in separate trees; per Phase 4 D-02 the
-          on-disk type segment is `vector_database`, per D-03 the index directory
-          uses display-case spellings).
+        - vector_database → results/<sys>/vector_database/<index_type>/code/
+          (results split by index type — AISAQ/DISKANN/HNSW results are not
+          comparable and live in separate trees; the index directory uses
+          the UPPERCASE token, matching args.index_type).
         - kv_cache → results/<sys>/<type>/code/
           (transitional shape — kv_cache directory structure below the
           <type>/ prefix will be finalized in a follow-up plan).

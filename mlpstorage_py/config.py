@@ -119,32 +119,6 @@ KVCACHE_DEFAULT_DURATION = 60
 VDB_INDEX_TYPES = ["DISKANN", "HNSW", "AISAQ", "IVF_FLAT", "IVF_SQ8", "FLAT"]
 VDB_INDEX_TYPES_CLOSED = ["DISKANN", "HNSW", "AISAQ"]
 
-# Dual-representation index-type vocabulary (Rules.md §5.6 callout, Phase 4 D-03).
-#
-# Two forms exist deliberately:
-#   * UPPERCASE tokens (DISKANN, HNSW, AISAQ) — the canonical INTERNAL form used
-#     by the CLI (`--index-type`), `summary.json.index_type`, and every Python
-#     string comparison against `args.index_type` / config constants.
-#   * Mixed-case display spellings (DiskANN, HNSW, AiSAQ) — the canonical
-#     ON-DISK convention used in directory names under `vector_database/<...>/...`,
-#     matching the §2.1.27 OPEN subtree diagram and §5.3.1 prose.
-#
-# Path generators MUST route token -> dir; validators MUST route dir -> token
-# when comparing a directory name to an UPPERCASE token (e.g. the value of
-# `summary.json.index_type`). Keep these two forms separate — do NOT normalize
-# one into the other (Phase 4 D-03, CD-01).
-#
-# Only the CLOSED triad has established display spellings (§5.6 callout). The
-# OPEN-extended types (IVF_FLAT, IVF_SQ8, FLAT) intentionally have no entries;
-# path generators must `.get(token, token)` so unknown tokens pass through
-# UPPERCASE on disk.
-INDEX_TYPE_TOKEN_TO_DIR: dict[str, str] = {
-    "DISKANN": "DiskANN",
-    "HNSW":    "HNSW",
-    "AISAQ":   "AiSAQ",
-}
-INDEX_TYPE_DIR_TO_TOKEN: dict[str, str] = {v: k for k, v in INDEX_TYPE_TOKEN_TO_DIR.items()}
-
 VDB_ORCHESTRATION_MODES = ["ssh", "mpi"]
 VDB_BENCHMARK_MODES = ["timed", "query_count", "sweep"]
 # Vector-database engines. Only milvus is wired up today; the slot exists so

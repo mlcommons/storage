@@ -830,22 +830,16 @@ class TestStruct06_OpenCodeDirectory:
         ]
         assert unconfigured == [], unconfigured
 
-    # ----- vector_database: per-<DisplayIndex> leaf (NOT comparable across types) -----
-    # Function name retains "vector_database" (the conceptual benchmark type)
-    # to keep test-selection patterns stable; the on-disk path it now exercises
-    # is vector_database/<DisplayIndex>/code/ per Phase 4 D-02 / D-03.
+    # ----- vector_database: per-<index_type> leaf (NOT comparable across types) -----
     def test_open_vector_database_code_dir_at_index_type_level(self, tmp_path, mock_logger):
-        """vector_database results split by index_type because AiSAQ results are
-        not comparable to DiskANN/HNSW. _iter_open_code_dirs must walk down to
-        the <DisplayIndex> level (same 3-level walk as training/checkpointing's
-        <model> level), yielding results/<sys>/vector_database/<DisplayIndex>/code/.
-
-        Per Phase 4 D-02 the on-disk type segment is `vector_database` (not
-        `vector_database`); per D-03 the index directory is the display-case
-        spelling (here `DiskANN`)."""
+        """vector_database results split by index_type because AISAQ results are
+        not comparable to DISKANN/HNSW. _iter_open_code_dirs must walk down to
+        the <index_type> level (same 3-level walk as training/checkpointing's
+        <model> level), yielding results/<sys>/vector_database/<index_type>/code/.
+        The index directory is the UPPERCASE token (here `DISKANN`)."""
         leaf = (
             tmp_path / "open" / "Acme" / "results" / "sys-1"
-            / "vector_database" / "DiskANN"
+            / "vector_database" / "DISKANN"
         )
         leaf.mkdir(parents=True)
         code_path = leaf / "code"
@@ -855,7 +849,7 @@ class TestStruct06_OpenCodeDirectory:
         check = _make_check(tmp_path, mock_logger)
         result = run_one_check(check, "code_directory_contents_check", mock_logger)
         assert result is True, mock_logger.errors
-        # And the missing variant: vector_database/<DisplayIndex>/ with no code/
+        # And the missing variant: vector_database/<index_type>/ with no code/
         # must emit a missing-code violation at the index_type level.
         shutil.rmtree(code_path)
         mock_logger.errors.clear()
@@ -865,7 +859,7 @@ class TestStruct06_OpenCodeDirectory:
             m for m in mock_logger.errors
             if "[2.1.6 codeDirectoryContents]" in m
             and "required code/ directory missing at" in m
-            and m.rstrip().endswith("/vector_database/DiskANN/code")
+            and m.rstrip().endswith("/vector_database/DISKANN/code")
         ]
         assert len(missing_msgs) == 1, mock_logger.errors
 

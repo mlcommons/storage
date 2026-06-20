@@ -17,10 +17,6 @@ from unittest.mock import MagicMock
 
 import pytest
 
-from mlpstorage_py.config import (
-    INDEX_TYPE_DIR_TO_TOKEN,
-    INDEX_TYPE_TOKEN_TO_DIR,
-)
 from mlpstorage_py.submission_checker.checks.vdb_checks import VdbCheck
 from mlpstorage_py.submission_checker.configuration.configuration import Config
 from mlpstorage_py.submission_checker.loader import LoaderMetadata, SubmissionLogs
@@ -49,8 +45,7 @@ def _build_vdb_leaf(
     division: str,
     orgname: str,
     system: str,
-    display_index: str,
-    index_type_token: str,
+    index_type: str,
     *,
     run_timestamps=None,
     datagen_timestamps=None,
@@ -58,8 +53,8 @@ def _build_vdb_leaf(
 ) -> Path:
     """Synthesize a vector_database submission tree under tmp_path.
 
-    Shape (Phase 04 Plan 04-01):
-        <tmp_path>/<division>/<orgname>/results/<system>/vector_database/<display_index>/
+    Shape:
+        <tmp_path>/<division>/<orgname>/results/<system>/vector_database/<index_type>/
             [code/.code-hash.json + payload   when with_code_image]
             datagen/<ts>/                     (one entry per datagen_timestamps)
             run/<ts>/                         (one entry per run_timestamps)
@@ -67,8 +62,9 @@ def _build_vdb_leaf(
     No summary.json / metadata.json files are written here — the rule
     methods read from the in-memory tuples populated on SubmissionLogs.
     The disk tree only exists so the path-based rules (5.3.1 run count,
-    5.6.3 dir-name → token) see something real. Returns the per-leaf path
-    (``.../vector_database/<display_index>``).
+    5.6.3 dir-name match) see something real. ``index_type`` is the
+    UPPERCASE token (e.g. ``"DISKANN"``). Returns the per-leaf path
+    (``.../vector_database/<index_type>``).
     """
     if run_timestamps is None:
         run_timestamps = _DEFAULT_RUN_TIMESTAMPS
@@ -82,7 +78,7 @@ def _build_vdb_leaf(
         / "results"
         / system
         / "vector_database"
-        / display_index
+        / index_type
     )
     (leaf / "datagen").mkdir(parents=True, exist_ok=True)
     (leaf / "run").mkdir(parents=True, exist_ok=True)
@@ -232,7 +228,7 @@ class TestModeGuardNoOpsOnNonVdbSubmissions:
 
     def test_all_rules_noop_on_training_mode(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         check = _make_vdb_check(
             leaf, "closed", mock_logger,
@@ -273,7 +269,7 @@ class Test_5_1_1_VdbDatasetScale:
 
     def test_happy_path_present_fields_pass(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         run_files = [(_summary_run(), _metadata(), ts) for ts in _DEFAULT_RUN_TIMESTAMPS]
         check = _make_vdb_check(
@@ -289,7 +285,7 @@ class Test_5_1_1_VdbDatasetScale:
 
     def test_missing_num_vectors_logs_violation(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         bad_summary = _summary_run()
         bad_summary.pop("num_vectors")
@@ -310,7 +306,7 @@ class Test_5_1_2_VdbDimensionConsistency:
 
     def test_matching_dimensions_pass(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         datagen_files = [(_summary_datagen(dimension=128), _metadata(), "20260618_120000")]
         run_files = [(_summary_run(dimension=128), _metadata(), "20260618_120100")]
@@ -323,7 +319,7 @@ class Test_5_1_2_VdbDimensionConsistency:
 
     def test_dimension_mismatch_logs_violation(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         datagen_files = [(_summary_datagen(dimension=128), _metadata(), "20260618_120000")]
         run_files = [(_summary_run(dimension=256), _metadata(), "20260618_120100")]
@@ -345,7 +341,7 @@ class Test_5_2_1_VdbCollectionPopulated:
 
     def test_inserted_equals_declared_pass(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         datagen_files = [
             (_summary_datagen(num_vectors=1_000_000, inserted_vectors=1_000_000),
@@ -359,7 +355,7 @@ class Test_5_2_1_VdbCollectionPopulated:
 
     def test_underpopulated_logs_violation(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         datagen_files = [
             (_summary_datagen(num_vectors=1_000_000, inserted_vectors=999_999),
@@ -381,7 +377,7 @@ class Test_5_2_2_VdbIndexBuildCompleted:
 
     def test_matching_index_types_pass(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         datagen_files = [(_summary_datagen(index_type="DISKANN"), _metadata(), "20260618_120000")]
         run_files = [(_summary_run(index_type="DISKANN"), _metadata(), "20260618_120100")]
@@ -394,7 +390,7 @@ class Test_5_2_2_VdbIndexBuildCompleted:
 
     def test_index_type_drift_logs_violation(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         datagen_files = [(_summary_datagen(index_type="DISKANN"), _metadata(), "20260618_120000")]
         run_files = [(_summary_run(index_type="HNSW"), _metadata(), "20260618_120100")]
@@ -408,7 +404,7 @@ class Test_5_2_2_VdbIndexBuildCompleted:
 
     def test_missing_index_type_at_datagen_logs_violation(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         bad_datagen = _summary_datagen()
         bad_datagen.pop("index_type")
@@ -433,7 +429,7 @@ class Test_5_3_1_VdbRunCount:
 
     def test_exactly_five_run_timestamps_pass(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
             run_timestamps=_DEFAULT_RUN_TIMESTAMPS,
         )
         check = _make_vdb_check(leaf, "closed", mock_logger)
@@ -442,7 +438,7 @@ class Test_5_3_1_VdbRunCount:
 
     def test_three_run_timestamps_log_violation(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
             run_timestamps=["20260618_120100", "20260618_120200", "20260618_120300"],
         )
         check = _make_vdb_check(leaf, "closed", mock_logger)
@@ -460,7 +456,7 @@ class Test_5_3_2_VdbRecallReported:
 
     def test_recall_present_pass(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         run_files = [(_summary_run(recall=0.95), _metadata(), ts) for ts in _DEFAULT_RUN_TIMESTAMPS]
         check = _make_vdb_check(
@@ -474,7 +470,7 @@ class Test_5_3_2_VdbRecallReported:
 
     def test_missing_recall_without_fallback_logs_violation(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         bad_summary = _summary_run()
         bad_summary.pop("recall")
@@ -497,7 +493,7 @@ class Test_5_3_3_VdbQueryCountMinimum:
 
     def test_qps_and_total_time_present_pass(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         run_files = [(_summary_run(), _metadata(), ts) for ts in _DEFAULT_RUN_TIMESTAMPS]
         check = _make_vdb_check(
@@ -511,7 +507,7 @@ class Test_5_3_3_VdbQueryCountMinimum:
 
     def test_missing_qps_and_query_count_logs_violation(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         bad_summary = _summary_run()
         bad_summary.pop("throughput_qps")
@@ -533,7 +529,7 @@ class Test_5_3_4_VdbMetricsReported:
 
     def test_all_required_fields_present_pass(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         run_files = [(_summary_run(), _metadata(), ts) for ts in _DEFAULT_RUN_TIMESTAMPS]
         check = _make_vdb_check(
@@ -544,7 +540,7 @@ class Test_5_3_4_VdbMetricsReported:
 
     def test_missing_p999_latency_logs_violation(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         bad_summary = _summary_run()
         bad_summary.pop("p999_latency_ms")
@@ -565,7 +561,7 @@ class Test_5_4_1_VdbPathArgs:
 
     def test_distinct_paths_pass(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         run_files = [
             (_summary_run(),
@@ -580,7 +576,7 @@ class Test_5_4_1_VdbPathArgs:
 
     def test_equal_paths_log_violation(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         run_files = [
             (_summary_run(),
@@ -614,7 +610,7 @@ class Test_5_4_2_VdbFilesystemCheck:
 
     def test_different_filesystems_pass(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         ts = "20260618_120100"
         (leaf / "run" / ts / "vdb_run.stdout.log").write_text(
@@ -633,7 +629,7 @@ class Test_5_4_2_VdbFilesystemCheck:
 
     def test_same_filesystem_logs_violation(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         ts = "20260618_120100"
         (leaf / "run" / ts / "vdb_run.stdout.log").write_text(
@@ -678,7 +674,7 @@ class Test_5_5_1_VdbObjectStorageBackend:
 
     def test_object_api_with_s3_backend_pass(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         run_files = [
             (_summary_run(database={"database": "milvus", "storage_backend": "s3"}),
@@ -694,7 +690,7 @@ class Test_5_5_1_VdbObjectStorageBackend:
 
     def test_object_api_with_non_s3_backend_logs_violation(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         run_files = [
             (_summary_run(database={"database": "milvus", "storage_backend": "nfs"}),
@@ -711,7 +707,7 @@ class Test_5_5_1_VdbObjectStorageBackend:
 
     def test_file_api_is_noop_regardless_of_backend(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         # Non-s3 backend but file API → must no-op.
         run_files = [
@@ -741,7 +737,7 @@ class Test_5_6_1_VdbClosedSubmissionChecksum:
 
     def test_closed_self_consistent_passes(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
             with_code_image=True,
         )
         check = _make_vdb_check(leaf, "closed", mock_logger)
@@ -753,7 +749,7 @@ class Test_5_6_1_VdbClosedSubmissionChecksum:
         self, tmp_path, mock_logger,
     ):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
             with_code_image=True,
         )
         # Tamper with .code-hash.json to break self-consistency.
@@ -780,7 +776,7 @@ class Test_5_6_1_VdbClosedSubmissionChecksum:
         self, tmp_path, mock_logger,
     ):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
             with_code_image=True,
         )
         # Configure a reference checksum that will NOT match.
@@ -800,7 +796,7 @@ class Test_5_6_1_VdbClosedSubmissionChecksum:
 
     def test_open_division_is_noop(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "open", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "open", "acme", "sys-1", "DISKANN",
             with_code_image=True,
         )
         check = _make_vdb_check(leaf, "open", mock_logger)
@@ -811,7 +807,7 @@ class Test_5_6_1_VdbClosedSubmissionChecksum:
     def test_missing_code_dir_does_not_double_violate(self, tmp_path, mock_logger):
         # CLOSED but no code/ — STRUCT-06 owns the missing-code violation.
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         check = _make_vdb_check(leaf, "closed", mock_logger)
         assert check.vdb_closed_submission_checksum() is True
@@ -826,7 +822,7 @@ class Test_5_6_2_VdbClosedDatabaseBackend:
 
     def test_closed_milvus_pass(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         run_files = [
             (_summary_run(database={"database": "milvus"}),
@@ -840,7 +836,7 @@ class Test_5_6_2_VdbClosedDatabaseBackend:
 
     def test_closed_elasticsearch_logs_violation(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         run_files = [
             (_summary_run(database={"database": "elasticsearch"}),
@@ -859,18 +855,13 @@ class Test_5_6_2_VdbClosedDatabaseBackend:
 # ===========================================================================
 
 class Test_5_6_3_VdbClosedIndexTypes:
-    """D-03 dir→token comparison: display-dir mapped through
-    INDEX_TYPE_DIR_TO_TOKEN, then compared to UPPERCASE summary.index_type.
-    """
+    """Dir-name vs summary.index_type comparison: both are UPPERCASE tokens."""
 
     def test_closed_diskann_dir_with_diskann_index_type_passes(
         self, tmp_path, mock_logger,
     ):
-        # Sanity check the D-03 mapping is what the rule expects.
-        assert INDEX_TYPE_DIR_TO_TOKEN["DiskANN"] == "DISKANN"
-        assert INDEX_TYPE_TOKEN_TO_DIR["DISKANN"] == "DiskANN"
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         run_files = [
             (_summary_run(index_type="DISKANN"), _metadata(), "20260618_120100"),
@@ -881,11 +872,9 @@ class Test_5_6_3_VdbClosedIndexTypes:
         assert check.vdb_closed_index_types() is True
         assert _violations(mock_logger, "5.6.3", "vdbClosedIndexTypes") == []
 
-    def test_closed_aisaq_display_case_passes(self, tmp_path, mock_logger):
-        # D-03 second case: 'AiSAQ' display dir → 'AISAQ' UPPERCASE token.
-        assert INDEX_TYPE_DIR_TO_TOKEN["AiSAQ"] == "AISAQ"
+    def test_closed_aisaq_passes(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "AiSAQ", "AISAQ",
+            tmp_path, "closed", "acme", "sys-1", "AISAQ",
         )
         run_files = [
             (_summary_run(index_type="AISAQ"), _metadata(), "20260618_120100"),
@@ -900,7 +889,7 @@ class Test_5_6_3_VdbClosedIndexTypes:
         # IVF_FLAT is in the OPEN-extended set but NOT in
         # VDB_INDEX_TYPES_CLOSED — CLOSED disallows it.
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "IVF_FLAT", "IVF_FLAT",
+            tmp_path, "closed", "acme", "sys-1", "IVF_FLAT",
         )
         run_files = [
             (_summary_run(index_type="IVF_FLAT"), _metadata(), "20260618_120100"),
@@ -913,9 +902,9 @@ class Test_5_6_3_VdbClosedIndexTypes:
         assert any("not a CLOSED index" in v for v in viol), viol
 
     def test_closed_dir_index_type_mismatch_violation(self, tmp_path, mock_logger):
-        # On-disk says DiskANN but summary.json says HNSW.
+        # On-disk says DISKANN but summary.json says HNSW.
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         run_files = [
             (_summary_run(index_type="HNSW"), _metadata(), "20260618_120100"),
@@ -925,7 +914,7 @@ class Test_5_6_3_VdbClosedIndexTypes:
         )
         assert check.vdb_closed_index_types() is False
         viol = _violations(mock_logger, "5.6.3", "vdbClosedIndexTypes")
-        assert any("DiskANN" in v and "HNSW" in v for v in viol), viol
+        assert any("DISKANN" in v and "HNSW" in v for v in viol), viol
 
 
 # ===========================================================================
@@ -936,7 +925,7 @@ class Test_5_6_4_VdbClosedSubmissionParameters:
 
     def test_only_allowed_params_pass(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         # All keys below are in the CLOSED allowlist (vdb_checks.py).
         params = {
@@ -957,7 +946,7 @@ class Test_5_6_4_VdbClosedSubmissionParameters:
 
     def test_disallowed_param_logs_violation(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "closed", "acme", "sys-1", "DISKANN",
         )
         # database.host is OPEN-only; CLOSED must reject it.
         params = {"database.host": "10.0.0.1"}
@@ -982,7 +971,7 @@ class Test_5_6_5_VdbOpenSubmissionParameters:
 
     def test_open_milvus_with_open_extras_pass(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "open", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "open", "acme", "sys-1", "DISKANN",
         )
         # CLOSED set + OPEN extras (database.host, database.port).
         params = {
@@ -1003,7 +992,7 @@ class Test_5_6_5_VdbOpenSubmissionParameters:
 
     def test_open_milvus_disallowed_param_logs_violation(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(
-            tmp_path, "open", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "open", "acme", "sys-1", "DISKANN",
         )
         # Milvus backend with a param outside the OPEN allowlist.
         params = {"index.unknown_param": "x"}
@@ -1022,7 +1011,7 @@ class Test_5_6_5_VdbOpenSubmissionParameters:
     def test_open_non_milvus_backend_warns_and_relaxes(self, tmp_path, mock_logger):
         # OPEN with elasticsearch: relax strict allowlist; warn instead.
         leaf = _build_vdb_leaf(
-            tmp_path, "open", "acme", "sys-1", "DiskANN", "DISKANN",
+            tmp_path, "open", "acme", "sys-1", "DISKANN",
         )
         params = {"index.elastic_native_param": "x"}
         run_files = [

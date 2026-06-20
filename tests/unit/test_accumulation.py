@@ -408,11 +408,10 @@ class TestPreviewBenchmarkAccumulation:
     as the distinguishing component in path and metadata."""
 
     def test_vectordb_path_includes_engine_and_index(self, tmp_path):
-        """Path is vector_database/<engine>/<DisplayIndex>/<command>/<datetime>.
+        """Path is vector_database/<engine>/<index_type>/<command>/<datetime>.
 
-        Phase 4 D-03: the index directory uses display-case spellings
-        ("DiskANN") via INDEX_TYPE_TOKEN_TO_DIR, while args.vdb_index /
-        args.index_type stay UPPERCASE.
+        The index directory uses the UPPERCASE token (e.g. "DISKANN"),
+        matching args.vdb_index / args.index_type.
         """
         from types import SimpleNamespace
 
@@ -437,7 +436,7 @@ class TestPreviewBenchmarkAccumulation:
             tmp_path
             / "vector_database"
             / "milvus"
-            / "DiskANN"
+            / "DISKANN"
             / "run"
             / "20250111_160000"
         )
@@ -512,7 +511,7 @@ class TestPreviewBenchmarkAccumulation:
             tmp_path
             / "vector_database"
             / "milvus"
-            / "HNSW"  # HNSW maps to itself in display form
+            / "HNSW"
             / "datagen"
             / "20250111_160000"
         )

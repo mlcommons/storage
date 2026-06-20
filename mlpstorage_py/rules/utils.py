@@ -9,7 +9,7 @@ import os
 import sys
 from typing import Tuple, List, Optional
 
-from mlpstorage_py.config import BENCHMARK_TYPES, DATETIME_STR, INDEX_TYPE_TOKEN_TO_DIR
+from mlpstorage_py.config import BENCHMARK_TYPES, DATETIME_STR
 from mlpstorage_py.errors import ConfigurationError, ErrorCode
 
 # Env-var names used by the Phase 2 CLI dispatch layer to source orgname/systemname (D-01, D-02).
@@ -266,10 +266,7 @@ def generate_output_location(
 
         output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
         output_location = os.path.join(output_location, engine)
-        # D-03: mixed-case display spelling on disk for the CLOSED triad;
-        # UPPERCASE passthrough for OPEN-extended types (IVF_FLAT, IVF_SQ8,
-        # FLAT) which lack established display spellings.
-        output_location = os.path.join(output_location, INDEX_TYPE_TOKEN_TO_DIR.get(vdb_index, vdb_index))
+        output_location = os.path.join(output_location, vdb_index)
         output_location = os.path.join(output_location, benchmark.args.command)
         output_location = os.path.join(output_location, datetime_str)
 
