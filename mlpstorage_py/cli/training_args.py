@@ -5,6 +5,8 @@ This module defines the CLI arguments for the training benchmark,
 including datasize, datagen, run, and configview commands.
 """
 
+import sys
+
 from mlpstorage_py.config import (
     MODELS, MODELS_CLOSED, MODELS_OPEN, ACCELERATORS, ACCELERATORS_CLOSED,
     DEFAULT_HOSTS, EXEC_TYPE, EXIT_CODE
@@ -144,11 +146,18 @@ def _add_training_core_args(parser, command, accel_choices):
 
     add_mpi_arguments(parser)
 
+    # --data-dir is optional at the argparse layer so --config-file (applied
+    # after parse_args) can supply it for object-storage workflows. Enforcement
+    # is split: file mode is checked in cli_parser before YAML overrides so
+    # users get an immediate, argparse-style error; object mode is checked in
+    # validate_training_arguments after YAML has had its chance to populate it.
     parser.add_argument(
         '--data-dir', '-dd',
         type=str,
-        required=command in ("datagen", "run"),
-        help="Filesystem location for data"
+        help=(
+            "Dataset location. For file storage, this is a filesystem path. "
+            "For object storage, this is an object key prefix or full object URI."
+        )
     )
 
     add_dlio_arguments(parser)
@@ -214,3 +223,17 @@ def validate_training_arguments(args):
     Args:
         args (argparse.Namespace): The parsed command-line arguments
     """
+    command = getattr(args, 'command', None)
+    protocol = getattr(args, 'data_access_protocol', None)
+
+    # Object-mode --data-dir enforcement runs here (post-YAML) so --config-file
+    # can populate data_dir for object workflows. File-mode enforcement happens
+    # earlier in cli_parser.parse_arguments via parser.error().
+    if command in ('datagen', 'run') and protocol == 'object' and not getattr(args, 'data_dir', None):
+        print(
+            f"ERROR: --data-dir is required for training {command} with object storage.\n"
+            "  Specify --data-dir <key-prefix-or-URI> on the command line, or set\n"
+            "  'data_dir:' in the file passed via --config-file.",
+            file=sys.stderr,
+        )
+        sys.exit(EXIT_CODE.INVALID_ARGUMENTS)

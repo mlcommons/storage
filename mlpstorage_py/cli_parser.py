@@ -161,6 +161,19 @@ def parse_arguments():
     # argparse sets it directly to 'file'|'object'|None. The old --file/--object
     # consolidation block is removed entirely.
 
+    # File-mode --data-dir is enforced before YAML overrides so the user gets
+    # an immediate argparse-style error. Object mode is checked after YAML in
+    # validate_training_arguments so --config-file can supply data_dir.
+    if (
+        getattr(parsed_args, 'benchmark', None) == 'training'
+        and getattr(parsed_args, 'command', None) in ('datagen', 'run')
+        and getattr(parsed_args, 'data_access_protocol', None) == 'file'
+        and not getattr(parsed_args, 'data_dir', None)
+    ):
+        parser.error(
+            f"--data-dir is required for training {parsed_args.command} with file storage"
+        )
+
     # Apply YAML config file overrides if specified
     if hasattr(parsed_args, 'config_file') and parsed_args.config_file:
         parsed_args = apply_yaml_config_overrides(parsed_args)
