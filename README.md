@@ -45,8 +45,8 @@ Additional quick links:
 
 | Document | What it covers |
 |----------|----------------|
-| **[docs/OBJECT_STORAGE_GUIDE.md](docs/OBJECT_STORAGE_GUIDE.md)** | All settings required to run against S3-compatible storage with `--object` — `.env` setup, env vars, URI schemes, multi-endpoint |
-| **[tests/object-store/bench-results-retinanet-20260425.md](tests/object-store/bench-results-retinanet-20260425.md)** | April 25, 2026 benchmark results: RetinaNet write_threads sweep on s3-ultra (loopback) |
+| **[docs/OBJECT_STORAGE_GUIDE.md](docs/OBJECT_STORAGE_GUIDE.md)** | All settings required to run against S3-compatible storage in object mode: `.env` setup, env vars, URI schemes, multi-endpoint |
+| **[docs/OBJECT_STORAGE_TESTING.md](docs/OBJECT_STORAGE_TESTING.md)** | MinIO-based smoke tests and validation commands for object storage libraries |
 
 The top-level sections below give the official MLCommons parameter reference and
 are retained for submission compliance.

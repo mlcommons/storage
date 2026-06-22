@@ -22,7 +22,7 @@ This directory contains example configurations for using s3dlio with MLPerf Stor
 - ✅ Protocol: file:// (local filesystem via s3dlio) 
 - ✅ Duration: 0.06s for 12 steps
 
-**See complete test details**: [docs/S3DLIO_TEST_RECORD.md](../../../docs/S3DLIO_TEST_RECORD.md)
+**See current test guidance**: [docs/OBJECT_STORAGE_TESTING.md](../../../docs/OBJECT_STORAGE_TESTING.md)
 
 ### 🔍 s3dlio Framework Support
 
@@ -106,7 +106,7 @@ mlpstorage training run \
   --params train.epochs=1
 ```
 
-See **[docs/S3DLIO_TEST_RECORD.md](../../../docs/S3DLIO_TEST_RECORD.md)** for tested working commands.
+See **[docs/OBJECT_STORAGE_TESTING.md](../../../docs/OBJECT_STORAGE_TESTING.md)** for current smoke tests and validation commands.
 
 ### Reference YAML Files (For Understanding s3dlio Config)
 
@@ -367,6 +367,6 @@ iperf3 -c minio1.local
 ## 📚 Related Documentation
 
 - [Quick Start](../../../docs/QUICK_START.md)
-- [Storage Libraries Guide](../../../docs/STORAGE_LIBRARIES.md)
-- [Performance Testing](../../../docs/PERFORMANCE_TESTING.md)
-- [Multi-Endpoint Guide](../../../docs/MULTI_ENDPOINT.md)
+- [Object Storage Guide](../../../docs/OBJECT_STORAGE_GUIDE.md)
+- [Object Storage Testing](../../../docs/OBJECT_STORAGE_TESTING.md)
+- [Multi-Endpoint Guide](../../../docs/MULTI_ENDPOINT_GUIDE.md)
