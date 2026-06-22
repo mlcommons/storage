@@ -116,7 +116,7 @@ class BenchmarkVerifier:
                 # KV Cache preview - use base multi-run checker
                 self.rules_checker = MultiRunRulesChecker(self.benchmark_runs, logger=self.logger)
             elif benchmark_type == BENCHMARK_TYPES.vector_database:
-                # VectorDB preview - use base multi-run checker
+                # VectorDB has no dedicated submission-rules checker; use base multi-run checker.
                 self.rules_checker = MultiRunRulesChecker(self.benchmark_runs, logger=self.logger)
             else:
                 raise ValueError(f"Unsupported benchmark type for multi-run: {benchmark_type}")

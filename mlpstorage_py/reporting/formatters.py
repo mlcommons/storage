@@ -284,12 +284,11 @@ class ClosedRequirementsFormatter:
     }
 
     VECTORDB_REQUIREMENTS = {
-        'title': 'VectorDB Benchmark Requirements (Preview)',
+        'title': 'VectorDB Benchmark Requirements',
         'requirements': [
             'Minimum runtime of 30 seconds',
             'Valid collection configuration',
             'Database host and port accessible',
-            'Note: VectorDB is in preview and not yet accepted for CLOSED submissions',
         ],
         'allowed_params': [],
     }
