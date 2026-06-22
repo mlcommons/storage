@@ -113,7 +113,7 @@ class BenchmarkVerifier:
             elif benchmark_type == BENCHMARK_TYPES.checkpointing:
                 self.rules_checker = CheckpointSubmissionRulesChecker(self.benchmark_runs, logger=self.logger)
             elif benchmark_type == BENCHMARK_TYPES.kv_cache:
-                # KV Cache preview - use base multi-run checker
+                # KV Cache has no dedicated submission-rules checker; use base multi-run checker.
                 self.rules_checker = MultiRunRulesChecker(self.benchmark_runs, logger=self.logger)
             elif benchmark_type == BENCHMARK_TYPES.vector_database:
                 # VectorDB has no dedicated submission-rules checker; use base multi-run checker.

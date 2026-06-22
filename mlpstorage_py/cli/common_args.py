@@ -196,8 +196,8 @@ HELP_MESSAGES = {
 PROGRAM_DESCRIPTIONS = {
     'training': "Run the MLPerf Storage training benchmark",
     'checkpointing': "Run the MLPerf Storage checkpointing benchmark",
-    'vectordb': "Run the MLPerf Storage Preview of a VectorDB benchmark (not available in closed submissions)",
-    'kvcache': "Run the KV Cache benchmark for LLM inference storage testing (preview)",
+    'vectordb': "Run the MLPerf Storage VectorDB benchmark",
+    'kvcache': "Run the KV Cache benchmark for LLM inference storage testing",
     'reports': "Generate reports from benchmark results",
     'history': "View and manage benchmark history",
 }

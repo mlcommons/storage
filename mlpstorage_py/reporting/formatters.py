@@ -273,12 +273,11 @@ class ClosedRequirementsFormatter:
     }
 
     KVCACHE_REQUIREMENTS = {
-        'title': 'KV Cache Benchmark Requirements (Preview)',
+        'title': 'KV Cache Benchmark Requirements',
         'requirements': [
             'Minimum runtime of 30 seconds',
             'Valid model configuration',
             'At least 1 concurrent user',
-            'Note: KV Cache is in preview and not yet accepted for CLOSED submissions',
         ],
         'allowed_params': [],
     }
