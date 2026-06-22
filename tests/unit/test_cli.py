@@ -223,6 +223,7 @@ class TestAddTrainingArguments:
             '--num-accelerators', '4',
             '--accelerator-type', 'b200',
             '--client-host-memory-in-gb', '256',
+            '--data-dir', '/data',
             '--results-dir', '/tmp',
             'file'
         ])
@@ -253,6 +254,7 @@ class TestAddTrainingArguments:
             '--accelerator-type', 'b200',
             '--client-host-memory-in-gb', '128',
             '--hosts', 'host1', 'host2',
+            '--data-dir', '/data',
             '--results-dir', '/tmp',
             'file'
         ])
@@ -270,6 +272,7 @@ class TestAddTrainingArguments:
             '--num-accelerators', '8',
             '--accelerator-type', 'b200',
             '--client-host-memory-in-gb', '128',
+            '--data-dir', '/data',
             '--results-dir', '/tmp',
             'file',
             '--params', 'key1=val1', 'key2=val2',
@@ -287,6 +290,7 @@ class TestAddTrainingArguments:
             '--num-accelerators', '1',
             '--accelerator-type', 'b200',
             '--client-host-memory-in-gb', '64',
+            '--data-dir', '/data',
             '--results-dir', '/tmp',
             'file'
         ])
@@ -311,7 +315,7 @@ class TestAddTrainingArguments:
         args = parser.parse_args([
             'unet3d', 'run',
             '--num-accelerators', '1', '--accelerator-type', 'b200',
-            '--client-host-memory-in-gb', '64', '--results-dir', '/tmp', 'file',
+            '--client-host-memory-in-gb', '64', '--data-dir', '/data', '--results-dir', '/tmp', 'file',
             '--loops', '3'
         ])
         assert args.loops == 3
@@ -329,7 +333,7 @@ class TestAddTrainingArguments:
         args = parser.parse_args([
             'unet3d', 'run',
             '--num-accelerators', '1', '--accelerator-type', 'b200',
-            '--client-host-memory-in-gb', '64', '--results-dir', '/tmp', 'file',
+            '--client-host-memory-in-gb', '64', '--data-dir', '/data', '--results-dir', '/tmp', 'file',
         ])
         assert args.loops == 1
         assert args.params is None
@@ -341,7 +345,7 @@ class TestAddTrainingArguments:
         add_training_arguments(parser, 'closed')
         args = parser.parse_args([
             'unet3d', 'datagen',
-            '--num-processes', '8', '--results-dir', '/tmp', 'file',
+            '--num-processes', '8', '--data-dir', '/data', '--results-dir', '/tmp', 'file',
             '--params', 'dataset.num_files_train=1000', 'dataset.num_subfolders_train=10',
         ])
         flattened = [kv for batch in (args.params or []) for kv in batch]

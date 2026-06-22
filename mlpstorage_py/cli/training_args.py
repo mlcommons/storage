@@ -147,6 +147,7 @@ def _add_training_core_args(parser, command, accel_choices):
     parser.add_argument(
         '--data-dir', '-dd',
         type=str,
+        required=command in ("datagen", "run"),
         help="Filesystem location for data"
     )
 

@@ -36,7 +36,7 @@ def test_closed_training_accepts_every_closed_allowed_param(dotted_key):
     is *registered* in closed mode and survives an actual dotted-key payload.
     """
     argv = ['mlpstorage', 'closed', 'training', 'unet3d', 'datagen', 'file',
-            '--num-processes', '8', '--results-dir', '/tmp',
+            '--num-processes', '8', '--data-dir', '/tmp', '--results-dir', '/tmp',
             '--params', f'{dotted_key}=1']
     with patch('sys.argv', argv):
         ns = parse_arguments()
@@ -51,7 +51,7 @@ def test_open_training_accepts_open_only_params():
     """OPEN_ALLOWED_PARAMS must reach the parser in open mode."""
     payload = [f'{k}=x' for k in TrainingRunRulesChecker.OPEN_ALLOWED_PARAMS]
     argv = ['mlpstorage', 'open', 'training', 'unet3d', 'datagen', 'file',
-            '--num-processes', '8', '--results-dir', '/tmp',
+            '--num-processes', '8', '--data-dir', '/tmp', '--results-dir', '/tmp',
             '--params', *payload]
     with patch('sys.argv', argv):
         ns = parse_arguments()
@@ -99,7 +99,7 @@ def test_checkpointing_dlio_bin_path_is_accessible(mode):
 @pytest.mark.parametrize("mode", ["closed", "open"])
 def test_training_dlio_bin_path_is_accessible(mode):
     argv = ['mlpstorage', mode, 'training', 'unet3d', 'run', 'file',
-            '-cm', '64', '-at', 'b200', '-na', '4', '-rd', '/tmp',
+            '-cm', '64', '-at', 'b200', '-na', '4', '-dd', '/tmp', '-rd', '/tmp',
             '--dlio-bin-path', '/opt/custom/dlio']
     with patch('sys.argv', argv):
         ns = parse_arguments()

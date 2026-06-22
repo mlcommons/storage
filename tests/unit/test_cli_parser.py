@@ -70,9 +70,9 @@ class TestCLIStructureAndCombinations:
     @pytest.mark.parametrize("test_name, cmd_list, expected_mode_or_benchmark, expected_command", [
         # Training — model is now a positional (no --model flag); storage type is positional
         # closed mode: only 'unet3d' and 'retinanet' are valid model choices
-        ("01", ['training', 'retinanet', 'run', '-cm', '1024', '-at', 'b200', '-na', '4', '-rd', '/tmp', 'file'], 'training', 'run'),
+        ("01", ['training', 'retinanet', 'run', '-cm', '1024', '-at', 'b200', '-na', '4', '-dd', '/tmp', '-rd', '/tmp', 'file'], 'training', 'run'),
         ("02", ['training', 'unet3d', 'datasize', '-cm', '1024', '-at', 'b200', '-ma', '4'], 'training', 'datasize'),
-        ("03", ['training', 'unet3d', 'datagen', '-np', '4', 'file', '-rd', '/tmp'], 'training', 'datagen'),
+        ("03", ['training', 'unet3d', 'datagen', '-np', '4', '-dd', '/tmp', 'file', '-rd', '/tmp'], 'training', 'datagen'),
         ("04", ['training', 'unet3d', 'configview', '-na', '4', '-cm', '64', '-at', 'b200', '-rd', '/tmp', 'file'], 'training', 'configview'),
 
         # Checkpointing — --model stays as a flag; storage type is positional
@@ -126,7 +126,7 @@ class TestCLIStructureAndCombinations:
     def test_data_access_protocol_positional(self):
         """Test that the data_access_protocol positional is set correctly."""
         # Use 'unet3d' — a valid model in closed mode
-        test_args = ['mlpstorage', 'closed', 'training', 'unet3d', 'datagen', '-np', '4', 'file', '-rd', '/tmp']
+        test_args = ['mlpstorage', 'closed', 'training', 'unet3d', 'datagen', '-np', '4', '-dd', '/tmp', 'file', '-rd', '/tmp']
         with patch('sys.argv', test_args):
             args = parse_arguments()
             assert args.data_access_protocol == 'file'
