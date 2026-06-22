@@ -2,7 +2,7 @@
 
 **Date**: May 12, 2026  
 **Host**: loki-russ  
-**Storage**: s3-ultra (`http://127.0.0.1:9000`, co-located)  
+**Storage**: a local S3-compatible test server (`http://127.0.0.1:9000`, co-located)
 **Sweep ID**: `20260512_141130`
 
 ---
@@ -13,7 +13,7 @@
 |-----------|-------|
 | Host CPU | Intel Xeon Platinum 8280L @ 2.70 GHz, 28 vCPUs visible |
 | Host RAM | 47 GB |
-| Object storage | s3-ultra, co-located loopback (`http://127.0.0.1:9000`) |
+| Object storage | a local S3-compatible test server, co-located loopback (`http://127.0.0.1:9000`) |
 | Bucket / path | `s3://mlp-flux/data/unet3d/train/` |
 | Storage library | `s3dlio` |
 | `decode_mode` | `none` |
@@ -25,7 +25,7 @@
 | Model config | `unet3d_b200.yaml` |
 | MPI invocation | `mpirun -n NP -host 127.0.0.1:NP` |
 
-> **⚠️ Co-located test configuration.** The s3-ultra storage server and all benchmark
+> **⚠️ Co-located test configuration.** The local S3-compatible test server and all benchmark
 > processes run on the **same** host, sharing CPU cores, memory, and the loopback network
 > interface. In a real deployment storage is a dedicated remote system; the CPU/memory
 > pressure that limits AU and throughput scaling here would not apply.
@@ -175,7 +175,7 @@ size, 1 sample/file).
 | 4  | 12.14             | 1,779                     |
 
 Per-rank throughput degrades monotonically as NP grows — each new worker competes
-with both the other workers and the co-located s3-ultra server for CPU and loopback
+with both the other workers and the co-located local S3-compatible test server for CPU and loopback
 bandwidth.
 
 ### Warm-Up Epoch Overhead
@@ -193,7 +193,7 @@ object, `get_object_uri_optimized_async()` issues a `HeadObject` call to learn t
 object size, then stores it. From epoch 2 onward, every lookup is a cache hit and the
 HEAD call is skipped entirely — the benchmark only issues `GetObject` (with byte-range
 parts for large objects). This is consistent with observing a burst of HEAD operations
-at the s3-ultra server during epoch 1 that stops completely at the start of epoch 2.
+at the local S3-compatible test server during epoch 1 that stops completely at the start of epoch 2.
 
 Absolute overhead decreases with NP (all ranks' 7,200 HEAD calls run in parallel,
 so they resolve faster), but relative overhead stays roughly constant at 9–13%.
@@ -203,13 +203,13 @@ so they resolve faster), but relative overhead stays roughly constant at 9–13%
 ## Key Findings
 
 1. **All NP configurations fail the 90% AU target.** This is expected in a co-located
-   setup: s3-ultra and all benchmark processes share the same CPU cores and loopback
+   setup: the local S3-compatible test server and all benchmark processes share the same CPU cores and loopback
    interface. The 90% UNet3D threshold requires storage to deliver data fast enough
    that the simulated accelerator is stalled for <10% of wall time — not achievable
    when storage competes for the same CPU.
 
 2. **AU degrades sharply with NP.** 53.7% → 42.9% → 28.2% as NP doubles. Each new rank
-   doubles the per-step I/O demand without changing s3-ultra's available CPU budget.
+   doubles the per-step I/O demand without changing the local S3-compatible test server's available CPU budget.
    This is purely a co-located resource contention effect, not a storage technology
    limitation.
 
@@ -219,14 +219,14 @@ so they resolve faster), but relative overhead stays roughly constant at 9–13%
 
 4. **Scaling efficiency drops from 80% (NP=2) to 52% (NP=4).** The efficiency drop
    between NP=2 and NP=4 is larger than between NP=1 and NP=2, consistent with
-   progressive CPU saturation of the co-located s3-ultra process.
+   progressive CPU saturation of the co-located a local S3-compatible test server process.
 
 5. **s3dlio `ObjectSizeCache` cold-start dominates E1.** The first epoch is 9–13%
    slower because every one of the 7,200 objects requires a `HeadObject` call to learn
    its size before the library can calculate byte-range GET boundaries. Results are
    stored in a process-wide 1-hour-TTL cache (`GLOBAL_SIZE_CACHE`). From epoch 2 onward
    the cache is fully warm: zero HEAD calls are issued, and the server shows no HEAD
-   traffic. This is directly observable by watching request logs on s3-ultra: a burst of
+   traffic. This is directly observable by watching request logs on a local S3-compatible test server: a burst of
    HEAD requests fires during E1 and then stops completely.
 
    This effect is smaller in DLRM (small 761-byte objects, no multi-part range GETs
@@ -234,11 +234,11 @@ so they resolve faster), but relative overhead stays roughly constant at 9–13%
    across runs (cache pre-warmed from a previous job).
 
 6. **NP=4 is the practical limit on this host.** At NP=4, all 4 DLIO workers plus
-   s3-ultra are sharing 28 vCPUs. NP=8 would likely OOM or saturate the loopback
+   the local S3-compatible test server and benchmark processes are sharing 28 vCPUs. NP=8 would likely OOM or saturate the loopback
    listener (as observed with DLRM NP=8 on the same host).
 
 7. **On dedicated storage, NP=1 would likely pass.** A 3.40 GB/s single-rank read
-   rate is a strong baseline. With s3-ultra on a separate host (full CPU available for
+   rate is a strong baseline. With a local S3-compatible test server on a separate host (full CPU available for
    both storage server and benchmark), AU at NP=1 would be expected to exceed 90%.
 
 ---
@@ -279,7 +279,7 @@ STORAGE_ROOT=mlp-flux NP=2 bash tests/object-store/test_unet3d.sh
 
 *Benchmark date: May 12, 2026*  
 *Host: loki-russ*  
-*s3-ultra (localhost:9000, co-located)*
+*a local S3-compatible test server (localhost:9000, co-located)*
 
 
 ---
@@ -289,7 +289,7 @@ STORAGE_ROOT=mlp-flux NP=2 bash tests/object-store/test_unet3d.sh
 | Parameter | Value |
 |-----------|-------|
 | Host | 24 vCPU VM (with hyperthreading), 48 GB RAM |
-| Object storage | s3-ultra (`http://127.0.0.1:9000`, co-located on test host) |
+| Object storage | a local S3-compatible test server (`http://127.0.0.1:9000`, co-located on test host) |
 | Bucket / path | `mlp-unet3d / data/unet3d` |
 | Dataset | 7,200 NPZ files × 1 sample/file (≈ 984 GiB) |
 | Record length | 146,600,628 bytes avg (σ = 68,341,808, resize = 2,097,152) |
@@ -302,7 +302,7 @@ STORAGE_ROOT=mlp-flux NP=2 bash tests/object-store/test_unet3d.sh
 | Model config | `unet3d_b200.yaml` |
 | MPI invocation | `mpirun -n NP -host 127.0.0.1:NP` |
 
-> **⚠️ Co-located test configuration.** The s3-ultra storage server and all benchmark
+> **⚠️ Co-located test configuration.** The local S3-compatible test server and all benchmark
 > processes run on the **same** 24 vCPU / 48 GB RAM host, sharing CPU cores, memory,
 > and the loopback network interface. In a real deployment the storage target would be a
 > dedicated remote system, and the CPU/memory pressure that limits scaling here

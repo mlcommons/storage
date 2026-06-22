@@ -11,7 +11,7 @@
 | Parameter | Value |
 |-----------|-------|
 | Host | 24 vCPU (Cascade Lake, no SHA-NI), 48 GB RAM |
-| Object storage | s3-ultra (`http://127.0.0.1:9000`, co-located on test host) |
+| Object storage | a local S3-compatible test server (`http://127.0.0.1:9000`, co-located on test host) |
 | Bucket / path | `mlp-retinanet/data/retinanet` |
 | Dataset | 50,000 JPEG files × 1 sample/file (≈ 15,399 MiB / ~15 GiB) |
 | Record length | 322,957 bytes (~315 KiB / file) |
@@ -25,7 +25,7 @@
 | Model config | `retinanet_b200.yaml` |
 | MPI invocation | `mpirun -n NP -host 127.0.0.1:NP` |
 
-> **⚠️ Co-located test configuration.** The s3-ultra storage server and all benchmark
+> **⚠️ Co-located test configuration.** The local S3-compatible test server and all benchmark
 > processes run on the **same** 24 vCPU / 48 GB RAM host, sharing CPU cores, memory,
 > and the loopback network interface. In a real deployment storage would be a dedicated
 > remote system; the CPU/memory pressure that limits scaling here would not apply.

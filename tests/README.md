@@ -15,7 +15,7 @@ object storage via s3dlio, minio, or s3torchconnector).
 
 Full end-to-end MLPerf Storage benchmark results on all four supported training and
 checkpointing workloads, tested on both POSIX NVMe and S3-compatible object storage
-(via [s3-ultra](../s3-ultra/) fake S3 server over loopback).
+using a local S3-compatible test server over loopback.
 
 **Host:** loki-russ · **MPI ranks:** 4 · **Accelerator profile:** B200
 
@@ -124,8 +124,9 @@ pytest tests/integration/ -v                          # full integration suite
 ./tests/object-store/test_mlp_minio.sh
 ./tests/object-store/test_mlp_s3torch.sh
 
-# Cross-library throughput benchmark
-python tests/object-store/test_direct_write_comparison.py
+# Maintained model-level benchmark scripts
+NP=1 bash tests/object-store/run_dlrm_bench.sh
+NP=1 bash tests/object-store/run_flux_bench.sh
 ```
 
 ---
@@ -351,33 +352,28 @@ Performance and correctness tests for the three supported object storage librari
 [tests/object-store/README.md](object-store/README.md) for full documentation and
 benchmark results.
 
-### Cross-library throughput comparison
+### Maintained model-level benchmark scripts
 
 ```bash
-cd /home/eval/Documents/Code/mlp-storage && source .venv/bin/activate
+cd /home/eval/Documents/Code/mlp-storage
 
-# Native API write + read — all three libraries, default 100 × 128 MiB, 8 workers
-python tests/object-store/test_direct_write_comparison.py
+# Parquet workloads generate data inline, then run the benchmark
+NP=1 bash tests/object-store/run_dlrm_bench.sh
+NP=1 bash tests/object-store/run_flux_bench.sh
 
-# 12-worker run (matches Object_Perf_Results.md baseline)
-python tests/object-store/test_direct_write_comparison.py \
-    --num-files 100 --size-mb 128 --write-workers 12 --read-workers 12
+# JPEG/NPZ workloads generate data first, then run
+bash tests/object-store/gen_retinanet_jpeg.sh
+NP=1 bash tests/object-store/test_retinanet.sh
 
-# Single library only
-python tests/object-store/test_direct_write_comparison.py --library s3dlio
+bash tests/object-store/gen_unet3d_npz.sh
+NP=1 bash tests/object-store/test_unet3d.sh
 ```
 
-### DLIO-driven training and checkpoint workloads
+### Checkpoint workload
 
 ```bash
-# Training (100 × 128 MiB NPZ, 2 epochs, all libraries)
-python tests/object-store/test_dlio_multilib_demo.py --workload training
-
-# Streaming checkpoint (~105 GB, llama3-8b profile)
-python tests/object-store/test_dlio_multilib_demo.py --workload checkpoint
-
-# Single library
-python tests/object-store/test_dlio_multilib_demo.py --workload training --library s3dlio
+# Streaming checkpoint write/read validation
+NP=4 bash tests/object-store/run_checkpointing.sh
 ```
 
 ### MPI process-count sweep
@@ -410,15 +406,9 @@ python tests/object-store/test_s3dlio_direct.py    # zero-copy direct I/O path
 
 ### Reference
 
-- **[Object_Perf_Results.md](object-store/Object_Perf_Results.md)** — Full benchmark
-  results: native API throughput, DLIO streaming checkpoint (16 GB / 100 GB), MPI sweep
-- **[bench-results-retinanet-20260425.md](object-store/bench-results-retinanet-20260425.md)** — April 25, 2026: write_threads sweep for RetinaNet on s3-ultra (loopback), NP=1
-- **[s3ultra-test-results-20260425.md](object-store/s3ultra-test-results-20260425.md)** — April 25, 2026: s3-ultra end-to-end test results
-- **[scaling-analysis-2026-04-25.md](object-store/scaling-analysis-2026-04-25.md)** — April 25, 2026: NP scaling analysis across storage backends
-- **[NPZ-OPTIMIZATION-ANALYSIS.md](object-store/NPZ-OPTIMIZATION-ANALYSIS.md)** — NPZ read optimization analysis
-- **[dlio_mpi_object_results.md](object-store/dlio_mpi_object_results.md)** — March 20, 2026: DLIO + MPI scaling results (UNet3D h100 profile, ~23.5 GB dataset, NP=1/2/4)
-- **[s3dlio_performance_analysis.md](object-store/s3dlio_performance_analysis.md)** — March 20, 2026 HISTORICAL: root-cause analysis of s3dlio performance (6 findings; most resolved in v0.9.84)
-- **[S3library_review_21-Mar.md](object-store/S3library_review_21-Mar.md)** — March 21, 2026: prefetch fairness review across all three libraries (analysis only; no code changes)
+- **[object-store/README.md](object-store/README.md)** — maintained object-storage benchmark scripts, required environment variables, cleanup, TLS notes, and archived-test guidance.
+- **[../docs/OBJECT_STORAGE_TESTING.md](../docs/OBJECT_STORAGE_TESTING.md)** — small MinIO smoke tests, parser checks, tiny datagen/run cycles, and useful unit tests.
+- **[../docs/OBJECT_STORAGE_GUIDE.md](../docs/OBJECT_STORAGE_GUIDE.md)** — object-storage setup, CLI usage, library comparison, and troubleshooting.
 
 ---
 
@@ -487,7 +477,7 @@ mlp-storage supports the following workload types, each exercised by the tests a
 
 | Workload | CLI command | Test files |
 |----------|------------|------------|
-| Training (DLIO) | `mlpstorage run training` | `unit/test_cli.py`, `integration/test_benchmark_flow.py`, `object-store/test_dlio_multilib_demo.py` |
+| Training (DLIO) | `mlpstorage run training` | `unit/test_cli.py`, `integration/test_benchmark_flow.py`, `object-store/test_retinanet.sh` |
 | Checkpointing | `mlpstorage run checkpointing` | `checkpointing/test_streaming_backends.py`, `object-store/test_*_checkpoint.py` |
 | KV Cache | `mlpstorage run kvcache` | `unit/test_benchmarks_kvcache.py`, `unit/test_cli_kvcache.py` |
 | Vector DB | `mlpstorage run vectordb` | `unit/test_benchmarks_vectordb.py`, `unit/test_cli_vectordb.py`, `unit/test_rules_vectordb.py` |
