@@ -4,17 +4,17 @@
 # Table of Contents
 
 * [1. Introduction](#1-introduction)
-* [2. Core/Common Rules](#2-corecommon-rules)
+* [2. Core/Common Rules for All Submissions](#2-corecommon-rules-for-all-submissions)
     * [2.1. Core/Common POSIX API Rules](#21-corecommon-posix-api-rules)
     * [2.2. Core/Common Object API Rules](#22-corecommon-object-api-rules)
-* [3. Validating the Training Options](#3-validating-the-training-options)
+* [3. Validating the Training Workloads](#3-validating-the-training-workloads)
     * [3.1. Training Sizing Options](#31-training-sizing-options)
     * [3.2. Training Generation Options](#32-training-generation-options)
     * [3.3. Training Run Options](#33-training-run-options)
     * [3.4. Training Access Via POSIX API Options](#34-training-access-via-posix-api-options)
     * [3.5. Training Access Via Object API Options](#35-training-access-via-object-api-options)
     * [3.6. Training OPEN versus CLOSED Options](#36-training-open-versus-closed-options)
-* [4. Validating the Checkpointing Options](#4-validating-the-checkpointing-options)
+* [4. Validating the Checkpointing Workloads](#4-validating-the-checkpointing-workloads)
     * [4.1. Checkpointing Sizing Options](#41-checkpointing-sizing-options)
     * [4.2. Checkpointing Generation Options](#42-checkpointing-generation-options)
     * [4.3. Checkpointing Run Options](#43-checkpointing-run-options)
@@ -36,7 +36,7 @@
     * [6.4. KVCache Access Via POSIX API Options](#64-kvcache-access-via-posix-api-options)
     * [6.5. KVCache Access Via Object API Options](#65-kvcache-access-via-object-api-options)
     * [6.6. KVCache OPEN versus CLOSED Options](#66-kvcache-open-versus-closed-options)
-# 1.  Introduction
+# 1. Introduction
 
 These are the requirements for the *submission validation checker* for version 2.0 of the MLPerf™ Storage benchmark,
 but since the `mlpstorage` tool will be responsible for generating the vast majority (if not all) of the contents of a submission, it is also a spec for what `mlpstorage` should generate.
@@ -53,9 +53,9 @@ The `mlpstorage` tool must be used to run the benchmarks, submitters are not all
 
 1.1. **mlpstorageGeneratesHierarchy** -- The `mlpstorage` command must obtain (somehow) the pathname of the output file directory hierarchy and directly create and/or append to the files within that hierarchy to successively build out the submission folder.  We don't want the submitter to manually create anything in that hierarchy except for the SystemDescription.* files (if we can help it).
 
-# 2.  Core/Common Rules for All Submissions
+# 2. Core/Common Rules for All Submissions
 
-## 2.1.  Core/Common POSIX API Rules
+## 2.1. Core/Common POSIX API Rules
 
 2.1.1. **submitterRootDirectory** --  The submission structure must start from a single directory whose name is the name of the submitter.  This can be any string, but a blank or any other character in that string that cannot be part of a POSIX filename should be replaced 1-for-1 with a dash character.
 
@@ -345,11 +345,11 @@ root_folder (or any name you prefer)
         └── overrides.yaml
 ```
 
-## 2.2.  Core/Common Object API Rules
+## 2.2. Core/Common Object API Rules
 
-# 3.  Validating the Training Workloads
+# 3. Validating the Training Workloads
 
-## 3.1.  Training Sizing Options
+## 3.1. Training Sizing Options
 
 3.1.1. **trainingVerifyDatasizeUsage** -- The *submission validator* must verify that the *datasize* option was used by finding the entry(s) in the log file showing its use.
 
@@ -365,11 +365,11 @@ root_folder (or any name you prefer)
      * `min_files_size = min_samples * record_length / 1024 / 1024 / 1024`
   * A minimum of `min_total_files` files are required which will consume `min_files_size` GB of storage.
 
-## 3.2.  Training Generation Options
+## 3.2. Training Generation Options
 
 3.2.1. **trainingDatagenMinimumSize** --  The amount of data generated during the *datagen* phase must be equal **or larger** -- than the amount of data calculated during the *datasize* phase or the run must be failed.
 
-## 3.3.  Training Run Options
+## 3.3. Training Run Options
 
 3.3.1. **trainingRunDataMatchesDatasize** -- The amount of data the *run* phase is told to use must be exactly equal to the *datasize* value calculated earlier, but can be less than the value used in the *datagen* phase.  To express that, you can run the benchmark on a subset of that dataset by setting `num_files_train` or `num_files_eval` smaller than the number of files available in the dataset folder, but `num_subfolders_train` and `num_subfolders_eval` must be to be equal to the actual number of subfolders inside the dataset folder in order to generate valid results.
 
@@ -388,15 +388,15 @@ root_folder (or any name you prefer)
 
 3.3.7. **trainingNodeCapabilityConsistency** -- For distributed Training submissions, the *submission validation checker* should emit a warning (not fail the validation) if the physical nodes that run the benchmark code are widely enough different in their capability.  **_(not clear we should do this, so maybe remove?)_**
 
-## 3.4.  Training Access Via POSIX API Options
+## 3.4. Training Access Via POSIX API Options
 
 3.4.1. **trainingMlpstoragePathArgs** --  The arguments to `mlpstorage` that set the directory pathname where the dataset is stored and the directory where the output logfiles are stored must both be set and must be set to different values.
 
 3.4.2. **trainingMlpstorageFilesystemCheck** --  The `mlpstorage` command should do a "df" command on the directory pathname where the dataset is stored and another one on the directory pathname where the output logfiles are stored and record those values in the logfile.  The *submission validator* should find those entries in the run's logfile and verify that they are different filesystems.  We don't want the submitter to, by acccident, place the logfiles onto the storage system under test since that would skew the results.
 
-## 3.5.  Training Access Via Object API Options
+## 3.5. Training Access Via Object API Options
 
-## 3.6.  Training OPEN versus CLOSED Options
+## 3.6. Training OPEN versus CLOSED Options
 
 3.6.1. **trainingClosedSubmissionChecksum** -- For CLOSED submissions of this benchmark, the MLPerf Storage codebase must not be changed.  The *submission validation checker* enforces this with a layered check:
 
@@ -441,13 +441,13 @@ root_folder (or any name you prefer)
 | *Reader parameters*          |                                            |                                                                                       |
 | reader.data_loader           | Supported options: Tensorflow or PyTorch.  | 3D U-Net: PyTorch<br>ResNet-50: Tensorflow<br>Cosmoflow: Tensorflow                   |
 
-# 4.  Validating the Checkpointing Workloads
+# 4. Validating the Checkpointing Workloads
 
-## 4.1.  Checkpointing Sizing Options
+## 4.1. Checkpointing Sizing Options
 
-## 4.2.  Checkpointing Generation Options
+## 4.2. Checkpointing Generation Options
 
-## 4.3.  Checkpointing Run Options
+## 4.3. Checkpointing Run Options
 
 4.3.1. **checkpointDataSizeRatio** -- The checkpoint data written per client node must be more than 3x the client node's memory capacity, otherwise the filesystem cache needs to be cleared between the write and read phases.
 
@@ -482,7 +482,7 @@ root_folder (or any name you prefer)
 
 ## 4.5. Checkpointing Access Via Object API Options
 
-## 4.6.  Checkpointing OPEN versus CLOSED Options
+## 4.6. Checkpointing OPEN versus CLOSED Options
 
 4.6.1. **checkpointClosedMpiProcesses** -- For CLOSED submissions, the number of MPI processes must be set to 8, 64, 512, and 1024 for the respective models.  (see table 2)
 
@@ -512,7 +512,7 @@ root_folder (or any name you prefer)
 
 **\*\* NOTE: In CLOSED submissions, ``--num-checkpoints-write`` and ``--num-checkpoints-read`` may be set to ``0`` only as part of the two-invocation cache-flush workflow described in §4.7.1: one invocation runs the write phase with ``--num-checkpoints-read=0`` and the next runs the read phase with ``--num-checkpoints-write=0``. The default for both flags is 10 and the total work performed across both invocations must still be 10 writes followed by 10 reads.**
 
-## 4.7.  Storage System Must Be Simultaneously R/W or _Remappable_
+## 4.7. Storage System Must Be Simultaneously R/W or _Remappable_
 
 4.7.1. **checkpointCacheFlushValidation** -- A cache flush between the write and read phases is only required when the client node has enough memory to cache all of the checkpoints written by that client during the run. The benchmark writes 10 sequential checkpoints specifically to overfill typical filesystem caches; on most submission configurations the early checkpoints have already been evicted by the time the read phase begins, so no flush is required. As a rule of thumb (see `checkpointing/README.md`), a flush is required when the total checkpoint size written per client is less than 3× the client node's memory capacity. When a flush is required, the submitter must execute the run in two invocations: the write phase with ``--num-checkpoints-read=0``, followed by the cache flush during a pause of no more than 30 seconds, then the read phase with ``--num-checkpoints-write=0``. The validator must confirm this split occurred and that the inter-phase gap did not exceed 30 seconds.
 
@@ -529,21 +529,21 @@ System:
     simultaneous_read__support: True    # Are simultaneous reads by multiple hosts supported in the submitted configuration
 ```
 
-# 5.  Validating the VDB Workloads
+# 5. Validating the VDB Workloads
 
-## 5.1.  VDB Sizing Options
+## 5.1. VDB Sizing Options
 
 5.1.1. **vdbDatasetScale** -- The benchmark must be run against one of the defined dataset scales (collection vector counts) listed in the VDB scale table. The *submission validator* must read `num_vectors` and `dimension` from the run's `config.json`/`summary.json` and verify they match a defined scale; any other scale must generate a message and fail validation.
 
 5.1.2. **vdbDimensionConsistency** -- The vector `dimension` recorded at `datagen` (load) time must equal the `dimension` used at `run` (query) time. The *submission validator* must compare the dimension in the load summary against the dimension in each run's `summary.json` and fail validation if they differ.
 
-## 5.2.  VDB Generation Options
+## 5.2. VDB Generation Options
 
 5.2.1. **vdbCollectionPopulated** -- The number of vectors actually inserted (`inserted_vectors`) during load must equal the declared `num_vectors` for the chosen scale. The *submission validator* must read the load summary and fail validation on a shortfall.
 
 5.2.2. **vdbIndexBuildCompleted** -- The collection must be fully indexed and (when configured) compacted before the query phase. The *submission validator* must confirm an index-build / compaction record is present in the load output and that the index type recorded at load time matches the index type used at run time.
 
-## 5.3.  VDB Run Options
+## 5.3. VDB Run Options
 
 5.3.1. **vdbRunCount** -- Within each `vector_database/<index_type>/run/` directory (where `<index_type>` is one of the UPPERCASE tokens `DISKANN`, `HNSW`, or `AISAQ`), there must be exactly five `<datetime>` timestamp directories, each containing a `summary.json`. The count rule applies to query runs only — `datagen` is governed by §5.2. (see §2.1.27 directory diagram.)
 
@@ -553,17 +553,17 @@ System:
 
 5.3.4. **vdbMetricsReported** -- Each run's `summary.json` must report `throughput_qps` and the latency percentile set (`mean_latency_ms`, `p95_latency_ms`, `p99_latency_ms`, `p999_latency_ms`). The *submission validator* must verify these fields exist and are populated.
 
-## 5.4.  VDB Access Via POSIX API Options
+## 5.4. VDB Access Via POSIX API Options
 
 5.4.1. **vdbPathArgs** -- The arguments to `mlpstorage` that set the storage path for the vector database data and the directory where output logfiles/results are stored must both be set and must be set to different values.
 
 5.4.2. **vdbFilesystemCheck** -- The `mlpstorage` command should do a "df" command on the directory pathname where the vector database stores its data and another on the directory pathname where the output logfiles are stored, and record those values in the logfile. The *submission validator* must find those entries in the run's logfile and verify that they are different filesystems, so that logfiles are not accidentally placed on the storage system under test.
 
-## 5.5.  VDB Access Via Object API Options
+## 5.5. VDB Access Via Object API Options
 
 5.5.1. **vdbObjectStorageBackend** -- For object-API submissions, the vector database must be backed by S3-compatible object storage and the submission must record the storage backend in the system description. The *submission validator* must confirm the recorded backend is consistent with the declared API.
 
-## 5.6.  VDB OPEN versus CLOSED Options
+## 5.6. VDB OPEN versus CLOSED Options
 
 > **Index type token convention.** The index type is recorded, validated, and
 > stored on disk using the uppercase token (`DISKANN`, `HNSW`, `AISAQ`) defined
@@ -642,16 +642,16 @@ System:
 | index.metric_type          | Any distance metric supported by the chosen backend                                                                 | --      |
 | index.* (backend-native)   | Any backend-native build/search parameters (e.g. pgvector `lists` / `probes`; Elasticsearch `m` / `ef_construction` / `num_candidates`) | -- |
 
-# 6.  Validating the KVCache Options
+# 6. Validating the KVCache Options
 
-## 6.1.  KVCache Sizing Options
+## 6.1. KVCache Sizing Options
 
-## 6.2.  KVCache Generation Options
+## 6.2. KVCache Generation Options
 
-## 6.3.  KVCache Run Options
+## 6.3. KVCache Run Options
 
-## 6.4.  KVCache Access Via POSIX API Options
+## 6.4. KVCache Access Via POSIX API Options
 
-## 6.5.  KVCache Access Via Object API Options
+## 6.5. KVCache Access Via Object API Options
 
-## 6.6.  KVCache OPEN versus CLOSED Options
+## 6.6. KVCache OPEN versus CLOSED Options
