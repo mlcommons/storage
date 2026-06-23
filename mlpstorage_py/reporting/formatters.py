@@ -273,23 +273,21 @@ class ClosedRequirementsFormatter:
     }
 
     KVCACHE_REQUIREMENTS = {
-        'title': 'KV Cache Benchmark Requirements (Preview)',
+        'title': 'KV Cache Benchmark Requirements',
         'requirements': [
             'Minimum runtime of 30 seconds',
             'Valid model configuration',
             'At least 1 concurrent user',
-            'Note: KV Cache is in preview and not yet accepted for CLOSED submissions',
         ],
         'allowed_params': [],
     }
 
     VECTORDB_REQUIREMENTS = {
-        'title': 'VectorDB Benchmark Requirements (Preview)',
+        'title': 'VectorDB Benchmark Requirements',
         'requirements': [
             'Minimum runtime of 30 seconds',
             'Valid collection configuration',
             'Database host and port accessible',
-            'Note: VectorDB is in preview and not yet accepted for CLOSED submissions',
         ],
         'allowed_params': [],
     }

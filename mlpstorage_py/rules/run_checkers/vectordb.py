@@ -2,8 +2,6 @@
 VectorDB benchmark run rules checker.
 
 Validates VectorDB benchmark parameters for individual runs.
-Note: VectorDB is currently a preview benchmark, so all runs
-automatically receive OPEN status regardless of other validations.
 """
 
 from typing import Optional
@@ -23,10 +21,6 @@ class VectorDBRunRulesChecker(RunRulesChecker):
     - Index building and search operations
     - Concurrent query handling
     - Various distance metrics and index types
-
-    Currently in preview mode - all runs return OPEN status regardless
-    of other validation results, as the benchmark is not yet accepted
-    for closed submissions.
     """
 
     # Minimum requirements for valid VectorDB runs
@@ -58,16 +52,3 @@ class VectorDBRunRulesChecker(RunRulesChecker):
             )
 
         return None
-
-    def check_preview_status(self) -> Optional[Issue]:
-        """
-        Return informational issue that VectorDB is in preview.
-
-        This is always returned to inform users that this benchmark
-        is not yet accepted for closed submissions.
-        """
-        return Issue(
-            validation=PARAM_VALIDATION.OPEN,
-            message="VectorDB benchmark is in preview status - not accepted for closed submissions",
-            parameter="benchmark_status"
-        )

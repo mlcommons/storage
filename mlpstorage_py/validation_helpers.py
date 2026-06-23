@@ -392,11 +392,6 @@ def validate_closed_requirements(args, benchmark_type: str, logger=None) -> Tupl
             warnings.append("num_checkpoints should be >= 1")
             is_eligible = False
 
-    elif benchmark_type == 'kvcache':
-        # KV Cache is preview only - always OPEN
-        warnings.append("KV Cache benchmark is in preview status - qualifies for OPEN only")
-        is_eligible = False
-
     if logger and warnings:
         for warning in warnings:
             logger.warning(f"CLOSED requirement: {warning}")

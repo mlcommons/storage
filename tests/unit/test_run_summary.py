@@ -208,3 +208,276 @@ class TestCredentialDisplay:
         assert '[SET —' in output, (
             f"Expected redacted '[SET —' marker in output, got: {output!r}"
         )
+
+
+class TestOutputOnlyDenylist:
+    """Output-only knobs (quiet/debug/verbose/stream_log_level) never appear as their own rows."""
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_no_debug_row_for_vdb(self, mock_logger):
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(
+            benchmark='vectordb', command='run',
+            debug=True, verbose=True, stream_log_level='DEBUG',
+        )
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        # Row label format is "  label:                ...". Look for the exact
+        # label form so a substring like 'debug' inside a path doesn't trip us.
+        assert 'debug:' not in output
+        assert 'verbose:' not in output
+        assert 'stream_log_level:' not in output
+
+
+class TestVectorDBSection:
+    """The --- VectorDB --- block is rendered for vectordb runs."""
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_section_header_present(self, mock_logger):
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(benchmark='vectordb', command='run')
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert '--- VectorDB ---' in output
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_section_absent_for_training(self, mock_logger):
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(benchmark='training', command='run')
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert '--- VectorDB ---' not in output
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_effective_index_falls_back_to_default(self, mock_logger):
+        """When neither --vdb-index nor --index-type is set, the default appears."""
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(benchmark='vectordb', command='datasize',
+                          vdb_index=None, index_type=None)
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert 'vdb_index (effective):' in output
+        assert 'DISKANN' in output  # VDB_INDEX_DEFAULT
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_effective_end_condition_defaults_for_run(self, mock_logger):
+        """run with neither --runtime nor --queries surfaces the default runtime."""
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(benchmark='vectordb', command='run',
+                          runtime=None, queries=None)
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert 'end_condition (effective):' in output
+        assert '[default]' in output
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_mpi_world_size_derived_when_distributed(self, mock_logger):
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(
+            benchmark='vectordb', command='run',
+            distributed=True, hosts=['h1', 'h2'], npernode=2,
+        )
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert 'mpi_world_size (derived):' in output
+        assert ' 4' in output  # 2 hosts * 2 npernode
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_arg_overrides_relabel(self, mock_logger):
+        """The summary uses the disambiguated 'mlpstorage_arg_overrides_file' label."""
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(benchmark='vectordb', command='run',
+                          config_file='/tmp/overrides.yaml')
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert 'mlpstorage_arg_overrides_file:' in output
+        assert '/tmp/overrides.yaml' in output
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_workload_yaml_section_header_present(self, mock_logger):
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(benchmark='vectordb', command='run')
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert '--- VectorDB Workload Config ---' in output
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_workload_yaml_contents_inlined(self, mock_logger, tmp_path):
+        """When --config points at a real YAML, its contents are printed verbatim."""
+        from mlpstorage_py.run_summary import print_run_summary
+
+        cfg = tmp_path / "myconfig.yaml"
+        cfg.write_text("dataset:\n  num_vectors: 9999\n  dimension: 768\n")
+
+        args = _make_args(benchmark='vectordb', command='run',
+                          config=str(cfg))
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert 'num_vectors: 9999' in output
+        assert 'dimension: 768' in output
+
+
+class TestKVCacheSection:
+    """The --- KVCache --- block is rendered for kvcache runs."""
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_section_header_present(self, mock_logger):
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(benchmark='kvcache', command='run',
+                          data_access_protocol='file')
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert '--- KVCache ---' in output
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_effective_seed_default_for_none(self, mock_logger):
+        """seed=None surfaces the 42 default."""
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(benchmark='kvcache', command='run',
+                          data_access_protocol='file', seed=None)
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert 'seed (effective):' in output
+        assert '42  [default]' in output
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_effective_seed_explicit_value(self, mock_logger):
+        """An explicit seed is shown without the [default] tag."""
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(benchmark='kvcache', command='run',
+                          data_access_protocol='file', seed=99)
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert 'seed (effective):' in output
+        assert '99' in output
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_total_ranks_derived(self, mock_logger):
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(benchmark='kvcache', command='run',
+                          data_access_protocol='file',
+                          hosts=['n1', 'n2', 'n3'], npernode=2)
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert 'total_ranks (derived):' in output
+        assert ' 6' in output  # 3 hosts * 2 npernode
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_kvcache_selected_workloads_env_row(self, mock_logger, monkeypatch):
+        """KVCACHE_SELECTED_WORKLOADS is surfaced in the Environment section for kvcache."""
+        from mlpstorage_py.run_summary import print_run_summary
+
+        monkeypatch.setenv('KVCACHE_SELECTED_WORKLOADS', 'option1,option3')
+
+        args = _make_args(benchmark='kvcache', command='run',
+                          data_access_protocol='file')
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert 'KVCACHE_SELECTED_WORKLOADS:' in output
+        assert 'option1,option3' in output
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_kvcache_workloads_env_absent_for_training(self, mock_logger, monkeypatch):
+        """KVCACHE_SELECTED_WORKLOADS row is not added for non-kvcache benchmarks."""
+        from mlpstorage_py.run_summary import print_run_summary
+
+        monkeypatch.setenv('KVCACHE_SELECTED_WORKLOADS', 'option1')
+
+        args = _make_args(benchmark='training', command='run')
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert 'KVCACHE_SELECTED_WORKLOADS:' not in output
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_workload_yaml_section_header_present(self, mock_logger):
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(benchmark='kvcache', command='run',
+                          data_access_protocol='file')
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert '--- KVCache Workload Config ---' in output
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_workload_yaml_contents_inlined(self, mock_logger, tmp_path):
+        """When --config points at a real YAML, its contents are printed verbatim."""
+        from mlpstorage_py.run_summary import print_run_summary
+
+        cfg = tmp_path / "kvc.yaml"
+        cfg.write_text("eviction:\n  target_usage_ratio: 0.42\n")
+
+        args = _make_args(benchmark='kvcache', command='run',
+                          data_access_protocol='file', config=str(cfg))
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert 'target_usage_ratio: 0.42' in output
+
+
+class TestTier1AcceleratorFiltering:
+    """Training-only Tier 1 fields are suppressed for vectordb/kvcache."""
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_accelerator_rows_present_for_training(self, mock_logger):
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(benchmark='training', command='run')
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert 'num_accelerators:' in output
+        assert 'accelerator_type:' in output
+        assert 'client_host_memory_in_gb:' in output
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_accelerator_rows_absent_for_vectordb(self, mock_logger):
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(benchmark='vectordb', command='run')
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert 'num_accelerators:' not in output
+        assert 'accelerator_type:' not in output
+        assert 'client_host_memory_in_gb:' not in output
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_accelerator_rows_absent_for_kvcache(self, mock_logger):
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(benchmark='kvcache', command='run',
+                          data_access_protocol='file')
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert 'num_accelerators:' not in output
+        assert 'accelerator_type:' not in output
+        assert 'client_host_memory_in_gb:' not in output
