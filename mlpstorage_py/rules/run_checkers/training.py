@@ -38,6 +38,30 @@ class TrainingRunRulesChecker(RunRulesChecker):
         'reader.data_loader',
     ]
 
+    # Parameters that the mlpstorage tool injects into the DLIO config without
+    # the user typing --params for them.  They show up in override_parameters
+    # alongside genuine user overrides because both share the same dotted-key
+    # surface, so check_allowed_params() must filter them out before deciding
+    # CLOSED-vs-OPEN-vs-INVALID — otherwise a closed run is marked INVALID for
+    # params the tool itself set (mlcommons/storage#494).
+    #
+    # When adding a new tool-side setter in mlpstorage_py/benchmarks/dlio.py
+    # (or anywhere that writes to self.params_dict outside of args.params),
+    # add the dotted-key here too.
+    TOOL_INJECTED_PARAMS = frozenset({
+        # _apply_skip_listing_params (#483)
+        'dataset.skip_listing',
+        'dataset.listing_validation_interval',
+        # add_datadir_param — derived from --data-dir + model
+        'dataset.data_folder',
+        # _apply_object_storage_params — derived from --object + BUCKET / env
+        'storage.storage_type',
+        'storage.storage_root',
+        'storage.storage_options.storage_library',
+        'storage.storage_options.uri_scheme',
+        'storage.s3_force_path_style',
+    })
+
     def check_benchmark_type(self) -> Optional[Issue]:
         """Verify this is a training benchmark."""
         if self.benchmark_run.benchmark_type != BENCHMARK_TYPES.training:
@@ -107,7 +131,10 @@ class TrainingRunRulesChecker(RunRulesChecker):
         Verify that only allowed parameters were overridden.
 
         Returns list of issues describing which parameters are allowed
-        for CLOSED, OPEN, or are invalid.
+        for CLOSED, OPEN, or are invalid.  Tool-injected params (see
+        TOOL_INJECTED_PARAMS) are reported under a separate "Tool-injected
+        parameter" message so reviewers can audit them, but never count as
+        user overrides for the CLOSED-vs-OPEN-vs-INVALID gate.
         """
         issues = []
         for param, value in self.benchmark_run.override_parameters.items():
@@ -117,7 +144,17 @@ class TrainingRunRulesChecker(RunRulesChecker):
 
             self.logger.debug(f"Processing override parameter: {param} = {value}")
 
-            if param in self.CLOSED_ALLOWED_PARAMS:
+            if param in self.TOOL_INJECTED_PARAMS:
+                # Tool-managed knob (skip_listing, object-storage backend,
+                # auto-resolved data_folder, etc).  Surface it for audit but
+                # don't subject it to the user-override allow-list.
+                issues.append(Issue(
+                    validation=PARAM_VALIDATION.CLOSED,
+                    message=f"Tool-injected parameter: {param} = {value}",
+                    parameter="Tool-Injected Parameters",
+                    actual=value
+                ))
+            elif param in self.CLOSED_ALLOWED_PARAMS:
                 issues.append(Issue(
                     validation=PARAM_VALIDATION.CLOSED,
                     message=f"Closed parameter override allowed: {param} = {value}",
