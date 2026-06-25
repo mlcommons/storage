@@ -616,7 +616,7 @@ requires-dist = [
     { name = "pyyaml", marker = "extra == 'vectordb-milvus'", specifier = ">=6.0" },
     { name = "pyyaml", marker = "extra == 'vectordb-pgvector'", specifier = ">=6.0" },
     { name = "rich", specifier = ">=13.0" },
-    { name = "s3dlio", specifier = ">=0.9.100" },
+    { name = "s3dlio", specifier = ">=0.9.102" },
     { name = "s3torchconnector", specifier = ">=1.5.0" },
     { name = "tabulate", marker = "extra == 'vectordb'", specifier = ">=0.9" },
     { name = "tabulate", marker = "extra == 'vectordb-elasticsearch'", specifier = ">=0.9" },
@@ -1202,15 +1202,15 @@ wheels = [
 
 [[package]]
 name = "s3dlio"
-version = "0.9.100"
+version = "0.9.102"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy", marker = "sys_platform == 'linux'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/33/98/23ed0451a8668e352206dea740920d85dceefadf0a6d427d1571d17e845e/s3dlio-0.9.100.tar.gz", hash = "sha256:b2d3dc9f037bcef5e2e171ab1988c1be730849730bee6570f484eb0f02c9a862", size = 1564701, upload-time = "2026-05-13T05:08:22.245Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/70/68/49468354c9ac4e957c23914ea20e014d160d82c4ebee3d5272f59e5ec3d7/s3dlio-0.9.102.tar.gz", hash = "sha256:306d68e4403cdbcde421e5559923b697cdbc021951aa1ded66af953d77642ba1", size = 1575897, upload-time = "2026-06-25T22:10:52.051Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/3b/80/e7a16ae10aa9374b29ae7dc175eaba3910f604c2f2d2ae8955488a13c821/s3dlio-0.9.100-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:090f61effc0eec32a876a62a921287961e92aec57eb0f21449bf5a89d9e9ada2", size = 12416760, upload-time = "2026-05-13T05:08:10.756Z" },
-    { url = "https://files.pythonhosted.org/packages/ce/38/44ad05689f5f66e503eb095b442f37271e74bde1948fadf1312284173ae3/s3dlio-0.9.100-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:eb48f3d295071b5226ad6062544003abaa2defadac695424a015db04126f5d57", size = 12842294, upload-time = "2026-05-13T05:08:13.756Z" },
+    { url = "https://files.pythonhosted.org/packages/b4/25/d870f111cc99ba740a2f0bb6fbcab821553de57ad0e3fec952ea68d754e4/s3dlio-0.9.102-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:d605e2ff84cc859fd76dc64d05538b9b1d210b6f4d1a33b7cbe2f14d1a64152a", size = 12397504, upload-time = "2026-06-25T22:10:41.665Z" },
+    { url = "https://files.pythonhosted.org/packages/fd/cc/ec8d681a5da7de73fb521bdba5eea248948caf2f763f44aecef1c4c5406d/s3dlio-0.9.102-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:2f3bdbe9709f2ef2ecb8a59fe728919894500c2897f782ced9e22cbaf6bc69a5", size = 12814399, upload-time = "2026-06-25T22:10:44.485Z" },
 ]
 
 [[package]]
