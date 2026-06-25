@@ -373,8 +373,17 @@ def create_flat_collection(
 
         if use_iterator:
             try:
+                # Cap the iterator batch size so a single gRPC response stays
+                # well under Milvus' default 256MB max-message limit. For wide
+                # vectors (e.g. 1536-dim float32 ~= 6KB/row) a 5000-row batch
+                # can exceed the limit and trigger RESOURCE_EXHAUSTED, forcing
+                # the fragile pk-cursor fallback. ~24MB/batch is a safe ceiling.
+                bytes_per_row = max(vector_dim * 4, 1)
+                safe_rows = max(1, (24 * 1024 * 1024) // bytes_per_row)
+                iter_batch_size = min(copy_batch_size, safe_rows, 16384)
+
                 iterator = source_coll.query_iterator(
-                    batch_size=copy_batch_size,
+                    batch_size=iter_batch_size,
                     output_fields=[src_pk_field, src_vec_field],
                 )
 
@@ -416,7 +425,14 @@ def create_flat_collection(
                 DataType.INT8,
             )
 
-            last_pk: Union[int, str] = -2**63 if is_int_pk else ""
+            # NOTE: do NOT initialize the int cursor at -2**63. The expression
+            # "pk > -9223372036854775808" makes Milvus parse the operand
+            # 9223372036854775808 (magnitude, before the sign) as int64, which
+            # overflows INT64_MAX by one and raises a parse error, breaking the
+            # copy loop with 0 vectors. Benchmark IDs are >= 0, so -1 is a safe
+            # in-range sentinel that yields the valid first-page expr "pk > -1".
+            last_pk: Union[int, str] = -1 if is_int_pk else ""
+            first_page = True
             page_limit = min(copy_batch_size, 16384)
 
             dummy_vec = np.random.random(vector_dim).astype(np.float32)
@@ -427,7 +443,14 @@ def create_flat_collection(
                 if is_int_pk:
                     expr = f"{src_pk_field} > {last_pk}"
                 else:
-                    expr = f'{src_pk_field} > "{last_pk}"'
+                    # First page for VARCHAR PKs uses a closed lower bound so an
+                    # empty-string sentinel does not skip valid keys; subsequent
+                    # pages advance with a strict cursor on the last seen key.
+                    if first_page:
+                        expr = f'{src_pk_field} >= ""'
+                    else:
+                        expr = f'{src_pk_field} > "{last_pk}"'
+                first_page = False
 
                 try:
                     pk_batch = source_coll.query(
@@ -523,7 +546,8 @@ def create_flat_collection(
                         f"({pct:.1f}%)"
                     )
 
-        print(f"  Copied {copied}/{total_vectors} vectors (100.0%)")
+        final_pct = (100.0 * copied / total_vectors) if total_vectors else 0.0
+        print(f"  Copied {copied}/{total_vectors} vectors ({final_pct:.1f}%)")
 
         flat_coll.flush()
 
@@ -543,6 +567,23 @@ def create_flat_collection(
                 f"  WARNING: Only {flat_coll.num_entities}/{copied} vectors "
                 f"visible after flush. Proceeding anyway."
             )
+
+        # Coverage guard: a FLAT ground-truth collection that does not cover the
+        # source collection cannot produce valid recall. Without this guard the
+        # function would build an empty FLAT index, return True, and let the
+        # benchmark report a "successful" run with recall.num_queries_evaluated=0
+        # (see issue #489). Abort here so the caller's `if not flat_ok` fires.
+        final_count = flat_coll.num_entities
+        coverage = (final_count / total_vectors) if total_vectors else 0.0
+        MIN_COVERAGE = 0.99
+        if coverage < MIN_COVERAGE:
+            print(
+                f"ERROR: FLAT ground-truth collection covers only "
+                f"{final_count}/{total_vectors} ({coverage * 100:.2f}%) of the "
+                f"source collection (minimum required: {MIN_COVERAGE * 100:.0f}%). "
+                f"Cannot compute valid recall — aborting FLAT setup."
+            )
+            return False
 
         print("Building FLAT index...")
         flat_coll.create_index(
@@ -643,6 +684,19 @@ def precompute_ground_truth(
             f"Ground truth pre-computation complete: "
             f"{len(ground_truth)} queries in {gt_elapsed:.2f}s"
         )
+
+        # If every query came back with an empty neighbor list, the FLAT
+        # collection had no usable vectors and recall would be silently 0.
+        # Return an empty dict so the caller's `if not ground_truth` guard
+        # aborts the run instead of reporting an invalid benchmark (issue #489).
+        non_empty = sum(1 for neighbors in ground_truth.values() if neighbors)
+        if non_empty == 0:
+            print(
+                "ERROR: Ground truth is empty for all queries "
+                "(FLAT collection has no usable vectors). "
+                "Recall cannot be computed."
+            )
+            return {}
 
         return ground_truth
 
@@ -1637,6 +1691,17 @@ def main():
     with open(recall_output_file, "w", encoding="utf-8") as f:
         json.dump(recall_stats, f, indent=2)
 
+    # A run in which zero queries had valid ground truth produced no measurable
+    # recall, so its QPS/latency numbers must not be reported as a successful
+    # benchmark. recall_stats.json is written above for diagnostics, then we
+    # abort with a non-zero exit code (issue #489).
+    if recall_stats.get("num_queries_evaluated", 0) == 0:
+        print(
+            "ERROR: 0 queries had valid ground truth; recall is invalid. "
+            "Marking run as FAILED (see recall_stats.json for details)."
+        )
+        sys.exit(1)
+
     print("Calculating benchmark statistics...")
     stats = calculate_statistics(output_dir, recall_stats=recall_stats)
 
@@ -1776,3 +1841,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
