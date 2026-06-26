@@ -1027,6 +1027,9 @@ def calculate_statistics(
         try:
             df = pd.read_csv(file_path)
             if not df.empty:
+                # Tag each row with its source file so the post-coerce
+                # diagnostic can name the affected workers (issue #543).
+                df["_source_file"] = file_path.name
                 dfs.append(df)
         except Exception as exc:
             print(f"Error reading result file {file_path}: {exc}")
@@ -1035,6 +1038,40 @@ def calculate_statistics(
         return {"error": "No valid data found in benchmark result files"}
 
     all_data = pd.concat(dfs, ignore_index=True)
+
+    # Issue #543: coerce numeric columns before any arithmetic.  A single
+    # malformed row (e.g. batch_time_seconds=='True') makes pandas fall
+    # back to object dtype for the whole column, and `timestamp +
+    # batch_time_seconds` then raises TypeError after the timed work has
+    # already completed.  Drop rows that fail coercion and continue with
+    # the rest — losing two rows out of a million is preferable to
+    # losing the entire benchmark result.
+    _numeric_cols = (
+        "timestamp",
+        "batch_size",
+        "batch_time_seconds",
+        "avg_query_time_seconds",
+    )
+    for col in _numeric_cols:
+        all_data[col] = pd.to_numeric(all_data[col], errors="coerce")
+
+    bad_mask = all_data[list(_numeric_cols)].isna().any(axis=1)
+    if bad_mask.any():
+        bad_count = int(bad_mask.sum())
+        bad_files = sorted(all_data.loc[bad_mask, "_source_file"].unique())
+        print(
+            f"Warning: dropping {bad_count} row(s) with non-numeric values "
+            f"in required columns. Affected file(s): {', '.join(bad_files)}. "
+            "See mlcommons/storage#543.",
+            flush=True,
+        )
+        all_data = all_data.loc[~bad_mask].reset_index(drop=True)
+
+    all_data = all_data.drop(columns=["_source_file"])
+
+    if all_data.empty:
+        return {"error": "No valid data found in benchmark result files"}
+
     all_data.sort_values("timestamp", inplace=True)
 
     file_start_time = float(all_data["timestamp"].min())
