@@ -154,8 +154,22 @@ RUN_TIMESTAMP_COUNT = 6
 # Directory-name prefixes excluded from the code-tree MD5 (Rules.md 2.1.6).
 # Match is against POSIX-joined relative paths with a trailing slash so that
 # `.gitignore` (file) does not collide with `.git/` (directory prefix).
+#
+# Dot-prefixed entries (.git/, .idea/, .planning/, etc.) catch local
+# developer / tooling artifacts that the project's .gitignore already
+# excludes from version control. They are not part of the benchmark
+# source contract, would change every time a contributor's tools change,
+# and (in the .gsd-tmp/ case) would even contain transient agent state.
 MD5_EXCLUDE_PREFIXES: tuple[str, ...] = (
     ".git/",
+    ".idea/",          # JetBrains IDE workspace
+    ".vscode/",        # VS Code workspace
+    ".claude/",        # Claude CLI runtime / settings
+    ".agent/",         # Agent runtime (per project .gitignore "Coding Agents")
+    ".agents/",        # Same, alternate name
+    ".roo/",           # Roo agent runtime
+    ".planning/",      # GSD planning artifacts (project-local)
+    ".gsd-tmp/",       # GSD code-fixer worktree (project-local)
     "__pycache__/",
     ".pytest_cache/",
     ".venv/",
@@ -163,12 +177,15 @@ MD5_EXCLUDE_PREFIXES: tuple[str, ...] = (
     "build/",
     "dist/",
     ".tox/",
+    "test/",
+    "tests/",
 )
 
 # Filename patterns excluded from the code-tree MD5 (Rules.md 2.1.6).
 # Matched against the basename. ``.egg-info`` is handled at the prefix level
 # (any directory ending in ``.egg-info``) — keep that in the predicate, not here.
 MD5_EXCLUDE_FILENAMES: tuple[str, ...] = (
+    ".code-hash.json",
     "*.pyc",
     "*.pyo",
     ".DS_Store",

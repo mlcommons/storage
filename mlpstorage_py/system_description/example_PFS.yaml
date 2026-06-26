@@ -33,6 +33,7 @@ system_under_test:
                       unit_count: 2
           networking:
               - type: ethernet
+                state: "up"
                 speed: 100
                 traffic:
                     - management
@@ -69,6 +70,7 @@ system_under_test:
                       unit_count: 2
           networking:
              - type: ethernet
+               state: "up"
                speed: 100
                traffic:
                    - management
@@ -124,6 +126,7 @@ system_under_test:
                       unit_count: 2
           networking:
              - type: ethernet
+               state: "up"
                speed: 100
                traffic:
                    - data

@@ -18,9 +18,13 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch, PropertyMock, call
 from argparse import Namespace
 
-# Stub out optional heavy deps so benchmark imports succeed without the full ML stack
+# Stub out optional heavy deps so benchmark imports succeed without the full
+# ML stack. Use importlib.util.find_spec — checking sys.modules alone would
+# install a MagicMock for a perfectly importable module that just hasn't been
+# imported yet, which then poisons later test collections (e.g. test_parquet_reader).
+import importlib.util as _ilu
 for _dep in ('pyarrow', 'pyarrow.ipc', 'psutil'):
-    if _dep not in sys.modules:
+    if _ilu.find_spec(_dep) is None and _dep not in sys.modules:
         sys.modules[_dep] = MagicMock()
 
 from mlpstorage_py.config import BENCHMARK_TYPES, EXEC_TYPE
@@ -37,6 +41,9 @@ class TestKVCacheClusterCollection:
             verbose=False,
             what_if=False,
             stream_log_level='INFO',
+            mode='closed',
+            orgname='Acme',
+            systemname='sys-v1',
             results_dir=str(tmp_path),
             model='llama3.1-8b',
             command='run',
@@ -103,6 +110,9 @@ class TestKVCacheNumProcessesStorage:
             verbose=False,
             what_if=False,
             stream_log_level='INFO',
+            mode='closed',
+            orgname='Acme',
+            systemname='sys-v1',
             results_dir=str(tmp_path),
             model='llama3.1-8b',
             command='run',
@@ -170,6 +180,9 @@ class TestKVCacheMetadata:
             verbose=False,
             what_if=False,
             stream_log_level='INFO',
+            mode='closed',
+            orgname='Acme',
+            systemname='sys-v1',
             results_dir=str(tmp_path),
             model='llama3.1-8b',
             command='run',
@@ -245,6 +258,35 @@ class TestKVCacheMetadata:
         assert 'cpu_mem_gb' in meta
         assert 'generation_mode' in meta
         assert 'performance_profile' in meta
+
+    def test_metadata_parameters_populated_for_run_checker(self, base_args, mock_logger, tmp_path):
+        """Issue #537: KVCacheRunRulesChecker reads workload config from
+        metadata['parameters']. KVCache has no DLIO combined_params so the base
+        class falls back to {}, and reportgen then classifies every run INVALID
+        with 'Missing model parameter'. The kvcache metadata must populate
+        ['parameters'] with the workload config keys the checker consults."""
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen, \
+             patch('mlpstorage_py.benchmarks.kvcache.KVCacheBenchmark._collect_cluster_information') as mock_cluster:
+            output_dir = str(tmp_path / "output")
+            mock_gen.return_value = output_dir
+            mock_cluster.return_value = None
+
+            from mlpstorage_py.benchmarks.kvcache import KVCacheBenchmark
+            bm = KVCacheBenchmark(base_args, logger=mock_logger, run_datetime="20250124_120000")
+            meta = bm.metadata
+
+        params = meta.get('parameters')
+        assert isinstance(params, dict) and params, \
+            "metadata['parameters'] must be a non-empty dict so reportgen can read workload config"
+
+        # Keys the KVCacheRunRulesChecker reads via self.benchmark_run.parameters.get(...)
+        assert params.get('model') == 'llama3.1-8b'
+        assert params.get('num_users') == 100
+        assert params.get('duration') == 60
+        assert params.get('gpu_mem_gb') == 16.0
+        assert params.get('cpu_mem_gb') == 32.0
+        assert params.get('generation_mode') == 'realistic'
+        assert params.get('performance_profile') == 'latency'
 
     def test_metadata_includes_distributed_info(self, base_args, mock_logger, tmp_path):
         """Verify metadata includes distributed execution info."""
@@ -343,6 +385,13 @@ def _make_run_benchmark(tmp_path, what_if=False):
         verbose=False,
         what_if=what_if,
         stream_log_level='INFO',
+        # mode='open' here so the strict CLOSED-mode override checks in
+        # KVCacheBenchmark._execute_run (seed/trials/inter-option-delay)
+        # don't fire — these tests deliberately override those args.
+        # TestClosedEnforcement sets mode='closed' on bm.args explicitly.
+        mode='open',
+        orgname='Acme',
+        systemname='sys-v1',
         results_dir=str(tmp_path),
         command='run',
         npernode=2,
@@ -546,8 +595,8 @@ class TestAggregateOptionResults:
 
         result = bm._aggregate_option_results(1, trial_dirs, expected_rank_count=1)
 
-        # 2 trials × 1 rank × 1.0 GBps = 2.0
-        assert result['aggregated_read_bandwidth_gbps'] == pytest.approx(2.0)
+        # 2 trials × 1 rank × 1.0 GBps each → fmean([1.0, 1.0]) = 1.0
+        assert result['aggregated_read_bandwidth_gbps'] == pytest.approx(1.0)
         assert result['trial_count'] == 2
 
     def test_uses_glob_not_constructed_filename(self, tmp_path):
@@ -571,7 +620,7 @@ class TestAggregateOptionResults:
         assert result['partial_failure'] is False
 
     def test_none_p95_when_no_successful_reads(self, tmp_path):
-        """aggregated_p95_latency_ms is None when all rank files are missing."""
+        """aggregated_p95_latency_ms is 0.0 when all rank files are missing."""
         bm = _make_run_benchmark(tmp_path)
         trial_dir = tmp_path / 'trial_0'
         # Both rank dirs exist but have no json files
@@ -580,7 +629,8 @@ class TestAggregateOptionResults:
 
         result = bm._aggregate_option_results(1, [str(trial_dir)], expected_rank_count=2)
 
-        assert result['aggregated_p95_latency_ms'] is None
+        # Empty trial contributes 0.0; fmean([0.0]) = 0.0
+        assert result['aggregated_p95_latency_ms'] == pytest.approx(0.0)
         assert result['partial_failure'] is True
 
 
@@ -726,7 +776,7 @@ class TestExecuteRun:
     - _execute_command called 3 times per run (once per option) with trials=1 (DIST-02, DIST-04)
     - mpirun command contains '--mca orte_abort_on_non_zero_status 0' (DIST-08)
     - mpirun command contains '--npernode N' (DIST-03)
-    - wrapper receives --option, --seed, --base-output-dir, --cache-dir (DIST-07)
+    - wrapper receives --seed-base, --rank-output-base, --rank-cache-base (DIST-07)
     - per-option/trial dirs created with correct naming (option_{N}/trial_{T}/)
     - _interruptible_sleep called 2 times (after options 1 and 2; not after 3) (DIST-05)
     - _aggregate_option_results called 3 times when what_if=False
@@ -816,6 +866,35 @@ class TestExecuteRun:
         assert '--mca orte_abort_on_non_zero_status 0' in cmd0, \
             f"Missing --mca orte_abort_on_non_zero_status 0 in: {cmd0}"
 
+    def test_mpirun_passes_through_user_mpi_params(self, bm, fake_agg_result):
+        """User --mpi-params must reach mpirun, ordered before the mandatory
+        --mca orte_abort_on_non_zero_status 0 flag so OpenMPI's last-wins
+        resolution keeps the abort-suppression authoritative (#520)."""
+        # Shape matches what cli_parser.py emits post-shlex.split.
+        bm.args.mpi_params = ['-genv', 'PMI_VERSION=2', '--mca', 'btl', 'tcp,self']
+        bm.args.trials = 1
+        bm.args.inter_option_delay = 0
+        executed_cmds = []
+        def fake_execute(cmd, **kwargs):
+            executed_cmds.append(cmd)
+            return ('', '', 0)
+        with patch.object(bm, '_execute_command', side_effect=fake_execute), \
+             patch.object(bm, '_interruptible_sleep'), \
+             patch.object(bm, '_aggregate_option_results', return_value=fake_agg_result), \
+             patch.object(bm, '_write_run_summary'), \
+             patch.object(bm, 'write_metadata'):
+            bm._execute_run()
+        cmd0 = executed_cmds[0]
+        assert '-genv PMI_VERSION=2' in cmd0, \
+            f"Missing user --mpi-params in: {cmd0}"
+        assert '--mca btl tcp,self' in cmd0, \
+            f"Missing user --mpi-params in: {cmd0}"
+        # Mandatory --mca must follow user params (OpenMPI last-wins).
+        user_idx = cmd0.index('--mca btl tcp,self')
+        mandatory_idx = cmd0.index('--mca orte_abort_on_non_zero_status 0')
+        assert mandatory_idx > user_idx, \
+            f"Mandatory --mca must come after user --mpi-params in: {cmd0}"
+
     def test_mpirun_contains_npernode(self, bm, fake_agg_result):
         """mpirun command must contain '--npernode 2' when npernode=2 (DIST-03)."""
         bm.args.npernode = 2
@@ -834,8 +913,13 @@ class TestExecuteRun:
         assert '--npernode 2' in executed_cmds[0], \
             f"Missing --npernode 2 in: {executed_cmds[0]}"
 
-    def test_wrapper_receives_option_seed_output_cache(self, bm, fake_agg_result):
-        """Wrapper command must include --option, --seed, --base-output-dir, --cache-dir (DIST-07)."""
+    def test_wrapper_receives_rank_bases_and_seed_base(self, bm, fake_agg_result):
+        """Wrapper command must include --rank-output-base, --rank-cache-base, --seed-base (DIST-07).
+
+        The wrapper API was reshaped for #498/#500: the wrapper no longer takes
+        --option and no longer encodes WORKLOAD_PARAMS. Per-option kv-cache.py
+        args are emitted by mlpstorage_py.benchmarks.kvcache and pass through
+        the wrapper via parse_known_args."""
         bm.args.trials = 1
         bm.args.inter_option_delay = 0
         bm.args.seed = 42
@@ -851,10 +935,11 @@ class TestExecuteRun:
              patch.object(bm, 'write_metadata'):
             bm._execute_run()
         cmd0 = executed_cmds[0]
-        assert '--option 1' in cmd0, f"Missing --option 1 in: {cmd0}"
-        assert '--seed 42' in cmd0, f"Missing --seed 42 in: {cmd0}"
-        assert '--base-output-dir' in cmd0, f"Missing --base-output-dir in: {cmd0}"
-        assert '--cache-dir /tmp/kv' in cmd0, f"Missing --cache-dir in: {cmd0}"
+        assert '--seed-base 42' in cmd0, f"Missing --seed-base 42 in: {cmd0}"
+        assert '--rank-output-base' in cmd0, f"Missing --rank-output-base in: {cmd0}"
+        assert '--rank-cache-base /tmp/kv' in cmd0, f"Missing --rank-cache-base in: {cmd0}"
+        # The legacy --option flag is no longer part of the wrapper API.
+        assert '--option ' not in cmd0, f"Stale --option flag in: {cmd0}"
 
     def test_per_option_trial_dirs_created(self, bm, fake_agg_result, tmp_path):
         """option_{N}/trial_{T}/ directories must be created."""
@@ -872,7 +957,7 @@ class TestExecuteRun:
         assert option1_trial0.exists(), f"Expected {option1_trial0} to exist"
 
     def test_option_trial_dirs_in_command_path(self, bm, fake_agg_result):
-        """Command must reference option_N/trial_T subdirectory in --base-output-dir."""
+        """Command must reference option_N/trial_T subdirectory in --rank-output-base."""
         bm.args.trials = 1
         bm.args.inter_option_delay = 0
         executed_cmds = []
@@ -1130,3 +1215,550 @@ class TestClosedEnforcement:
              patch.object(bm, 'write_metadata'):
             rc = bm._execute_run()
         assert rc == 0
+
+
+class TestWorkloadParamsConstant:
+    """WORKLOAD_PARAMS lives in mlpstorage_py.benchmarks.kvcache — the single
+    source of truth for per-option MLPerf v3.0 workloads. Previously it lived
+    in kv_cache_benchmark/mlperf_wrapper.py; centralizing it here is what
+    closes issues #498 and #500."""
+
+    def test_options_are_1_2_3(self):
+        from mlpstorage_py.benchmarks.kvcache import WORKLOAD_PARAMS
+        assert set(WORKLOAD_PARAMS.keys()) == {1, 2, 3}
+
+    def test_option1_model_is_8b(self):
+        from mlpstorage_py.benchmarks.kvcache import WORKLOAD_PARAMS
+        assert WORKLOAD_PARAMS[1]['model'] == 'llama3.1-8b'
+
+    def test_option3_model_is_70b(self):
+        from mlpstorage_py.benchmarks.kvcache import WORKLOAD_PARAMS
+        assert WORKLOAD_PARAMS[3]['model'] == 'llama3.1-70b-instruct'
+
+    def test_generation_mode_always_none(self):
+        from mlpstorage_py.benchmarks.kvcache import WORKLOAD_PARAMS
+        for opt in (1, 2, 3):
+            assert WORKLOAD_PARAMS[opt]['generation-mode'] == 'none'
+
+
+class TestBuildOptionKvcacheArgs:
+    """Per-option kv-cache.py CLI args returned by _build_option_kvcache_args.
+
+    Verifies CLOSED uses the mandated WORKLOAD_PARAMS verbatim and OPEN lets
+    user-set CLI flags supersede the per-option defaults — the behavior the
+    old in-wrapper squashing prevented (issues #498 and #500)."""
+
+    def test_closed_emits_workload_params_verbatim_for_option1(self, tmp_path):
+        from mlpstorage_py.benchmarks.kvcache import WORKLOAD_PARAMS
+        bm = _make_run_benchmark(tmp_path)
+        # Even if args carry non-default values, CLOSED ignores them.
+        bm.args.model = 'llama3.1-70b-instruct'
+        bm.args.num_users = 999
+        out = bm._build_option_kvcache_args(1, is_closed=True)
+        assert '--model' in out and out[out.index('--model') + 1] == WORKLOAD_PARAMS[1]['model']
+        assert '--num-users' in out and out[out.index('--num-users') + 1] == str(WORKLOAD_PARAMS[1]['num-users'])
+
+    def test_closed_emits_option3_70b_model(self, tmp_path):
+        bm = _make_run_benchmark(tmp_path)
+        out = bm._build_option_kvcache_args(3, is_closed=True)
+        assert out[out.index('--model') + 1] == 'llama3.1-70b-instruct'
+
+    def test_open_user_args_override_defaults(self, tmp_path):
+        """Issue #498: in OPEN, user CLI args must reach kv-cache.py."""
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.model = 'llama3.1-70b-instruct'
+        bm.args.num_users = 42
+        bm.args.duration = 600
+        bm.args.gpu_mem_gb = 8
+        bm.args.cpu_mem_gb = 16
+        bm.args.generation_mode = 'realistic'
+        out = bm._build_option_kvcache_args(1, is_closed=False)
+        assert out[out.index('--model') + 1] == 'llama3.1-70b-instruct'
+        assert out[out.index('--num-users') + 1] == '42'
+        assert out[out.index('--duration') + 1] == '600'
+        assert out[out.index('--gpu-mem-gb') + 1] == '8'
+        assert out[out.index('--cpu-mem-gb') + 1] == '16'
+        assert out[out.index('--generation-mode') + 1] == 'realistic'
+
+    def test_open_falls_back_to_workload_params_when_args_missing(self, tmp_path):
+        """In OPEN, attributes the user did not set come from WORKLOAD_PARAMS."""
+        from mlpstorage_py.benchmarks.kvcache import WORKLOAD_PARAMS
+        bm = _make_run_benchmark(tmp_path)
+        for attr in ('model', 'num_users', 'duration', 'gpu_mem_gb',
+                     'cpu_mem_gb', 'generation_mode'):
+            if hasattr(bm.args, attr):
+                delattr(bm.args, attr)
+        out = bm._build_option_kvcache_args(2, is_closed=False)
+        assert out[out.index('--model') + 1] == WORKLOAD_PARAMS[2]['model']
+        assert out[out.index('--num-users') + 1] == str(WORKLOAD_PARAMS[2]['num-users'])
+        assert out[out.index('--cpu-mem-gb') + 1] == str(WORKLOAD_PARAMS[2]['cpu-mem-gb'])
+
+    def test_max_concurrent_allocs_always_from_workload_params(self, tmp_path):
+        """max-concurrent-allocs is not user-exposed even in OPEN — it
+        always tracks the per-option WORKLOAD_PARAMS value."""
+        from mlpstorage_py.benchmarks.kvcache import WORKLOAD_PARAMS
+        bm = _make_run_benchmark(tmp_path)
+        out_open = bm._build_option_kvcache_args(3, is_closed=False)
+        out_closed = bm._build_option_kvcache_args(3, is_closed=True)
+        expected = str(WORKLOAD_PARAMS[3]['max-concurrent-allocs'])
+        assert out_open[out_open.index('--max-concurrent-allocs') + 1] == expected
+        assert out_closed[out_closed.index('--max-concurrent-allocs') + 1] == expected
+
+
+class TestWrapperCommandForwardsPerOptionArgs:
+    """End-to-end check that the wrapper invocation built by _execute_run
+    contains the per-option model/num-users/etc., so kv-cache.py receives
+    them downstream of mlperf_wrapper.py."""
+
+    def _capture_first_cmd(self, bm, fake_agg_result):
+        executed = []
+        def fake_execute(cmd, **kwargs):
+            executed.append(cmd)
+            return ('', '', 0)
+        with patch.object(bm, '_execute_command', side_effect=fake_execute), \
+             patch.object(bm, '_interruptible_sleep'), \
+             patch.object(bm, '_aggregate_option_results', return_value=fake_agg_result), \
+             patch.object(bm, '_write_run_summary'), \
+             patch.object(bm, 'write_metadata'):
+            bm._execute_run()
+        return executed[0]
+
+    def _fake_agg(self):
+        return {
+            'option': 1, 'aggregated_read_bandwidth_gbps': 0.0,
+            'aggregated_write_bandwidth_gbps': 0.0,
+            'aggregated_avg_throughput_tokens_per_sec': 0.0,
+            'aggregated_storage_throughput_tokens_per_sec': 0.0,
+            'aggregated_p95_latency_ms': 0.0,
+            'rank_count': 1, 'trial_count': 1,
+            'partial_failure': False, 'missing_files': [], 'cpu_tier_ranks': [],
+        }
+
+    def test_closed_option1_wrapper_cmd_contains_8b_model(self, tmp_path):
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.mode = 'closed'
+        # CLOSED requires trials=3 and inter_option_delay=20 (the fixture's
+        # values); overriding them would trigger CLOSED enforcement and
+        # short-circuit before any command is built.
+        cmd0 = self._capture_first_cmd(bm, self._fake_agg())
+        assert '--model llama3.1-8b' in cmd0
+        assert '--num-users 200' in cmd0
+        assert '--max-concurrent-allocs 16' in cmd0
+
+    def test_open_user_model_appears_in_wrapper_cmd(self, tmp_path):
+        """Issue #498: user --model must reach the wrapper-built command."""
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.mode = 'open'
+        bm.args.model = 'llama3.1-70b-instruct'
+        bm.args.num_users = 33
+        bm.args.trials = 1
+        bm.args.inter_option_delay = 0
+        cmd0 = self._capture_first_cmd(bm, self._fake_agg())
+        assert '--model llama3.1-70b-instruct' in cmd0
+        assert '--num-users 33' in cmd0
+
+    def test_wrapper_cmd_contains_config_path(self, tmp_path):
+        """mlpstorage now owns the config path; it must be passed to the wrapper."""
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.trials = 1
+        bm.args.inter_option_delay = 0
+        cmd0 = self._capture_first_cmd(bm, self._fake_agg())
+        assert '--config' in cmd0
+
+    def _capture_all_cmds(self, bm, fake_agg_result):
+        """Capture every per-option/per-trial wrapper command built by _execute_run."""
+        executed = []
+        def fake_execute(cmd, **kwargs):
+            executed.append(cmd)
+            return ('', '', 0)
+        with patch.object(bm, '_execute_command', side_effect=fake_execute), \
+             patch.object(bm, '_interruptible_sleep'), \
+             patch.object(bm, '_aggregate_option_results', return_value=fake_agg_result), \
+             patch.object(bm, '_write_run_summary'), \
+             patch.object(bm, 'write_metadata'):
+            bm._execute_run()
+        return executed
+
+    def test_open_option3_defaults_to_70b_when_user_did_not_override(self, tmp_path):
+        """OPEN with no --model override: option 3 must still receive the
+        MLPerf-mandated llama70b model from WORKLOAD_PARAMS[3]. Closes the
+        gap between _build_option_kvcache_args (covered) and the actual
+        wrapper command (was uncovered)."""
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.mode = 'open'
+        bm.args.trials = 1
+        bm.args.inter_option_delay = 0
+        # Remove the fixture's model/num-users defaults so the fallback path
+        # in _build_option_kvcache_args is exercised — this mirrors the case
+        # where the OPEN user invoked the run without those flags.
+        for attr in ('model', 'num_users'):
+            if hasattr(bm.args, attr):
+                delattr(bm.args, attr)
+        cmds = self._capture_all_cmds(bm, self._fake_agg())
+        assert len(cmds) == 3, f"Expected 3 commands (one per option), got {len(cmds)}"
+        # cmds[0] is option 1, cmds[1] is option 2, cmds[2] is option 3
+        assert '--model llama3.1-8b' in cmds[0]
+        assert '--num-users 200' in cmds[0]
+        assert '--model llama3.1-8b' in cmds[1]
+        assert '--num-users 100' in cmds[1]
+        assert '--model llama3.1-70b-instruct' in cmds[2]
+        assert '--num-users 70' in cmds[2]
+
+    def test_open_user_config_path_supersedes_wrapper_default(self, tmp_path):
+        """OPEN: when the user provides --config /custom/path.yaml, mlpstorage
+        forwards that exact path to the wrapper instead of the kv-cache.py
+        adjacent default. (CLOSED rejects --config — covered separately.)"""
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.mode = 'open'
+        bm.args.config = '/custom/path/user.yaml'
+        bm.args.trials = 1
+        bm.args.inter_option_delay = 0
+        cmd0 = self._capture_first_cmd(bm, self._fake_agg())
+        assert '--config /custom/path/user.yaml' in cmd0, \
+            f"User config path missing from cmd: {cmd0}"
+        # And the wrapper-adjacent default must NOT also be present.
+        assert 'kv_cache_benchmark/config.yaml' not in cmd0, \
+            f"Default config path leaked into cmd alongside user override: {cmd0}"
+
+
+class TestResolveRankLayout:
+    """Tests for KVCacheBenchmark._resolve_rank_layout (issue #500).
+
+    --num-processes was previously a dead flag — registered on the kvcache
+    distributed-execution group but never read by _execute_run. Total ranks
+    were computed solely from npernode * len(hosts), so a user passing
+    --num-processes 2 with the default --npernode 1 still got one rank per
+    host. This class covers the new resolver semantics:
+
+      - --num-processes is total cluster ranks (matches the flag's help
+        text and DLIO's --num-accelerators convention).
+      - --npernode is ranks per host.
+      - When only one is set, the other is derived.
+      - When both are set, they must be consistent.
+      - --num-processes must divide evenly across the host list.
+    """
+
+    def test_only_npernode_uses_today_behavior(self, tmp_path):
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.num_processes = None
+        bm.args.npernode = 4
+        npn, total = bm._resolve_rank_layout(['h1', 'h2'])
+        assert npn == 4
+        assert total == 8
+
+    def test_only_num_processes_single_host(self, tmp_path):
+        """The exact scenario dslik reproduced in issue #500."""
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.num_processes = 2
+        bm.args.npernode = 1  # the CLI default — treated as 'not explicitly set'
+        npn, total = bm._resolve_rank_layout(['localhost'])
+        assert total == 2, "num_processes=2 with one host must produce 2 total ranks"
+        assert npn == 2
+
+    def test_only_num_processes_multi_host_even_divide(self, tmp_path):
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.num_processes = 8
+        bm.args.npernode = 1
+        npn, total = bm._resolve_rank_layout(['h1', 'h2', 'h3', 'h4'])
+        assert total == 8
+        assert npn == 2
+
+    def test_num_processes_not_divisible_by_hosts_fails(self, tmp_path):
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.num_processes = 5
+        bm.args.npernode = 1
+        npn, total = bm._resolve_rank_layout(['h1', 'h2'])
+        assert (npn, total) == (None, None)
+
+    def test_both_set_consistent(self, tmp_path):
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.num_processes = 6
+        bm.args.npernode = 3
+        npn, total = bm._resolve_rank_layout(['h1', 'h2'])
+        assert npn == 3
+        assert total == 6
+
+    def test_both_set_inconsistent_fails(self, tmp_path):
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.num_processes = 5
+        bm.args.npernode = 3
+        npn, total = bm._resolve_rank_layout(['h1', 'h2'])
+        assert (npn, total) == (None, None)
+
+    def test_neither_set_defaults_one_per_host(self, tmp_path):
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.num_processes = None
+        bm.args.npernode = None
+        npn, total = bm._resolve_rank_layout(['h1', 'h2', 'h3'])
+        assert npn == 1
+        assert total == 3
+
+    def test_negative_num_processes_fails(self, tmp_path):
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.num_processes = -1
+        bm.args.npernode = 1
+        npn, total = bm._resolve_rank_layout(['h1'])
+        assert (npn, total) == (None, None)
+
+
+class TestExecuteRunHonorsNumProcesses:
+    """End-to-end check that _execute_run actually uses --num-processes.
+
+    Repro of issue #500: with --num-processes 2 on a single host, the
+    wrapper-launch mpirun command must request 2 ranks (not 1)."""
+
+    def _capture_first_cmd(self, bm):
+        executed = []
+        def fake_execute(cmd, **kwargs):
+            executed.append(cmd)
+            return ('', '', 0)
+        agg = {
+            'option': 1, 'aggregated_read_bandwidth_gbps': 0.0,
+            'aggregated_write_bandwidth_gbps': 0.0,
+            'aggregated_avg_throughput_tokens_per_sec': 0.0,
+            'aggregated_storage_throughput_tokens_per_sec': 0.0,
+            'aggregated_p95_latency_ms': 0.0,
+            'rank_count': 1, 'trial_count': 1,
+            'partial_failure': False, 'missing_files': [], 'cpu_tier_ranks': [],
+        }
+        with patch.object(bm, '_execute_command', side_effect=fake_execute), \
+             patch.object(bm, '_interruptible_sleep'), \
+             patch.object(bm, '_aggregate_option_results', return_value=agg), \
+             patch.object(bm, '_write_run_summary'), \
+             patch.object(bm, 'write_metadata'):
+            bm._execute_run()
+        return executed[0] if executed else None
+
+    def test_num_processes_2_single_host_launches_2_ranks(self, tmp_path):
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.trials = 1
+        bm.args.inter_option_delay = 0
+        bm.args.num_processes = 2
+        bm.args.hosts = ['localhost']
+        cmd = self._capture_first_cmd(bm)
+        assert cmd is not None, "Expected at least one wrapper command"
+        assert '-n 2 ' in cmd, f"Expected '-n 2' in mpirun cmd, got: {cmd}"
+        assert '--npernode 2' in cmd, f"Expected '--npernode 2' in mpirun cmd, got: {cmd}"
+
+    def test_num_processes_inconsistent_fails_run(self, tmp_path):
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.trials = 1
+        bm.args.inter_option_delay = 0
+        bm.args.num_processes = 5  # not divisible by 2 hosts
+        bm.args.hosts = ['h1', 'h2']
+        with patch.object(bm, '_execute_command') as mock_exec, \
+             patch.object(bm, '_interruptible_sleep'), \
+             patch.object(bm, '_aggregate_option_results'), \
+             patch.object(bm, '_write_run_summary'), \
+             patch.object(bm, 'write_metadata'):
+            rc = bm._execute_run()
+        assert rc == 1
+        mock_exec.assert_not_called()
+
+
+class TestProbeResultsDirShared:
+    """Tests for KVCacheBenchmark._probe_results_dir_shared.
+
+    Issue #521: kvcache must fail fast when --results-dir is not visible at
+    the same path on every host in --hosts. Otherwise rank result files
+    written on remote nodes are invisible to the controller's aggregation.
+    """
+
+    def test_localhost_only_is_noop(self, tmp_path):
+        """All-localhost runs cannot exhibit the bug; probe must not spawn mpi."""
+        bm = _make_run_benchmark(tmp_path)
+        with patch.object(bm, '_execute_command') as mock_exec:
+            bm._probe_results_dir_shared(['localhost'])
+        mock_exec.assert_not_called()
+
+    def test_single_host_is_noop(self, tmp_path):
+        """A single-host run (even non-localhost) cannot scatter results."""
+        bm = _make_run_benchmark(tmp_path)
+        with patch.object(bm, '_execute_command') as mock_exec:
+            bm._probe_results_dir_shared(['h1'])
+        mock_exec.assert_not_called()
+
+    def test_passes_when_all_hosts_write_sentinel(self, tmp_path):
+        """Shared FS: each host writes its sentinel; probe returns cleanly."""
+        bm = _make_run_benchmark(tmp_path)
+
+        def fake_execute(cmd, **kwargs):
+            # Simulate every host successfully landing its sentinel in the
+            # probe dir (which is what a shared FS would produce).
+            probe_dir = Path(bm.run_result_output) / '.fs_probe'
+            assert probe_dir.exists(), "probe dir should be pre-created"
+            # Extract probe_id from the embedded inline script in the command.
+            import re
+            m = re.search(r"'([0-9a-f]{12})__rank'", cmd)
+            assert m is not None, f"probe_id not found in cmd: {cmd}"
+            probe_id = m.group(1)
+            for rank, host in enumerate(['h1', 'h2', 'h3']):
+                marker = probe_dir / f"{probe_id}__rank{rank}__{host}.ok"
+                marker.write_text(host)
+            return ('', '', 0)
+
+        with patch.object(bm, '_execute_command', side_effect=fake_execute):
+            bm._probe_results_dir_shared(['h1', 'h2', 'h3'])
+
+    def test_raises_when_remote_hosts_miss_sentinel(self, tmp_path):
+        """Non-shared FS: only the controller's sentinel is visible; fail."""
+        bm = _make_run_benchmark(tmp_path)
+
+        def fake_execute(cmd, **kwargs):
+            import re
+            probe_dir = Path(bm.run_result_output) / '.fs_probe'
+            m = re.search(r"'([0-9a-f]{12})__rank'", cmd)
+            probe_id = m.group(1)
+            # Only one host out of three landed a sentinel — the other two
+            # wrote to their own local FS (invisible to the controller).
+            (probe_dir / f"{probe_id}__rank0__h1.ok").write_text('h1')
+            return ('', '', 0)
+
+        with patch.object(bm, '_execute_command', side_effect=fake_execute):
+            with pytest.raises(RuntimeError) as excinfo:
+                bm._probe_results_dir_shared(['h1', 'h2', 'h3'])
+        msg = str(excinfo.value)
+        assert 'not visible on every host' in msg
+        assert 'shared' in msg.lower() or 'NFS' in msg
+        # Hostnames the user passed must surface in the diagnostic.
+        assert 'h2' in msg and 'h3' in msg
+
+    def test_strips_slot_suffixes_before_probing(self, tmp_path):
+        """--hosts 'h1:4 h2:4' should probe 2 unique hosts, not 8."""
+        bm = _make_run_benchmark(tmp_path)
+        captured = {}
+
+        def fake_execute(cmd, **kwargs):
+            captured['cmd'] = cmd
+            # Land sentinels for both unique hosts.
+            import re
+            probe_dir = Path(bm.run_result_output) / '.fs_probe'
+            m = re.search(r"'([0-9a-f]{12})__rank'", cmd)
+            probe_id = m.group(1)
+            (probe_dir / f"{probe_id}__rank0__h1.ok").write_text('h1')
+            (probe_dir / f"{probe_id}__rank1__h2.ok").write_text('h2')
+            return ('', '', 0)
+
+        with patch.object(bm, '_execute_command', side_effect=fake_execute):
+            bm._probe_results_dir_shared(['h1:4', 'h2:4'])
+
+        # 1 rank per unique host, with :1 slot pinning in the host arg.
+        assert '-n 2 ' in captured['cmd']
+        assert '-host h1:1,h2:1' in captured['cmd']
+
+    def test_execute_run_invokes_probe_for_multi_host(self, tmp_path):
+        """_execute_run should call the probe when --hosts has remote entries."""
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.trials = 1
+        bm.args.inter_option_delay = 0
+        bm.args.num_processes = 2
+        bm.args.npernode = 1  # consistent with num_processes=2 across 2 hosts
+        bm.args.hosts = ['h1', 'h2']
+        agg = {
+            'option': 1, 'aggregated_read_bandwidth_gbps': 0.0,
+            'aggregated_write_bandwidth_gbps': 0.0,
+            'aggregated_avg_throughput_tokens_per_sec': 0.0,
+            'aggregated_storage_throughput_tokens_per_sec': 0.0,
+            'aggregated_p95_latency_ms': 0.0,
+            'rank_count': 2, 'trial_count': 1,
+            'partial_failure': False, 'missing_files': [], 'cpu_tier_ranks': [],
+        }
+        with patch.object(bm, '_probe_results_dir_shared') as mock_probe, \
+             patch.object(bm, '_execute_command', return_value=('', '', 0)), \
+             patch.object(bm, '_interruptible_sleep'), \
+             patch.object(bm, '_aggregate_option_results', return_value=agg), \
+             patch.object(bm, '_write_run_summary'), \
+             patch.object(bm, 'write_metadata'):
+            bm._execute_run()
+        mock_probe.assert_called_once_with(['h1', 'h2'])
+
+    def test_execute_run_skips_probe_in_what_if_mode(self, tmp_path):
+        """--what-if must not spawn mpirun probes (no execution at all)."""
+        bm = _make_run_benchmark(tmp_path, what_if=True)
+        bm.args.trials = 1
+        bm.args.inter_option_delay = 0
+        bm.args.num_processes = 2
+        bm.args.npernode = 1
+        bm.args.hosts = ['h1', 'h2']
+        with patch.object(bm, '_probe_results_dir_shared') as mock_probe, \
+             patch.object(bm, '_execute_command', return_value=('', '', 0)), \
+             patch.object(bm, '_interruptible_sleep'), \
+             patch.object(bm, '_aggregate_option_results'), \
+             patch.object(bm, '_write_run_summary'), \
+             patch.object(bm, 'write_metadata'):
+            bm._execute_run()
+        mock_probe.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Phase 02 / Plan 02-05 — non-DLIO regression: assert the shared
+# Benchmark.run() systemname.yaml write hook fires for KVCacheBenchmark.
+# ---------------------------------------------------------------------------
+
+
+class TestKVCacheSystemnameYamlHook:
+    """KVCacheBenchmark inherits Benchmark.run() — the LIFE-01 hook must
+    fire for it just as for DLIO-based benchmarks. If a future refactor
+    overrides run() on the subclass and accidentally drops the hook, these
+    tests catch the regression.
+
+    The shared fixture `_make_run_benchmark` uses `mode='open'` (see its
+    docstring: the strict CLOSED-mode override checks in _execute_run would
+    otherwise fire on tests that deliberately override those args). We
+    therefore assert the file lands at `<tmp>/open/Acme/systems/sys-v1.yaml`.
+    """
+
+    def _install_cluster_info_mock(self, bm):
+        """Mock _collect_cluster_start so it populates self._cluster_info_start
+        with a one-host MagicMock fleet — the production write hook reads
+        host_info_list from this attribute."""
+        from mlpstorage_py.rules.models import HostCPUInfo, HostInfo, HostMemoryInfo
+        from mlpstorage_py.cluster_collector import HostSystemInfo
+
+        host = HostInfo(
+            hostname='h0',
+            cpu=HostCPUInfo(
+                model='Intel(R) Xeon Platinum 8480+',
+                num_cores=56, num_logical_cores=112, num_sockets=2,
+                architecture='x86_64',
+            ),
+            memory=HostMemoryInfo(total=274_877_906_944),
+            system=HostSystemInfo(
+                hostname='h0',
+                os_release={'NAME': 'Rocky Linux', 'VERSION_ID': '9.5'},
+            ),
+        )
+        cluster_info_mock = MagicMock(host_info_list=[host])
+
+        def _side_effect():
+            bm._cluster_info_start = cluster_info_mock
+            bm._collection_method = 'mpi'
+
+        bm._collect_cluster_start = MagicMock(side_effect=_side_effect)
+
+    def _mock_remaining_lifecycle(self, bm):
+        bm._validate_environment = MagicMock()
+        bm._start_timeseries_collection = MagicMock()
+        bm._stop_timeseries_collection = MagicMock()
+        bm._collect_cluster_end = MagicMock()
+        bm.write_timeseries_data = MagicMock()
+        bm._run = MagicMock(return_value=0)
+
+    def test_kvcache_run_writes_systemname_yaml(self, tmp_path):
+        """KVCacheBenchmark.run() must write systemname.yaml at the canonical
+        path (Phase 02 LIFE-01, regression coverage for the shared base hook
+        on non-DLIO benchmarks)."""
+        bm = _make_run_benchmark(tmp_path)
+        # Fixture uses mode='open', orgname='Acme', systemname='sys-v1' —
+        # see _make_run_benchmark docstring.
+        self._install_cluster_info_mock(bm)
+        self._mock_remaining_lifecycle(bm)
+
+        rc = bm.run()
+        assert rc == 0
+
+        target = tmp_path / 'open' / 'Acme' / 'systems' / 'sys-v1.yaml'
+        assert target.exists(), (
+            f"KVCacheBenchmark.run() should have written systemname.yaml at "
+            f"{target}; this is the LIFE-01 non-DLIO regression coverage."
+        )

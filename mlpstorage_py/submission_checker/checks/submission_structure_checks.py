@@ -21,11 +21,18 @@ Per PITFALLS.md #2: no ``.lower()`` calls — case comparisons are byte-exact.
 import json
 import os
 import re
+from pathlib import Path
 
 from .base import BaseCheck
 from ..configuration.configuration import Config
 from ..rule_registry import rule
 from ..tools.code_checksum import compute_code_tree_md5
+from ..tools.code_image import (
+    verify_image_self_consistent,
+    CodeImageError,
+    MissingHashFile,
+    MalformedHashFile,
+)
 from ..utils import list_dir, list_files
 from ..parsers.yaml_parser import YamlParser
 
@@ -38,8 +45,34 @@ _SUBMITTER_NAME_RE = re.compile(r"^[A-Za-z0-9._-]+$")
 # Allowed top-level divisions (case-sensitive, PITFALLS.md #2)
 _VALID_DIVISIONS = frozenset({"closed", "open"})
 
-# Required submitter subdirectories (case-sensitive set equality)
-_REQUIRED_SUBMITTER_SUBDIRS = frozenset({"code", "results", "systems"})
+# Benchmark-type directory names whose OPEN leaf shape has no per-leaf
+# segment between <type>/ and code/ — code/ lives directly at <type>/code/.
+#
+# vector_database is NOT in this set: AISAQ results are not comparable to
+# DISKANN/HNSW, so its leaf shape is vector_database/<index_type>/code/ —
+# same 3-level walk as training (<model>) and checkpointing (<model>). The
+# index directory uses the UPPERCASE token (DISKANN/HNSW/AISAQ), matching
+# args.index_type and summary.json.index_type.
+#
+# kv_cache stays here transitionally — its directory/file structure below
+# the <type>/ prefix will be finalized in a follow-up plan. Once the
+# per-(model, operation) split is specified, this entry will move into the
+# standard 3-level walk too.
+#
+# Mirror set kept inline (rather than imported from tools.code_image) to
+# avoid pulling the helper module's runtime dependencies into the validator.
+_OPEN_TYPES_WITHOUT_MODEL = frozenset({"kv_cache"})
+
+# Mode-aware required submitter-level subdirectory sets per Rules.md §2.1.5 split (D-17).
+# CLOSED: {code, results, systems} at the submitter level.
+# OPEN:   {results, systems} at the submitter level; code/ lives at each
+#         results/<sys>/<type>/<model>/ leaf (see code_directory_contents_check
+#         and Rules.md §2.1.5.b / §2.1.27 OPEN subtree).
+_REQUIRED_SUBMITTER_SUBDIRS_CLOSED = frozenset({"code", "results", "systems"})
+_REQUIRED_SUBMITTER_SUBDIRS_OPEN = frozenset({"results", "systems"})
+
+# Legacy alias for CLOSED — see _REQUIRED_SUBMITTER_SUBDIRS_CLOSED.
+_REQUIRED_SUBMITTER_SUBDIRS = _REQUIRED_SUBMITTER_SUBDIRS_CLOSED
 
 # Valid workload categories under results/<system>/
 _VALID_WORKLOAD_CATEGORIES = frozenset({"training", "checkpointing"})
@@ -109,6 +142,57 @@ class SubmissionStructureCheck(BaseCheck):
             div_path = os.path.join(self.root_path, division)
             for submitter in list_dir(div_path):
                 yield division, submitter, os.path.join(div_path, submitter)
+
+    def _iter_open_code_dirs(self, submitter_path):
+        """Yield each per-leaf code/ path under an OPEN submitter (D-15).
+
+        The leaf shape depends on the benchmark type:
+
+        - training, checkpointing → results/<sys>/<type>/<model>/code/
+          (runtime output is keyed per model).
+        - vector_database → results/<sys>/vector_database/<index_type>/code/
+          (results split by index type — AISAQ/DISKANN/HNSW results are not
+          comparable and live in separate trees; the index directory uses
+          the UPPERCASE token, matching args.index_type).
+        - kv_cache → results/<sys>/<type>/code/
+          (transitional shape — kv_cache directory structure below the
+          <type>/ prefix will be finalized in a follow-up plan).
+
+        Per Rules.md §2.1.27 OPEN subtree, code/ lives at each leaf rather
+        than at the submitter level. This generator yields the absolute
+        code/ path for every leaf — whether or not the directory currently
+        exists on disk (the caller decides what to do with the path).
+        """
+        results = os.path.join(submitter_path, "results")
+        if not os.path.isdir(results):
+            return
+        for sys_name in list_dir(results):
+            # Skip dot-prefixed entries (.git/, .github/, .cache/, .DS_Store, etc.) —
+            # every sibling check in this file already filters them, and yielding a
+            # synthetic code/ path under one produces a spurious 2.1.6 violation.
+            if sys_name.startswith("."):
+                continue
+            sys_path = os.path.join(results, sys_name)
+            if not os.path.isdir(sys_path):
+                continue
+            for wtype in list_dir(sys_path):
+                if wtype.startswith("."):
+                    continue
+                wtype_path = os.path.join(sys_path, wtype)
+                if not os.path.isdir(wtype_path):
+                    continue
+                if wtype in _OPEN_TYPES_WITHOUT_MODEL:
+                    # kv_cache (transitional): code/ is a direct child of
+                    # <type>/ — no per-leaf segment yet (see _OPEN_TYPES_WITHOUT_MODEL).
+                    yield os.path.join(wtype_path, "code")
+                    continue
+                for model in list_dir(wtype_path):
+                    if model.startswith("."):
+                        continue
+                    model_path = os.path.join(wtype_path, model)
+                    if not os.path.isdir(model_path):
+                        continue
+                    yield os.path.join(model_path, "code")
 
     def _load_json_safe(self, json_path):
         """Return parsed JSON dict or None on any error (silently)."""
@@ -255,26 +339,41 @@ class SubmissionStructureCheck(BaseCheck):
 
     @rule("2.1.5", "requiredSubdirectories")
     def required_subdirectories_check(self):
-        """STRUCT-05: submitter dir must contain EXACTLY {code, results, systems}.
+        """STRUCT-05: submitter dir must contain EXACTLY the required set for its division.
+
+        Per Rules.md §2.1.5 split (D-17):
+          - CLOSED submitter dir: {code, results, systems}
+          - OPEN   submitter dir: {results, systems}   (code/ lives per-leaf in OPEN)
 
         Dot-prefixed entries are silently skipped (e.g. .DS_Store, .cache/).
 
-        When an unexpected subdirectory itself contains some of {code, results,
-        systems}, the diagnostic includes a wrapping hint — this catches the
-        common v2.0 submitter mistake of nesting the package one level deeper
-        than the spec requires (e.g. closed/<submitter>/benchmarks/{code,
-        results, systems}/ instead of closed/<submitter>/{code, results,
-        systems}/).
+        When an unexpected subdirectory itself contains some of the division's
+        required set, the diagnostic includes a wrapping hint — this catches
+        the common v2.0 submitter mistake of nesting the package one level
+        deeper than the spec requires.
+
+        Violation messages route through the sub-rule anchors
+        `requiredSubdirectoriesClosed` (CLOSED) and `requiredSubdirectoriesOpen`
+        (OPEN), matching the §2.1.5.a / §2.1.5.b sub-rules in Rules.md. The
+        rule-id passed to `log_violation` stays `"2.1.5"` (the top-level rule
+        number is unchanged — only the per-violation sub-rule anchor splits).
         """
         valid = True
         for division, submitter, sub_path in self._iter_submitter_dirs():
+            if division == "closed":
+                required = _REQUIRED_SUBMITTER_SUBDIRS_CLOSED
+                anchor = "requiredSubdirectoriesClosed"
+            else:  # open
+                required = _REQUIRED_SUBMITTER_SUBDIRS_OPEN
+                anchor = "requiredSubdirectoriesOpen"
+
             actual = {e for e in list_dir(sub_path) if not e.startswith(".")}
-            missing = _REQUIRED_SUBMITTER_SUBDIRS - actual
-            extra = actual - _REQUIRED_SUBMITTER_SUBDIRS
+            missing = required - actual
+            extra = actual - required
 
             for m in sorted(missing):
                 self.log_violation(
-                    "2.1.5", "requiredSubdirectories",
+                    "2.1.5", anchor,
                     os.path.join(sub_path, m),
                     "required subdirectory %r missing from %s/%s",
                     m, division, submitter,
@@ -288,7 +387,7 @@ class SubmissionStructureCheck(BaseCheck):
                     nested = {
                         n for n in list_dir(extra_path) if not n.startswith(".")
                     }
-                    wrapped = sorted(nested & _REQUIRED_SUBMITTER_SUBDIRS)
+                    wrapped = sorted(nested & required)
                     if wrapped:
                         hint = (
                             "; the submission appears to be nested one level "
@@ -297,11 +396,11 @@ class SubmissionStructureCheck(BaseCheck):
                             % (wrapped, division, submitter)
                         )
                 self.log_violation(
-                    "2.1.5", "requiredSubdirectories",
+                    "2.1.5", anchor,
                     extra_path,
                     "unexpected subdirectory %r in %s/%s "
-                    "(only code/results/systems allowed)%s",
-                    e, division, submitter, hint,
+                    "(allowed: %s)%s",
+                    e, division, submitter, sorted(required), hint,
                 )
                 valid = False
 
@@ -313,45 +412,109 @@ class SubmissionStructureCheck(BaseCheck):
 
     @rule("2.1.6", "codeDirectoryContents")
     def code_directory_contents_check(self):
-        """STRUCT-06: for CLOSED submissions, verify code/ tree MD5.
+        """STRUCT-06: per-tree self-consistency for CLOSED + OPEN; layered REFERENCE_CHECKSUMS for CLOSED only.
 
-        Per D-12: when reference checksum is None, emit WARNING and return
-        True (does not fail the run). The no-checksum warning is hoisted out
-        of the per-submitter loop so an unconfigured invocation emits one
-        warning per run rather than one per submitter (which would spam the
-        report against N-submitter merged trees).
+        D-11 layered model:
+          - CLOSED leaves: self-consistency (VALS-02) AND REFERENCE_CHECKSUMS
+            upstream-identity (when configured).
+          - OPEN leaves:   self-consistency (VALS-04) only — OPEN allows source
+            modifications by spec, so there is no upstream digest to enforce.
+
+        D-14: separate violations for missing-code/ (VALS-01/03) vs hash-mismatch
+        (VALS-02/04). D-15: walk strategy uses _iter_submitter_dirs for the
+        closed/ subtree (one code/ per submitter) and the nested
+        _iter_open_code_dirs for the open/ subtree (one code/ per
+        results/<sys>/<type>/<model>/ leaf).
+
+        D-12 single-warning behavior is preserved: when get_reference_checksum()
+        returns None AND a closed/ subtree is present, exactly one warning
+        fires per run, with an addendum noting that the self-consistency
+        check still ran on every leaf.
         """
         valid = True
+        expected = self.config.get_reference_checksum()  # CLOSED layered check, D-11
+
+        for division, submitter, sub_path in self._iter_submitter_dirs():
+            if division == "closed":
+                code_paths = [os.path.join(sub_path, "code")]
+            else:  # open — nested glob per D-15
+                code_paths = list(self._iter_open_code_dirs(sub_path))
+
+            for code_path in code_paths:
+                if not os.path.isdir(code_path):
+                    # VALS-01 / VALS-03 — missing code/
+                    self.log_violation(
+                        "2.1.6", "codeDirectoryContents",
+                        code_path,
+                        "required code/ directory missing at %s", code_path,
+                    )
+                    valid = False
+                    continue
+
+                # VALS-02 / VALS-04 — self-consistency (CLOSED and OPEN).
+                # Same accumulate-don't-abort + short-circuit-on-missing-anchor
+                # pattern as _check_code_image_layered (helpers.py): a missing
+                # .code-hash.json already invalidates the leaf; the upstream-
+                # identity walk below would just add a contradictory second
+                # violation per leaf with no diagnostic value.
+                hashfile_present = True
+                try:
+                    if not verify_image_self_consistent(Path(code_path), self.log):
+                        self.log_violation(
+                            "2.1.6", "codeDirectoryContents",
+                            code_path,
+                            "code tree hash does not match .code-hash.json at %s",
+                            code_path,
+                        )
+                        valid = False
+                except MissingHashFile as e:
+                    hashfile_present = False
+                    self.log_violation(
+                        "2.1.6", "codeDirectoryContents",
+                        code_path,
+                        "%s", str(e),
+                    )
+                    valid = False
+                except (MalformedHashFile, CodeImageError) as e:
+                    self.log_violation(
+                        "2.1.6", "codeDirectoryContents",
+                        code_path,
+                        "%s", str(e),
+                    )
+                    valid = False
+
+                # D-11 layered: REFERENCE_CHECKSUMS upstream-identity (CLOSED only)
+                if division == "closed" and expected is not None and hashfile_present:
+                    digest = compute_code_tree_md5(code_path, self.log)
+                    if digest != expected:
+                        self.log_violation(
+                            "2.1.6", "codeDirectoryContents",
+                            code_path,
+                            "code tree MD5 mismatch: expected %s, got %s",
+                            expected, digest,
+                        )
+                        valid = False
+
+        # D-11/D-12 preserved: emit the "not pinned" warning exactly once per
+        # run when REFERENCE_CHECKSUMS is unset AND a closed/ subtree exists
+        # AND that subtree actually contains a submitter (any non-dot entry).
+        # An empty closed/ — or one with only dotfiles like .DS_Store — has no
+        # code/ checks to skip, so the warning would be noise.
         closed_path = os.path.join(self.root_path, "closed")
-        if not os.path.isdir(closed_path):
-            return valid  # no closed/ — nothing to check
-
-        expected = self.config.get_reference_checksum()
-        if expected is None:
-            self.warn_violation(
-                "2.1.6", "codeDirectoryContents",
-                closed_path,
-                "reference checksum not configured "
-                "(use --reference-checksum or populate REFERENCE_CHECKSUMS); "
-                "the code/ subtree cannot be validated without one",
+        if expected is None and os.path.isdir(closed_path):
+            has_closed_submitter = any(
+                not name.startswith(".")
+                and os.path.isdir(os.path.join(closed_path, name))
+                for name in list_dir(closed_path)
             )
-            return valid  # not a failure (D-12 preserved); skip per-submitter walk
-
-        for submitter in list_dir(closed_path):
-            code_path = os.path.join(closed_path, submitter, "code")
-            if not os.path.isdir(code_path):
-                continue  # STRUCT-05 will catch missing code/
-
-            digest = compute_code_tree_md5(code_path, self.log)
-            if digest != expected:
-                self.log_violation(
+            if has_closed_submitter:
+                self.warn_violation(
                     "2.1.6", "codeDirectoryContents",
-                    code_path,
-                    "code tree MD5 mismatch: expected %s, got %s",
-                    expected, digest,
+                    closed_path,
+                    "reference checksum not configured "
+                    "(use --reference-checksum or populate REFERENCE_CHECKSUMS); "
+                    "upstream-identity check skipped (self-consistency check still ran)",
                 )
-                valid = False
-
         return valid
 
     # -----------------------------------------------------------------------
@@ -471,16 +634,14 @@ class SubmissionStructureCheck(BaseCheck):
                     )
                     valid = False
                 else:
-                    # Parse YAML and check submission_name == name (D-17)
+                    # Parse YAML and check submission_name == name (D-17).
+                    # Use `or {}` rather than `.get(key, {})` so a YAML node
+                    # that serializes as null (not just absent) also collapses
+                    # to a safe default instead of raising AttributeError mid-chain.
                     system_yaml = YamlParser(yaml_path, "System").get_dict()
-                    try:
-                        submission_name = (
-                            system_yaml.get("system_under_test", {})
-                            .get("solution", {})
-                            .get("submission_name")
-                        )
-                    except AttributeError:
-                        submission_name = None
+                    sut = system_yaml.get("system_under_test") or {}
+                    solution = sut.get("solution") or {}
+                    submission_name = solution.get("submission_name")
 
                     if submission_name != name:
                         self.log_violation(

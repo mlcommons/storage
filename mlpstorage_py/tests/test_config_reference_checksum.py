@@ -44,6 +44,8 @@ class TestConstantsImport:
             "build/",
             "dist/",
             ".tox/",
+            "test/",
+            "tests/",
         }
         for prefix in required:
             assert prefix in MD5_EXCLUDE_PREFIXES, f"Missing prefix: {prefix}"
@@ -59,13 +61,15 @@ class TestConstantsImport:
             "build/",
             "dist/",
             ".tox/",
+            "test/",
+            "tests/",
         )
         assert MD5_EXCLUDE_PREFIXES == expected
 
     def test_md5_exclude_filenames_membership(self):
         """MD5_EXCLUDE_FILENAMES must be a tuple containing all required filename patterns (D-13)."""
         assert isinstance(MD5_EXCLUDE_FILENAMES, tuple)
-        required = {"*.pyc", "*.pyo", ".DS_Store", "Thumbs.db"}
+        required = {".code-hash.json", "*.pyc", "*.pyo", ".DS_Store", "Thumbs.db"}
         for pattern in required:
             assert pattern in MD5_EXCLUDE_FILENAMES, f"Missing pattern: {pattern}"
 

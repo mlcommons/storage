@@ -2,8 +2,6 @@
 KV Cache benchmark run rules checker.
 
 Validates KV Cache benchmark parameters for individual runs.
-Note: KV Cache is currently a preview benchmark, so validation
-rules are less strict than training/checkpointing.
 """
 
 from typing import Optional, List
@@ -26,8 +24,6 @@ class KVCacheRunRulesChecker(RunRulesChecker):
     - Multi-tier cache configurations (GPU → CPU → NVMe)
     - Multi-user simulation
     - Phase-aware processing (prefill/decode)
-
-    Currently in preview mode - rules are informational rather than strict.
     """
 
     # Minimum requirements for valid KV Cache runs
@@ -184,16 +180,3 @@ class KVCacheRunRulesChecker(RunRulesChecker):
             )
 
         return None
-
-    def check_preview_status(self) -> Optional[Issue]:
-        """
-        Return informational issue that KV Cache is in preview.
-
-        This is always returned to inform users that this benchmark
-        is not yet accepted for closed submissions.
-        """
-        return Issue(
-            validation=PARAM_VALIDATION.OPEN,
-            message="KV Cache benchmark is in preview status - not accepted for closed submissions",
-            parameter="benchmark_status"
-        )

@@ -19,8 +19,9 @@ index:
   index_type: DISKANN
   metric_type: COSINE
   index_params:
-    M: 64
-    ef_construction: 200
+    max_degree: 64
+    search_list_size: 200
 
 workflow:
   compact: True
+

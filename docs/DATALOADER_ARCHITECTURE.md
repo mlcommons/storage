@@ -169,8 +169,7 @@ pipeline depth was 1 per worker, now 64 per worker).
 - [UNet3D_NP_Scaling_Results.md](UNet3D_NP_Scaling_Results.md) — benchmark results where this
   architectural choice is most relevant
 - [ARCHITECTURE.md](ARCHITECTURE.md) — overall system architecture
-- [STORAGE_LIBRARIES.md](STORAGE_LIBRARIES.md) — s3dlio capabilities (get_many, byte-range GETs,
-  ObjectSizeCache)
+- [OBJECT_STORAGE_GUIDE.md](OBJECT_STORAGE_GUIDE.md#supported-libraries-and-selection) — s3dlio and object library capabilities
 - [PARQUET_FORMATS.md](PARQUET_FORMATS.md) — the Parquet iterable reader that already uses the
   `TorchIterableDataset` path
 

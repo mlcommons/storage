@@ -33,20 +33,18 @@ Uses the [DLIO benchmark](https://github.com/argonne-lcf/dlio_benchmark) to simu
 
 ```bash
 # Generate data
-mlpstorage training datagen \
-  --model resnet50 \
-  --file \
+uv run mlpstorage closed training retinanet datagen file \
   --num-processes 4 \
-  --data-dir /tmp/mlperf-test/resnet50
+  --data-dir /tmp/mlperf-test \
+  --results-dir /tmp/mlps-results
 
 # Run
-mlpstorage training run \
-  --model resnet50 \
-  --accelerator-type h100 \
+uv run mlpstorage closed training retinanet run file \
   --num-accelerators 4 \
+  --accelerator-type b200 \
   --client-host-memory-in-gb 64 \
-  --file \
-  --data-dir /tmp/mlperf-test/resnet50
+  --data-dir /tmp/mlperf-test \
+  --results-dir /tmp/mlps-results
 ```
 
 ### S3 Object Storage
@@ -57,42 +55,55 @@ Choose any of the three supported libraries:
 export AWS_ENDPOINT_URL=http://your-server:9000
 export AWS_ACCESS_KEY_ID=minioadmin
 export AWS_SECRET_ACCESS_KEY=minioadmin
+export AWS_REGION=us-east-1
+export BUCKET=mlperf-data
+export STORAGE_LIBRARY=s3dlio
+export STORAGE_URI_SCHEME=s3
 
-# s3dlio (recommended — native multi-endpoint, multi-protocol)
-mlpstorage training datagen \
-  --model unet3d \
-  --params storage.storage_type=s3dlio \
-  --params storage.storage_root=s3://mlperf-data/unet3d
+# s3dlio (recommended)
+uv run mlpstorage closed training retinanet datagen object \
+  --num-processes 4 \
+  --data-dir retinanet \
+  --results-dir /tmp/mlps-results
 
-mlpstorage training run \
-  --model unet3d \
-  --accelerator-type h100 \
-  --num-processes 8 \
-  --params storage.storage_type=s3dlio \
-  --params storage.storage_root=s3://mlperf-data/unet3d
+uv run mlpstorage closed training retinanet run object \
+  --num-accelerators 4 \
+  --accelerator-type b200 \
+  --client-host-memory-in-gb 64 \
+  --data-dir retinanet \
+  --results-dir /tmp/mlps-results
 
 # minio Python SDK
-mlpstorage training run \
-  --model unet3d \
-  --params storage.storage_type=minio \
-  --params storage.storage_root=s3://mlperf-data/unet3d
+export STORAGE_LIBRARY=minio
+uv run mlpstorage closed training retinanet run object \
+  --num-accelerators 4 \
+  --accelerator-type b200 \
+  --client-host-memory-in-gb 64 \
+  --data-dir retinanet \
+  --results-dir /tmp/mlps-results
 
 # s3torchconnector (PyTorch only)
-mlpstorage training run \
-  --model unet3d \
-  --params storage.storage_type=s3torchconnector \
-  --params storage.storage_root=s3://mlperf-data/unet3d
+export STORAGE_LIBRARY=s3torchconnector
+uv run mlpstorage closed training retinanet run object \
+  --num-accelerators 4 \
+  --accelerator-type b200 \
+  --client-host-memory-in-gb 64 \
+  --data-dir retinanet \
+  --results-dir /tmp/mlps-results
 ```
 
-See [STORAGE_LIBRARIES.md](STORAGE_LIBRARIES.md) for library selection guidance.
+See [OBJECT_STORAGE_GUIDE.md](OBJECT_STORAGE_GUIDE.md) for setup details, library selection guidance, and object-mode environment variables.
 
 ### Parquet Format
 
 ```bash
-mlpstorage training run \
-  --model resnet50 \
+uv run mlpstorage closed training retinanet run file \
+  --num-accelerators 4 \
+  --accelerator-type b200 \
+  --client-host-memory-in-gb 64 \
+  --data-dir /tmp/mlperf-test \
+  --results-dir /tmp/mlps-results \
   --params dataset.format=parquet \
-  --params dataset.storage_type=local \
   --params dataset.num_samples_per_file=1024
 ```
 
@@ -101,11 +112,16 @@ See [PARQUET_FORMATS.md](PARQUET_FORMATS.md) for full parquet configuration.
 ### Multi-Endpoint / Load Balancing
 
 ```bash
-# Comma-separated endpoints for s3dlio
-mlpstorage training run \
-  --model resnet50 \
-  --params storage.storage_type=s3dlio \
-  --params storage.endpoint_urls=http://10.0.0.1:9000,http://10.0.0.2:9000
+# Comma-separated endpoints for object storage
+export STORAGE_LIBRARY=s3dlio
+export S3_ENDPOINT_URIS=http://minio1:9000,http://minio2:9000
+
+uv run mlpstorage closed training retinanet run object \
+  --num-accelerators 2 \
+  --accelerator-type b200 \
+  --client-host-memory-in-gb 64 \
+  --data-dir retinanet \
+  --results-dir /tmp/mlps-results
 ```
 
 See [MULTI_ENDPOINT_GUIDE.md](MULTI_ENDPOINT_GUIDE.md) for all configuration options.
@@ -147,31 +163,55 @@ See [Streaming-Chkpt-Guide.md](Streaming-Chkpt-Guide.md) for full checkpointing 
 
 ---
 
-## Object Storage Library Tests
+## Object Storage Tests
 
-Run the full object-store test suite to compare libraries head-to-head:
+Start with the small smoke tests in [OBJECT_STORAGE_TESTING.md](OBJECT_STORAGE_TESTING.md) when validating a new endpoint, credential set, or code change. Use [../tests/object-store/README.md](../tests/object-store/README.md) for the maintained model-level benchmark scripts and cleanup workflow.
+
+Minimum setup for either path:
 
 ```bash
 export AWS_ENDPOINT_URL=http://your-server:9000
 export AWS_ACCESS_KEY_ID=minioadmin
 export AWS_SECRET_ACCESS_KEY=minioadmin
-
-# Full DLIO training cycle (datagen + train + cleanup) for each library
-bash tests/object-store/dlio_s3dlio_cycle.sh
-bash tests/object-store/dlio_minio_cycle.sh
-bash tests/object-store/dlio_s3torch_cycle.sh
-
-# Direct read throughput comparison
-python tests/object-store/test_s3lib_get_bench.py
-
-# Write throughput comparison
-python tests/object-store/test_direct_write_comparison.py
-
-# Multi-library demo (all 3 in sequence)
-python tests/object-store/test_dlio_multilib_demo.py
+export AWS_REGION=us-east-1
+export BUCKET=mlperf-data
+export STORAGE_LIBRARY=s3dlio
+export STORAGE_URI_SCHEME=s3
 ```
 
-See [Object_Storage_Test_Guide.md](Object_Storage_Test_Guide.md) for full test results and methodology.
+Fast smoke-test path:
+
+```bash
+# Parser and object-storage unit checks
+uv run python -m pytest \
+  tests/unit/test_cli.py \
+  tests/unit/test_cli_parser.py \
+  tests/unit/test_dlio_object_storage.py \
+  tests/unit/test_datagen_command_generation.py \
+  -q
+
+# Tiny datagen/run examples are documented in OBJECT_STORAGE_TESTING.md
+```
+
+Maintained object-store benchmark scripts:
+
+```bash
+# Parquet workloads generate data inline, then run the benchmark
+NP=1 bash tests/object-store/run_dlrm_bench.sh
+NP=1 bash tests/object-store/run_flux_bench.sh
+
+# JPEG/NPZ workloads generate data first, then run
+bash tests/object-store/gen_retinanet_jpeg.sh
+NP=1 bash tests/object-store/test_retinanet.sh
+
+bash tests/object-store/gen_unet3d_npz.sh
+NP=1 bash tests/object-store/test_unet3d.sh
+
+# Checkpoint write/read validation across object libraries
+NP=4 bash tests/object-store/run_checkpointing.sh
+```
+
+Use `STORAGE_LIBRARY=minio` or `STORAGE_LIBRARY=s3torchconnector` to compare libraries after the `s3dlio` baseline passes. Use `bash tests/object-store/run_cleanup.sh` to remove test objects.
 
 ---
 
@@ -239,17 +279,16 @@ source .venv/bin/activate
 # Test network bandwidth (need >25 Gbps for >3 GB/s storage)
 iperf3 -c your-server
 
-# Benchmark write throughput directly
-python tests/object-store/test_direct_write_comparison.py
+# Run a maintained object-storage benchmark script
+NP=1 bash tests/object-store/run_dlrm_bench.sh
 ```
 
 ---
 
 ## Further Reading
 
-- [STORAGE_LIBRARIES.md](STORAGE_LIBRARIES.md) — s3dlio, minio, s3torchconnector comparison
 - [PARQUET_FORMATS.md](PARQUET_FORMATS.md) — Parquet reader configuration and testing
 - [MULTI_ENDPOINT_GUIDE.md](MULTI_ENDPOINT_GUIDE.md) — Load balancing across multiple S3 endpoints
-- [Object_Storage_Test_Guide.md](Object_Storage_Test_Guide.md) — Object storage test results
-- [PERFORMANCE_TESTING.md](PERFORMANCE_TESTING.md) — Full performance testing methodology
+- [OBJECT_STORAGE_GUIDE.md](OBJECT_STORAGE_GUIDE.md) — Object storage setup, CLI usage, and library comparison
+- [OBJECT_STORAGE_TESTING.md](OBJECT_STORAGE_TESTING.md) — Object storage smoke tests
 - [Streaming-Chkpt-Guide.md](Streaming-Chkpt-Guide.md) — Streaming checkpoint architecture

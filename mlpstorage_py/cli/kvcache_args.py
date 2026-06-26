@@ -48,7 +48,10 @@ KVCACHE_HELP_MESSAGES = {
         "'latency' optimizes for response time, 'throughput' for requests/second."
     ),
     'kvcache_run': (
-        "Run the MLPerf KV Cache benchmark sequence (options 1, 2, and 3 via mlperf_wrapper.py)."
+        "Run the MLPerf KV Cache benchmark sequence (options 1, 2, and 3 via mlperf_wrapper.py). "
+        "Multi-host runs (--hosts with more than one host) REQUIRE --results-dir to be on a "
+        "filesystem mounted at the same path on every host (e.g. NFS/Lustre/GPFS); rank result "
+        "JSONs are written on the node where each rank lands and aggregated on the controller."
     ),
     'kvcache_datasize': (
         "Calculate memory requirements for KV cache based on model and user count."
@@ -67,7 +70,11 @@ KVCACHE_HELP_MESSAGES = {
         "OPEN submissions only — fixed at 42 in CLOSED."
     ),
     'kvcache_bin_path': "Path to kv-cache.py script. Auto-detected if not specified.",
-    'npernode': "Number of kv-cache instances per client host (ranks per node).",
+    'npernode': (
+        "Number of kv-cache instances per client host (ranks per node). "
+        "Total cluster ranks = npernode * len(hosts). Use either this or "
+        "--num-processes; if both are set they must be consistent."
+    ),
     'trials': (
         "Number of trial runs per option (default 3). "
         "OPEN submissions only — fixed at 3 in CLOSED."
@@ -109,7 +116,14 @@ def add_kvcache_arguments(parser, mode):
     # Storage type args are intentionally absent from this builder.
     for _parser in [run_benchmark, datasize]:
         _add_kvcache_cache_arguments(_parser, mode)
-        add_universal_arguments(_parser, req_results=(_parser is run_benchmark))
+        # D-10 / LAY-04: kvcache `run` emits results; `datasize` is a
+        # pre-flight calculation. Only the emitting subcommand requires
+        # --systemname.
+        add_universal_arguments(
+            _parser,
+            req_results=(_parser is run_benchmark),
+            req_systemname=(_parser is run_benchmark),
+        )
 
     # Run-specific arguments
     _add_kvcache_run_arguments(run_benchmark)
@@ -378,7 +392,12 @@ def _add_kvcache_distributed_arguments(parser):
     distributed_group.add_argument(
         '--num-processes', '-np',
         type=int,
-        help="Number of MPI processes (ranks) to spawn for distributed execution."
+        help=(
+            "Total number of MPI processes (ranks) to spawn across all hosts. "
+            "Must divide evenly by --hosts count; per-host rank count is "
+            "derived as num_processes // len(hosts). Use either this or "
+            "--npernode; if both are set they must be consistent."
+        )
     )
 
     # Add host arguments from common_args

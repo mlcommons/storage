@@ -26,6 +26,7 @@ from mlpstorage_py.cli import (
     add_reports_arguments,
     add_history_arguments,
     add_lockfile_arguments,
+    add_init_arguments,
     add_version_arguments,
     add_validate_arguments,
     add_rules_coverage_arguments,
@@ -134,6 +135,11 @@ def parse_arguments():
     reports_parser = top.add_parser("reports", help="Generate a report from benchmark results")
     history_parser = top.add_parser("history", help="Display benchmark history")
     lockfile_parser = top.add_parser("lockfile", help="Generate and verify package lockfiles")
+    init_parser = top.add_parser(
+        "init",
+        description="Initialize a results-dir with the mlperf-results.yaml sentinel",
+        help="Pin orgname to a results-dir",
+    )
     version_parser = top.add_parser("version", description="Print the mlpstorage package version", help="Show installed package version and exit")
     validate_parser = top.add_parser(
         "validate",
@@ -148,6 +154,7 @@ def parse_arguments():
     add_reports_arguments(reports_parser)
     add_history_arguments(history_parser)
     add_lockfile_arguments(lockfile_parser)
+    add_init_arguments(init_parser)
     add_version_arguments(version_parser)
     add_validate_arguments(validate_parser)
     add_rules_coverage_arguments(rules_coverage_parser)
@@ -160,6 +167,19 @@ def parse_arguments():
     # add_storage_type_arguments() registers 'data_access_protocol' as a positional;
     # argparse sets it directly to 'file'|'object'|None. The old --file/--object
     # consolidation block is removed entirely.
+
+    # File-mode --data-dir is enforced before YAML overrides so the user gets
+    # an immediate argparse-style error. Object mode is checked after YAML in
+    # validate_training_arguments so --config-file can supply data_dir.
+    if (
+        getattr(parsed_args, 'benchmark', None) == 'training'
+        and getattr(parsed_args, 'command', None) in ('datagen', 'run')
+        and getattr(parsed_args, 'data_access_protocol', None) == 'file'
+        and not getattr(parsed_args, 'data_dir', None)
+    ):
+        parser.error(
+            f"--data-dir is required for training {parsed_args.command} with file storage"
+        )
 
     # Apply YAML config file overrides if specified
     if hasattr(parsed_args, 'config_file') and parsed_args.config_file:
@@ -244,6 +264,15 @@ def validate_args(args):
     """
     if getattr(args, 'mode', None) == 'version':
         return
+    # CR-02: enforce env-var-aware "required" gates for --results-dir and
+    # --systemname after argparse defaults have settled. ``add_universal_arguments``
+    # tags the namespace with ``_mlps_req_results`` / ``_mlps_req_systemname``
+    # whenever the calling subcommand opted in to the requirement; the actual
+    # resolved value (which may come from the env-var-sourced DEFAULT) is
+    # checked here. Using argparse ``required=True`` would have short-
+    # circuited before the env-var default applied — that is exactly the bug
+    # CR-02 fixed.
+    _check_universal_required_present(args)
     benchmark = getattr(args, 'benchmark', None)
     if benchmark == 'training':
         validate_training_arguments(args)
@@ -253,6 +282,42 @@ def validate_args(args):
         validate_vectordb_arguments(args)
     if benchmark == 'kvcache':
         validate_kvcache_arguments(args)
+
+
+def _check_universal_required_present(args):
+    """Enforce post-parse non-empty checks for --results-dir / --systemname.
+
+    Subcommands opt in to "required" via ``add_universal_arguments(..., req_results=True)``
+    and / or ``req_systemname=True``. That call seeds
+    ``args._mlps_req_results`` / ``args._mlps_req_systemname`` via
+    ``parser.set_defaults``. Here we just look at the resolved attribute
+    values; if the corresponding flag was required but the value is empty
+    (or None), exit with the same argparse-style error that argparse would
+    have emitted if ``required=True`` had been used directly.
+
+    The env-var-sourced defaults (``MLPERF_RESULTS_DIR`` /
+    ``MLPERF_SYSTEMNAME``) populate ``args.results_dir`` /
+    ``args.systemname`` for free if argparse used the default; this check
+    is precisely what makes the env-var fallback live again on emitting
+    subcommands.
+    """
+    errors = []
+    if getattr(args, '_mlps_req_results', False):
+        if not getattr(args, 'results_dir', None):
+            errors.append(
+                "--results-dir/-rd is required (or set MLPERF_RESULTS_DIR)"
+            )
+    if getattr(args, '_mlps_req_systemname', False):
+        if not getattr(args, 'systemname', None):
+            errors.append(
+                "--systemname/-sn is required (or set MLPERF_SYSTEMNAME)"
+            )
+    if errors:
+        # Match argparse's stderr-then-exit-2 convention so existing tests
+        # that catch SystemExit continue to pass.
+        msg = "the following arguments are required: " + ", ".join(errors)
+        print(f"error: {msg}", file=sys.stderr)
+        sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
 
 
 def update_args(args):
@@ -280,6 +345,22 @@ def update_args(args):
     # Check for list of lists in params and flatten them
     if hasattr(args, 'params') and args.params:
         flattened_params = [item for sublist in args.params for item in sublist]
+        # Each token must be of the form KEY=VALUE. argparse with nargs="+"
+        # silently accepts space-separated pairs (--param KEY VALUE), which
+        # used to surface as "not enough values to unpack" inside the DLIO
+        # param processor (issue #469). Catch it here with a message that
+        # actually names the offending token and the right syntax.
+        bad = [tok for tok in flattened_params if '=' not in tok]
+        if bad:
+            print(
+                "Error: --params expects KEY=VALUE tokens joined with '=' "
+                "(no space).\n"
+                f"  Offending token(s): {bad}\n"
+                "  Wrong: --param dataset.num_files_train 35000\n"
+                "  Right: --param dataset.num_files_train=35000\n"
+                "  Multiple overrides: --params A=1 B=2 C=3"
+            )
+            sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
         setattr(args, 'params', flattened_params)
 
     if hasattr(args, 'mpi_params') and args.mpi_params:
@@ -322,8 +403,8 @@ def update_args(args):
             sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
         args.hosts = normalized
 
-    if hasattr(args, 'hosts') and getattr(args, 'num_client_hosts', None) is None:
-        setattr(args, "num_client_hosts", len(args.hosts))
+        if getattr(args, 'num_client_hosts', None) is None:
+            setattr(args, "num_client_hosts", len(args.hosts))
 
 
 if __name__ == "__main__":

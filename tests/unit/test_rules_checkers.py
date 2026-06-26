@@ -335,6 +335,37 @@ class TestTrainingRunRulesChecker:
         assert issue.validation == PARAM_VALIDATION.INVALID
         assert "Missing num_files_train" in issue.message
 
+    def test_check_num_files_train_skips_when_system_info_missing(self, mock_logger):
+        """Issue #503 bug 1: when the run was loaded from on-disk metadata
+        without cluster_information (system_info is None), check_num_files_train
+        must skip the check (return None) and log a warning rather than crash
+        with AttributeError. Before the fix, the AttributeError was caught by
+        the verifier's per-check wrapper and the entire run was marked INVALID."""
+        data = BenchmarkRunData(
+            benchmark_type=BENCHMARK_TYPES.training,
+            model="unet3d",
+            command="run",
+            run_datetime="20250111_143022",
+            num_processes=8,
+            parameters={"dataset": {"num_files_train": 1000}},
+            override_parameters={},
+        )
+        run = BenchmarkRun.from_data(data, mock_logger)
+        # BenchmarkRunData defaults system_info to None — exactly the state
+        # a reportgen-loaded run lands in when on-disk metadata lacks
+        # cluster_information, so no explicit assignment is needed.
+        assert run.system_info is None, "Test precondition: system_info must be None"
+        checker = TrainingRunRulesChecker(run, logger=mock_logger)
+
+        issue = checker.check_num_files_train()
+
+        assert issue is None, "Check must skip cleanly, not return an Issue"
+        # Confirm we surfaced the skip to the user via the logger
+        warnings = [c for c in mock_logger.method_calls if c[0] == 'warning']
+        assert any('check_num_files_train' in str(c) for c in warnings), (
+            f"Expected a warning naming check_num_files_train; got: {warnings}"
+        )
+
     def test_check_allowed_params_closed_param(self, mock_logger):
         """check_allowed_params returns CLOSED for allowed closed params."""
         data = BenchmarkRunData(
@@ -418,6 +449,72 @@ class TestTrainingRunRulesChecker:
         issues = checker.check_allowed_params()
 
         assert len(issues) == 0
+
+    def test_check_allowed_params_skip_listing_is_tool_injected(self, mock_logger):
+        """Regression for #494: skip_listing pair is reported as tool-injected,
+        not as an invalid user override."""
+        data = BenchmarkRunData(
+            benchmark_type=BENCHMARK_TYPES.training,
+            model="retinanet",
+            command="run",
+            run_datetime="20250111_143022",
+            num_processes=40,
+            parameters={
+                "dataset": {"num_files_train": 5319553, "num_subfolders_train": 532},
+                "reader": {"read_threads": 8}
+            },
+            override_parameters={
+                # The two #494 culprits — tool-injected for large datasets:
+                "dataset.skip_listing": "True",
+                "dataset.listing_validation_interval": "1000",
+                # Mixed with a genuine user override (closed-allowed):
+                "dataset.num_files_train": "5319553",
+            }
+        )
+        run = BenchmarkRun.from_data(data, mock_logger)
+        checker = TrainingRunRulesChecker(run, logger=mock_logger)
+        issues = checker.check_allowed_params()
+
+        # Three issues: two tool-injected, one closed-allowed user override.
+        # The critical assertion: zero INVALID issues (the pre-fix behavior
+        # produced two INVALID issues for skip_listing + listing_validation_interval).
+        assert all(i.validation != PARAM_VALIDATION.INVALID for i in issues), (
+            f"Tool-injected params must not be marked INVALID; got: "
+            f"{[(i.message, i.validation) for i in issues]}"
+        )
+        tool_msgs = [i for i in issues if i.message.startswith("Tool-injected parameter:")]
+        closed_msgs = [i for i in issues if i.message.startswith("Closed parameter override allowed:")]
+        assert len(tool_msgs) == 2
+        assert len(closed_msgs) == 1
+        # Both tool-injected lines carry CLOSED validation so they never gate the run.
+        assert all(i.validation == PARAM_VALIDATION.CLOSED for i in tool_msgs)
+        # Tool-injected issues report under a distinct parameter label so the
+        # run-summary log can section them off from genuine user overrides.
+        assert all(i.parameter == "Tool-Injected Parameters" for i in tool_msgs)
+        assert all(i.parameter == "Overrode Parameters" for i in closed_msgs)
+
+    def test_tool_injected_params_constant_includes_storage_keys(self):
+        """All known tool-side setters in dlio.py must have their keys listed.
+        Drift between the setters and this constant re-introduces #494-class bugs."""
+        from mlpstorage_py.rules.run_checkers.training import TrainingRunRulesChecker
+
+        # Keys touched by _apply_object_storage_params in dlio.py.
+        for key in ("storage.storage_type", "storage.storage_root",
+                    "storage.storage_options.storage_library",
+                    "storage.storage_options.uri_scheme",
+                    "storage.s3_force_path_style"):
+            assert key in TrainingRunRulesChecker.TOOL_INJECTED_PARAMS, (
+                f"{key} is written by _apply_object_storage_params but missing "
+                f"from TOOL_INJECTED_PARAMS — closed-mode object-storage runs "
+                f"will be flagged INVALID."
+            )
+
+        # Keys touched by _apply_skip_listing_params (#483, #494).
+        for key in ("dataset.skip_listing", "dataset.listing_validation_interval"):
+            assert key in TrainingRunRulesChecker.TOOL_INJECTED_PARAMS
+
+        # Key touched by add_datadir_param.
+        assert "dataset.data_folder" in TrainingRunRulesChecker.TOOL_INJECTED_PARAMS
 
     def test_check_odirect_unsupported_model(self, mock_logger):
         """check_odirect_supported_model returns INVALID for non-unet3d."""

@@ -192,8 +192,17 @@ def create_sample_benchmark_args(
     Returns:
         Namespace with benchmark arguments.
     """
-    # Base args that all commands share
+    # Base args that all commands share. Post-#412 modal CLI + Phase 1
+    # LAY-03: the orgname-resolution gate in production sets `args.mode`
+    # (closed|open|whatif) and `args.orgname` (from the mlperf-results.yaml
+    # sentinel) before any Benchmark is instantiated. Synthetic test args
+    # bypass that gate, so we set them here. `mode='closed'` is the most
+    # restrictive — tests that need a different mode override via kwargs.
     args = Namespace(
+        mode='closed',
+        orgname='Acme',
+        systemname='sys-v1',
+        dry_run=False,
         debug=False,
         verbose=False,
         what_if=False,

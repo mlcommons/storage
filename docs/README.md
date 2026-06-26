@@ -27,15 +27,14 @@ mlp-storage hosts **four benchmark workloads**:
 | Run or understand any test (unit, integration, object-store) | [../tests/README.md](../tests/README.md) |
 | Benchmark LLM KV-cache offload storage | [kv_cache_benchmark/README.md](../kv_cache_benchmark/README.md) |
 | Benchmark vector database storage (Milvus) | [vdb_benchmark/README.md](../vdb_benchmark/README.md) |
-| Set up object storage (S3 / MinIO / Azure / GCS) | [Object_Storage.md](Object_Storage.md) |
-| Install and configure an object storage library | [Object_Storage_Library_Setup.md](Object_Storage_Library_Setup.md) |
-| Compare object storage libraries (s3dlio, minio, s3torchconnector) | [STORAGE_LIBRARIES.md](STORAGE_LIBRARIES.md) |
+| Set up object storage (S3 / MinIO / Azure / GCS) | [OBJECT_STORAGE_GUIDE.md](OBJECT_STORAGE_GUIDE.md) |
+| Test object storage locally or in CI | [OBJECT_STORAGE_TESTING.md](OBJECT_STORAGE_TESTING.md) |
+| Compare object storage libraries (s3dlio, minio, s3torchconnector) | [OBJECT_STORAGE_GUIDE.md](OBJECT_STORAGE_GUIDE.md#supported-libraries-and-selection) |
 | Understand map-style vs. iterable DataLoader tradeoffs for S3 | [DATALOADER_ARCHITECTURE.md](DATALOADER_ARCHITECTURE.md) |
 | Benchmark NVMe with O_DIRECT (bypass page cache) | [DATALOADER_ARCHITECTURE.md — O_DIRECT section](DATALOADER_ARCHITECTURE.md#o_direct-local-storage-two-independent-paths) |
 | Understand AIStore gaps, reader/checkpoint issues, rationalization options | [dlio_benchmark/docs/AIStore_Analysis.md](../dlio_benchmark/docs/AIStore_Analysis.md) |
 | Test streaming checkpointing | [Streaming-Chkpt-Guide.md](Streaming-Chkpt-Guide.md) |
 | Configure multi-endpoint / load-balanced object storage | [MULTI_ENDPOINT_GUIDE.md](MULTI_ENDPOINT_GUIDE.md) |
-| Complete object storage settings reference (`--object` flag, `.env`, env vars) | [OBJECT_STORAGE_GUIDE.md](OBJECT_STORAGE_GUIDE.md) |
 | Understand the system architecture | [ARCHITECTURE.md](ARCHITECTURE.md) |
 | Add a new workload or benchmark | [ADDING_BENCHMARKS.md](ADDING_BENCHMARKS.md) |
 
@@ -121,26 +120,13 @@ Uses the [DLIO benchmark](https://github.com/argonne-lcf/dlio_benchmark) to
 simulate deep learning training data loading patterns across multiple storage
 backends.
 
-#### [Object_Storage.md](Object_Storage.md) ← **Main object storage reference**
+#### [OBJECT_STORAGE_GUIDE.md](OBJECT_STORAGE_GUIDE.md) ← **Main object storage reference**
 
-Complete guide for running training and checkpoint benchmarks against object
-storage. Covers all three supported object storage libraries (s3dlio, minio,
-s3torchconnector):
-
-- Credential setup and `.env` configuration
-- Object storage library selection (one YAML key)
-- Running DLIO end-to-end training cycles per library
-- Running checkpoint tests (file-based and object-store)
-- Streaming checkpointing (dgen-py + StreamingCheckpointing, 192× memory reduction)
-- Measured throughput numbers for all five checkpoint backends
-- HTTPS / TLS setup with self-signed certificates
-- Known limitations
-
-#### [STORAGE_LIBRARIES.md](STORAGE_LIBRARIES.md)
-
-Side-by-side comparison of all three supported object storage libraries:
-protocol support, installation, API usage examples, configuration snippets, and
-multi-protocol examples for s3dlio (S3 / Azure / GCS / file / direct).
+Primary guide for running `mlpstorage` training workloads against S3-compatible
+object storage. Covers MinIO quick start, `.env` configuration, the current
+`file|object` CLI grammar, `--data-dir` prefix semantics, supported libraries
+(`s3dlio`, `minio`, `s3torchconnector`), library capability comparison,
+multi-protocol notes, and common troubleshooting.
 
 #### [dlio_benchmark/docs/AIStore_Analysis.md](../dlio_benchmark/docs/AIStore_Analysis.md)
 
@@ -153,27 +139,11 @@ table and three concrete rationalization options (A: S3 gateway, B: fill gaps,
 C: consolidate as 4th library) with a pros/cons comparison and a per-option file
 change list.
 
-#### [Object_Storage_Test_Guide.md](Object_Storage_Test_Guide.md)
+#### [OBJECT_STORAGE_TESTING.md](OBJECT_STORAGE_TESTING.md)
 
-How to run object storage library functional and performance tests. Covers DLIO
-per-library test cycles, GET/PUT throughput scripts, multi-protocol testing with
-s3dlio, and troubleshooting common failures.
-
-#### [Object_Storage_Library_Setup.md](Object_Storage_Library_Setup.md)
-
-Installation, credential configuration, and YAML workload setup for all three
-object storage libraries. Covers library-specific install commands, URI schemes,
-environment variables (S3/Azure/GCS), per-library YAML config examples, and the
-s3dlio drop-in replacement API. Start here when setting up a library for the
-first time.
-
-#### [Object_Storage_Test_Results.md](Object_Storage_Test_Results.md)
-
-Measured test results for each object storage library. Currently documents
-s3dlio with local filesystem (February 7, 2026): PyTorch/NPZ and
-TensorFlow/TFRecord complete round-trip results. minio and s3torchconnector
-results are pending — see [Object_Storage_Test_Guide.md](Object_Storage_Test_Guide.md)
-for instructions to run and record them.
+Small repeatable object-storage tests: Python library smoke tests, parser checks,
+tiny MinIO datagen/run cycles, multi-endpoint smoke validation, and the most useful
+unit tests to run when changing object-storage behavior.
 
 #### [MULTI_ENDPOINT_GUIDE.md](MULTI_ENDPOINT_GUIDE.md)
 
@@ -181,14 +151,6 @@ Multi-endpoint load balancing for object storage: comma-separated URI lists,
 template expansion, file-based endpoint lists, and MPI rank-based distribution.
 Compares native multi-endpoint (s3dlio) vs. MPI rank selection across all three
 object storage libraries.
-
-#### [OBJECT_STORAGE_GUIDE.md](OBJECT_STORAGE_GUIDE.md)
-
-Comprehensive reference for every setting required to run `mlpstorage` training
-benchmarks against S3-compatible object storage using `s3dlio`. Covers `.env`
-credential setup, `BUCKET` / `STORAGE_LIBRARY` / `AWS_ENDPOINT_URL` environment
-variables, URI schemes (s3/direct/file), multi-endpoint configuration, and the
-`--object` CLI flag.
 
 #### [Streaming-Chkpt-Guide.md](Streaming-Chkpt-Guide.md)
 
@@ -260,12 +222,13 @@ The quick-link tables below list the most commonly used scripts.
 
 | What | Script |
 |------|--------|
-| End-to-end DLIO cycle (s3dlio) | `tests/object-store/dlio_s3dlio_cycle.sh` |
-| End-to-end DLIO cycle (minio) | `tests/object-store/dlio_minio_cycle.sh` |
-| End-to-end DLIO cycle (s3torchconnector) | `tests/object-store/dlio_s3torch_cycle.sh` |
-| GET throughput benchmark (all 3 object storage libraries) | `tests/object-store/test_s3lib_get_bench.py` |
-| Write throughput comparison | `tests/object-store/test_direct_write_comparison.py` |
-| Multi-library demo (all 3 in sequence) | `tests/object-store/test_dlio_multilib_demo.py` |
+| Object-storage smoke guide | `docs/OBJECT_STORAGE_TESTING.md` |
+| Full object-store script guide | `tests/object-store/README.md` |
+| DLRM Parquet benchmark | `tests/object-store/run_dlrm_bench.sh` |
+| Flux Parquet benchmark | `tests/object-store/run_flux_bench.sh` |
+| RetinaNet JPEG datagen + run | `tests/object-store/gen_retinanet_jpeg.sh`, `tests/object-store/test_retinanet.sh` |
+| UNet3D NPZ datagen + run | `tests/object-store/gen_unet3d_npz.sh`, `tests/object-store/test_unet3d.sh` |
+| Object checkpoint write/read | `tests/object-store/run_checkpointing.sh` |
 | Unit tests (no infrastructure needed) | `pytest tests/unit/` |
 | Integration tests (requires S3 endpoint) | `pytest tests/integration/` |
 

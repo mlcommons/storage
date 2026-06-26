@@ -430,19 +430,21 @@ class TestBenchmarkRunIntegration:
 
     @pytest.fixture
     def training_fixture_dir(self):
-        """Get path to training fixture directory."""
-        fixtures_dir = Path(__file__).parent.parent / "fixtures" / "sample_results" / "training_run"
-        if fixtures_dir.exists():
-            return fixtures_dir
-        pytest.skip("Training fixture directory not found")
+        """Get path to training fixture directory (leaf datetime dir)."""
+        return (
+            Path(__file__).parent.parent
+            / "fixtures" / "sample_results"
+            / "training" / "unet3d" / "run" / "20250115_143022"
+        )
 
     @pytest.fixture
     def checkpointing_fixture_dir(self):
-        """Get path to checkpointing fixture directory."""
-        fixtures_dir = Path(__file__).parent.parent / "fixtures" / "sample_results" / "checkpointing_run"
-        if fixtures_dir.exists():
-            return fixtures_dir
-        pytest.skip("Checkpointing fixture directory not found")
+        """Get path to checkpointing fixture directory (leaf datetime dir)."""
+        return (
+            Path(__file__).parent.parent
+            / "fixtures" / "sample_results"
+            / "checkpointing" / "llama3-8b" / "run" / "20250115_150000"
+        )
 
     def test_load_from_training_fixture(self, training_fixture_dir):
         """BenchmarkRun loads correctly from training fixture."""

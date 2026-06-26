@@ -7,7 +7,7 @@
 | Parameter | Value |
 |-----------|-------|
 | Host | 24 vCPU VM (with hyperthreading), 48 GB RAM |
-| Object storage | s3-ultra (`http://127.0.0.1:9000`, co-located on test host) |
+| Object storage | a local S3-compatible test server (`http://127.0.0.1:9000`, co-located on test host) |
 | Bucket / path | `mlp-dlrm / data/dlrm` |
 | Dataset | 200 files × 1,536,000 samples/file |
 | Record length | 761 bytes |
@@ -18,7 +18,7 @@
 | Model config | `dlrm_b200.yaml` |
 | MPI invocation | `mpirun -n NP -host 127.0.0.1:NP` |
 
-> **⚠️ Co-located test configuration.** The s3-ultra storage server and all benchmark processes run on the
+> **⚠️ Co-located test configuration.** The local S3-compatible test server and all benchmark processes run on the
 > **same** 24 vCPU / 48 GB RAM host, sharing CPU cores, memory, and the loopback network interface.
 > In a real deployment the storage target would be a dedicated remote system, and the CPU/memory
 > pressure that limits scaling here (particularly at NP ≥ 4) would not apply to the test processes.
@@ -176,12 +176,12 @@ Both ct = 1 ms and ct = 5 ms runs at NP = 8 crashed before completing any traini
    - `mpirun noticed that process rank N exited on signal 9 (Killed)`
 
 2. **S3 TCP connection exhaustion.** 8 concurrent s3dlio processes each attempted to open
-   connection pools to s3-ultra on loopback. The aggregate connection demand — combined with
-   s3-ultra itself consuming CPU on the same host — overwhelmed the server's listener backlog,
+   connection pools to a local S3-compatible test server on loopback. The aggregate connection demand — combined with
+   the local S3-compatible test server itself consuming CPU on the same host — overwhelmed the server's listener backlog,
    causing TCP connection rejection errors on all ranks before the OOM fired on some runs.
 
 **Conclusion:** NP = 8 is not viable on this co-located 24 vCPU / 48 GB RAM setup. Maximum usable
-NP = 4. In a real deployment where s3-ultra runs on a dedicated remote system, NP = 8 would have
+NP = 4. In a real deployment where a local S3-compatible test server runs on a dedicated remote system, NP = 8 would have
 the full 48 GB and all 24 vCPUs available exclusively for the benchmark processes, making this
 limitation irrelevant.
 
@@ -195,7 +195,7 @@ limitation irrelevant.
    - At ct = 10 ms: comfortably passes (AU ≈ 88%); workload is strongly compute-bound.
 
 2. **Storage saturates near 5 GB/s on this co-located setup.** Both ct groups hit ~4.75–4.93 GB/s
-   at NP=4, and AU begins degrading. This ceiling reflects the shared CPU/memory budget — s3-ultra
+   at NP=4, and AU begins degrading. This ceiling reflects the shared CPU/memory budget — a local S3-compatible test server
    and the benchmark processes are competing for the same resources. On a dedicated remote storage
    system, this throughput ceiling would be significantly higher.
 
@@ -219,4 +219,4 @@ limitation irrelevant.
 
 *Benchmark date: May 12, 2026*  
 *Host: loki-russ*  
-*s3-ultra (localhost:9000, co-located on test host)*
+*a local S3-compatible test server (localhost:9000, co-located on test host)*

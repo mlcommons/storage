@@ -2,11 +2,15 @@ from importlib.metadata import version as _pkg_version, PackageNotFoundError as 
 import pathlib
 import tomllib  # stdlib since Python 3.11; project requires >=3.12
 
+# Distribution name. Must match `project.name` in pyproject.toml — tested in
+# tests/unit/test_version.py::test_dist_name_matches_pyproject.
+_DIST_NAME = "mlpstorage"
+
 
 def _resolve_version() -> str:
-    # Primary: installed distribution metadata (correct dist name is "mlpstorage")
+    # Primary: installed distribution metadata
     try:
-        return _pkg_version("mlpstorage")
+        return _pkg_version(_DIST_NAME)
     except _PkgNF:
         pass
     # Fallback: parse pyproject.toml for source-checkout usage

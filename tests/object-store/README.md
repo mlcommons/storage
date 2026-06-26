@@ -340,9 +340,6 @@ environment variables. To test a new storage library:
 Older scripts and historical results are preserved in `tests/object-store/old-archive/`
 for reference. They are **not maintained** and may not work with current code.
 
-Notable reference files:
-- `test_s3dlio_direct.py`, `test_s3dlio_formats.py` — raw s3dlio API patterns
-- `test_s3lib_get_bench.py`, `test_direct_write_comparison.py` — library comparison methodology
-- `S3library_review_21-Mar.md` — analysis of library concurrency models
-- `bench_npz_build.py`, `bench_parquet_rg_flux.py` — format serialization benchmarks
-- `run_datagen.sh`, `run_training.sh` — old generic multi-model wrappers (replaced by model-specific scripts)
+Archived materials include raw API experiments, older library-comparison helpers,
+format serialization benchmarks, and generic multi-model wrappers. Prefer the
+maintained scripts listed in [Structure](#structure) for current testing.

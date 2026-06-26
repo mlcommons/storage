@@ -491,7 +491,7 @@ The benchmark suite provides workload [configurations](https://github.com/mlcomm
 | Area | Problem | Model | Data Loader | Dataset seed | Minimum AU% |
 | ---- | ------- | ----- | ----------- | ------------ | ----------- |
 | Vision | Image Classification | Unet3D | PyTorch | ??? | 90% |
-| Vision | Image Recognition | RetinaNet | PyTorch | ??? | 90% |
+| Vision | Image Recognition | RetinaNet | PyTorch | ??? | 85% |
 
 Table 1: Benchmark description
 

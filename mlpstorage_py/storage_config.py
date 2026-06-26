@@ -17,18 +17,56 @@ import os
 from typing import Optional, Tuple
 
 
-def _redact(val: Optional[str]) -> str:
-    """Return a redacted representation of a credential value.
+# Phase 4 / Plan 04-02 (D-25, COLL-06) — unified credential redaction.
+# Two helpers replace the legacy `_redact(val)` and are shared with
+# `cluster_collector.collect_environment` (the new YAML emit path).
+# Option B chosen at refactor time (the grep `_redact\b mlpstorage_py/`
+# returned zero non-test, non-self consumers) — `_redact` is gone, all
+# call sites use the new names. See 04-02-SUMMARY.md for the rationale.
 
-    Args:
-        val: The raw credential string (or None/empty).
 
-    Returns:
-        "[SET — N chars]" if val is truthy, else "[not set]".
+def _redact_secret(val: Optional[str]) -> str:
+    """Length-only credential redactor (D-24).
+
+    Branches:
+      - ``None`` → ``"[not set]"``
+      - ``""``   → ``"[SET — empty]"`` (Phase 4 deliberate UX improvement:
+        the legacy ``_redact()`` returned ``"[not set]"`` for both branches,
+        which hid the misleading set-but-empty case from operators)
+      - non-empty → ``"[SET — N chars]"`` where ``N == len(val)``
+
+    No sha256 fingerprint — ROADMAP.md SC #2 was reconciled to match this
+    decision in the same commit that landed the helper.
     """
-    if val:
-        return f"[SET — {len(val)} chars]"
-    return "[not set]"
+    if val is None:
+        return "[not set]"
+    if val == "":
+        return "[SET — empty]"
+    return f"[SET — {len(val)} chars]"
+
+
+def _mask_credential_id(val: Optional[str]) -> str:
+    """First-4 / last-4 mask for credential identifiers (D-23).
+
+    Preserves enough identifying prefix for an operator to recognize *which*
+    credential is configured without leaking the full value.
+
+    Branches:
+      - ``None`` → ``"[not set]"``
+      - ``""``   → ``"[SET — empty]"``
+      - ``1..7`` chars → ``"****"`` (too short to mask meaningfully without
+        leaking >50% of the value)
+      - ``>= 8`` chars → ``f"{val[:4]}****{val[-4:]}"``
+
+    Canonical example: ``AKIAIOSFODNN7EXAMPLE`` → ``"AKIA****MPLE"``.
+    """
+    if val is None:
+        return "[not set]"
+    if val == "":
+        return "[SET — empty]"
+    if len(val) < 8:
+        return "****"
+    return f"{val[:4]}****{val[-4:]}"
 
 
 def _resolve_endpoint() -> Tuple[Optional[str], str]:
@@ -101,6 +139,10 @@ def resolve_object_storage_config() -> dict:
         'load_balance_strategy': os.environ.get('S3_LOAD_BALANCE_STRATEGY', 'round_robin'),
         'aws_region': os.environ.get('AWS_REGION', 'us-east-1'),
         'aws_ca_bundle': os.environ.get('AWS_CA_BUNDLE') or None,
-        'aws_access_key_id_redacted': _redact(os.environ.get('AWS_ACCESS_KEY_ID')),
-        'aws_secret_access_key_redacted': _redact(os.environ.get('AWS_SECRET_ACCESS_KEY')),
+        # D-23 / D-25: KEY_ID uses the masked-form helper (deliberate UX
+        # change vs. the legacy `_redact` length-only shape — run_summary.py
+        # output now reads "AKIA****MPLE" instead of "[SET — 20 chars]").
+        # SECRET stays length-only per D-24.
+        'aws_access_key_id_redacted': _mask_credential_id(os.environ.get('AWS_ACCESS_KEY_ID')),
+        'aws_secret_access_key_redacted': _redact_secret(os.environ.get('AWS_SECRET_ACCESS_KEY')),
     }

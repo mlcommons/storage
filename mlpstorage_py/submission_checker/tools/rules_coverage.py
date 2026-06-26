@@ -1,10 +1,10 @@
-"""Standalone CLI tool that reconciles Rules.md §2/§3/§4 against checker code.
+"""Standalone CLI tool that reconciles Rules.md §2/§3/§4/§5/§6 against checker code.
 
 Usage:
     python -m mlpstorage_py.submission_checker.tools.rules_coverage [--rules-md PATH]
 
-Walks every kebab-case rule ID in ``Rules.md`` §2/§3/§4 (matched by the locked
-regex ``^([234]\\.\\d+\\.\\d+)\\.\\s+\\*\\*([a-zA-Z][a-zA-Z0-9]+)\\*\\*``) and
+Walks every kebab-case rule ID in ``Rules.md`` §2/§3/§4/§5/§6 (matched by the locked
+regex ``^([23456]\\.\\d+\\.\\d+)\\.\\s+\\*\\*([a-zA-Z][a-zA-Z0-9]+)\\*\\*``) and
 reconciles each ID against four coverage sources in priority order (D-A4):
 
 1. ``@rule``-decorated method on any ``BaseCheck`` subclass (via
@@ -46,8 +46,12 @@ logging.basicConfig(
 log = logging.getLogger("rules_coverage")
 
 
-# D-A3: locked regex for Rules.md §2/§3/§4 ID enumeration.
-_RULE_ID_PATTERN = re.compile(r"^([234]\.\d+\.\d+)\.\s+\*\*([a-zA-Z][a-zA-Z0-9]+)\*\*")
+# D-A3: locked regex for Rules.md §2/§3/§4/§5/§6 ID enumeration.
+# §5 covers vectordb (VdbCheck, Phase 4); §6 reserved for kvcache rules
+# landing soon. Extending the character class preemptively avoids
+# repeating Phase 4's miss where the regex shipped behind the actual
+# Rules.md scope.
+_RULE_ID_PATTERN = re.compile(r"^([23456]\.\d+\.\d+)\.\s+\*\*([a-zA-Z][a-zA-Z0-9]+)\*\*")
 
 
 def _default_rules_md_path() -> str:
@@ -245,7 +249,7 @@ def _compute_drift(live_ids: set) -> tuple:
 
 
 def reconcile(rules_md_path=None) -> dict:
-    """Reconcile Rules.md §2/§3/§4 IDs against the four coverage sources.
+    """Reconcile Rules.md §2/§3/§4/§5/§6 IDs against the four coverage sources.
 
     Applies the locked priority order from CONTEXT.md D-A4:
 
@@ -400,7 +404,7 @@ def get_args():
     """
     parser = argparse.ArgumentParser(
         description=(
-            "Reconcile every Rules.md §2/§3/§4 ID against @rule-decorated "
+            "Reconcile every Rules.md §2/§3/§4/§5/§6 ID against @rule-decorated "
             "check methods, SCHEMA_ERROR_RULE_MAP, STUB_COVERAGE, and "
             "OUT_OF_SCOPE_RULES. Exits 1 if any ID is unmapped."
         ),

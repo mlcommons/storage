@@ -1,17 +1,28 @@
 """
 Detect whether systemd-logind will reap POSIX IPC objects out from under the
-benchmark, which causes the SemLock FileNotFoundError reported in #447.
+benchmark, which causes two independent shm-reap failures: the SemLock
+FileNotFoundError reported in #447 and the PyTorch tensor-storage
+"could not unlink the shared memory file /torch_*" RuntimeError reported
+in #528.
 
 systemd-logind defaults to `RemoveIPC=yes`, which removes /dev/shm/sem.*,
-SysV semaphores, and shared memory belonging to a user once that user has
-no remaining login sessions. mpirun launches that briefly detach from
-the controlling session, or Python's spawn-context multiprocessing that
-re-opens semaphores by name, can hit this window and crash with
-`FileNotFoundError: [Errno 2] No such file or directory` inside
-`SemLock._rebuild`.
+/dev/shm/torch_*, SysV semaphores, and shared memory belonging to a user
+once that user has no remaining login sessions. mpirun launches that
+briefly detach from the controlling session can hit this window and crash
+in one of two ways:
+  - `FileNotFoundError: [Errno 2]` inside multiprocessing.SemLock._rebuild
+    (#447 — mitigated by storage PR #460's multiprocessing_context=fork)
+  - `RuntimeError: could not unlink the shared memory file /torch_*`
+    inside a PyTorch DataLoader worker (#528 — INDEPENDENT of fork vs
+    spawn; the multiprocessing_context fix does not cover it)
 
 `loginctl enable-linger USER` keeps a user-level systemd manager alive
-regardless of login sessions, which suppresses the reap.
+regardless of login sessions, which suppresses the reap and covers both
+vectors. For users without privilege to enable linger, the #528 vector
+can additionally be sidestepped by setting
+`DLIO_TORCH_SHARING_STRATEGY=file_descriptor` before launching (switches
+PyTorch IPC to FD-passing so no /dev/shm/torch_* files are created); the
+#447 vector requires sysadmin escalation if linger is unavailable.
 
 This module only inspects host state — it never modifies it. The intended
 caller is `validate_benchmark_environment`, which logs the warning string
@@ -149,9 +160,26 @@ def check_removeipc_risk(
     return (
         "systemd-logind has RemoveIPC=yes (the distro default). When a "
         "benchmark spawns Python multiprocessing workers, the kernel can "
-        "reap their POSIX semaphores out from under them, producing "
-        "`FileNotFoundError: [Errno 2]` in multiprocessing/synchronize.py "
-        "(see issue #447). To prevent this, enable systemd user-linger:\n"
+        "reap two independent classes of user-owned /dev/shm files out "
+        "from under live ranks:\n"
+        "  - /dev/shm/sem.mp-*  -> FileNotFoundError in "
+        "multiprocessing/synchronize.py (issue #447)\n"
+        "  - /dev/shm/torch_*   -> 'could not unlink the shared memory "
+        "file' RuntimeError in PyTorch DataLoader workers (issue #528)\n"
+        "\n"
+        "PRIMARY FIX (covers BOTH vectors; persistent):\n"
         f"  sudo loginctl enable-linger {user_for_msg}\n"
-        "Alternatively, set `RemoveIPC=no` in /etc/systemd/logind.conf."
+        "  loginctl show-user "
+        f"{user_for_msg} --property=Linger   # should report Linger=yes\n"
+        "\n"
+        "FALLBACK if you cannot enable linger (HPC cluster, container, "
+        "hosted env), to be applied IN ADDITION TO any existing #447 fix:\n"
+        "  - Set DLIO_TORCH_SHARING_STRATEGY=file_descriptor before "
+        "launching (switches PyTorch IPC away from named shm so #528's "
+        "vector has nothing to reap).\n"
+        "  - Raise FD limits before launching mpirun "
+        "(`ulimit -n 65536`); file_descriptor strategy opens one FD per "
+        "shared tensor and the default ulimit -n=1024 is too low.\n"
+        "  - Or sysadmin-side: set `RemoveIPC=no` in "
+        "/etc/systemd/logind.conf."
     )

@@ -5,8 +5,8 @@ These tests drive the REAL get_runs_files() walk against synthetic on-disk
 results trees (no mocking of discovery). They lock down current behavior so
 follow-up PRs can fix bugs without regressing the rest of the accumulation
 surface. Scenarios intentionally not covered today are documented as xfail or
-left for follow-up PRs (sub-second collisions, vectordb/kvcache path containing
-engine/model — both addressed in subsequent PRs of this effort).
+left for follow-up PRs (for example, sub-second collisions). VectorDB and
+KV-cache path identity are covered here, including VectorDB engine/index.
 
 Existing tests at tests/unit/test_reporting.py:425-531 cover ReportGenerator
 grouping with get_runs_files mocked. tests/unit/test_rules_calculations.py
@@ -155,27 +155,40 @@ def make_vectordb_run(
     results_dir: Path,
     *,
     engine: str = "milvus",
+    index: str = "DISKANN",
     run_datetime: str = "20250111_160000",
     command: str = "run",
     include_summary: bool = True,
 ) -> Path:
-    """Create one vectordb run at
-    results_dir/vector_database/<engine>/<command>/<datetime>/.
+    """Create one VectorDB run under the engine/index-aware layout.
 
-    The engine is recorded as model in metadata (matches how
-    VectorDBBenchmark.__init__ mirrors args.vdb_engine into args.model so
-    grouping by (model, accelerator) treats engines as distinct workloads).
+    The composite engine/index identity is recorded in ``model`` because the
+    current reporting layer groups workloads by ``(model, accelerator)``.
+    Explicit ``vdb_engine`` and ``vdb_index`` metadata remain available to
+    downstream consumers.
     """
-    run_dir = results_dir / "vector_database" / engine / command / run_datetime
+    model = f"{engine}_{index}"
+    run_dir = (
+        results_dir
+        / "vector_database"
+        / engine
+        / index
+        / command
+        / run_datetime
+    )
     return _write_run(
         run_dir,
         benchmark_type="vector_database",
         run_datetime=run_datetime,
-        model=engine,
+        model=model,
         accelerator=None,
         command=command,
         parameters={"workload": "vdb"},
         include_summary=include_summary,
+        metadata_overrides={
+            "vdb_engine": engine,
+            "vdb_index": index,
+        },
     )
 
 
@@ -384,20 +397,24 @@ class TestWorkloadSeparation:
 
 
 # ---------------------------------------------------------------------------
-# Documented limitation: vectordb/kvcache lack model/engine in path AND metadata,
-# so two distinct workloads of the same type cannot be told apart today.
-# (Resolved in PR 3 for vectordb and PR 4 for kvcache.)
+# Preview benchmark path identity and accumulation.
 # ---------------------------------------------------------------------------
 
 
 class TestPreviewBenchmarkAccumulation:
     """Accumulation behavior for preview benchmarks (vectordb, kvcache).
 
-    VectorDB (PR 3) records an engine and KVCache (PR 4) records the model
+    VectorDB records engine/index identity and KVCache records the model
     as the distinguishing component in path and metadata."""
 
-    def test_vectordb_path_includes_engine(self, tmp_path):
-        """generate_output_location produces vector_database/<engine>/<command>/<datetime>/."""
+    def test_vectordb_path_includes_engine_and_index(self, tmp_path):
+        """Path is <canonical-prefix>/vector_database/<engine>/<index>/<command>/<datetime>.
+
+        Plan 01-03 LAY-05 canonical prefix plus per-index segment (PR #476):
+        <rd>/<mode>/<org>/results/<sys>/vector_database/<engine>/<index>/<command>/<dt>/.
+        The index directory uses the UPPERCASE token (e.g. "DISKANN"),
+        matching args.vdb_index / args.index_type.
+        """
         from types import SimpleNamespace
 
         from mlpstorage_py.config import BENCHMARK_TYPES as _BT
@@ -407,13 +424,22 @@ class TestPreviewBenchmarkAccumulation:
             BENCHMARK_TYPE=_BT.vector_database,
             args=SimpleNamespace(
                 results_dir=str(tmp_path),
+                mode="closed",
+                orgname="Acme",
+                systemname="sys-v1",
                 command="run",
                 vdb_engine="milvus",
+                vdb_index="DISKANN",
             ),
         )
-        location = generate_output_location(fake_benchmark, datetime_str="20250111_160000")
+        location = generate_output_location(
+            fake_benchmark,
+            datetime_str="20250111_160000",
+        )
+
         assert location == str(
-            tmp_path / "vector_database" / "milvus" / "run" / "20250111_160000"
+            tmp_path / "closed" / "Acme" / "results" / "sys-v1"
+            / "vector_database" / "milvus" / "DISKANN" / "run" / "20250111_160000"
         )
 
     def test_vectordb_path_requires_engine(self, tmp_path):
@@ -421,37 +447,115 @@ class TestPreviewBenchmarkAccumulation:
         from types import SimpleNamespace
 
         from mlpstorage_py.config import BENCHMARK_TYPES as _BT
+        from mlpstorage_py.errors import ConfigurationError
         from mlpstorage_py.rules.utils import generate_output_location
 
         fake_benchmark = SimpleNamespace(
             BENCHMARK_TYPE=_BT.vector_database,
             args=SimpleNamespace(
                 results_dir=str(tmp_path),
+                mode="closed",
+                orgname="Acme",
+                systemname="sys-v1",
                 command="run",
+                vdb_index="DISKANN",
                 # no vdb_engine
             ),
         )
-        with pytest.raises(ValueError, match="VectorDB engine is required"):
+        with pytest.raises(ConfigurationError, match="VectorDB engine is required"):
             generate_output_location(fake_benchmark, datetime_str="20250111_160000")
 
-    def test_vectordb_runs_distinguished_by_engine(self, tmp_path, mock_logger):
-        """Two vectordb engines accumulate in one results-dir without collision.
-        Each run's metadata records the engine in the model slot so workload
-        grouping by (model, accelerator) treats them as distinct workloads."""
+    def test_vectordb_path_requires_index(self, tmp_path):
+        """Without vdb_index/index_type, generate_output_location refuses to build a path."""
+        from types import SimpleNamespace
+
+        from mlpstorage_py.config import BENCHMARK_TYPES as _BT
+        from mlpstorage_py.errors import ConfigurationError
+        from mlpstorage_py.rules.utils import generate_output_location
+
+        fake_benchmark = SimpleNamespace(
+            BENCHMARK_TYPE=_BT.vector_database,
+            args=SimpleNamespace(
+                results_dir=str(tmp_path),
+                mode="closed",
+                orgname="Acme",
+                systemname="sys-v1",
+                command="run",
+                vdb_engine="milvus",
+            ),
+        )
+        with pytest.raises(ConfigurationError, match="VectorDB index is required"):
+            generate_output_location(fake_benchmark, datetime_str="20250111_160000")
+
+    def test_vectordb_path_can_fall_back_to_index_type(self, tmp_path):
+        """Direct callers using the legacy index_type still get a labeled path."""
+        from types import SimpleNamespace
+
+        from mlpstorage_py.config import BENCHMARK_TYPES as _BT
+        from mlpstorage_py.rules.utils import generate_output_location
+
+        fake_benchmark = SimpleNamespace(
+            BENCHMARK_TYPE=_BT.vector_database,
+            args=SimpleNamespace(
+                results_dir=str(tmp_path),
+                mode="closed",
+                orgname="Acme",
+                systemname="sys-v1",
+                command="datagen",
+                vdb_engine="milvus",
+                index_type="HNSW",
+            ),
+        )
+
+        location = generate_output_location(
+            fake_benchmark,
+            datetime_str="20250111_160000",
+        )
+
+        assert location == str(
+            tmp_path / "closed" / "Acme" / "results" / "sys-v1"
+            / "vector_database" / "milvus" / "HNSW" / "datagen" / "20250111_160000"
+        )
+
+    def test_vectordb_runs_distinguished_by_engine_and_index(
+        self, tmp_path, mock_logger
+    ):
+        """Engine/index combinations remain separate in one results tree."""
         results_dir = tmp_path / "results"
-        make_vectordb_run(results_dir, engine="milvus", run_datetime="20250111_160000")
-        make_vectordb_run(results_dir, engine="milvus", run_datetime="20250111_160100")
-        # A hypothetical future engine in the same tree.
-        make_vectordb_run(results_dir, engine="elasticsearch", run_datetime="20250111_160200")
+        make_vectordb_run(
+            results_dir,
+            engine="milvus",
+            index="DISKANN",
+            run_datetime="20250111_160000",
+        )
+        make_vectordb_run(
+            results_dir,
+            engine="milvus",
+            index="HNSW",
+            run_datetime="20250111_160100",
+        )
+        make_vectordb_run(
+            results_dir,
+            engine="elasticsearch",
+            index="HNSW",
+            run_datetime="20250111_160200",
+        )
 
         runs = get_runs_files(str(results_dir), logger=mock_logger)
 
         assert len(runs) == 3
-        engines = sorted(r.model for r in runs)
-        assert engines == ["elasticsearch", "milvus", "milvus"]
+        assert sorted(run.model for run in runs) == [
+            "elasticsearch_HNSW",
+            "milvus_DISKANN",
+            "milvus_HNSW",
+        ]
 
     def test_kvcache_path_includes_model(self, tmp_path):
-        """generate_output_location produces kv_cache/<model>/<command>/<datetime>/."""
+        """generate_output_location produces kv_cache/<model>/<command>/<datetime>/.
+
+        Plan 01-03 LAY-05: full canonical prefix
+        <rd>/<mode>/<org>/results/<sys>/kv_cache/<model>/<command>/<dt>/.
+        """
         from types import SimpleNamespace
 
         from mlpstorage_py.config import BENCHMARK_TYPES as _BT
@@ -461,13 +565,17 @@ class TestPreviewBenchmarkAccumulation:
             BENCHMARK_TYPE=_BT.kv_cache,
             args=SimpleNamespace(
                 results_dir=str(tmp_path),
+                mode="closed",
+                orgname="Acme",
+                systemname="sys-v1",
                 command="run",
                 model="llama3.1-8b",
             ),
         )
         location = generate_output_location(fake_benchmark, datetime_str="20250111_170000")
         assert location == str(
-            tmp_path / "kv_cache" / "llama3.1-8b" / "run" / "20250111_170000"
+            tmp_path / "closed" / "Acme" / "results" / "sys-v1"
+            / "kv_cache" / "llama3.1-8b" / "run" / "20250111_170000"
         )
 
     def test_kvcache_path_requires_model(self, tmp_path):
@@ -475,17 +583,21 @@ class TestPreviewBenchmarkAccumulation:
         from types import SimpleNamespace
 
         from mlpstorage_py.config import BENCHMARK_TYPES as _BT
+        from mlpstorage_py.errors import ConfigurationError
         from mlpstorage_py.rules.utils import generate_output_location
 
         fake_benchmark = SimpleNamespace(
             BENCHMARK_TYPE=_BT.kv_cache,
             args=SimpleNamespace(
                 results_dir=str(tmp_path),
+                mode="closed",
+                orgname="Acme",
+                systemname="sys-v1",
                 command="run",
                 # no model
             ),
         )
-        with pytest.raises(ValueError, match="Model is required for kv_cache"):
+        with pytest.raises(ConfigurationError, match="Model is required for kv_cache"):
             generate_output_location(fake_benchmark, datetime_str="20250111_170000")
 
     def test_kvcache_runs_distinguished_by_model(self, tmp_path, mock_logger):

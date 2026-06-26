@@ -4,7 +4,6 @@ Tests for VectorDBRunRulesChecker in mlpstorage.rules module.
 Tests cover:
 - Benchmark type validation (valid and invalid)
 - Runtime validation (valid, insufficient, missing/default)
-- Preview status (always returns OPEN)
 - run_checks integration
 """
 
@@ -111,38 +110,24 @@ class TestVectorDBRunRulesChecker:
 
         assert issue is None
 
-    def test_check_preview_status_always_open(self, mock_logger, valid_vectordb_run):
-        """check_preview_status always returns OPEN issue with preview status message."""
-        checker = VectorDBRunRulesChecker(valid_vectordb_run, logger=mock_logger)
-        issue = checker.check_preview_status()
-
-        assert issue is not None
-        assert issue.validation == PARAM_VALIDATION.OPEN
-        assert "preview status" in issue.message.lower()
-
-    def test_run_checks_collects_all_issues(self, mock_logger, valid_vectordb_run):
-        """run_checks collects all issues from check methods."""
+    def test_run_checks_no_preview_issue(self, mock_logger, valid_vectordb_run):
+        """run_checks does not emit a preview-status issue (de-previewed)."""
         checker = VectorDBRunRulesChecker(valid_vectordb_run, logger=mock_logger)
         issues = checker.run_checks()
 
-        # Should have at least 1 issue (the preview status)
-        assert len(issues) >= 1
-        # Verify the preview status issue is included
         preview_issues = [i for i in issues if "preview" in i.message.lower()]
-        assert len(preview_issues) == 1
+        assert preview_issues == []
 
-    def test_all_valid_run_returns_open_due_to_preview(self, mock_logger, valid_vectordb_run):
-        """A valid VectorDB run returns OPEN (not CLOSED) due to preview status."""
+    def test_valid_run_is_closed_clean(self, mock_logger, valid_vectordb_run):
+        """A valid VectorDB run has no INVALID or OPEN issues — qualifies for CLOSED."""
         checker = VectorDBRunRulesChecker(valid_vectordb_run, logger=mock_logger)
         issues = checker.run_checks()
 
-        # No INVALID issues should be present for a valid run
         invalid_issues = [i for i in issues if i.validation == PARAM_VALIDATION.INVALID]
-        assert len(invalid_issues) == 0
+        assert invalid_issues == []
 
-        # At least one OPEN issue should be present (preview status)
         open_issues = [i for i in issues if i.validation == PARAM_VALIDATION.OPEN]
-        assert len(open_issues) >= 1
+        assert open_issues == []
 
     def test_check_benchmark_type_with_checkpointing(self, mock_logger):
         """check_benchmark_type returns INVALID for checkpointing benchmark."""

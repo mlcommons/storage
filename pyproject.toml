@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlpstorage"
-version = "3.0.12"
+version = "3.0.22"
 description = "MLPerf Storage Benchmark Suite"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -23,7 +23,7 @@ dependencies = [
     "minio>=7.2.20",
     "s3torchconnector>=1.5.0",
     "python-dotenv>=1.0.0",
-    "s3dlio>=0.9.100",
+    "s3dlio>=0.9.102",
 ]
 
 [project.optional-dependencies]
@@ -126,13 +126,19 @@ environments = ["sys_platform == 'linux'"]
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
 torchaudio = [{ index = "pytorch-cpu" }]
-# Pinned to FileSystemGuy-combined-391-448 head — carries:
-#   - DLIO PR #21 fix for storage #391 part 1 (TorchIterableDatasetSimple gating)
-#   - DLIO PR #22 fix for storage #415 (mpi4py auto-init in spawn workers)
-#   - DLIO PR #23 fix for storage #391 part 2 (sudo -n + warn-once for drop_caches)
+# Tracks upstream main. Reproducibility is anchored by the resolved hash
+# recorded in uv.lock; bump by re-running `uv lock --upgrade-package dlio-benchmark`.
+# Current main carries (most recent first):
+#   - DLIO PR #28 fix for storage #487: expose DLIO_DROP_CACHES_TIMEOUT,
+#     distinguish slow flush from sudo refusal
+#   - DLIO PR #27 fix for storage #466 #472: skip_listing, S3 object storage,
+#     epoch-2+ AU, TFRecord via s3dlio, large-scale listing OOM prevention
+#   - DLIO PR #25 fix for storage #455 (sampler floor division — equal per-rank shards)
 #   - DLIO PR #24 fix for storage #448 (per-node worker-memory budget)
-# Revert to branch = "main" once PRs #23 and #24 merge upstream.
-dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "814f3ff400c865a294bfc70714a3289efbfa83ac" }
+#   - DLIO PR #23 fix for storage #391 part 2 (sudo -n + warn-once for drop_caches)
+#   - DLIO PR #22 fix for storage #415 (mpi4py auto-init in spawn workers)
+#   - DLIO PR #21 fix for storage #391 part 1 (TorchIterableDatasetSimple gating)
+dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", branch = "main" }
 
 [dependency-groups]
 dev = [

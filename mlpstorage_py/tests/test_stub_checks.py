@@ -1,16 +1,21 @@
-"""Unit tests for the Rules.md §5 / §6 extension stubs.
+"""Unit tests for the Rules.md §6 extension stub (KVCacheCheck).
 
-Pins the structural invariants of ``VdbCheck`` and ``KVCacheCheck``
-(Plan 03-03 Task 4 / W-02 / CLAUDE.md "new structural checks should
-have unit tests"):
+Pins the structural invariants of ``KVCacheCheck`` (Plan 03-03 Task 4 /
+W-02 / CLAUDE.md "new structural checks should have unit tests"):
 
-  1. Each stub subclasses ``BaseCheck``.
+  1. The stub subclasses ``BaseCheck``.
   2. ``discover_rules(stub_cls) == {}`` — zero ``@rule`` bindings (D-S2;
      Phase 3 success criterion #2).
   3. Instantiation + ``__call__`` returns ``True`` with zero errors and
      zero warnings on the mock logger.
   4. ``init_checks`` registers exactly one method, named
      ``_section_unimplemented``.
+
+Phase 4 Plan 04-02 (D-01) removed ``VdbCheck`` from this fixture: VdbCheck
+is no longer a stub — Rules.md §5 was filled by upstream PR #452 and
+VdbCheck now carries 16 ``@rule``-decorated methods. Rules.md §6 (KVCache)
+is still empty, so ``KVCacheCheck`` continues to satisfy the stub
+contract pinned here.
 
 Run with:
     pytest mlpstorage_py/tests/test_stub_checks.py -v
@@ -22,12 +27,10 @@ import pytest
 
 from mlpstorage_py.submission_checker.checks.base import BaseCheck
 from mlpstorage_py.submission_checker.checks.kvcache_checks import KVCacheCheck
-from mlpstorage_py.submission_checker.checks.vdb_checks import VdbCheck
 from mlpstorage_py.submission_checker.rule_registry import discover_rules
 
 
 STUB_CASES = [
-    pytest.param(VdbCheck, "vdb checks", id="VdbCheck"),
     pytest.param(KVCacheCheck, "kvcache checks", id="KVCacheCheck"),
 ]
 

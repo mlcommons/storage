@@ -4,18 +4,19 @@
 # Table of Contents
 
 * [1. Introduction](#1-introduction)
-* [2. Core/Common Rules](#2-corecommon-rules)
+* [2. Core/Common Rules for All Submissions](#2-corecommon-rules-for-all-submissions)
     * [2.1. Core/Common POSIX API Rules](#21-corecommon-posix-api-rules)
     * [2.2. Core/Common Object API Rules](#22-corecommon-object-api-rules)
-* [3. Validating the Training Options](#3-validating-the-training-options)
+* [3. Validating the Training Workloads](#3-validating-the-training-workloads)
     * [3.1. Training Sizing Options](#31-training-sizing-options)
     * [3.2. Training Generation Options](#32-training-generation-options)
     * [3.3. Training Run Options](#33-training-run-options)
     * [3.4. Training Access Via POSIX API Options](#34-training-access-via-posix-api-options)
     * [3.5. Training Access Via Object API Options](#35-training-access-via-object-api-options)
     * [3.6. Training OPEN versus CLOSED Options](#36-training-open-versus-closed-options)
-* [4. Validating the Checkpointing Options](#4-validating-the-checkpointing-options)
+* [4. Validating the Checkpointing Workloads](#4-validating-the-checkpointing-workloads)
     * [4.1. Checkpointing Sizing Options](#41-checkpointing-sizing-options)
+    * 
     * [4.2. Checkpointing Generation Options](#42-checkpointing-generation-options)
     * [4.3. Checkpointing Run Options](#43-checkpointing-run-options)
     * [4.4. Checkpointing Access Via POSIX API Options](#44-checkpointing-access-via-posix-api-options)
@@ -36,7 +37,7 @@
     * [6.4. KVCache Access Via POSIX API Options](#64-kvcache-access-via-posix-api-options)
     * [6.5. KVCache Access Via Object API Options](#65-kvcache-access-via-object-api-options)
     * [6.6. KVCache OPEN versus CLOSED Options](#66-kvcache-open-versus-closed-options)
-# 1.  Introduction
+# 1. Introduction
 
 These are the requirements for the *submission validation checker* for version 2.0 of the MLPerf™ Storage benchmark,
 but since the `mlpstorage` tool will be responsible for generating the vast majority (if not all) of the contents of a submission, it is also a spec for what `mlpstorage` should generate.
@@ -53,9 +54,9 @@ The `mlpstorage` tool must be used to run the benchmarks, submitters are not all
 
 1.1. **mlpstorageGeneratesHierarchy** -- The `mlpstorage` command must obtain (somehow) the pathname of the output file directory hierarchy and directly create and/or append to the files within that hierarchy to successively build out the submission folder.  We don't want the submitter to manually create anything in that hierarchy except for the SystemDescription.* files (if we can help it).
 
-# 2.  Core/Common Rules for All Submissions
+# 2. Core/Common Rules for All Submissions
 
-## 2.1.  Core/Common POSIX API Rules
+## 2.1. Core/Common POSIX API Rules
 
 2.1.1. **submitterRootDirectory** --  The submission structure must start from a single directory whose name is the name of the submitter.  This can be any string, but a blank or any other character in that string that cannot be part of a POSIX filename should be replaced 1-for-1 with a dash character.
 
@@ -65,11 +66,31 @@ The `mlpstorage` tool must be used to run the benchmarks, submitters are not all
 
 2.1.4. **closedSubmitterDirectory** --  Within the "closed" directory, each submitter's contribution lives in a directory whose name is the submitter's name (subject to 2.1.1).  Reviewers may run the submission checker against either a single submitter's pre-merge package (in which case the "closed" directory contains exactly one submitter directory, whose name matches the top-level submitter directory) or a merged tree containing multiple submitters' packages (in which case the "closed" directory contains one directory per participating submitter and the top-level directory is named for the merged set rather than any one submitter).  The same convention applies to the "open" directory per 2.1.3.
 
-2.1.5. **requiredSubdirectories** --  Within the submitter directory mentioned just above, there must be exactly three directories: "code", "results", and "systems".  These names are case-sensitive.
+2.1.5. **requiredSubdirectories** -- The required subdirectories at the submitter level differ between CLOSED and OPEN submissions:
 
-2.1.6. **codeDirectoryContents** --  The "code" directory must include a complete copy of the MLPerf Storage github repo that was used to run the test that resulted in the "results" directory's contents.
-If this is in the "open" hierarchy, any modifications made to the benchmark code must be included here, and if this is in the "closed" hierarchy, there must be no changes to the benchmark code.
-Note that in both cases this must be the code that was actually run to generate those results.  In a CLOSED submission, the *submission validator* should do an md5sum of the code directory hierarchy, compare that to a value hard-coded into the validator code, and fail the validation if there is a difference.
+2.1.5.a. **requiredSubdirectoriesClosed** -- Within a CLOSED submitter directory, there must be exactly three directories: "code", "results", and "systems".  These names are case-sensitive.
+
+2.1.5.b. **requiredSubdirectoriesOpen** -- Within an OPEN submitter directory, there must be exactly two directories: "results" and "systems".  These names are case-sensitive.  The "code" directory does NOT appear at the OPEN submitter level; instead, a "code" directory is captured at each leaf inside `results/`.  The leaf shape is per-benchmark-type:
+- For "training" and "checkpointing" the leaf is `results/<systemname>/<type>/<model>/` (one capture per model).
+- For "vector_database" the leaf is `results/<systemname>/vector_database/<index_type>/` where `<index_type>` is the UPPERCASE token (`DISKANN`, `HNSW`, or `AISAQ`) (one capture per index type, because results across index types — e.g. AISAQ vs DISKANN vs HNSW — are not comparable and must live in separate trees).
+- For "kv_cache" the leaf is currently `results/<systemname>/<type>/` (one capture per type).  This is transitional pending finalization of the kv_cache directory structure below the type prefix.
+
+See §2.1.6 and §2.1.27.
+
+2.1.6. **codeDirectoryContents** -- Each "code" directory in the submission package must be a captured copy of the MLPerf Storage source tree that was used to generate the corresponding results, accompanied by a top-level ".code-hash.json" file that records the captured tree's hash and metadata.
+
+The "code" directory is created automatically by the `mlpstorage` CLI on the first invocation of `closed|open datasize|datagen|run`.  On subsequent invocations, the CLI verifies that the live source tree matches the recorded hash and refuses to proceed on mismatch (with the exact message "changes to the codebase are not allowed in a CLOSED run" for CLOSED, or "all runs of this type must use the same codebase" for OPEN).  See §2.1.27 for the per-leaf location of "code" in OPEN submissions.
+
+The ".code-hash.json" schema is:
+- "hash": 32-character lowercase hex MD5 of the captured tree (excluding dotfiles, dotdirs, `test/`, `tests/`, `__pycache__/`, `.egg-info/`, `*.pyc`, and `.code-hash.json` itself).
+- "algorithm": stable identifier (currently "md5-tree-v1").
+- "captured_at": ISO-8601 UTC timestamp of the capture (e.g., "2026-06-16T15:42:11Z").
+- "mlpstorage_version": the `mlpstorage` package version at capture time.
+- "git_sha": full 40-character SHA of HEAD at capture, or null if unavailable.
+
+At submission-validation time, the *submission validator* performs a per-tree self-consistency check on every "code" directory it finds: it recomputes the captured tree's MD5 (using the same exclusion set above) and compares it against the recorded "hash" in ".code-hash.json".  Mismatch produces a violation under §2.1.6.
+
+For CLOSED submissions, an additional upstream-identity check is layered on top: the validator compares the captured tree's MD5 against a pinned digest from `REFERENCE_CHECKSUMS` (or a value supplied via `--reference-checksum`).  See §3.6.1.
 
 2.1.7. **systemsDirectoryFiles** --  The "systems" directory must contain two files for each "system name", a .yaml file and a .pdf file, and nothing more, with two exceptions: Markdown files (any "*.md", e.g. "README.md", "NOTES.md") are permitted alongside the per-system files so submitters may include supplementary documentation, and dot-prefixed entries (such as ".DS_Store" or ".gitkeep") are ignored.  Each of the .yaml/.pdf files must be named with the "system name".
 Eg: for a system-under-test named "Big_and_Fast_4000_buffered", there must be a "Big_and_Fast_4000_buffered.yaml" and a "Big_and_Fast_4000_buffered.pdf" file.  These names are case-sensitive.
@@ -98,6 +119,8 @@ configuration of storage system and to link together those results with the .pdf
 
 2.1.18. **runTimestampGap** --  The timestamp (the day and time) represented by the name of each *timestamp directory* must be separated by less than the duration of a single *timestamp directory* from it's neighboring *timestamp directories*.  Ie: the gap between a consecutive pair of *timestamp directories* must be short enough that we can be sure that there was no benchmark activity between them.
 
+2.1.18a.  **runPickingSubsets** -- It is permissible to execute a large number of runs (all consecutive) and then delete the *timestamp directories* for all but 6 consecutive runs in the middle.  This differs from "cherry picking" in that these runs must be consecutive, see **runTimestampGap**.
+
 2.1.19. **runFiles** --  Within each *timestamp directory* within the "run" *phase*, there must exist the following files: "training_run.stdout.log", "training_run.stderr.log" file, "*output.json, "*per_epoch_stats.json", "*summary.json", and "dlio.log", plus a subdirectory named "dlio_config".  These names are case-sensitive.
 
 2.1.20. **runDlioConfig** --  The "dlio_config" subdirectory in each *timestamp directory* must contain the following list of files, and nothing else: "config.yaml", "hydra.yaml", and "overrides.yaml".  These names are case-sensitive.
@@ -109,6 +132,8 @@ configuration of storage system and to link together those results with the .pdf
 2.1.23. **checkpointingTimestamps** --  Within the *workload directories* within the "checkpointing" directory hierarchy, there must be either one or two *timestamp directories* named *YYYYMMDD_HHmmss" that represent a *timestamp* of when that part of the test run was completed (one timestamp directory per invocation, per §4.7.1: a single combined invocation OR a write-phase invocation followed by a read-phase invocation).  Where Y's are replaced with the year the run was performed, M's are replaced with the month, D's with the day, H's with the hour (in 24-hour format), m's with the minute, and s's with the second.  The timestamps should be relative to the local timezone where the test was actually run.
 
 2.1.24. **checkpointingTimestampGap** --  The timestamp (the day and time) represented by the name of each *timestamp directory* must be separated by less than the duration of a single *timestamp directory* from it's neighboring *timestamp directories*.  Ie: the gap between a consecutive pair of *timestamp directories* must be short enough that we can be sure that there was no benchmark activity between them.
+
+2.1.24a.  **checkpointingPickingSubsets** -- It is permissible to execute a large set of runs (all consecutive) and then delete all but one run (with 10 checkpoint files in it) in the middle.
 
 2.1.25. **checkpointingFiles** --  Within the *timestamp directories* within the "checkpointing" directory hierarchy, there must exist the following files: "checkpointing_run.stdout.log", "checkpointing_run.stderr.log" file, "*output.json, "*per_epoch_stats.json", "*summary.json", and "dlio.log", plus a subdirectory named "dlio_config".  These names are case-sensitive.
 
@@ -174,25 +199,37 @@ root_folder (or any name you prefer)
 │	  	│		│	 	... (10x Runs for Read and Write. May be combined in a single run)
 │	  	│		│		└── YYYYMMDD_HHmmss
 │	  	│		│	 		└── dlio_config
-│	  	│	 	└── vdb_bench
-|		|			├── AiSAQ
-│	  	│	 		|	├── YYYYMMDD_HHmmss
-│	  	│			|	│	└── summary.json
-│	  	│			|	... (5x Runs total)
-│	  	│			|	└── YYYYMMDD_HHmmss
-│	  	│			|		└── summary.json
-|		|			├── DiskANN
-│	  	│	 		|	├── YYYYMMDD_HHmmss
-│	  	│			|	│	└── summary.json
-│	  	│			|	... (5x Runs total)
-│	  	│			|	└── YYYYMMDD_HHmmss
-│	  	│			|		└── summary.json
+│	  	│	 	└── vector_database
+|		|			├── AISAQ
+│	  	│	 		|	├── datagen
+│	  	│			|	│	└── YYYYMMDD_HHmmss
+│	  	│			|	│		└── summary.json
+│	  	│			|	└── run
+│	  	│			|		├── YYYYMMDD_HHmmss
+│	  	│			|		│	└── summary.json
+│	  	│			|		... (5x Runs total)
+│	  	│			|		└── YYYYMMDD_HHmmss
+│	  	│			|			└── summary.json
+|		|			├── DISKANN
+│	  	│	 		|	├── datagen
+│	  	│			|	│	└── YYYYMMDD_HHmmss
+│	  	│			|	│		└── summary.json
+│	  	│			|	└── run
+│	  	│			|		├── YYYYMMDD_HHmmss
+│	  	│			|		│	└── summary.json
+│	  	│			|		... (5x Runs total)
+│	  	│			|		└── YYYYMMDD_HHmmss
+│	  	│			|			└── summary.json
 |		|			└── HNSW
-│	  	│	 			├── YYYYMMDD_HHmmss
-│	  	│				│	└── summary.json
-│	  	│				... (5x Runs total)
-│	  	│				└── YYYYMMDD_HHmmss
-│	  	│					└── summary.json
+│	  	│	 			├── datagen
+│	  	│				│	└── YYYYMMDD_HHmmss
+│	  	│				│		└── summary.json
+│	  	│				└── run
+│	  	│					├── YYYYMMDD_HHmmss
+│	  	│					│	└── summary.json
+│	  	│					... (5x Runs total)
+│	  	│					└── YYYYMMDD_HHmmss
+│	  	│						└── summary.json
 │	  	└── systems
 │	  		├──system-name-1.yaml
 │	  		├──system-name-1.pdf
@@ -201,11 +238,11 @@ root_folder (or any name you prefer)
 │
 └── Open
  	└──<submitter_org>
-		├── code
 		├── results
 		│	└──system-name-1
 		│	 	├── training
 		│	 	│	├── unet3d
+		│		│	│	├── code  # captured per-leaf
 		│		│	│	├── datagen
 		│		│	│	│	└── YYYYMMDD_HHmmss
 		│		│	│	│		└── dlio_config
@@ -229,6 +266,7 @@ root_folder (or any name you prefer)
 		│		│	 			└── dlio_config
 	  	│	 	├── checkpointing
 	  	│	 	│	├── llama3-8b
+	  	│		│	│	├── code  # captured per-leaf
 	  	│		│	│	├──results.json
 	  	│		│	│	├── YYYYMMDD_HHmmss
 	  	│		│	│	│	└── dlio_config 
@@ -236,6 +274,7 @@ root_folder (or any name you prefer)
 	  	│		│	│	└── YYYYMMDD_HHmmss
 	  	│		│	│		└── dlio_config
 	  	│	 	│	├── llama3-70b
+	  	│		│	│	├── code  # captured per-leaf
 	  	│		│	│	├──results.json
 	  	│		│	│	├── YYYYMMDD_HHmmss
 	  	│		│	│	│	└── dlio_config 
@@ -243,6 +282,7 @@ root_folder (or any name you prefer)
 	  	│		│	│	└── YYYYMMDD_HHmmss
 	  	│		│	│		└── dlio_config
 	  	│	 	│	├── llama3-405b
+	  	│		│	│	├── code  # captured per-leaf
 	  	│		│	│	├──results.json
 	  	│		│	│	├── YYYYMMDD_HHmmss
 	  	│		│	│	│	└── dlio_config 
@@ -250,31 +290,47 @@ root_folder (or any name you prefer)
 	  	│		│	│	└── YYYYMMDD_HHmmss
 	  	│		│	│		└── dlio_config
 	  	│	 	│	└── llama3-1t
+	  	│		│		├── code  # captured per-leaf
 	  	│		│		├──results.json
 	  	│		│	 	├── YYYYMMDD_HHmmss
 	  	│		│	 	│	└── dlio_config 
 	  	│		│	 	... (10x Runs for Read and Write. May be combined in a single run)
 	  	│		│		└── YYYYMMDD_HHmmss
 	  	│		│	 		└── dlio_config
-	  	│	 	└── vdb_bench
-		|			├── AiSAQ
-	  	│	 		|	├── YYYYMMDD_HHmmss
-	  	│			|	│	└── summary.json
-	  	│			|	... (5x Runs total)
-	  	│			|	└── YYYYMMDD_HHmmss
-	  	│			|		└── summary.json
-		|			├── DiskANN
-	  	│	 		|	├── YYYYMMDD_HHmmss
-	  	│			|	│	└── summary.json
-	  	│			|	... (5x Runs total)
-	  	│			|	└── YYYYMMDD_HHmmss
-	  	│			|		└── summary.json
+	  	│	 	└── vector_database
+		|			├── AISAQ
+	  	│	 		|	├── code  # captured per-leaf
+	  	│	 		|	├── datagen
+	  	│			|	│	└── YYYYMMDD_HHmmss
+	  	│			|	│		└── summary.json
+	  	│			|	└── run
+	  	│			|		├── YYYYMMDD_HHmmss
+	  	│			|		│	└── summary.json
+	  	│			|		... (5x Runs total)
+	  	│			|		└── YYYYMMDD_HHmmss
+	  	│			|			└── summary.json
+		|			├── DISKANN
+	  	│	 		|	├── code  # captured per-leaf
+	  	│	 		|	├── datagen
+	  	│			|	│	└── YYYYMMDD_HHmmss
+	  	│			|	│		└── summary.json
+	  	│			|	└── run
+	  	│			|		├── YYYYMMDD_HHmmss
+	  	│			|		│	└── summary.json
+	  	│			|		... (5x Runs total)
+	  	│			|		└── YYYYMMDD_HHmmss
+	  	│			|			└── summary.json
 		|			└── HNSW
-	  	│	 			├── YYYYMMDD_HHmmss
-	  	│				│	└── summary.json
-	  	│				... (5x Runs total)
-	  	│				└── YYYYMMDD_HHmmss
-	  	│					└── summary.json
+	  	│	 			├── code  # captured per-leaf
+	  	│	 			├── datagen
+	  	│				│	└── YYYYMMDD_HHmmss
+	  	│				│		└── summary.json
+	  	│				└── run
+	  	│					├── YYYYMMDD_HHmmss
+	  	│					│	└── summary.json
+	  	│					... (5x Runs total)
+	  	│					└── YYYYMMDD_HHmmss
+	  	│						└── summary.json
 		└── systems
 			├──system-name-1.yaml
 			├──system-name-1.pdf
@@ -294,11 +350,11 @@ root_folder (or any name you prefer)
         └── overrides.yaml
 ```
 
-## 2.2.  Core/Common Object API Rules
+## 2.2. Core/Common Object API Rules
 
-# 3.  Validating the Training Workloads
+# 3. Validating the Training Workloads
 
-## 3.1.  Training Sizing Options
+## 3.1. Training Sizing Options
 
 3.1.1. **trainingVerifyDatasizeUsage** -- The *submission validator* must verify that the *datasize* option was used by finding the entry(s) in the log file showing its use.
 
@@ -314,11 +370,11 @@ root_folder (or any name you prefer)
      * `min_files_size = min_samples * record_length / 1024 / 1024 / 1024`
   * A minimum of `min_total_files` files are required which will consume `min_files_size` GB of storage.
 
-## 3.2.  Training Generation Options
+## 3.2. Training Generation Options
 
 3.2.1. **trainingDatagenMinimumSize** --  The amount of data generated during the *datagen* phase must be equal **or larger** -- than the amount of data calculated during the *datasize* phase or the run must be failed.
 
-## 3.3.  Training Run Options
+## 3.3. Training Run Options
 
 3.3.1. **trainingRunDataMatchesDatasize** -- The amount of data the *run* phase is told to use must be exactly equal to the *datasize* value calculated earlier, but can be less than the value used in the *datagen* phase.  To express that, you can run the benchmark on a subset of that dataset by setting `num_files_train` or `num_files_eval` smaller than the number of files available in the dataset folder, but `num_subfolders_train` and `num_subfolders_eval` must be to be equal to the actual number of subfolders inside the dataset folder in order to generate valid results.
 
@@ -337,17 +393,21 @@ root_folder (or any name you prefer)
 
 3.3.7. **trainingNodeCapabilityConsistency** -- For distributed Training submissions, the *submission validation checker* should emit a warning (not fail the validation) if the physical nodes that run the benchmark code are widely enough different in their capability.  **_(not clear we should do this, so maybe remove?)_**
 
-## 3.4.  Training Access Via POSIX API Options
+## 3.4. Training Access Via POSIX API Options
 
 3.4.1. **trainingMlpstoragePathArgs** --  The arguments to `mlpstorage` that set the directory pathname where the dataset is stored and the directory where the output logfiles are stored must both be set and must be set to different values.
 
 3.4.2. **trainingMlpstorageFilesystemCheck** --  The `mlpstorage` command should do a "df" command on the directory pathname where the dataset is stored and another one on the directory pathname where the output logfiles are stored and record those values in the logfile.  The *submission validator* should find those entries in the run's logfile and verify that they are different filesystems.  We don't want the submitter to, by acccident, place the logfiles onto the storage system under test since that would skew the results.
 
-## 3.5.  Training Access Via Object API Options
+## 3.5. Training Access Via Object API Options
 
-## 3.6.  Training OPEN versus CLOSED Options
+## 3.6. Training OPEN versus CLOSED Options
 
-3.6.1. **trainingClosedSubmissionChecksum** -- For CLOSED submissions of this benchmark, the MLPerf Storage codebase cannot be changed, so the *submission validation checker* SHOULD do an `md5sum` of the code directory hierachy in the submission package and verify that that matches a precalculated checksum stored as a literal in the validator's codebase.
+3.6.1. **trainingClosedSubmissionChecksum** -- For CLOSED submissions of this benchmark, the MLPerf Storage codebase must not be changed.  The *submission validation checker* enforces this with a layered check:
+
+  (a) **Self-consistency check (always runs):** the validator recomputes the captured `code/` tree's MD5 (per the exclusion set documented in §2.1.6) and compares it against the recorded "hash" in `.code-hash.json`.  This detects post-capture tampering of the submission package itself.
+
+  (b) **Upstream-identity check (CLOSED only):** the validator additionally compares the captured tree's MD5 against a pinned digest from `REFERENCE_CHECKSUMS` (or a value supplied via the `--reference-checksum` CLI flag).  When no pinned digest is configured, the upstream-identity check is skipped with a single warning per run; the self-consistency check (a) still runs and can still fail.  The pinned digest, when present, must be computed against the same exclusion set as the runtime capture (currently dotfiles, dotdirs, `test/`, `tests/`, `__pycache__/`, `.egg-info/`, `*.pyc`, and `.code-hash.json` itself).
 
 3.6.2. **trainingClosedSubmissionParameters** -- For CLOSED submissions of this benchmark, only a small number of parameters can be modified, and those parameters are listed in the table below.  Any other parameters being modified must generate a message and fail the validation.
 
@@ -386,13 +446,13 @@ root_folder (or any name you prefer)
 | *Reader parameters*          |                                            |                                                                                       |
 | reader.data_loader           | Supported options: Tensorflow or PyTorch.  | 3D U-Net: PyTorch<br>ResNet-50: Tensorflow<br>Cosmoflow: Tensorflow                   |
 
-# 4.  Validating the Checkpointing Workloads
+# 4. Validating the Checkpointing Workloads
 
-## 4.1.  Checkpointing Sizing Options
+## 4.1. Checkpointing Sizing Options
 
-## 4.2.  Checkpointing Generation Options
+## 4.2. Checkpointing Generation Options
 
-## 4.3.  Checkpointing Run Options
+## 4.3. Checkpointing Run Options
 
 4.3.1. **checkpointDataSizeRatio** -- The checkpoint data written per client node must be more than 3x the client node's memory capacity, otherwise the filesystem cache needs to be cleared between the write and read phases.
 
@@ -427,7 +487,7 @@ root_folder (or any name you prefer)
 
 ## 4.5. Checkpointing Access Via Object API Options
 
-## 4.6.  Checkpointing OPEN versus CLOSED Options
+## 4.6. Checkpointing OPEN versus CLOSED Options
 
 4.6.1. **checkpointClosedMpiProcesses** -- For CLOSED submissions, the number of MPI processes must be set to 8, 64, 512, and 1024 for the respective models.  (see table 2)
 
@@ -457,7 +517,7 @@ root_folder (or any name you prefer)
 
 **\*\* NOTE: In CLOSED submissions, ``--num-checkpoints-write`` and ``--num-checkpoints-read`` may be set to ``0`` only as part of the two-invocation cache-flush workflow described in §4.7.1: one invocation runs the write phase with ``--num-checkpoints-read=0`` and the next runs the read phase with ``--num-checkpoints-write=0``. The default for both flags is 10 and the total work performed across both invocations must still be 10 writes followed by 10 reads.**
 
-## 4.7.  Storage System Must Be Simultaneously R/W or _Remappable_
+## 4.7. Storage System Must Be Simultaneously R/W or _Remappable_
 
 4.7.1. **checkpointCacheFlushValidation** -- A cache flush between the write and read phases is only required when the client node has enough memory to cache all of the checkpoints written by that client during the run. The benchmark writes 10 sequential checkpoints specifically to overfill typical filesystem caches; on most submission configurations the early checkpoints have already been evicted by the time the read phase begins, so no flush is required. As a rule of thumb (see `checkpointing/README.md`), a flush is required when the total checkpoint size written per client is less than 3× the client node's memory capacity. When a flush is required, the submitter must execute the run in two invocations: the write phase with ``--num-checkpoints-read=0``, followed by the cache flush during a pause of no more than 30 seconds, then the read phase with ``--num-checkpoints-write=0``. The validator must confirm this split occurred and that the inter-phase gap did not exceed 30 seconds.
 
@@ -474,23 +534,23 @@ System:
     simultaneous_read__support: True    # Are simultaneous reads by multiple hosts supported in the submitted configuration
 ```
 
-# 5.  Validating the VDB Workloads
+# 5. Validating the VDB Workloads
 
-## 5.1.  VDB Sizing Options
+## 5.1. VDB Sizing Options
 
 5.1.1. **vdbDatasetScale** -- The benchmark must be run against one of the defined dataset scales (collection vector counts) listed in the VDB scale table. The *submission validator* must read `num_vectors` and `dimension` from the run's `config.json`/`summary.json` and verify they match a defined scale; any other scale must generate a message and fail validation.
 
 5.1.2. **vdbDimensionConsistency** -- The vector `dimension` recorded at `datagen` (load) time must equal the `dimension` used at `run` (query) time. The *submission validator* must compare the dimension in the load summary against the dimension in each run's `summary.json` and fail validation if they differ.
 
-## 5.2.  VDB Generation Options
+## 5.2. VDB Generation Options
 
 5.2.1. **vdbCollectionPopulated** -- The number of vectors actually inserted (`inserted_vectors`) during load must equal the declared `num_vectors` for the chosen scale. The *submission validator* must read the load summary and fail validation on a shortfall.
 
 5.2.2. **vdbIndexBuildCompleted** -- The collection must be fully indexed and (when configured) compacted before the query phase. The *submission validator* must confirm an index-build / compaction record is present in the load output and that the index type recorded at load time matches the index type used at run time.
 
-## 5.3.  VDB Run Options
+## 5.3. VDB Run Options
 
-5.3.1. **vdbRunCount** -- Within each *index directory* (named "DiskANN", "HNSW", or "AiSAQ") under "vdb_bench", there must be exactly five *timestamp directories*, each containing a "summary.json". (see Rules.md 2.1 directory diagram)
+5.3.1. **vdbRunCount** -- Within each `vector_database/<index_type>/run/` directory (where `<index_type>` is one of the UPPERCASE tokens `DISKANN`, `HNSW`, or `AISAQ`), there must be exactly five `<datetime>` timestamp directories, each containing a `summary.json`. The count rule applies to query runs only — `datagen` is governed by §5.2. (see §2.1.27 directory diagram.)
 
 5.3.2. **vdbRecallReported** -- Each run's `summary.json` (or its rank-local `recall_stats.json`) must report a recall value computed outside the timed query loop. The *submission validator* must verify a recall field is present and that recall meets or exceeds the minimum recall target defined for the chosen scale/metric.
 
@@ -498,28 +558,29 @@ System:
 
 5.3.4. **vdbMetricsReported** -- Each run's `summary.json` must report `throughput_qps` and the latency percentile set (`mean_latency_ms`, `p95_latency_ms`, `p99_latency_ms`, `p999_latency_ms`). The *submission validator* must verify these fields exist and are populated.
 
-## 5.4.  VDB Access Via POSIX API Options
+## 5.4. VDB Access Via POSIX API Options
 
 5.4.1. **vdbPathArgs** -- The arguments to `mlpstorage` that set the storage path for the vector database data and the directory where output logfiles/results are stored must both be set and must be set to different values.
 
 5.4.2. **vdbFilesystemCheck** -- The `mlpstorage` command should do a "df" command on the directory pathname where the vector database stores its data and another on the directory pathname where the output logfiles are stored, and record those values in the logfile. The *submission validator* must find those entries in the run's logfile and verify that they are different filesystems, so that logfiles are not accidentally placed on the storage system under test.
 
-## 5.5.  VDB Access Via Object API Options
+## 5.5. VDB Access Via Object API Options
 
 5.5.1. **vdbObjectStorageBackend** -- For object-API submissions, the vector database must be backed by S3-compatible object storage and the submission must record the storage backend in the system description. The *submission validator* must confirm the recorded backend is consistent with the declared API.
 
-## 5.6.  VDB OPEN versus CLOSED Options
+## 5.6. VDB OPEN versus CLOSED Options
 
-> **Index type token convention.** The index type is recorded and validated using the
-> uppercase token (`DISKANN`, `HNSW`, `AISAQ`) defined by `VDB_INDEX_TYPES_CLOSED` in
-> `mlpstorage_py/config.py`. The corresponding *index directory* names in the §2.1
-> directory diagram use the display spellings "DiskANN", "HNSW", and "AiSAQ".
+> **Index type token convention.** The index type is recorded, validated, and
+> stored on disk using the uppercase token (`DISKANN`, `HNSW`, `AISAQ`) defined
+> by `VDB_INDEX_TYPES_CLOSED` in `mlpstorage_py/config.py`. The same token is
+> used by the CLI (`--index-type`), in `summary.json.index_type`, and as the
+> index directory name in the §2.1 directory diagram.
 
-5.6.1. **vdbClosedSubmissionChecksum** -- For CLOSED submissions of this benchmark, the MLPerf Storage codebase cannot be changed, so the *submission validation checker* SHOULD do an `md5sum` of the code directory hierarchy in the submission package and verify that it matches a precalculated checksum stored as a literal in the validator's codebase.
+5.6.1. **vdbClosedSubmissionChecksum** -- For CLOSED VDB submissions, the *submission validator* enforces the same layered code-image check defined in §3.6.1: self-consistency against `.code-hash.json` always, plus upstream-identity against `REFERENCE_CHECKSUMS` (or `--reference-checksum`) for CLOSED. See §2.1.6 for the `.code-hash.json` schema and exclusion set.
 
 5.6.2. **vdbClosedDatabaseBackend** -- For CLOSED submissions, the vector database backend must be Milvus. The *submission validator* must read the `database.database` field from the run's `config.json`/`summary.json` and fail validation if any backend other than `milvus` is recorded.
 
-5.6.3. **vdbClosedIndexTypes** -- For CLOSED submissions, the index type must be one of exactly three supported types: `DISKANN`, `HNSW`, or `AISAQ` (matching `VDB_INDEX_TYPES_CLOSED`). The *submission validator* must read the `index_type` field and the index directory name under "vdb_bench" and fail validation if any other index type (e.g. `IVF_FLAT`, `IVF_SQ8`, or `FLAT`) is recorded. Within these three index types, the submitter is free to choose the metric type and any index-specific build and search parameters (see 5.6.4).
+5.6.3. **vdbClosedIndexTypes** -- For CLOSED submissions, the index type must be one of exactly three supported types: `DISKANN`, `HNSW`, or `AISAQ` (matching `VDB_INDEX_TYPES_CLOSED`). The *submission validator* must read the `index_type` field and the index directory name under "vector_database" and fail validation if any other index type (e.g. `IVF_FLAT`, `IVF_SQ8`, or `FLAT`) is recorded. Within these three index types, the submitter is free to choose the metric type and any index-specific build and search parameters (see 5.6.4).
 
 5.6.4. **vdbClosedSubmissionParameters** -- For CLOSED submissions of this benchmark, the database backend is fixed to Milvus (see 5.6.2) and the index type is restricted to `DISKANN`, `HNSW`, or `AISAQ` (see 5.6.3), but the submitter may freely choose the metric type and all index-specific build/search parameters for those three index types, plus the load and run parameters listed in the table below. Any other parameter being modified, any unsupported index type, or any attempt to substitute a different database backend must generate a message and fail the validation.
 
@@ -586,16 +647,16 @@ System:
 | index.metric_type          | Any distance metric supported by the chosen backend                                                                 | --      |
 | index.* (backend-native)   | Any backend-native build/search parameters (e.g. pgvector `lists` / `probes`; Elasticsearch `m` / `ef_construction` / `num_candidates`) | -- |
 
-# 6.  Validating the KVCache Options
+# 6. Validating the KVCache Options
 
-## 6.1.  KVCache Sizing Options
+## 6.1. KVCache Sizing Options
 
-## 6.2.  KVCache Generation Options
+## 6.2. KVCache Generation Options
 
-## 6.3.  KVCache Run Options
+## 6.3. KVCache Run Options
 
-## 6.4.  KVCache Access Via POSIX API Options
+## 6.4. KVCache Access Via POSIX API Options
 
-## 6.5.  KVCache Access Via Object API Options
+## 6.5. KVCache Access Via Object API Options
 
-## 6.6.  KVCache OPEN versus CLOSED Options
+## 6.6. KVCache OPEN versus CLOSED Options

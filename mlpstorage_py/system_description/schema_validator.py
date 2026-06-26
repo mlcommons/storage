@@ -14,7 +14,7 @@
 import sys
 from enum import Enum
 from pathlib import Path
-from typing import List, Optional
+from typing import List, Literal, Optional
 
 import yaml
 from pydantic import BaseModel, ConfigDict, Field, ValidationError, model_validator
@@ -152,11 +152,33 @@ class PowerDevice(StrictModel):
 
 
 class NetworkPort(StrictModel):
-    """One homogeneous group of NIC ports sharing the same type, speed, and traffic role."""
-    unit_count:  int               = Field(ge=1)
+    """One homogeneous group of NIC ports sharing the same type, speed, and traffic role.
+
+    Phase 3 D-20: `state` is REQUIRED and pins the operational disposition of
+    the NIC group (`"up"` or `"down"`). `speed` and `traffic` are required
+    when state is `"up"` (positive-evidence rule, enforced by the
+    `_require_speed_and_traffic_when_up` model_validator below) and may be
+    omitted when state is `"down"` (a known-down NIC needs no further evidence).
+    """
+    unit_count:  int                          = Field(ge=1)
     type:        NetworkType
-    speed:       int               = Field(ge=1)   # Gigabits/s
-    traffic:     List[TrafficType] = Field(min_length=1)
+    state:       Literal["up", "down"]                         # D-20: REQUIRED, no default
+    speed:       Optional[int]                = Field(default=None, ge=1)   # Gigabits/s
+    traffic:     Optional[List[TrafficType]]  = None
+
+    @model_validator(mode='after')
+    def _require_speed_and_traffic_when_up(self) -> 'NetworkPort':
+        # D-20: state == "up" must carry positive evidence — speed and at least
+        # one traffic role. `not self.traffic` matches both None (the universal
+        # collection-failure value) AND [] (the D-17 splice on collector-
+        # populated up NICs; rejecting [] at validate_file time is the SER-02
+        # signal that the submitter must fill the traffic role).
+        if self.state == "up":
+            if self.speed is None:
+                raise ValueError("speed is required when state is 'up'")
+            if not self.traffic:
+                raise ValueError("traffic must have at least one entry when state is 'up'")
+        return self
 
 
 class DrivePerformance(BaseModel):

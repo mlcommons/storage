@@ -39,7 +39,7 @@ class ResultsDirectoryValidator:
     results_dir/
         <benchmark_type>/           # training, checkpointing, vector_database, kv_cache
             <model>/                # unet3d, retinanet, llama3-8b, etc.
-                <command>/          # run, datagen (for training)
+                <command>/          # run, datagen, datasize
                     <datetime>/     # YYYYMMDD_HHMMSS format
                         *_metadata.json
                         summary.json (for DLIO runs)
@@ -51,6 +51,29 @@ class ResultsDirectoryValidator:
                 <datetime>/
                     *_metadata.json
                     summary.json
+
+    VectorDB structures accepted for backward compatibility:
+    results_dir/
+        vector_database/
+            <command>/
+                <datetime>/
+                    *_metadata.json
+
+    results_dir/
+        vector_database/
+            <engine>/
+                <command>/
+                    <datetime>/
+                        *_metadata.json
+
+    Preferred VectorDB structure:
+    results_dir/
+        vector_database/
+            <engine>/
+                <index>/
+                    <command>/
+                        <datetime>/
+                            *_metadata.json
     """
 
     EXPECTED_BENCHMARK_TYPES = ['training', 'checkpointing', 'vector_database', 'kv_cache']
@@ -129,6 +152,13 @@ class ResultsDirectoryValidator:
     def _validate_benchmark_type_dir(self, benchmark_dir: Path) -> None:
         """Validate a benchmark type directory (e.g., training/)."""
         benchmark_type = benchmark_dir.name
+
+        # VectorDB has engine and index identity levels that do not exist in
+        # the generic <benchmark>/<model>/<command>/<datetime> hierarchy.
+        if benchmark_type == 'vector_database':
+            self._validate_vectordb_dir(benchmark_dir)
+            return
+
         has_valid_content = False
 
         for model_dir in benchmark_dir.iterdir():
@@ -139,6 +169,107 @@ class ResultsDirectoryValidator:
         if not has_valid_content:
             self.result.warnings.append(
                 f"Benchmark type directory '{benchmark_type}/' is empty"
+            )
+
+    def _validate_vectordb_dir(self, benchmark_dir: Path) -> None:
+        """Validate supported VectorDB results-directory layouts.
+
+        Accepted layouts:
+            vector_database/<command>/<datetime>/
+            vector_database/<engine>/<command>/<datetime>/
+            vector_database/<engine>/<index>/<command>/<datetime>/
+
+        The first two forms are retained for backward compatibility. Engine
+        and index directory names are not checked against static allowlists so
+        the validator continues to work as new implementations are added.
+        """
+        benchmark_type = benchmark_dir.name
+        visible_dirs = [
+            entry for entry in benchmark_dir.iterdir()
+            if entry.is_dir() and not entry.name.startswith('.')
+        ]
+
+        if not visible_dirs:
+            self.result.warnings.append(
+                f"Benchmark type directory '{benchmark_type}/' is empty"
+            )
+            return
+
+        has_valid_runs = False
+
+        for first_level in visible_dirs:
+            # Legacy layout, before --vdb-engine:
+            # vector_database/<command>/<datetime>/
+            if first_level.name in self.EXPECTED_COMMANDS:
+                if self._validate_command_dir(first_level, benchmark_type):
+                    has_valid_runs = True
+                continue
+
+            # Engine-aware layouts:
+            # vector_database/<engine>/<command>/<datetime>/
+            # vector_database/<engine>/<index>/<command>/<datetime>/
+            engine_dir = first_level
+            engine_has_valid_runs = False
+            engine_children = [
+                entry for entry in engine_dir.iterdir()
+                if entry.is_dir() and not entry.name.startswith('.')
+            ]
+
+            if not engine_children:
+                self.result.warnings.append(
+                    f"VectorDB engine directory '{engine_dir}' is empty"
+                )
+                continue
+
+            for second_level in engine_children:
+                # PR #442 layout, before --vdb-index.
+                if second_level.name in self.EXPECTED_COMMANDS:
+                    if self._validate_command_dir(second_level, benchmark_type):
+                        engine_has_valid_runs = True
+                        has_valid_runs = True
+                    continue
+
+                # Index-aware layout. The index directory must contain one or
+                # more command directories.
+                index_dir = second_level
+                index_has_valid_runs = False
+                index_children = [
+                    entry for entry in index_dir.iterdir()
+                    if entry.is_dir() and not entry.name.startswith('.')
+                ]
+
+                if not index_children:
+                    self.result.warnings.append(
+                        f"VectorDB index directory '{index_dir}' is empty"
+                    )
+                    continue
+
+                for command_dir in index_children:
+                    if command_dir.name in self.EXPECTED_COMMANDS:
+                        if self._validate_command_dir(command_dir, benchmark_type):
+                            index_has_valid_runs = True
+                            engine_has_valid_runs = True
+                            has_valid_runs = True
+                    else:
+                        self.result.warnings.append(
+                            "Unexpected directory in VectorDB index directory "
+                            f"'{index_dir}': {command_dir.name}. Expected a "
+                            f"command directory: {self.EXPECTED_COMMANDS}"
+                        )
+
+                if not index_has_valid_runs:
+                    self.result.warnings.append(
+                        f"No valid run directories found in {index_dir}"
+                    )
+
+            if not engine_has_valid_runs:
+                self.result.warnings.append(
+                    f"No valid run directories found in {engine_dir}"
+                )
+
+        if not has_valid_runs:
+            self.result.warnings.append(
+                f"No valid VectorDB run directories found in {benchmark_dir}"
             )
 
     def _validate_model_dir(self, model_dir: Path, benchmark_type: str) -> None:
@@ -153,20 +284,44 @@ class ResultsDirectoryValidator:
                     has_valid_runs = True
                 # Check if this is a command subdirectory
                 elif entry.name in self.EXPECTED_COMMANDS:
-                    for datetime_dir in entry.iterdir():
-                        if datetime_dir.is_dir():
-                            if self._is_datetime_dir(datetime_dir.name):
-                                self._validate_run_dir(datetime_dir, benchmark_type)
-                                has_valid_runs = True
-                            else:
-                                self.result.warnings.append(
-                                    f"Unexpected directory format in {entry}: {datetime_dir.name}"
-                                )
+                    if self._validate_command_dir(entry, benchmark_type):
+                        has_valid_runs = True
 
         if not has_valid_runs:
             self.result.warnings.append(
                 f"No valid run directories found in {model_dir}"
             )
+
+    def _validate_command_dir(
+        self, command_dir: Path, benchmark_type: str
+    ) -> bool:
+        """Validate datetime run directories below a command directory.
+
+        Args:
+            command_dir: A run, datagen, or datasize directory.
+            benchmark_type: Benchmark type passed to run-level validation.
+
+        Returns:
+            True when at least one datetime-formatted run directory is found.
+            A matching directory can still contain a run-level error such as
+            a missing metadata file.
+        """
+        has_valid_runs = False
+
+        for datetime_dir in command_dir.iterdir():
+            if not datetime_dir.is_dir() or datetime_dir.name.startswith('.'):
+                continue
+
+            if self._is_datetime_dir(datetime_dir.name):
+                self._validate_run_dir(datetime_dir, benchmark_type)
+                has_valid_runs = True
+            else:
+                self.result.warnings.append(
+                    f"Unexpected directory format in {command_dir}: "
+                    f"{datetime_dir.name}"
+                )
+
+        return has_valid_runs
 
     def _validate_run_dir(self, run_dir: Path, benchmark_type: str) -> None:
         """Validate a single run directory."""
@@ -248,15 +403,20 @@ Expected results directory structure:
 
     vector_database/
       milvus/                          # VDB engine (--vdb-engine)
-        run/
-          20250115_160000/
-            vector_database_20250115_160000_metadata.json
+        DISKANN/                       # VDB index (--vdb-index)
+          run/
+            20250115_160000/
+              vector_database_20250115_160000_metadata.json
 
     kv_cache/
       llama3.1-8b/
         run/
           20250115_160000/
             kvcache_llama3.1-8b_metadata.json
+
+Backward-compatible VectorDB layouts also accepted:
+  vector_database/<command>/<datetime>/
+  vector_database/<engine>/<command>/<datetime>/
 
 Key files:
   - *_metadata.json: Contains benchmark configuration and parameters

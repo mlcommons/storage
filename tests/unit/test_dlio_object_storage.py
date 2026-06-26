@@ -20,9 +20,13 @@ from unittest.mock import MagicMock, patch, call
 
 import pytest
 
-# Stub optional heavy deps so this file can be collected in isolation
+# Stub optional heavy deps so this file can be collected in isolation. Use
+# importlib.util.find_spec — checking sys.modules alone would install a
+# MagicMock for a perfectly importable module that just hasn't been imported
+# yet, which then poisons later test collections.
+import importlib.util as _ilu
 for _dep in ('pyarrow', 'pyarrow.ipc', 'dotenv'):
-    if _dep not in sys.modules:
+    if _ilu.find_spec(_dep) is None and _dep not in sys.modules:
         sys.modules[_dep] = MagicMock()
 
 from mlpstorage_py.benchmarks.dlio import DLIOBenchmark

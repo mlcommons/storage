@@ -118,13 +118,15 @@ KVCACHE_DEFAULT_DURATION = 60
 # VDB Benchmark Configuration
 VDB_INDEX_TYPES = ["DISKANN", "HNSW", "AISAQ", "IVF_FLAT", "IVF_SQ8", "FLAT"]
 VDB_INDEX_TYPES_CLOSED = ["DISKANN", "HNSW", "AISAQ"]
+
 VDB_ORCHESTRATION_MODES = ["ssh", "mpi"]
 VDB_BENCHMARK_MODES = ["timed", "query_count", "sweep"]
 # Vector-database engines. Only milvus is wired up today; the slot exists so
 # accumulated results from multiple engines can coexist in one results-dir
-# (path: vector_database/<engine>/<command>/<datetime>/).
+# (path: vector_database/<engine>/<index>/<command>/<datetime>/).
 VDB_ENGINES = ["milvus"]
 VDB_ENGINE_DEFAULT = "milvus"
+VDB_INDEX_DEFAULT = "DISKANN"
 
 MPIRUN = "mpirun"
 MPIEXEC = "mpiexec"
@@ -142,10 +144,40 @@ ALLOW_RUN_AS_ROOT = True
 
 MAX_NUM_FILES_TRAIN = 128*1024
 
-DEFAULT_RESULTS_DIR = os.environ.get(
-    "MLPERF_RESULTS_DIR",
-    os.path.join(tempfile.gettempdir(), "mlperf_storage_results"),
-)
+def _resolve_default_results_dir() -> str:
+    """Resolve DEFAULT_RESULTS_DIR from MLPERF_RESULTS_DIR or tempdir.
+
+    Extracted so tests can exercise the env-driven branch without
+    reloading this module — reload re-creates the PARAM_VALIDATION enum
+    class, which then fails `in`-checks against any pre-imported copy
+    held by other modules (notably the rules verifier).
+    """
+    return os.environ.get(
+        "MLPERF_RESULTS_DIR",
+        os.path.join(tempfile.gettempdir(), "mlperf_storage_results"),
+    )
+
+
+DEFAULT_RESULTS_DIR = _resolve_default_results_dir()
+
+# DEFAULT_SYSTEMNAME mirrors DEFAULT_RESULTS_DIR (LAY-04): honor the
+# MLPERF_SYSTEMNAME env var if set, fall back to an empty string. The
+# universal-args layer (add_universal_arguments) decides required-vs-optional
+# per subcommand; an empty default plus required=True on emitting commands
+# makes "no --systemname and no env var" fail at parse time rather than
+# silently producing `<results-dir>/<mode>/<orgname>/results//...` (T-1-02).
+def _resolve_default_systemname() -> str:
+    """Resolve DEFAULT_SYSTEMNAME from MLPERF_SYSTEMNAME.
+
+    Extracted so tests can exercise the env-driven branch without
+    reloading this module — reload re-creates the PARAM_VALIDATION enum
+    class, which then fails `in`-checks against any pre-imported copy
+    held by other modules (notably the rules verifier).
+    """
+    return os.environ.get("MLPERF_SYSTEMNAME", "")
+
+
+DEFAULT_SYSTEMNAME = _resolve_default_systemname()
 
 import enum
 
@@ -153,6 +185,8 @@ class EXIT_CODE(enum.IntEnum):
     SUCCESS = 0
     GENERAL_ERROR = 1
     INVALID_ARGUMENTS = 2
+    # CAP/VALR failure exit code (per 02-CONTEXT.md D-22). Aliased with INVALID_ARGUMENTS=2 for ergonomic naming at the typed-exception → exit mapping in main.py.
+    CODE_IMAGE_ERROR = 2
     FILE_NOT_FOUND = 3
     PERMISSION_DENIED = 4
     CONFIGURATION_ERROR = 5

@@ -115,8 +115,15 @@ def compute_code_tree_md5(root_path: str, log) -> str | None:
 def _is_excluded_dir(dirpath: str, dirname: str, root_path: str) -> bool:
     """Return True if ``dirname`` inside ``dirpath`` should be pruned.
 
-    Checks both the MD5_EXCLUDE_PREFIXES list (path-prefix match) and the
-    ``.egg-info`` suffix (D-13: handled in predicate, not in constant).
+    Matches against MD5_EXCLUDE_PREFIXES by basename at any depth (so
+    ``__pycache__/``, ``tests/``, ``build/``, etc. are pruned wherever they
+    appear in the tree, not only at the root). Also matches by rooted
+    relative path for completeness, and excludes any ``.egg-info`` directory
+    (D-13: handled in predicate, not in the constant).
+
+    The basename-at-any-depth semantics intentionally mirror
+    ``capture_code_image``'s ``shutil.copytree`` ignore callback so the two
+    walkers produce identical hashes for the same logical tree.
 
     Args:
         dirpath: Absolute path of the parent directory (from os.walk).
@@ -126,6 +133,12 @@ def _is_excluded_dir(dirpath: str, dirname: str, root_path: str) -> bool:
     Returns:
         True if the directory should be excluded from the walk.
     """
+    # Basename-at-any-depth: ``__pycache__/leak.txt`` should be pruned whether
+    # __pycache__/ sits at the root or deeply nested inside a package.
+    for prefix in MD5_EXCLUDE_PREFIXES:
+        if dirname == prefix.rstrip("/"):
+            return True
+
     full_dir = os.path.join(dirpath, dirname)
     rel_dir = os.path.relpath(full_dir, root_path).replace(os.sep, "/") + "/"
 

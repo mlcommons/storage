@@ -46,6 +46,7 @@ CLAUDE.md
 .roomodes
 LOCAL_BRANCH_NOTES.md
 .planning/
+.gsd-tmp/
 
 # DLIO test artifacts — created in cwd when running dlio_benchmark tests
 output/
@@ -69,6 +70,12 @@ env-fast
 # Benchmark simulation output files
 sim_*.tsv
 sim_*.tsv.zst
+
+# Submission checker default CSV output (utility_args.py default --csv path,
+# README.md §submission-checker). Runtime artifact, not source — keep
+# untracked so contributors don't see a dirty working tree after running
+# `mlpstorage validate ...` without an explicit --csv path.
+summary.csv
 
 # Sweep run logs and results (local benchmark output)
 sweep_logs/

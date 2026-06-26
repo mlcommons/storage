@@ -13,6 +13,20 @@ collect_ignore_glob = [
     "integration/test_s3_connectivity.py",  # argparse.parse_args() at module level
     "integration/test_compat_runtime.py",   # full S3 smoke-test at module level
     "integration/test_dlio_storage.py",     # standalone script; StorageType.S3DLIO not in installed package
+    # Standalone mpirun launcher scripts (per tests/README.md §"MPI tests").
+    # Importing them at collection time runs `from mpi4py import MPI;
+    # MPI.COMM_WORLD.Get_rank()` in the pytest interpreter, leaving MPI in a
+    # half-initialized state that later corrupts the spawned-mpirun probe
+    # tests in test_shared_fs_probe_real_mpi.py (silent returncode=1).
+    "integration/test_mpi_basic.py",        # standalone script: mpirun -np 8 python ...
+    "integration/test_dlio_mpi.py",         # standalone script: mpirun -np 8 python ...
+    "integration/test_multi_endpoint_integration.py",  # standalone DLIO MPI script (was module-level pytest.mark.skip)
+    # Standalone diagnostic scripts: print + return True/False + __main__ driver,
+    # no pytest assertions. Documented in tests/README.md for direct python
+    # invocation. Pytest collection silently "passes" them with
+    # PytestReturnNotNoneWarning regardless of internal outcome (false-pass).
+    "integration/test_storage_library.py",
+    "integration/test_ab_comparison.py",
 ]
 
 import json
@@ -326,7 +340,9 @@ def sample_benchmark_run_data(sample_training_parameters, sample_cluster_info):
         override_parameters={'dataset.num_files_train': '42000'},
         system_info=sample_cluster_info,
         metrics={'train_au_percentage': [95.2, 94.8, 95.1]},
-        result_dir='/tmp/results/training/unet3d/run/20250111_143022',
+        # Canonical layout (Phase 01 LAY-05):
+        #   <rd>/<mode>/<orgname>/results/<sys>/<bench>/<model>/<cmd>/<dt>/
+        result_dir='/tmp/results/closed/Acme/results/sys-v1/training/unet3d/run/20250111_143022',
         accelerator='h100',
     )
 
@@ -343,7 +359,13 @@ def temp_result_dir(tmp_path, sample_training_parameters):
     This fixture creates a realistic result directory structure that can be
     parsed by DLIOResultParser without needing actual DLIO execution.
     """
-    result_dir = tmp_path / "training" / "unet3d" / "run" / "20250111_143022"
+    # Canonical layout (Phase 01 LAY-05):
+    #   <rd>/<mode>/<orgname>/results/<sys>/<bench>/<model>/<cmd>/<dt>/
+    result_dir = (
+        tmp_path
+        / "closed" / "Acme" / "results" / "sys-v1"
+        / "training" / "unet3d" / "run" / "20250111_143022"
+    )
     result_dir.mkdir(parents=True)
 
     # Create summary.json (DLIO output)
@@ -405,7 +427,13 @@ def temp_result_dir(tmp_path, sample_training_parameters):
 @pytest.fixture
 def temp_checkpointing_result_dir(tmp_path, sample_checkpointing_parameters):
     """Create a temporary result directory for checkpointing benchmark."""
-    result_dir = tmp_path / "checkpointing" / "llama3-8b" / "20250111_150000"
+    # Canonical layout (Phase 01 LAY-05) — checkpointing omits <command> by design:
+    #   <rd>/<mode>/<orgname>/results/<sys>/checkpointing/<model>/<dt>/
+    result_dir = (
+        tmp_path
+        / "closed" / "Acme" / "results" / "sys-v1"
+        / "checkpointing" / "llama3-8b" / "20250111_150000"
+    )
     result_dir.mkdir(parents=True)
 
     summary = {
@@ -463,6 +491,13 @@ def mock_benchmark_instance(training_run_args, sample_training_parameters, sampl
 
     This mock has all the attributes that BenchmarkInstanceExtractor expects.
     """
+    # Phase 01 LAY-03 / LAY-04 — populate the new canonical-layout args on
+    # the mock's `args` namespace so extractors that read
+    # mock.args.mode / .orgname / .systemname see canonical values.
+    training_run_args.mode = 'closed'
+    training_run_args.orgname = 'Acme'
+    training_run_args.systemname = 'sys-v1'
+
     mock = MagicMock()
     mock.BENCHMARK_TYPE = BENCHMARK_TYPES.training
     mock.args = training_run_args
@@ -470,7 +505,9 @@ def mock_benchmark_instance(training_run_args, sample_training_parameters, sampl
     mock.combined_params = sample_training_parameters
     mock.params_dict = {'dataset.num_files_train': '42000'}
     mock.cluster_information = sample_cluster_info
-    mock.run_result_output = '/tmp/results/training/unet3d/run/20250111_143022'
+    # Canonical layout (Phase 01 LAY-05):
+    #   <rd>/<mode>/<orgname>/results/<sys>/<bench>/<model>/<cmd>/<dt>/
+    mock.run_result_output = '/tmp/results/closed/Acme/results/sys-v1/training/unet3d/run/20250111_143022'
     return mock
 
 

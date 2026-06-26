@@ -14,11 +14,17 @@ def test_version_matches_pyproject():
     assert mlpstorage_py.VERSION == declared
 
 
-def test_version_lookup_uses_correct_distribution_name():
-    """importlib.metadata lookup must succeed under the 'mlpstorage' dist name."""
-    # Will raise PackageNotFoundError (not caught) if wrong name is used
-    pkg_version = importlib.metadata.version("mlpstorage")
-    assert pkg_version == mlpstorage_py.VERSION
+def test_dist_name_matches_pyproject():
+    """The dist name used by _resolve_version must equal pyproject's
+    project.name. Catches the regression where the in-code lookup string
+    drifts from the declared package name — independent of whether the
+    package is currently pip-installed in the test environment."""
+    from mlpstorage_py import _DIST_NAME
+
+    pyproject = pathlib.Path(__file__).parent.parent.parent / "pyproject.toml"
+    with open(pyproject, "rb") as f:
+        declared_name = tomllib.load(f)["project"]["name"]
+    assert _DIST_NAME == declared_name
 
 
 def test_version_fallback_reads_pyproject(monkeypatch):
