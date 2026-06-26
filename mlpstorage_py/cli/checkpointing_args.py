@@ -232,7 +232,14 @@ def validate_checkpointing_arguments(args):
             error_messages.append(
                 "--o-direct is incompatible with --object. "
                 "O_DIRECT mode reads from the local filesystem via s3dlio's "
-                "direct:// URI scheme; it cannot be combined with an S3 endpoint."
+                "direct:// URI scheme; it cannot be combined with an S3 endpoint. "
+                "Use --file --o-direct for O_DIRECT local I/O."
+            )
+        elif protocol != 'file':
+            error_messages.append(
+                "--o-direct requires --file. "
+                "O_DIRECT mode routes I/O through s3dlio's direct:// URI scheme on the "
+                "local filesystem and must be combined with --file."
             )
 
     if error_messages:

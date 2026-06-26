@@ -63,10 +63,10 @@ class TestApplyOdirectParamsNoOp:
 # ---------------------------------------------------------------------------
 
 class TestApplyOdirectParamsInjection:
-    def test_sets_storage_type_s3(self):
+    def test_sets_storage_type_direct_fs(self):
         obj = _make_obj()
         DLIOBenchmark._apply_odirect_params(obj, storage_root='/mnt/data')
-        assert obj.params_dict['storage.storage_type'] == 's3'
+        assert obj.params_dict['storage.storage_type'] == 'direct_fs'
 
     def test_sets_storage_library_s3dlio(self):
         obj = _make_obj()
@@ -174,6 +174,23 @@ class TestOdirectObjectRejection:
         assert '--o-direct' in captured.err
         assert '--object' in captured.err
 
+    def test_training_rejects_odirect_without_file(self, capsys):
+        """--o-direct without --file must be rejected: --o-direct requires --file."""
+        from mlpstorage_py.cli.training_args import validate_training_arguments
+        from mlpstorage_py.config import EXIT_CODE
+        args = Namespace(
+            command='run',
+            data_access_protocol=None,  # neither --file nor --object
+            data_dir='/mnt/data',
+            o_direct=True,
+        )
+        with pytest.raises(SystemExit) as exc:
+            validate_training_arguments(args)
+        assert exc.value.code == EXIT_CODE.INVALID_ARGUMENTS
+        captured = capsys.readouterr()
+        assert '--o-direct' in captured.err
+        assert '--file' in captured.err
+
     def test_training_allows_odirect_plus_file(self):
         from mlpstorage_py.cli.training_args import validate_training_arguments
         args = Namespace(
@@ -194,6 +211,26 @@ class TestOdirectObjectRejection:
             o_direct=False,
         )
         validate_training_arguments(args)
+
+    def test_checkpointing_rejects_odirect_without_file(self, capsys):
+        """--o-direct without --file must be rejected for checkpointing too."""
+        from mlpstorage_py.cli.checkpointing_args import validate_checkpointing_arguments
+        from mlpstorage_py.config import LLM_MODELS, EXIT_CODE
+        args = Namespace(
+            model=LLM_MODELS[0],
+            num_checkpoints_read=10,
+            num_checkpoints_write=10,
+            data_access_protocol=None,  # neither --file nor --object
+            o_direct=True,
+            mode='open',
+        )
+        with pytest.raises(SystemExit) as exc:
+            validate_checkpointing_arguments(args)
+        assert exc.value.code == EXIT_CODE.INVALID_ARGUMENTS
+        combined = capsys.readouterr()
+        output = combined.out + combined.err
+        assert '--o-direct' in output
+        assert '--file' in output
 
     def test_checkpointing_rejects_odirect_plus_object(self, capsys):
         from mlpstorage_py.cli.checkpointing_args import validate_checkpointing_arguments
@@ -228,7 +265,7 @@ class TestAddDatadirParamOdirect:
             model=model,
         )
         obj.params_dict = {
-            'storage.storage_type': 's3',
+            'storage.storage_type': 'direct_fs',
             'storage.storage_root': data_dir.rstrip('/'),
         } if o_direct else {}
         obj.logger = MagicMock()
@@ -284,7 +321,7 @@ class TestAddCheckpointParamsOdirect:
             num_checkpoints_write=10,
         )
         obj.params_dict = {
-            'storage.storage_type': 's3',
+            'storage.storage_type': 'direct_fs',
             'storage.storage_root': checkpoint_folder.rstrip('/'),
         } if o_direct else {}
         obj.logger = MagicMock()
@@ -302,3 +339,84 @@ class TestAddCheckpointParamsOdirect:
         obj = self._make_chkpt_obj('/mnt/ckpts', 'llama3-70b', o_direct=False)
         CheckpointingBenchmark.add_checkpoint_params(obj)
         assert obj.params_dict['checkpoint.checkpoint_folder'] == '/mnt/ckpts/llama3-70b'
+
+
+# ---------------------------------------------------------------------------
+# Integration: --file + --o-direct combined param injection
+#
+# Verifies the real invariants:
+#   1. --file --o-direct  → storage_type=direct_fs, library=s3dlio, NO s3
+#   2. --file (only)      → no storage_type injected at all
+#   3. --object (only)    → storage_type=s3, no direct_fs
+# ---------------------------------------------------------------------------
+
+class TestFileModeParamInjection:
+    """End-to-end param injection tests covering --file and --o-direct combinations.
+
+    Calls _apply_object_storage_params() then _apply_odirect_params() in the
+    same order as TrainingBenchmark.__init__() to catch interaction bugs.
+    """
+
+    def _make_obj(self, data_access_protocol, o_direct, data_dir='/mnt/data'):
+        obj = MagicMock(spec=['args', 'params_dict', 'logger'])
+        obj.args = Namespace(
+            data_access_protocol=data_access_protocol,
+            o_direct=o_direct,
+            data_dir=data_dir,
+        )
+        obj.params_dict = {}
+        obj.logger = MagicMock()
+        return obj
+
+    def test_file_plus_odirect_sets_direct_fs_not_s3(self):
+        """--file --o-direct must set storage_type=direct_fs, NEVER s3."""
+        obj = self._make_obj('file', o_direct=True)
+        DLIOBenchmark._apply_object_storage_params(obj)
+        DLIOBenchmark._apply_odirect_params(obj, storage_root='/mnt/data')
+        assert obj.params_dict.get('storage.storage_type') == 'direct_fs'
+        assert obj.params_dict.get('storage.storage_type') != 's3'
+
+    def test_file_plus_odirect_sets_library_s3dlio(self):
+        """--file --o-direct must set storage_library=s3dlio."""
+        obj = self._make_obj('file', o_direct=True)
+        DLIOBenchmark._apply_object_storage_params(obj)
+        DLIOBenchmark._apply_odirect_params(obj, storage_root='/mnt/data')
+        assert obj.params_dict.get('storage.storage_options.storage_library') == 's3dlio'
+
+    def test_file_plus_odirect_sets_uri_scheme_direct(self):
+        """--file --o-direct must set uri_scheme=direct (not s3)."""
+        obj = self._make_obj('file', o_direct=True)
+        DLIOBenchmark._apply_object_storage_params(obj)
+        DLIOBenchmark._apply_odirect_params(obj, storage_root='/mnt/data')
+        assert obj.params_dict.get('storage.storage_options.uri_scheme') == 'direct'
+
+    def test_file_only_injects_no_storage_type(self):
+        """--file alone (no --o-direct) must not inject any storage_type."""
+        obj = self._make_obj('file', o_direct=False)
+        DLIOBenchmark._apply_object_storage_params(obj)
+        DLIOBenchmark._apply_odirect_params(obj, storage_root='/mnt/data')
+        assert 'storage.storage_type' not in obj.params_dict
+        assert 'storage.storage_options.storage_library' not in obj.params_dict
+
+    def test_file_only_injects_no_s3(self):
+        """--file alone must never produce storage_type=s3."""
+        obj = self._make_obj('file', o_direct=False)
+        DLIOBenchmark._apply_object_storage_params(obj)
+        DLIOBenchmark._apply_odirect_params(obj, storage_root='/mnt/data')
+        assert obj.params_dict.get('storage.storage_type') != 's3'
+
+    def test_object_mode_injects_s3_not_direct_fs(self):
+        """--object (no --o-direct) must set storage_type=s3, never direct_fs."""
+        from unittest.mock import patch
+        obj = self._make_obj('object', o_direct=False)
+        # _apply_object_storage_params loads .env and reads bucket/library from
+        # config — mock the internals that require real S3 config files.
+        with patch.object(DLIOBenchmark, '_apply_object_storage_params',
+                          lambda self: self.params_dict.update({
+                              'storage.storage_type': 's3',
+                              'storage.storage_options.storage_library': 's3dlio',
+                          })):
+            DLIOBenchmark._apply_object_storage_params(obj)
+        DLIOBenchmark._apply_odirect_params(obj, storage_root='/mnt/data')
+        assert obj.params_dict.get('storage.storage_type') == 's3'
+        assert obj.params_dict.get('storage.storage_type') != 'direct_fs'

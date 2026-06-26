@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlpstorage"
-version = "3.0.22"
+version = "3.0.23"
 description = "MLPerf Storage Benchmark Suite"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -126,9 +126,10 @@ environments = ["sys_platform == 'linux'"]
 torch = [{ index = "pytorch-cpu" }]
 torchvision = [{ index = "pytorch-cpu" }]
 torchaudio = [{ index = "pytorch-cpu" }]
-# Tracks upstream main. Reproducibility is anchored by the resolved hash
-# recorded in uv.lock; bump by re-running `uv lock --upgrade-package dlio-benchmark`.
-# Current main carries (most recent first):
+# Pinned to a specific commit for reproducibility; bump by updating `rev` and
+# re-running `uv lock --upgrade-package dlio-benchmark`.
+# Commit history (most recent first):
+#   - DLIO PR #38 fix for storage #538: wire DIRECT_FS for --o-direct local O_DIRECT I/O
 #   - DLIO PR #28 fix for storage #487: expose DLIO_DROP_CACHES_TIMEOUT,
 #     distinguish slow flush from sudo refusal
 #   - DLIO PR #27 fix for storage #466 #472: skip_listing, S3 object storage,
@@ -138,7 +139,7 @@ torchaudio = [{ index = "pytorch-cpu" }]
 #   - DLIO PR #23 fix for storage #391 part 2 (sudo -n + warn-once for drop_caches)
 #   - DLIO PR #22 fix for storage #415 (mpi4py auto-init in spawn workers)
 #   - DLIO PR #21 fix for storage #391 part 1 (TorchIterableDatasetSimple gating)
-dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", branch = "main" }
+dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "17d982a3c7842355c25787c97f636a9f6a474caa" }
 
 [dependency-groups]
 dev = [

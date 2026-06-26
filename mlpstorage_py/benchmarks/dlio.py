@@ -237,8 +237,11 @@ class DLIOBenchmark(Benchmark, abc.ABC):
         """
         if not getattr(self.args, 'o_direct', False):
             return
+        # storage_type=direct_fs — NOT s3.  direct_fs means "local filesystem via
+        # s3dlio's direct:// URI scheme".  It is 100% mutually exclusive with s3:
+        # s3 always refers to an S3 bucket; direct_fs always refers to a local path.
         if 'storage.storage_type' not in self.params_dict:
-            self.params_dict['storage.storage_type'] = 's3'
+            self.params_dict['storage.storage_type'] = 'direct_fs'
         if 'storage.storage_options.storage_library' not in self.params_dict:
             self.params_dict['storage.storage_options.storage_library'] = 's3dlio'
         if 'storage.storage_options.uri_scheme' not in self.params_dict:

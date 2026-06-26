@@ -303,12 +303,21 @@ def validate_training_arguments(args):
         )
         sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
 
-    if getattr(args, 'o_direct', False) and protocol == 'object':
-        print(
-            "ERROR: --o-direct is incompatible with --object.\n"
-            "  --o-direct routes I/O through s3dlio's direct:// URI scheme, which\n"
-            "  reads from the local filesystem with O_DIRECT — not from an S3 endpoint.\n"
-            "  Use --file with --o-direct, or use --object without --o-direct.",
-            file=sys.stderr,
-        )
+    if getattr(args, 'o_direct', False) and protocol != 'file':
+        if protocol == 'object':
+            print(
+                "ERROR: --o-direct is incompatible with --object.\n"
+                "  --o-direct routes I/O through s3dlio's direct:// URI scheme on the\n"
+                "  local filesystem — it cannot be combined with S3 object storage.\n"
+                "  Use --file --o-direct for O_DIRECT local I/O.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "ERROR: --o-direct requires --file.\n"
+                "  --o-direct routes I/O through s3dlio's direct:// URI scheme on the\n"
+                "  local filesystem. It must be combined with --file.\n"
+                "  Use --file --o-direct for O_DIRECT local I/O.",
+                file=sys.stderr,
+            )
         sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
