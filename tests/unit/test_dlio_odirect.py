@@ -255,3 +255,50 @@ class TestAddDatadirParamOdirect:
             obj.args.data_dir = tmpdir
             TrainingBenchmark.add_datadir_param(obj)
         assert obj.params_dict['dataset.data_folder'] != 'unet3d'
+
+
+# ---------------------------------------------------------------------------
+# add_checkpoint_params: checkpoint_folder must be absolute in --o-direct mode
+# ---------------------------------------------------------------------------
+
+class TestAddCheckpointParamsOdirect:
+    """Regression for issue #536.
+
+    DLIO instantiates a separate storage backend for checkpointing using
+    checkpoint.checkpoint_folder as that backend's namespace. For direct:// /
+    file:// schemes, ObjStoreLibStorage._preflight validates the namespace as
+    a local directory, so it must be an absolute path — not relative to
+    storage.storage_root.
+    """
+
+    def _make_chkpt_obj(self, checkpoint_folder, model, o_direct, num_processes=8):
+        from mlpstorage_py.config import LLM_ALLOWED_VALUES
+        _, _, _, closed_gpus = LLM_ALLOWED_VALUES[model]
+        obj = MagicMock(spec=['args', 'params_dict', 'logger'])
+        obj.args = Namespace(
+            o_direct=o_direct,
+            checkpoint_folder=checkpoint_folder,
+            model=model,
+            num_processes=num_processes,
+            num_checkpoints_read=10,
+            num_checkpoints_write=10,
+        )
+        obj.params_dict = {
+            'storage.storage_type': 's3',
+            'storage.storage_root': checkpoint_folder.rstrip('/'),
+        } if o_direct else {}
+        obj.logger = MagicMock()
+        return obj
+
+    def test_checkpoint_folder_is_absolute_with_odirect(self):
+        """Issue #536: relative path 'llama3-70b' fails ObjStoreLibStorage preflight."""
+        from mlpstorage_py.benchmarks.dlio import CheckpointingBenchmark
+        obj = self._make_chkpt_obj('/mnt/ckpts', 'llama3-70b', o_direct=True)
+        CheckpointingBenchmark.add_checkpoint_params(obj)
+        assert obj.params_dict['checkpoint.checkpoint_folder'] == '/mnt/ckpts/llama3-70b'
+
+    def test_checkpoint_folder_is_absolute_without_odirect(self):
+        from mlpstorage_py.benchmarks.dlio import CheckpointingBenchmark
+        obj = self._make_chkpt_obj('/mnt/ckpts', 'llama3-70b', o_direct=False)
+        CheckpointingBenchmark.add_checkpoint_params(obj)
+        assert obj.params_dict['checkpoint.checkpoint_folder'] == '/mnt/ckpts/llama3-70b'

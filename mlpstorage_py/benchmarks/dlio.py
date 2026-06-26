@@ -625,13 +625,12 @@ class CheckpointingBenchmark(DLIOBenchmark):
         self.params_dict['checkpoint.num_checkpoints_read'] = self.args.num_checkpoints_read
         self.params_dict['checkpoint.num_checkpoints_write'] = self.args.num_checkpoints_write
         if self.args.checkpoint_folder:
-            if getattr(self.args, 'o_direct', False) and self.params_dict.get('storage.storage_type') == 's3':
-                # In direct:// mode: storage_root = checkpoint_folder (set by _apply_odirect_params).
-                # DLIO's checkpoint_folder param is the model-relative subdirectory within storage_root.
-                # URI = direct://<checkpoint_folder>/<model>/checkpoint_file
-                self.params_dict['checkpoint.checkpoint_folder'] = self.args.model
-            else:
-                self.params_dict['checkpoint.checkpoint_folder'] = os.path.join(self.args.checkpoint_folder, self.args.model)
+            # DLIO instantiates a separate storage backend for checkpointing using
+            # checkpoint_folder as that backend's namespace (storage_factory.get_storage).
+            # For direct:// / file:// schemes, ObjStoreLibStorage._preflight validates
+            # that namespace as a local directory — so it must be an absolute path,
+            # not relative to storage.storage_root. See issue #536.
+            self.params_dict['checkpoint.checkpoint_folder'] = os.path.join(self.args.checkpoint_folder, self.args.model)
 
 
     def add_workflow_to_cmd(self, cmd) -> str:
