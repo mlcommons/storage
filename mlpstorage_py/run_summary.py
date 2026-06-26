@@ -496,12 +496,17 @@ def print_run_summary(args) -> None:
     lines = ["", f"--- Run Configuration (mlpstorage {VERSION}) ---"]
 
     # Tier 1 CLI args — use getattr so absent attrs are '[not set]' not AttributeError.
+    # `orgname` and `systemname` (Phase 01 LAY-03 / LAY-04) are surfaced right
+    # under `mode` so the banner makes the canonical-layout pin obvious:
+    #     <mode>/<orgname>/results/<systemname>/...
     # For benchmarks that don't use accelerator-related knobs (VDB, KVCache), drop
     # those rows so reviewers don't see noise.
     _tier1_all = [
         ("benchmark",                 'benchmark'),
         ("command",                   'command'),
         ("mode",                      'mode'),
+        ("orgname",                   'orgname'),
+        ("systemname",                'systemname'),
         ("data_dir",                  'data_dir'),
         ("results_dir",               'results_dir'),
         ("data_access_protocol",      'data_access_protocol'),
@@ -524,6 +529,7 @@ def print_run_summary(args) -> None:
     lines.append("")
     lines.append("--- Environment ---")
     lines.append(_row("MLPERF_RESULTS_DIR:", os.environ.get('MLPERF_RESULTS_DIR', '[not set]')))
+    lines.append(_row("MLPERF_SYSTEMNAME:",  os.environ.get('MLPERF_SYSTEMNAME',  '[not set]')))
     lines.append(_row("MPI_RUN_BIN:",        os.environ.get('MPI_RUN_BIN',        '[not set]')))
     lines.append(_row("MPI_EXEC_BIN:",       os.environ.get('MPI_EXEC_BIN',       '[not set]')))
     # KVCACHE_SELECTED_WORKLOADS is read by kv-cache-wrapper.sh and filters the

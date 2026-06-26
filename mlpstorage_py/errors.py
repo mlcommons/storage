@@ -307,6 +307,112 @@ class FileSystemError(MLPStorageException):
         return suggestions.get(code, "Check file system and try again")
 
 
+class SystemDriftError(MLPStorageException):
+    """
+    Raised when the on-disk systemname.yaml disagrees with the in-memory
+    representation built from the live MPI fleet (Phase 5 / CONTEXT.md D-42).
+
+    This is the LIFE-02/03 hard failure: on a re-run against a results
+    directory whose `systemname.yaml` was authored by a different fleet
+    (or by a prior version of the auto-collector), the writer's
+    `FileExistsError` branch loads the on-disk file, computes a logical
+    diff against the recomputed in-memory image, and raises this exception
+    BEFORE DLIO is launched.
+
+    The `message` is the unified-diff body produced by
+    `mlpstorage_py.system_description.diff.format_unified_diff` (D-40):
+    a `--- on-disk` / `+++ in-memory` header followed by
+    `@@ <JSONPath> @@` / `-` / `+` hunks and a trailing Remediation block.
+
+    `code` defaults to `ErrorCode.FS_INVALID_STRUCTURE` (E404) — the on-disk
+    file describes a different fleet than reality, so the directory's
+    submission structure is wrong.
+
+    `mlpstorage_py/main.py:262` already routes `MLPStorageException` via the
+    error-footer formatter with a non-zero exit; no new dispatch is required.
+    """
+
+    def __init__(self, message: str, path: str = None,
+                 suggestion: str = None,
+                 code: ErrorCode = ErrorCode.FS_INVALID_STRUCTURE):
+        details_parts = []
+        if path:
+            details_parts.append(f"Path: {path}")
+
+        super().__init__(
+            message=message,
+            code=code,
+            details="; ".join(details_parts) if details_parts else "",
+            suggestion=suggestion or self._default_suggestion(code),
+            path=path,
+        )
+        # Expose the on-disk path so tests / handlers can inspect it without
+        # poking at the structured-error context dict. Mirrors the
+        # FileSystemError.path attribute pattern (errors.py:295).
+        self.path = path
+
+    @staticmethod
+    def _default_suggestion(code: ErrorCode) -> str:
+        suggestions = {
+            ErrorCode.FS_INVALID_STRUCTURE: (
+                "See the diff above; rename or remove the file and re-run"
+            ),
+        }
+        return suggestions.get(code, "Review and reconcile drift, then re-run")
+
+
+class SystemDescriptionParseError(MLPStorageException):
+    """
+    Raised when the on-disk systemname.yaml cannot be parsed or fails
+    structural validation (Phase 5 / CONTEXT.md D-48).
+
+    Two trigger paths inside `parse_on_disk_systemname_yaml` (Slice 2):
+
+    1. `yaml.safe_load` raises `yaml.YAMLError` — the file is not
+       structurally-valid YAML. The message includes `(line N, column M)`
+       when the `problem_mark` attribute is available.
+    2. The loaded dict is missing the `system_under_test`,
+       `system_under_test.clients` key, or `clients` is not a list.
+
+    `code` defaults to `ErrorCode.CONFIG_PARSE_ERROR` (E104) — this is a
+    malformed config file at a known path.
+
+    The default suggestion guides the operator to `rm <path>` and re-run
+    (the file is regenerated automatically on the next run).
+
+    `mlpstorage_py/main.py:262` already routes `MLPStorageException` via the
+    error-footer formatter with a non-zero exit; no new dispatch is required.
+    """
+
+    def __init__(self, message: str, path: str = None,
+                 suggestion: str = None,
+                 code: ErrorCode = ErrorCode.CONFIG_PARSE_ERROR):
+        details_parts = []
+        if path:
+            details_parts.append(f"Path: {path}")
+
+        super().__init__(
+            message=message,
+            code=code,
+            details="; ".join(details_parts) if details_parts else "",
+            suggestion=suggestion or self._default_suggestion(code, path),
+            path=path,
+        )
+        # Expose the on-disk path so tests / handlers can inspect it without
+        # poking at the structured-error context dict. Mirrors the
+        # FileSystemError.path attribute pattern (errors.py:295).
+        self.path = path
+
+    @staticmethod
+    def _default_suggestion(code: ErrorCode, path: str = None) -> str:
+        if code == ErrorCode.CONFIG_PARSE_ERROR:
+            target = path if path else "<systemname.yaml>"
+            return (
+                f"rm {target} && re-run; the file will be regenerated on the next run"
+            )
+        return "Check file syntax (YAML format)"
+
+
 class MPIError(MLPStorageException):
     """
     Raised when MPI or cluster operations fail.

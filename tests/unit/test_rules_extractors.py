@@ -133,6 +133,37 @@ class TestBenchmarkInstanceExtractor:
 
         assert result.metrics is None
 
+    def test_extract_falls_back_to_metadata_parameters(self):
+        """Issue #537: KVCacheBenchmark (and any non-DLIO benchmark) lacks
+        combined_params, so the extractor's pre-fix behavior produces an empty
+        parameters dict. The live-verification run-checker then can't see the
+        workload config it was built to validate. When combined_params is
+        absent, fall back to benchmark.metadata['parameters'] so live and
+        on-disk reportgen paths agree."""
+        mock_benchmark = MagicMock(spec=['BENCHMARK_TYPE', 'args', 'run_datetime',
+                                         'params_dict', 'metadata'])
+        mock_benchmark.BENCHMARK_TYPE = BENCHMARK_TYPES.kv_cache
+        mock_benchmark.args.model = 'llama3.1-8b'
+        mock_benchmark.args.command = 'run'
+        mock_benchmark.args.num_processes = 4
+        mock_benchmark.run_datetime = '20260626_120000'
+        mock_benchmark.params_dict = {}
+        mock_benchmark.metadata = {
+            'parameters': {
+                'model': 'llama3.1-8b',
+                'num_users': 100,
+                'duration': 60,
+            },
+        }
+
+        result = BenchmarkInstanceExtractor.extract(mock_benchmark)
+
+        assert result.parameters == {
+            'model': 'llama3.1-8b',
+            'num_users': 100,
+            'duration': 60,
+        }
+
 
 class TestDLIOResultParser:
     """Tests for DLIOResultParser class."""
@@ -515,19 +546,21 @@ class TestExtractorIntegration:
 
     @pytest.fixture
     def training_fixture_dir(self):
-        """Get path to training fixture directory."""
-        fixtures_dir = Path(__file__).parent.parent / "fixtures" / "sample_results" / "training_run"
-        if fixtures_dir.exists():
-            return fixtures_dir
-        pytest.skip("Training fixture directory not found")
+        """Get path to training fixture directory (leaf datetime dir)."""
+        return (
+            Path(__file__).parent.parent
+            / "fixtures" / "sample_results"
+            / "training" / "unet3d" / "run" / "20250115_143022"
+        )
 
     @pytest.fixture
     def checkpointing_fixture_dir(self):
-        """Get path to checkpointing fixture directory."""
-        fixtures_dir = Path(__file__).parent.parent / "fixtures" / "sample_results" / "checkpointing_run"
-        if fixtures_dir.exists():
-            return fixtures_dir
-        pytest.skip("Checkpointing fixture directory not found")
+        """Get path to checkpointing fixture directory (leaf datetime dir)."""
+        return (
+            Path(__file__).parent.parent
+            / "fixtures" / "sample_results"
+            / "checkpointing" / "llama3-8b" / "run" / "20250115_150000"
+        )
 
     def test_extract_from_training_fixture(self, training_fixture_dir):
         """Extract data from training fixture directory."""

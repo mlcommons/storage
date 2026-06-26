@@ -556,7 +556,11 @@ def capture_or_verify_code_image(args, env, log):
     Notes:
         D-07..D-10, D-20, D-21; inline path-traversal guard per REVIEWS.md
         consensus finding (T-02-02-05). This helper is the SOLE reader of
-        MLPSTORAGE_ORGNAME / MLPSTORAGE_SYSTEMNAME env vars.
+        MLPSTORAGE_ORGNAME / MLPSTORAGE_SYSTEMNAME env vars. As of HARDEN-03
+        (Phase 5.1), args.orgname / args.systemname (populated by
+        main._main_impl's LAY-03 gate) take precedence over the env vars;
+        the env-only read remains as a fallback for legacy callers that
+        bypass the LAY-03 gate.
     """
     # 1. Gate by mode (D-10) — return None for whatif/reports/validate/etc.
     mode = getattr(args, "mode", None)
@@ -570,14 +574,22 @@ def capture_or_verify_code_image(args, env, log):
         return None
 
     # 3. Read + validate orgname (D-04, D-05).
-    orgname = env.get(MLPSTORAGE_ORGNAME_ENVVAR)
+    # HARDEN-03: prefer args.orgname (populated by main._main_impl's LAY-03
+    # gate from the mlperf-results.yaml sentinel — main.py:356-389) before
+    # falling back to env. The defensive getattr() handles non-CLI args
+    # constructed without an orgname attribute (e.g., legacy test fixtures).
+    # Trust-contract intent (D-05) preserved: this helper remains the sole
+    # READER of MLPSTORAGE_ORGNAME env var (args.orgname is the LAY-03 hook,
+    # not a separate env source).
+    orgname = getattr(args, "orgname", None) or env.get(MLPSTORAGE_ORGNAME_ENVVAR)
     if not orgname:
         raise ConfigurationError(
             "MLPSTORAGE_ORGNAME environment variable is required for closed|open runs",
             parameter=MLPSTORAGE_ORGNAME_ENVVAR,
             suggestion=(
-                "export MLPSTORAGE_ORGNAME=<your_org>  "
-                "# future: mlpstorage init <orgname> <results_dir>"
+                "export MLPSTORAGE_ORGNAME=<your_org>, or run "
+                "`mlpstorage init <orgname> <results-dir>` to pin orgname "
+                "via mlperf-results.yaml (HARDEN-03 / LAY-03)"
             ),
             code=ErrorCode.CONFIG_MISSING_REQUIRED,
         )
@@ -605,14 +617,17 @@ def capture_or_verify_code_image(args, env, log):
     # 4. For OPEN, also read + validate systemname.
     systemname = None
     if mode == "open":
-        systemname = env.get(MLPSTORAGE_SYSTEMNAME_ENVVAR)
+        # HARDEN-03 (symmetric): args.systemname takes precedence over env even
+        # though there is no sentinel field for systemname today — locks the
+        # future hook so a sentinel-field addition is a one-line schema change.
+        systemname = getattr(args, "systemname", None) or env.get(MLPSTORAGE_SYSTEMNAME_ENVVAR)
         if not systemname:
             raise ConfigurationError(
                 "MLPSTORAGE_SYSTEMNAME environment variable is required for open runs",
                 parameter=MLPSTORAGE_SYSTEMNAME_ENVVAR,
                 suggestion=(
-                    "export MLPSTORAGE_SYSTEMNAME=<your_system>  "
-                    "# future: per-command --system-name flag"
+                    "export MLPSTORAGE_SYSTEMNAME=<your_system>, or pass "
+                    "--systemname <your_system> (HARDEN-03 / LAY-05)"
                 ),
                 code=ErrorCode.CONFIG_MISSING_REQUIRED,
             )

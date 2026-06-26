@@ -13,11 +13,11 @@ from typing import Tuple, List, Optional
 from mlpstorage_py.config import BENCHMARK_TYPES, DATETIME_STR
 from mlpstorage_py.errors import ConfigurationError, ErrorCode
 
-# Env-var names used by the Phase 2 CLI dispatch layer to source orgname/systemname (D-01, D-02).
-# generate_output_location itself does NOT read these; the helper in
-# mlpstorage_py/submission_checker/tools/code_image.py reads + validates them and threads
-# the values through as keyword arguments. The names are exported here so the helper has a
-# single source of truth for the env-var spelling.
+# Env-var names used by the CLI dispatch layer to source orgname/systemname.
+# generate_output_location itself does NOT read these; values are threaded in
+# via benchmark.args (populated upstream by main._main_impl()'s sentinel-
+# resolution gate). The names are exported here as a single source of truth
+# for the env-var spelling.
 MLPSTORAGE_ORGNAME_ENVVAR = "MLPSTORAGE_ORGNAME"
 MLPSTORAGE_SYSTEMNAME_ENVVAR = "MLPSTORAGE_SYSTEMNAME"
 
@@ -174,179 +174,219 @@ def generate_output_location(
     **kwargs,
 ) -> str:
     """
-    Generate a standardized output location for benchmark results.
+    Generate the canonical Rules.md §2.1-shaped output path for benchmark results.
 
-    Output structure follows this pattern:
+    Canonical shape (LAY-05, Phase 1 Plan 01-03):
 
-      CLOSED (args.mode == "closed"):
-        <results_dir>/closed/<orgname>/<benchmark_name>/<model>/<command>/<datetime>/
+        <results-dir>/<mode>/<orgname>/results/<systemname>/<benchmark>/<model>/<command>/<datetime>/
 
-      OPEN (args.mode == "open"):
-        <results_dir>/open/<orgname>/results/<systemname>/<benchmark_name>/<model>/<command>/<datetime>/
+    Vector-database results include the index_type between engine and command
+    (closed/open results for AISAQ vs DISKANN/HNSW must live in separate
+    trees per Rules.md §2.1.27):
 
-      Legacy (args.mode not in {"closed", "open"}, or attribute missing —
-      e.g. whatif, programmatic callers from tests):
-        <results_dir>/<benchmark_name>/<model>/<command>/<datetime>/
+        <results-dir>/<mode>/<orgname>/results/<systemname>/vector_database/<engine>/<index>/<command>/<datetime>/
 
-    The per-``BENCHMARK_TYPES`` tail (training/checkpointing/vector_database/
-    kv_cache) is unchanged below the new prefix.
+    Checkpointing intentionally omits the <command> segment to preserve the
+    pre-refactor layout of checkpointing runs:
+
+        <results-dir>/<mode>/<orgname>/results/<systemname>/checkpointing/<model>/<datetime>/
+
+    This function is PURE with respect to args.{mode, orgname, systemname} —
+    it does NOT resolve orgname from the sentinel or read MLPERF_SYSTEMNAME
+    here. Per RESEARCH.md Pitfall 1, orgname resolution lives upstream in
+    main._main_impl()'s sentinel-resolution gate (Slice 4); the universal
+    --systemname plumbing (Slice 3 / this plan) populates args.systemname.
+
+    Every path segment appended to results_dir is validated via
+    _check_safe_path_component() to block path-traversal ('../') and
+    absolute-path resets ('/') at the trust boundary, even for callers that
+    bypass the CLI's argparse choices= validation.
 
     Args:
-        benchmark: Benchmark instance.
-        datetime_str: Optional datetime string for the run.
-        orgname: Keyword-only. Submitter organization name; required when
-            ``benchmark.args.mode`` is "closed" or "open". The CLI dispatch
-            layer (Plan 02-02) reads ``MLPSTORAGE_ORGNAME`` from the
-            environment, validates it per Rules.md §2.1.1, and threads the
-            validated value through as this keyword argument. This function
-            does NOT read ``os.environ`` — passing the value explicitly is a
-            trust-contract requirement so programmatic callers (tests,
-            future tooling) receive a typed ``ConfigurationError`` if they
-            forget to thread it through, rather than a hidden ``KeyError``.
-        systemname: Keyword-only. System name; required when
-            ``benchmark.args.mode`` is "open". Same trust-contract semantics
-            as ``orgname``; sourced from ``MLPSTORAGE_SYSTEMNAME`` by the
-            dispatch layer.
-        **kwargs: Additional benchmark-specific parameters (reserved).
+        benchmark: Benchmark instance. Expected attributes:
+            - benchmark.BENCHMARK_TYPE — one of BENCHMARK_TYPES enum values.
+            - benchmark.args.results_dir, args.mode, args.orgname, args.systemname.
+            - benchmark.args.{model | vdb_engine[, vdb_index]}, args.command
+              (per BENCHMARK_TYPE).
+        datetime_str: Optional datetime string for the run; defaults to
+            mlpstorage_py.config.DATETIME_STR.
+        **kwargs: Reserved for forward compatibility; currently unused.
 
     Returns:
-        Full path to the output location.
+        Full path to the output location, no trailing slash.
 
     Raises:
-        ValueError: If required parameters are missing (e.g. ``args.model``
-            for training/checkpointing benchmarks).
-        ConfigurationError: If ``benchmark.args.mode`` is "closed" or "open"
-            but ``orgname`` (and, for "open", ``systemname``) was not threaded
-            through by the caller. The ``parameter`` attribute identifies the
-            missing kwarg; the ``suggestion`` field references the
-            ``MLPSTORAGE_*`` env-var the dispatch layer must read.
+        ConfigurationError: If args.systemname is empty (T-1-02 mitigation —
+            empty post-resolution systemname would silently produce
+            "<rd>/closed/Acme/results//training/..." which subsequent
+            os.makedirs collapses to a different shape that breaks
+            submission-checker layout invariants). Same for empty orgname
+            (Pitfall 1 defense-in-depth: orgname must be resolved upstream).
+        ValueError: If a per-benchmark-type required field is missing or if
+            any path component fails _check_safe_path_component() validation:
+            - training/checkpointing: args.model.
+            - vector_database: args.vdb_engine, args.vdb_index (or .index_type).
+            - kv_cache: args.model.
     """
     if datetime_str is None:
         datetime_str = DATETIME_STR
 
-    output_location = benchmark.args.results_dir
+    args = benchmark.args
 
-    if hasattr(benchmark, "run_number"):
-        run_number = benchmark.run_number
-    else:
-        run_number = 0
+    # Defense-in-depth empty-string guards (T-1-02 + Pitfall 1).
+    # Use getattr per Pitfall 2: args may not have the attribute if
+    # _apply_yaml_config_overrides() dropped it via key-not-in-dict skip.
+    orgname = getattr(args, 'orgname', '')
+    systemname = getattr(args, 'systemname', '')
+    if not orgname:
+        raise ConfigurationError(
+            "Cannot generate output location: orgname is empty "
+            "(sentinel not resolved).",
+            suggestion=(
+                "Internal error: the upstream orgname-resolution gate in "
+                "main._main_impl() must populate args.orgname before "
+                "benchmark instantiation. If you reached this from a non-init "
+                "command, run `mlpstorage init <orgname> <results-dir>` first."
+            ),
+            code=ErrorCode.CONFIG_MISSING_REQUIRED,
+        )
+    if not systemname:
+        raise ConfigurationError(
+            "Cannot generate output location: --systemname is empty.",
+            suggestion=(
+                "Pass --systemname <name> on the CLI or set the "
+                "MLPERF_SYSTEMNAME environment variable before re-running."
+            ),
+            code=ErrorCode.CONFIG_MISSING_REQUIRED,
+        )
 
-    # New D-03 prefix: insert {closed|open}/<orgname>[/results/<systemname>]/
-    # before the legacy per-type chain. The values are explicit kwargs threaded
-    # by the CLI dispatch layer (Plan 02-02); env-var reading is owned by that
-    # helper, not this function (see module-level constants above for the
-    # env-var-name source of truth).
-    mode = getattr(benchmark.args, "mode", None)
-    if mode in ("closed", "open"):
-        if not orgname:
-            raise ConfigurationError(
-                "orgname is required when args.mode in {closed, open} but was "
-                "not provided to generate_output_location",
-                parameter="orgname",
-                suggestion=(
-                    f"The CLI dispatch layer should read the "
-                    f"{MLPSTORAGE_ORGNAME_ENVVAR} environment variable and "
-                    "thread the validated value through as the orgname "
-                    "keyword. Programmatic callers must pass orgname= "
-                    "explicitly."
-                ),
-                code=ErrorCode.CONFIG_MISSING_REQUIRED,
-            )
-        _check_safe_path_component("orgname", orgname)
-        output_location = os.path.join(output_location, mode, orgname)
-
-        if mode == "open":
-            if not systemname:
-                raise ConfigurationError(
-                    "systemname is required when args.mode == 'open' but was "
-                    "not provided to generate_output_location",
-                    parameter="systemname",
-                    suggestion=(
-                        f"The CLI dispatch layer should read the "
-                        f"{MLPSTORAGE_SYSTEMNAME_ENVVAR} environment "
-                        "variable and thread the validated value through "
-                        "as the systemname keyword. Programmatic callers "
-                        "must pass systemname= explicitly."
-                    ),
-                    code=ErrorCode.CONFIG_MISSING_REQUIRED,
-                )
-            _check_safe_path_component("systemname", systemname)
-            output_location = os.path.join(output_location, "results", systemname)
-
-    # datetime_str is built into every per-type path below; validate once here.
+    # Validate every user-supplied path segment that goes into the base
+    # prefix and per-type tail. Blocks path-traversal ('../') and absolute-
+    # path resets ('/') at the trust boundary (args/env-var → os.path.join),
+    # even for callers that bypass the CLI's argparse choices= validation.
+    _check_safe_path_component("mode", args.mode)
+    _check_safe_path_component("orgname", orgname)
+    _check_safe_path_component("systemname", systemname)
     _check_safe_path_component("datetime_str", datetime_str)
 
-    # Handle different benchmark types
+    # Shared Rules.md §2.1 prefix for every benchmark type.
+    base = os.path.join(
+        args.results_dir,
+        args.mode,                 # closed | open | whatif
+        orgname,
+        "results",
+        systemname,
+    )
+
+    # WR-07: all missing-required failures raise ``ConfigurationError`` (a
+    # ``MLPStorageException`` subclass) so the top-level ``main()`` handler
+    # surfaces them uniformly with the user-facing message + suggestion
+    # (rather than reporting "Unexpected error" with a stack trace gated on
+    # ``MLPS_DEBUG``).
     if benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.training:
-        if not hasattr(benchmark.args, "model"):
-            raise ValueError("Model name is required for training benchmark output location")
+        if not hasattr(args, "model"):
+            raise ConfigurationError(
+                "Model name is required for training benchmark output location.",
+                suggestion="Pass ``--model`` (or ``-m``) on the CLI.",
+                code=ErrorCode.CONFIG_MISSING_REQUIRED,
+            )
+        _check_safe_path_component("model", args.model)
+        _check_safe_path_component("command", args.command)
+        return os.path.join(
+            base,
+            benchmark.BENCHMARK_TYPE.name,
+            args.model,
+            args.command,
+            datetime_str,
+        )
 
-        _check_safe_path_component("model", benchmark.args.model)
-        _check_safe_path_component("command", benchmark.args.command)
-        output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
-        output_location = os.path.join(output_location, benchmark.args.model)
-        output_location = os.path.join(output_location, benchmark.args.command)
-        output_location = os.path.join(output_location, datetime_str)
-
-    elif benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.vector_database:
+    if benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.vector_database:
+        engine = getattr(args, "vdb_engine", None)
+        if not engine:
+            raise ConfigurationError(
+                "VectorDB engine is required for output location.",
+                suggestion="Pass ``--vdb-engine`` on the CLI.",
+                code=ErrorCode.CONFIG_MISSING_REQUIRED,
+            )
         # Results split by index_type because AISAQ is not comparable to
         # DISKANN/HNSW — they must live in separate on-disk trees so
         # submission validation and downstream tooling never collate them
         # (per Rules.md §2.1.27).
-        engine = getattr(benchmark.args, "vdb_engine", None)
-        if not engine:
-            raise ValueError(
-                "VectorDB engine is required for output location "
-                "(set --vdb-engine on the CLI)."
-            )
         vdb_index = (
-            getattr(benchmark.args, "vdb_index", None)
-            or getattr(benchmark.args, "index_type", None)
+            getattr(args, "vdb_index", None)
+            or getattr(args, "index_type", None)
         )
         if not vdb_index:
-            raise ValueError(
-                "VectorDB index is required for output location "
-                "(set --vdb-index on the CLI)."
+            raise ConfigurationError(
+                "VectorDB index is required for output location.",
+                suggestion="Pass ``--vdb-index`` on the CLI.",
+                code=ErrorCode.CONFIG_MISSING_REQUIRED,
             )
-
         _check_safe_path_component("vdb_engine", engine)
         _check_safe_path_component("vdb_index", vdb_index)
-        _check_safe_path_component("command", benchmark.args.command)
-        output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
-        output_location = os.path.join(output_location, engine)
-        output_location = os.path.join(output_location, vdb_index)
-        output_location = os.path.join(output_location, benchmark.args.command)
-        output_location = os.path.join(output_location, datetime_str)
+        _check_safe_path_component("command", args.command)
+        return os.path.join(
+            base,
+            benchmark.BENCHMARK_TYPE.name,
+            engine,
+            vdb_index,
+            args.command,
+            datetime_str,
+        )
 
-    elif benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.kv_cache:
-        model = getattr(benchmark.args, "model", None)
+    if benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.kv_cache:
+        model = getattr(args, "model", None)
         if not model:
-            raise ValueError(
-                "Model is required for kv_cache output location: set "
-                "args.model before calling generate_output_location "
-                "(KVCacheBenchmark.__init__ defaults this from KVCACHE_MODEL_DEFAULT)."
+            raise ConfigurationError(
+                "Model is required for kv_cache output location.",
+                suggestion=(
+                    "Set args.model before calling generate_output_location "
+                    "(KVCacheBenchmark.__init__ defaults this from "
+                    "KVCACHE_MODEL_DEFAULT)."
+                ),
+                code=ErrorCode.CONFIG_MISSING_REQUIRED,
             )
         _check_safe_path_component("model", model)
-        _check_safe_path_component("command", benchmark.args.command)
-        output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
-        output_location = os.path.join(output_location, model)
-        output_location = os.path.join(output_location, benchmark.args.command)
-        output_location = os.path.join(output_location, datetime_str)
+        _check_safe_path_component("command", args.command)
+        return os.path.join(
+            base,
+            benchmark.BENCHMARK_TYPE.name,
+            model,
+            args.command,
+            datetime_str,
+        )
 
-    elif benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.checkpointing:
-        if not hasattr(benchmark.args, "model"):
-            raise ValueError("Model name is required for checkpointing benchmark output location")
+    if benchmark.BENCHMARK_TYPE == BENCHMARK_TYPES.checkpointing:
+        if not hasattr(args, "model"):
+            raise ConfigurationError(
+                "Model name is required for checkpointing benchmark output location.",
+                suggestion="Pass ``--model`` (or ``-m``) on the CLI.",
+                code=ErrorCode.CONFIG_MISSING_REQUIRED,
+            )
+        _check_safe_path_component("model", args.model)
+        # Checkpointing intentionally omits the <command> segment; preserves
+        # the pre-refactor layout shape that downstream submission-checkers
+        # already validate against.
+        return os.path.join(
+            base,
+            benchmark.BENCHMARK_TYPE.name,
+            args.model,
+            datetime_str,
+        )
 
-        _check_safe_path_component("model", benchmark.args.model)
-        output_location = os.path.join(output_location, benchmark.BENCHMARK_TYPE.name)
-        output_location = os.path.join(output_location, benchmark.args.model)
-        output_location = os.path.join(output_location, datetime_str)
-
-    else:
-        print(f'The given benchmark is not supported by mlpstorage_py.rules.generate_output_location()')
-        sys.exit(1)
-
-    return output_location
+    # WR-07: unknown BENCHMARK_TYPE used to ``print`` + ``sys.exit(1)``,
+    # bypassing the logger and leaving no trail in log files. Raise a typed
+    # error instead — the ``main()`` handler will log it through the normal
+    # ConfigurationError flow.
+    raise ConfigurationError(
+        f"Unsupported benchmark type {benchmark.BENCHMARK_TYPE!r} for "
+        "generate_output_location().",
+        suggestion=(
+            "Add the new benchmark to the if/elif chain in "
+            "rules/utils.generate_output_location."
+        ),
+        code=ErrorCode.CONFIG_INVALID_VALUE,
+    )
 
 
 def get_runs_files(results_dir: str, logger=None) -> List:

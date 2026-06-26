@@ -37,6 +37,7 @@ def test_closed_training_accepts_every_closed_allowed_param(dotted_key):
     """
     argv = ['mlpstorage', 'closed', 'training', 'unet3d', 'datagen', 'file',
             '--num-processes', '8', '--data-dir', '/tmp', '--results-dir', '/tmp',
+            '--systemname', 'sys-v1',
             '--params', f'{dotted_key}=1']
     with patch('sys.argv', argv):
         ns = parse_arguments()
@@ -52,6 +53,7 @@ def test_open_training_accepts_open_only_params():
     payload = [f'{k}=x' for k in TrainingRunRulesChecker.OPEN_ALLOWED_PARAMS]
     argv = ['mlpstorage', 'open', 'training', 'unet3d', 'datagen', 'file',
             '--num-processes', '8', '--data-dir', '/tmp', '--results-dir', '/tmp',
+            '--systemname', 'sys-v1',
             '--params', *payload]
     with patch('sys.argv', argv):
         ns = parse_arguments()
@@ -69,7 +71,8 @@ def test_checkpointing_checkpoint_folder_is_changeable(mode):
     """Rules.md §4.6 Table 3: --checkpoint-folder is Changeable in CLOSED and OPEN."""
     argv = ['mlpstorage', mode, 'checkpointing', 'run',
             '-cm', '64', '-m', 'llama3-8b', '-np', '8',
-            '-cf', '/tmp/some/custom/path', '-rd', '/tmp', 'file']
+            '-cf', '/tmp/some/custom/path', '-rd', '/tmp',
+            '-sn', 'sys-v1', 'file']
     with patch('sys.argv', argv):
         ns = parse_arguments()
     assert ns.checkpoint_folder == '/tmp/some/custom/path'
@@ -85,7 +88,8 @@ def test_checkpointing_dlio_bin_path_is_accessible(mode):
     """
     argv = ['mlpstorage', mode, 'checkpointing', 'run',
             '-cm', '64', '-m', 'llama3-8b', '-np', '8',
-            '-cf', '/tmp/ckpt', '-rd', '/tmp', 'file',
+            '-cf', '/tmp/ckpt', '-rd', '/tmp',
+            '-sn', 'sys-v1', 'file',
             '--dlio-bin-path', '/opt/custom/dlio']
     with patch('sys.argv', argv):
         ns = parse_arguments()
@@ -100,6 +104,7 @@ def test_checkpointing_dlio_bin_path_is_accessible(mode):
 def test_training_dlio_bin_path_is_accessible(mode):
     argv = ['mlpstorage', mode, 'training', 'unet3d', 'run', 'file',
             '-cm', '64', '-at', 'b200', '-na', '4', '-dd', '/tmp', '-rd', '/tmp',
+            '-sn', 'sys-v1',
             '--dlio-bin-path', '/opt/custom/dlio']
     with patch('sys.argv', argv):
         ns = parse_arguments()

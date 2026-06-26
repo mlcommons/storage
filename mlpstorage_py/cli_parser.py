@@ -26,6 +26,7 @@ from mlpstorage_py.cli import (
     add_reports_arguments,
     add_history_arguments,
     add_lockfile_arguments,
+    add_init_arguments,
     add_version_arguments,
     add_validate_arguments,
     add_rules_coverage_arguments,
@@ -134,6 +135,11 @@ def parse_arguments():
     reports_parser = top.add_parser("reports", help="Generate a report from benchmark results")
     history_parser = top.add_parser("history", help="Display benchmark history")
     lockfile_parser = top.add_parser("lockfile", help="Generate and verify package lockfiles")
+    init_parser = top.add_parser(
+        "init",
+        description="Initialize a results-dir with the mlperf-results.yaml sentinel",
+        help="Pin orgname to a results-dir",
+    )
     version_parser = top.add_parser("version", description="Print the mlpstorage package version", help="Show installed package version and exit")
     validate_parser = top.add_parser(
         "validate",
@@ -148,6 +154,7 @@ def parse_arguments():
     add_reports_arguments(reports_parser)
     add_history_arguments(history_parser)
     add_lockfile_arguments(lockfile_parser)
+    add_init_arguments(init_parser)
     add_version_arguments(version_parser)
     add_validate_arguments(validate_parser)
     add_rules_coverage_arguments(rules_coverage_parser)
@@ -257,6 +264,15 @@ def validate_args(args):
     """
     if getattr(args, 'mode', None) == 'version':
         return
+    # CR-02: enforce env-var-aware "required" gates for --results-dir and
+    # --systemname after argparse defaults have settled. ``add_universal_arguments``
+    # tags the namespace with ``_mlps_req_results`` / ``_mlps_req_systemname``
+    # whenever the calling subcommand opted in to the requirement; the actual
+    # resolved value (which may come from the env-var-sourced DEFAULT) is
+    # checked here. Using argparse ``required=True`` would have short-
+    # circuited before the env-var default applied — that is exactly the bug
+    # CR-02 fixed.
+    _check_universal_required_present(args)
     benchmark = getattr(args, 'benchmark', None)
     if benchmark == 'training':
         validate_training_arguments(args)
@@ -266,6 +282,42 @@ def validate_args(args):
         validate_vectordb_arguments(args)
     if benchmark == 'kvcache':
         validate_kvcache_arguments(args)
+
+
+def _check_universal_required_present(args):
+    """Enforce post-parse non-empty checks for --results-dir / --systemname.
+
+    Subcommands opt in to "required" via ``add_universal_arguments(..., req_results=True)``
+    and / or ``req_systemname=True``. That call seeds
+    ``args._mlps_req_results`` / ``args._mlps_req_systemname`` via
+    ``parser.set_defaults``. Here we just look at the resolved attribute
+    values; if the corresponding flag was required but the value is empty
+    (or None), exit with the same argparse-style error that argparse would
+    have emitted if ``required=True`` had been used directly.
+
+    The env-var-sourced defaults (``MLPERF_RESULTS_DIR`` /
+    ``MLPERF_SYSTEMNAME``) populate ``args.results_dir`` /
+    ``args.systemname`` for free if argparse used the default; this check
+    is precisely what makes the env-var fallback live again on emitting
+    subcommands.
+    """
+    errors = []
+    if getattr(args, '_mlps_req_results', False):
+        if not getattr(args, 'results_dir', None):
+            errors.append(
+                "--results-dir/-rd is required (or set MLPERF_RESULTS_DIR)"
+            )
+    if getattr(args, '_mlps_req_systemname', False):
+        if not getattr(args, 'systemname', None):
+            errors.append(
+                "--systemname/-sn is required (or set MLPERF_SYSTEMNAME)"
+            )
+    if errors:
+        # Match argparse's stderr-then-exit-2 convention so existing tests
+        # that catch SystemExit continue to pass.
+        msg = "the following arguments are required: " + ", ".join(errors)
+        print(f"error: {msg}", file=sys.stderr)
+        sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
 
 
 def update_args(args):

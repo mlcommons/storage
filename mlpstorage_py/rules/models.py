@@ -153,6 +153,7 @@ class HostCPUInfo:
     num_logical_cores: int = 0
     model: str = ""
     architecture: str = ""
+    num_sockets: int = 0
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'HostCPUInfo':
@@ -162,6 +163,7 @@ class HostCPUInfo:
             num_logical_cores=data.get('num_logical_cores', 0),
             model=data.get('model', ""),
             architecture=data.get('architecture', ""),
+            num_sockets=data.get('num_sockets', 0),
         )
 
 
@@ -174,6 +176,11 @@ class HostInfo:
     disks: Optional[List[HostDiskInfo]] = None
     network: Optional[List[HostNetworkInfo]] = None
     system: Optional[HostSystemInfo] = None
+    chassis_model: str = ""                                              # Phase 3 (COLL-03)
+    networking: List[Dict[str, Any]] = field(default_factory=list)       # Phase 3 (COLL-04)
+    sysctl: List[Dict[str, Any]] = field(default_factory=list)           # Phase 4 (COLL-05)
+    environment: List[Dict[str, Any]] = field(default_factory=list)      # Phase 4 (COLL-06)
+    drives: List[Dict[str, Any]] = field(default_factory=list)           # Phase 4 (COLL-07)
     collection_timestamp: Optional[str] = None
 
     @classmethod
@@ -216,6 +223,7 @@ class HostInfo:
                 num_logical_cores=cpu_summary.get('num_logical_cores', 0),
                 model=cpu_summary.get('model', ''),
                 architecture=cpu_summary.get('architecture', ''),
+                num_sockets=cpu_summary.get('num_sockets', 0),
             )
 
         diskstats = data.get('diskstats', [])
@@ -237,6 +245,23 @@ class HostInfo:
             total_processes=loadavg.get('total_processes', 0),
         )
 
+        # Phase 3 / Plan 03-05: COLL-03 + COLL-04 — flow the chassis_model
+        # scalar (D-21 placeholder-normalized in collect_chassis_model) and
+        # per-host networking list (Plan 03-03 emit shape) onto the dataclass.
+        # Universal D-2 collection-failure rule: missing keys default to ''/[].
+        chassis_model = data.get('chassis_model', '')
+        networking = data.get('networking', [])
+
+        # Phase 4 / Plan 04-05: COLL-05 + COLL-06 + COLL-07 — flow the three
+        # new collector outputs onto the dataclass. Plan 04-01 (sysctl), Plan
+        # 04-02 (environment — already redacted per D-23/D-24), Plan 04-03
+        # (drives — D-31 filtered). Universal D-2 rule: missing keys default
+        # to []. `from_dict` left untouched (consistent with the Phase 3
+        # chassis_model/networking precedent).
+        sysctl = data.get('sysctl', [])
+        environment = data.get('environment', [])
+        drives = data.get('drives', [])
+
         return cls(
             hostname=hostname,
             memory=memory,
@@ -244,6 +269,11 @@ class HostInfo:
             disks=disks,
             network=network,
             system=system,
+            chassis_model=chassis_model,
+            networking=networking,
+            sysctl=sysctl,
+            environment=environment,
+            drives=drives,
             collection_timestamp=data.get('collection_timestamp'),
         )
 
@@ -665,6 +695,12 @@ class BenchmarkInstanceExtractor:
         """Extract BenchmarkRunData from a Benchmark instance."""
         if hasattr(benchmark, 'combined_params'):
             parameters = benchmark.combined_params
+        elif hasattr(benchmark, 'metadata'):
+            # Issue #537: non-DLIO benchmarks (e.g. kvcache, vectordb) lack
+            # combined_params but publish their workload config via the
+            # metadata property. Fall back to metadata['parameters'] so live
+            # run-checkers see the same dict reportgen reads on disk.
+            parameters = benchmark.metadata.get('parameters', {})
         else:
             parameters = {}
 

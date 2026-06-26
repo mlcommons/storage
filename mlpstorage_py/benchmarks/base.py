@@ -40,12 +40,14 @@ import signal
 import sys
 import time
 import types
+import uuid
 from argparse import Namespace
 from typing import Tuple, Dict, Any, List, Optional, Callable, Set, TYPE_CHECKING
 
 from functools import wraps
 
 from mlpstorage_py.config import PARAM_VALIDATION, DATETIME_STR, MLPS_DEBUG, EXEC_TYPE
+from mlpstorage_py.errors import ConfigurationError, ErrorCode
 from mlpstorage_py.run_directory import (
     DEFAULT_COLLISION_BUMP_BUDGET,
     reserve_run_directory,
@@ -61,8 +63,11 @@ from mlpstorage_py.cluster_collector import (
     SSHClusterCollector,
     TimeSeriesCollector,
     MultiHostTimeSeriesCollector,
+    run_shared_fs_probe,
 )
 from mlpstorage_py.progress import create_stage_progress, progress_context
+from mlpstorage_py.system_description.auto_generator import write_systemname_yaml
+from mlpstorage_py.benchmarks.capacity_gate import check_capacity_4field
 
 if TYPE_CHECKING:
     import logging
@@ -112,6 +117,20 @@ class Benchmark(BenchmarkInterface, abc.ABC):
                        Used for testing validation logic.
         """
         self.args = args
+        # Defense-in-depth (Pitfall 3): the orgname-resolution gate in
+        # `main._main_impl` must have populated args.orgname before any
+        # Benchmark subclass is instantiated. Production callers never trip
+        # this; the guard catches direct (test-only) instantiations or any
+        # future codepath that bypasses the main gate.
+        if not getattr(self.args, 'orgname', None):
+            raise ConfigurationError(
+                "orgname was not resolved before Benchmark instantiation",
+                suggestion=(
+                    "Internal error — orgname must be set on args by "
+                    "main._main_impl()'s orgname-resolution gate."
+                ),
+                code=ErrorCode.CONFIG_MISSING_REQUIRED,
+            )
         self.debug = self.args.debug or MLPS_DEBUG
         if logger:
             self.logger = logger
@@ -129,6 +148,21 @@ class Benchmark(BenchmarkInterface, abc.ABC):
 
         # Dependency injection for testability
         self._cluster_collector = cluster_collector
+        # Initialize cluster-info attributes up front so the Phase 2
+        # systemname.yaml write hook at run() can read them on the
+        # early-return path through _collect_cluster_start (which fires
+        # for datagen/configview and for any benchmark whose --hosts
+        # default is None, e.g. VectorDB). When None, the writer's D-8
+        # fallback at auto_generator.py:374-378 takes over via
+        # _resolve_host_info_list. See CR-01 in 02-REVIEW.md.
+        self._cluster_info_start = None
+        # D-43: per-instance sentinel suffix for CAP-02 shared-FS probe
+        # (Pitfall 7 collision protection). Generated once per Benchmark
+        # instance — NOT per-import or per-module — so concurrent runs
+        # against the same data_dir cannot collide on the sentinel path.
+        # W-5 launcher contract: this value is passed verbatim to
+        # run_shared_fs_probe(...) → mpirun argv[2]; nothing mutates it.
+        self._run_uuid = uuid.uuid4().hex
         self._validator = validator
 
         self.benchmark_run_verifier = None
@@ -137,6 +171,32 @@ class Benchmark(BenchmarkInterface, abc.ABC):
 
         self.command_output_files = list()
         self.run_result_output = self._reserve_run_directory()
+
+        # LAY-06 (Rules.md §2.1.6): capture the live mlpstorage_py/ source
+        # tree alongside the results so the submission package is auditable.
+        # Per-mode policy:
+        #   closed  → ONE image at <rd>/closed/<orgname>/code/ (idempotent).
+        #   open    → one image per (benchmark, command) tuple.
+        #   whatif  → no image (capture_code_image returns None).
+        # WR-09: ``--dry-run`` short-circuits before any work — so we MUST
+        # also skip the code-image capture (which would otherwise write
+        # ~MBs to disk on every dry-run invocation despite no benchmark
+        # actually running). Mirrors the existing ``mode == 'whatif'``
+        # no-op inside capture_code_image. ``getattr`` is defensive in
+        # case a synthetic args Namespace omits the attribute.
+        # Deferred import keeps top-of-file import-time cost minimal and
+        # avoids cycles with `mlpstorage_py.results_dir`.
+        if getattr(self.args, 'dry_run', False):
+            self.code_image_path: Optional[str] = None
+        else:
+            from mlpstorage_py.results_dir.code_image import capture_code_image
+            self.code_image_path: Optional[str] = capture_code_image(
+                results_dir=self.args.results_dir,
+                mode=self.args.mode,
+                orgname=self.args.orgname,
+                benchmark_type=self.BENCHMARK_TYPE.name,
+                command=getattr(self.args, 'command', 'run'),
+            )
 
         self.metadata_filename = f"{self.BENCHMARK_TYPE.value}_{self.run_datetime}_metadata.json"
         self.metadata_file_path = os.path.join(self.run_result_output, self.metadata_filename)
@@ -848,12 +908,15 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         self.verification = self.benchmark_run_verifier.verify()
         self.logger.verboser(f'Benchmark verification result: {self.verification}')
 
-        # Use getattr so we're resilient to args objects built in tests that
-        # may not define one or both attributes. Neither flag set => warn and
-        # skip formal verification (fixes #349: --open was previously
-        # indistinguishable from "nothing passed").
-        closed_mode = getattr(self.args, 'closed', False)
-        open_mode = getattr(self.args, 'open', False)
+        # ``args.mode`` is the source of truth (post-PR #412 modal CLI:
+        # closed|open|whatif as the first positional, argparse-enforced).
+        # The ``not closed_mode and not open_mode`` branch below is the
+        # explicit short-circuit for ``mode == 'whatif'``: whatif runs
+        # without verification by design. Do not delete it — whatif is a
+        # supported execution mode.
+        mode = self.args.mode
+        closed_mode = (mode == 'closed')
+        open_mode = (mode == 'open')
 
         if not closed_mode and not open_mode:
             self.logger.warning(f'Running the benchmark without verification for open or closed configurations. These results are not valid for submission. Use closed or open as the first positional argument to specify a configuration.')
@@ -882,6 +945,89 @@ class Benchmark(BenchmarkInterface, abc.ABC):
                 # closed_mode is True here
                 self.logger.warning(f'Parameters allowed for open but not closed. Use --open and rerun the benchmark.')
                 sys.exit(1)
+
+    def required_bytes_for_capacity_gate(self) -> int:
+        """Return bytes needed for the dataset destination (CAP-01).
+
+        Subclasses MUST override. Each benchmark's required-bytes math
+        already lives inline in its ``datasize``/``execute_datasize``
+        method (per-benchmark — see 05-RESEARCH.md §"Per-benchmark
+        required_bytes sources (CAP-01)"). The override mirrors that math
+        WITHOUT calling the user-facing logger so the happy path can stay
+        silent per REQUIREMENTS.md SC#6.
+
+        Raises:
+            NotImplementedError: Always, on the base class.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} must override "
+            f"required_bytes_for_capacity_gate() for CAP-01"
+        )
+
+    def _capacity_gate_destination(self) -> Optional[str]:
+        """Return the filesystem path the gate runs statvfs against (CAP-01).
+
+        Return ``None`` to skip the local statvfs — used by the A8 remote-
+        backend escape hatch (e.g., VectorDB pointed at a remote milvus
+        URI). The skip is logged at INFO level by ``_pre_execution_gate``.
+
+        Raises:
+            NotImplementedError: Always, on the base class.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} must override "
+            f"_capacity_gate_destination() for CAP-01"
+        )
+
+    def _pre_execution_gate(self) -> None:
+        """Run all pre-execution capacity/environment gates (CAP-01 in
+        Slice 3; CAP-02 shared-FS verification is appended in Slice 4 of
+        Phase 5; LIFE-02 stays on the run-only path via the existing
+        ``write_systemname_yaml`` try/except).
+
+        Called from BOTH ``Benchmark.run()`` AND each subclass's datagen
+        entry point (TrainingBenchmark.datasize, CheckpointingBenchmark.
+        datasize, VectorDBBenchmark.execute_datagen, KVCacheBenchmark's
+        kvcache datagen branch in ``_run``). Per REQUIREMENTS.md CAP-01 +
+        RESEARCH Pitfall 5 the gate runs per-rank so a single starved node
+        in a heterogeneous fleet fails fast with its own destination
+        identified in the error.
+
+        Happy path: returns ``None`` silently (no logger output) per SC#6.
+        """
+        destination = self._capacity_gate_destination()
+        if destination is None:
+            # A8 escape hatch: remote vector-DB backend (milvus/elasticsearch/
+            # pgvector), or any other engine whose data lands behind a network
+            # boundary where local statvfs is meaningless. Log INFO so the
+            # operator sees the skip; do not raise.
+            self.logger.info(
+                "CAP-01 skipped: destination not local "
+                "(e.g., remote vector-DB backend)"
+            )
+            return
+        required_bytes = self.required_bytes_for_capacity_gate()
+        check_capacity_4field(destination, required_bytes, self.logger)
+        # ------------------------------------------------------------------
+        # Slice 4 / CAP-02: shared-FS verification (Phase 5 / Plan 05-04).
+        # ------------------------------------------------------------------
+        # On multi-host runs, verify the data-dir is the SAME shared
+        # filesystem on every participating host (REQUIREMENTS.md CAP-02).
+        # The probe is a silent no-op on single-host runs (SC#8). The
+        # `self._run_uuid` is the Pitfall-7 per-instance UUID, generated
+        # once in __init__ and passed through to mpirun argv verbatim
+        # (W-5 launcher pass-through contract). The destination reused
+        # here is the same path CAP-01 just statvfs'd.
+        hosts = getattr(self.args, 'hosts', None) or []
+        run_shared_fs_probe(
+            destination=destination,
+            hosts=hosts,
+            run_uuid=self._run_uuid,
+            logger=self.logger,
+            mpi_bin=getattr(self.args, 'mpi_bin', None),
+            allow_run_as_root=getattr(self.args, 'allow_run_as_root', False),
+            ssh_username=getattr(self.args, 'ssh_username', None),
+        )
 
     @abc.abstractmethod
     def _run(self) -> int:
@@ -950,6 +1096,34 @@ class Benchmark(BenchmarkInterface, abc.ABC):
 
             # Stage 2: Cluster collection
             self._collect_cluster_start()
+
+            # Phase 5 CAP-01 pre-execution gate (Slice 3 of Phase 5; Slice 4
+            # extends the body with CAP-02 shared-FS probe). Fires AFTER
+            # cluster collection so a per-rank destination check has the
+            # cluster context available, BEFORE write_systemname_yaml so a
+            # starved disk fails fast BEFORE any on-disk artifact is created.
+            self._pre_execution_gate()
+
+            # Phase 2 LIFE-01 write hook. Fires AFTER cluster collection so the
+            # write can consume self._cluster_info_start; BEFORE DLIO launch so
+            # the file lands before any benchmark output exists. The writer owns
+            # its own args.command == 'run' gate (D-12 — belt-and-braces with
+            # _should_collect_cluster_info()).
+            try:
+                write_systemname_yaml(self.args, self._cluster_info_start, self.logger)
+            except FileExistsError:
+                # D-9 no-op-if-exists is handled INSIDE write_systemname_yaml
+                # (the function returns None). Any FileExistsError that bubbles
+                # up here is unexpected; re-raise rather than swallow.
+                raise
+            except Exception as e:
+                # D-9: filesystem failures (EACCES, ENOSPC, IsADirectoryError, etc.)
+                # abort the benchmark BEFORE DLIO launches. The universal
+                # collection-failure rule applies to COLLECTOR failures (which
+                # yield empty strings), NOT to filesystem-level WRITE failures.
+                self.logger.error(f"Failed to write systemname.yaml: {e}")
+                raise
+
             self._start_timeseries_collection()
             advance_stage()
 

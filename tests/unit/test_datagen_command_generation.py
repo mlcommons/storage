@@ -21,7 +21,7 @@ from mlpstorage_py.cli_parser import parse_arguments
 
 
 def _make_stub(*, mode, model, hosts, num_processes, results_dir, data_dir,
-               params_dict, exec_type='mpi'):
+               params_dict, exec_type='mpi', systemname='sys-v1'):
     """Build the minimal object shape that generate_datagen_benchmark_command reads."""
     return SimpleNamespace(
         args=SimpleNamespace(
@@ -32,6 +32,7 @@ def _make_stub(*, mode, model, hosts, num_processes, results_dir, data_dir,
             results_dir=results_dir,
             data_dir=data_dir,
             exec_type=exec_type,
+            systemname=systemname,
         ),
         params_dict=dict(params_dict),
     )
@@ -73,6 +74,7 @@ def test_generated_datagen_command_round_trips(mode, model):
     assert ns.results_dir == '/tmp/results'
     assert ns.data_dir == '/tmp/data'
     assert ns.hosts == ['172.16.4.101', '172.16.4.102']
+    assert ns.systemname == 'sys-v1'
 
     # --params uses nargs='+' action='append' → list of lists. Flatten and check the
     # dotted-key overrides datasize computed are present.

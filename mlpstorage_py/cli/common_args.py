@@ -12,7 +12,7 @@ import argparse
 
 from mlpstorage_py.config import (
     CHECKPOINT_RANKS_STRINGS, MODELS, ACCELERATORS, ACCELERATORS_CLOSED, DEFAULT_HOSTS,
-    LLM_MODELS_STRINGS, MPI_CMDS, EXEC_TYPE, DEFAULT_RESULTS_DIR,
+    LLM_MODELS_STRINGS, MPI_CMDS, EXEC_TYPE, DEFAULT_RESULTS_DIR, DEFAULT_SYSTEMNAME,
     VECTOR_DTYPES, DISTRIBUTIONS
 )
 
@@ -20,17 +20,29 @@ from mlpstorage_py.config import (
 class MLPStorageHelpFormatter(argparse.HelpFormatter):
     """Argparse formatter for leaf-command help output.
 
-    Positionals (file|object, model, command) are already present in the
-    command path the user typed — the same way ``closed``, ``training``, and
-    ``run`` live in the _prog prefix and never appear again.  This formatter:
+    Tree-dispatch positionals (``file|object``, subparser selectors like
+    ``closed``/``training``/``run``) are already present in the command path
+    the user typed — listing them again is noise. This formatter:
 
-    1. Excludes positionals from both the usage line and the detailed sections.
-    2. Lists required options before optional options (both alphabetically)
+    1. Excludes tree-dispatch positionals (those with ``choices`` set —
+       ``data_access_protocol`` and ``_SubParsersAction``) from both the
+       usage line and the detailed sections.
+    2. KEEPS user-supplied positionals (those with ``choices is None`` —
+       e.g. ``validate input``, ``init orgname``, ``init path``) so the
+       user can discover what runtime values the command requires.
+    3. Lists required options before optional options (both alphabetically)
        in the usage line and in every argument group.
     """
 
     @staticmethod
     def _sort_opts(actions):
+        # User-supplied positionals (no option_strings, no choices) — keep in
+        # registration order at the front so argparse routes them into the
+        # positional-arguments section and lists them ahead of options in usage.
+        user_positionals = [
+            a for a in actions
+            if not a.option_strings and a.choices is None
+        ]
         required = sorted(
             [a for a in actions if a.option_strings and a.required],
             key=lambda a: a.option_strings[0].lstrip('-').lower()
@@ -39,7 +51,7 @@ class MLPStorageHelpFormatter(argparse.HelpFormatter):
             [a for a in actions if a.option_strings and not a.required],
             key=lambda a: a.option_strings[0].lstrip('-').lower()
         )
-        return required + optional
+        return user_positionals + required + optional
 
     def _format_usage(self, usage, actions, groups, prefix):
         return super()._format_usage(
@@ -47,7 +59,6 @@ class MLPStorageHelpFormatter(argparse.HelpFormatter):
         )
 
     def add_arguments(self, actions):
-        # Positionals are suppressed — they are already consumed in the command path.
         super().add_arguments(self._sort_opts(actions))
 
 
@@ -173,6 +184,12 @@ HELP_MESSAGES = {
     'output_dir': "Directory where the benchmark report will be saved.",
     'config_file': "Path to YAML file with argument overrides that will be applied after CLI arguments",
 
+    # System-under-test name (LAY-04 / D-10) — folder under results/ in canonical layout
+    'systemname': (
+        "System-under-test name (folder under results/). "
+        "Defaults to MLPERF_SYSTEMNAME env var if set."
+    ),
+
     # MPI help messages
     'mpi_bin': f"Execution type for MPI commands. Supported options: {MPI_CMDS}",
     'exec_type': f"Execution type for benchmark commands. Supported options: {list(EXEC_TYPE)}",
@@ -203,29 +220,59 @@ PROGRAM_DESCRIPTIONS = {
 }
 
 
-def add_universal_arguments(parser, req_results):
+def add_universal_arguments(parser, req_results, req_systemname=False):
     """Add arguments common to all benchmarks and commands.
 
     Args:
         parser: Argparse parser to add arguments to.
-        req_results: Whether --results-dir is required.
+        req_results: Whether --results-dir is required. The requirement is
+            enforced POST-PARSE (see ``check_universal_arguments_present``)
+            so the ``MLPERF_RESULTS_DIR`` env-var-sourced default counts as
+            satisfying it. Using ``required=True`` here would short-circuit
+            argparse before the env-var default applies — that's the CR-02
+            bug we fixed.
+        req_systemname: Whether --systemname is required. Defaults to False
+            so pure utility call sites (lockfile, etc.) keep working without
+            opting in. Emitting commands (datagen/run/configview/datasize/
+            reportgen/history) MUST opt in per CONTEXT.md D-10 / LAY-04.
+            Same post-parse enforcement model as ``req_results``.
     """
     standard_args = parser.add_argument_group("Standard Arguments")
+    # NOTE on the env-var fallback (CR-02): argparse's ``required=True``
+    # checks "was the option supplied on the command line?", NOT "is the
+    # resulting attribute non-None?". The ``default=`` only applies when the
+    # option is OMITTED, but ``required=True`` makes argparse error when it
+    # is omitted — so the env-var-sourced default was unreachable on every
+    # emitting subcommand. We drop ``required=True`` entirely and instead
+    # stash a marker on the namespace (via an argparse.SUPPRESS-defaulted
+    # action) that ``check_universal_arguments_present`` consumes at the
+    # post-parse validation layer to enforce non-emptiness.
+    standard_args.add_argument(
+        '--results-dir', '-rd',
+        type=str,
+        default=DEFAULT_RESULTS_DIR,
+        help=HELP_MESSAGES['results_dir']
+    )
     if req_results:
-        standard_args.add_argument(
-            '--results-dir', '-rd',
-            type=str,
-            required=True,
-            default=DEFAULT_RESULTS_DIR,
-            help=HELP_MESSAGES['results_dir']
-        )
-    else:
-        standard_args.add_argument(
-            '--results-dir', '-rd',
-            type=str,
-            default=DEFAULT_RESULTS_DIR,
-            help=HELP_MESSAGES['results_dir']
-        )
+        # Stash a marker on the namespace — set_defaults does NOT register a
+        # CLI flag; it just seeds the resulting Namespace attribute. The
+        # post-parse validator consumes this to know whether to error on an
+        # empty resolved value.
+        parser.set_defaults(_mlps_req_results=True)
+
+    # --systemname: required on emitting commands (Rules.md §2.1.8 systemname
+    # subdir), optional elsewhere. Default = DEFAULT_SYSTEMNAME = "" unless
+    # MLPERF_SYSTEMNAME env var is set. Same env-var-fallback bug as above:
+    # we keep argparse's ``required=False`` and gate emptiness post-parse.
+    standard_args.add_argument(
+        '--systemname', '-sn',
+        type=str,
+        required=False,
+        default=DEFAULT_SYSTEMNAME,
+        help=HELP_MESSAGES['systemname']
+    )
+    if req_systemname:
+        parser.set_defaults(_mlps_req_systemname=True)
 
     standard_args.add_argument(
         '--config-file', '-c',

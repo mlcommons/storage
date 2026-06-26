@@ -55,12 +55,12 @@ class TestVectorDBSubcommands:
 
     def test_run_subcommand_exists(self, parser):
         """VectorDB should have run subcommand (not run-search)."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert args.command == 'run'
 
     def test_datagen_subcommand_exists(self, parser):
         """VectorDB should have datagen subcommand."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert args.command == 'datagen'
 
     def test_run_search_does_not_exist(self, parser):
@@ -81,48 +81,48 @@ class TestVectorDBCommonArguments:
 
     def test_host_argument_default(self, parser):
         """Host should default to 127.0.0.1."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert args.host == '127.0.0.1'
 
     def test_host_argument_custom(self, parser):
         """Should accept custom host."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--host', '192.168.1.100', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--host', '192.168.1.100', 'file'])
         assert args.host == '192.168.1.100'
 
     def test_host_short_flag(self, parser):
         """Should accept -s shorthand for host."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '-s', 'milvus.local', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '-s', 'milvus.local', 'file'])
         assert args.host == 'milvus.local'
 
     def test_port_argument_default(self, parser):
         """Port should default to 19530."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert args.port == 19530
 
     def test_port_argument_custom(self, parser):
         """Should accept custom port."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--port', '19531', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--port', '19531', 'file'])
         assert args.port == 19531
 
     def test_port_short_flag(self, parser):
         """Should accept -p shorthand for port."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '-p', '8080', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '-p', '8080', 'file'])
         assert args.port == 8080
 
     def test_config_argument(self, parser):
         """Should accept --config argument."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--config', '10m', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--config', '10m', 'file'])
         assert args.config == '10m'
 
     def test_collection_argument(self, parser):
         """Should accept --collection argument."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--collection', 'my_collection', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--collection', 'my_collection', 'file'])
         assert args.collection == 'my_collection'
 
     def test_common_args_work_for_datagen(self, parser):
         """Common arguments should also work for datagen command."""
         args = parser.parse_args([
-            'datagen', '--results-dir', '/tmp',
+            'datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1',
             '--host', '10.0.0.1',
             '--port', '19531',
             '--config', 'custom_config',
@@ -147,94 +147,94 @@ class TestVectorDBDatagenArguments:
 
     def test_dimension_argument_default(self, parser):
         """Dimension should default to 1536."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert args.dimension == 1536
 
     def test_dimension_argument_custom(self, parser):
         """Should accept custom dimension."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--dimension', '768', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--dimension', '768', 'file'])
         assert args.dimension == 768
 
     def test_num_shards_argument_default(self, parser):
         """num_shards should default to 1."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert args.num_shards == 1
 
     def test_num_shards_argument_custom(self, parser):
         """Should accept custom num_shards."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--num-shards', '4', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--num-shards', '4', 'file'])
         assert args.num_shards == 4
 
     def test_vector_dtype_argument_default(self, parser):
         """vector_dtype should default to FLOAT_VECTOR."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert args.vector_dtype == 'FLOAT_VECTOR'
 
     def test_vector_dtype_argument_choices(self, parser):
         """Should accept valid vector dtype choices."""
         for dtype in VECTOR_DTYPES:
-            args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--vector-dtype', dtype, 'file'])
+            args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--vector-dtype', dtype, 'file'])
             assert args.vector_dtype == dtype
 
     def test_vector_dtype_invalid_choice(self, parser):
         """Should reject invalid vector dtype."""
         with pytest.raises(SystemExit):
-            parser.parse_args(['datagen', '--results-dir', '/tmp', '--vector-dtype', 'INVALID_TYPE', 'file'])
+            parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--vector-dtype', 'INVALID_TYPE', 'file'])
 
     def test_num_vectors_argument_default(self, parser):
         """num_vectors should default to 1_000_000."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert args.num_vectors == 1_000_000
 
     def test_num_vectors_argument_custom(self, parser):
         """Should accept custom num_vectors."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--num-vectors', '5000000', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--num-vectors', '5000000', 'file'])
         assert args.num_vectors == 5000000
 
     def test_distribution_argument_default(self, parser):
         """distribution should default to uniform."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert args.distribution == 'uniform'
 
     def test_distribution_argument_choices(self, parser):
         """Should accept valid distribution choices."""
         for dist in DISTRIBUTIONS:
-            args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--distribution', dist, 'file'])
+            args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--distribution', dist, 'file'])
             assert args.distribution == dist
 
     def test_distribution_invalid_choice(self, parser):
         """Should reject invalid distribution."""
         with pytest.raises(SystemExit):
-            parser.parse_args(['datagen', '--results-dir', '/tmp', '--distribution', 'invalid_dist', 'file'])
+            parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--distribution', 'invalid_dist', 'file'])
 
     def test_batch_size_argument_default(self, parser):
         """batch_size should default to 1000."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert args.batch_size == 1_000
 
     def test_batch_size_argument_custom(self, parser):
         """Should accept custom batch_size."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--batch-size', '500', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--batch-size', '500', 'file'])
         assert args.batch_size == 500
 
     def test_chunk_size_argument_default(self, parser):
         """chunk_size should default to 10000."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert args.chunk_size == 10_000
 
     def test_chunk_size_argument_custom(self, parser):
         """Should accept custom chunk_size."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--chunk-size', '50000', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--chunk-size', '50000', 'file'])
         assert args.chunk_size == 50000
 
     def test_force_argument(self, parser):
         """Should accept --force flag."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--force', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--force', 'file'])
         assert args.force is True
 
     def test_force_argument_default(self, parser):
         """force should default to False."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert args.force is False
 
 
@@ -250,52 +250,52 @@ class TestVectorDBRunArguments:
 
     def test_num_query_processes_argument_default(self, parser):
         """num_query_processes should default to 1."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert args.num_query_processes == 1
 
     def test_num_query_processes_argument_custom(self, parser):
         """Should accept custom num_query_processes."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--num-query-processes', '8', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--num-query-processes', '8', 'file'])
         assert args.num_query_processes == 8
 
     def test_batch_size_argument_default(self, parser):
         """batch_size should default to 1."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert args.batch_size == 1
 
     def test_batch_size_argument_custom(self, parser):
         """Should accept custom batch_size."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--batch-size', '100', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--batch-size', '100', 'file'])
         assert args.batch_size == 100
 
     def test_report_count_argument_default(self, parser):
         """report_count should default to 100."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert args.report_count == 100
 
     def test_report_count_argument_custom(self, parser):
         """Should accept custom report_count."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--report-count', '500', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--report-count', '500', 'file'])
         assert args.report_count == 500
 
     def test_runtime_argument(self, parser):
         """Should accept --runtime argument."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--runtime', '120', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--runtime', '120', 'file'])
         assert args.runtime == 120
 
     def test_queries_argument(self, parser):
         """Should accept --queries argument."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--queries', '10000', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--queries', '10000', 'file'])
         assert args.queries == 10000
 
     def test_runtime_and_queries_mutually_exclusive(self, parser):
         """runtime and queries should be mutually exclusive."""
         with pytest.raises(SystemExit):
-            parser.parse_args(['run', '--results-dir', '/tmp', '--runtime', '60', '--queries', '1000', 'file'])
+            parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--runtime', '60', '--queries', '1000', 'file'])
 
     def test_runtime_not_required(self, parser):
         """Neither runtime nor queries is required."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert args.runtime is None
         assert args.queries is None
 
@@ -312,32 +312,32 @@ class TestVectorDBDatagenNoRunArgs:
 
     def test_datagen_has_dimension(self, parser):
         """datagen should have dimension argument."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--dimension', '512', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--dimension', '512', 'file'])
         assert args.dimension == 512
 
     def test_run_no_dimension(self, parser):
         """run should not have dimension argument."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert not hasattr(args, 'dimension')
 
     def test_run_no_num_vectors(self, parser):
         """run should not have num_vectors argument."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert not hasattr(args, 'num_vectors')
 
     def test_run_no_force(self, parser):
         """run should not have force argument."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert not hasattr(args, 'force')
 
     def test_run_no_chunk_size(self, parser):
         """run should not have chunk_size argument."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert not hasattr(args, 'chunk_size')
 
     def test_run_no_num_shards(self, parser):
         """run should not have num_shards argument."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert not hasattr(args, 'num_shards')
 
 
@@ -353,22 +353,22 @@ class TestVectorDBRunNoDatagenArgs:
 
     def test_datagen_no_num_query_processes(self, parser):
         """datagen should not have num_query_processes argument."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert not hasattr(args, 'num_query_processes')
 
     def test_datagen_no_runtime(self, parser):
         """datagen should not have runtime argument."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert not hasattr(args, 'runtime')
 
     def test_datagen_no_queries(self, parser):
         """datagen should not have queries argument."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert not hasattr(args, 'queries')
 
     def test_datagen_no_report_count(self, parser):
         """datagen should not have report_count argument."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert not hasattr(args, 'report_count')
 
 
@@ -385,7 +385,7 @@ class TestVectorDBFullCommandParsing:
     def test_datagen_full_command(self, parser):
         """Should parse a complete datagen command."""
         args = parser.parse_args([
-            'datagen', '--results-dir', '/tmp',
+            'datagen', '--results-dir', '/tmp', '--systemname', 'sys-v1',
             '--host', '192.168.1.100',
             '--port', '19531',
             '--config', 'custom_config',
@@ -417,7 +417,7 @@ class TestVectorDBFullCommandParsing:
     def test_run_full_command_with_runtime(self, parser):
         """Should parse a complete run command with runtime."""
         args = parser.parse_args([
-            'run', '--results-dir', '/tmp',
+            'run', '--results-dir', '/tmp', '--systemname', 'sys-v1',
             '--host', '10.0.0.50',
             '--port', '9999',
             '--config', '10m',
@@ -442,7 +442,7 @@ class TestVectorDBFullCommandParsing:
     def test_run_full_command_with_queries(self, parser):
         """Should parse a complete run command with queries."""
         args = parser.parse_args([
-            'run', '--results-dir', '/tmp',
+            'run', '--results-dir', '/tmp', '--systemname', 'sys-v1',
             '--host', '10.0.0.50',
             '--port', '9999',
             '--num-query-processes', '8',
@@ -571,12 +571,12 @@ class TestVectorDBClosedMode:
 
     def test_closed_run_parses_successfully(self, parser):
         """Closed vectordb run should parse successfully."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert args.command == 'run'
 
     def test_closed_mode_namespace_has_open_defaults(self, parser):
         """Closed-mode parse must supply loops/params/allow_invalid_params via set_defaults."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file'])
         assert args.loops == 1
         assert args.params == ''
         assert args.allow_invalid_params is False

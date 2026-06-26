@@ -82,8 +82,9 @@ key_value:
 network_port:
     unit_count:                 int( min=1 )        # Number of ports that look like this
     type:                       enum( 'ethernet', 'infiniband', 'other' )
-    speed:                      int( min=1 )        # in Gigabits/s
-    traffic:                    list( enum( 'management', 'data', 'metadata', 'backend' ), min=1 )
+    state:                      enum( 'up', 'down' )    # Operational state — D-20; required, no default
+    speed:                      int( min=1, required=False )    # in Gigabits/s; required when state is 'up'
+    traffic:                    list( enum( 'management', 'data', 'metadata', 'backend' ), min=1, required=False )    # required when state is 'up'
 
 ---
 #

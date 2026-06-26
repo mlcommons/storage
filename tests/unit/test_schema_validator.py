@@ -19,8 +19,9 @@ Rule reference:
 
 import copy
 import pytest
+from pydantic import ValidationError
 
-from mlpstorage_py.system_description.schema_validator import validate_dict
+from mlpstorage_py.system_description.schema_validator import NetworkPort, validate_dict
 
 
 # ---------------------------------------------------------------------------
@@ -41,7 +42,10 @@ def _power(min_active=1) -> dict:
 
 
 def _networking() -> list:
-    return [{"unit_count": 1, "type": "ethernet", "speed": 100, "traffic": ["data"]}]
+    # D-20: every NetworkPort dict now carries state="up"; pre-existing examples
+    # in this test module are all "well-formed working configurations" so the
+    # up-with-speed-and-traffic shape is the right default for the helpers.
+    return [{"unit_count": 1, "type": "ethernet", "state": "up", "speed": 100, "traffic": ["data"]}]
 
 
 def _os() -> dict:
@@ -115,7 +119,7 @@ def _switch(rack_units=2, unit_count=1) -> dict:
         "unit_count": unit_count,
         "vendor_name": "Cisco",
         "model_name": "Nexus 5000",
-        "ports": [{"unit_count": 48, "type": "ethernet", "speed": 100, "traffic": ["data"]}],
+        "ports": [{"unit_count": 48, "type": "ethernet", "state": "up", "speed": 100, "traffic": ["data"]}],
         "rack_units": rack_units,
         "power": _power(),
     }
@@ -991,3 +995,96 @@ class TestDriveInstance:
             _drive(with_performance=True),
             _drive(model_name="X1650 QLC", media_type="QLC", capacity_in_GB=24000),
         ))
+
+
+# ---------------------------------------------------------------------------
+# Phase 3 / Plan 03-01 — NetworkPort.state (D-20)
+#
+# These tests pin the new `state` field added to NetworkPort and its
+# `_require_speed_and_traffic_when_up` model_validator. They exercise the
+# Pydantic model directly (not the whole-doc validate_dict path) because the
+# state semantics are leaf-level invariants — separating concerns from the
+# document-shape tests above keeps the breakage surface narrow when the
+# schema is extended in future phases.
+# ---------------------------------------------------------------------------
+
+class TestNetworkPortState:
+    """D-20: NetworkPort gains a REQUIRED `state: Literal["up","down"]` field
+    plus a `model_validator(mode="after")` that enforces speed and traffic are
+    populated when state == "up". These tests are written RED-first per
+    CONTEXT.md Cross-Cutting Process Rule "Test-impact scan before every
+    slice's RED" — they fail before the schema change lands in Task 2.
+    """
+
+    def test_state_required_no_default(self):
+        """state has NO default; constructing without it raises ValidationError
+        and the error message names `state` as the missing/required field.
+        Pre-Task-2: passes silently because the field doesn't exist — RED.
+        """
+        with pytest.raises(ValidationError) as exc_info:
+            NetworkPort(unit_count=1, type="ethernet", speed=100, traffic=["data"])
+        assert "state" in str(exc_info.value)
+
+    def test_up_requires_speed(self):
+        """state=='up' with no speed → ValidationError mentioning the locked
+        substring `speed is required when state is 'up'` (raised by the new
+        _require_speed_and_traffic_when_up model_validator)."""
+        with pytest.raises(ValidationError) as exc_info:
+            NetworkPort(unit_count=1, type="ethernet", state="up", traffic=["data"])
+        assert "speed is required when state is 'up'" in str(exc_info.value)
+
+    def test_up_requires_traffic(self):
+        """state=='up' with no traffic → ValidationError mentioning the locked
+        substring `traffic must have at least one entry when state is 'up'`."""
+        with pytest.raises(ValidationError) as exc_info:
+            NetworkPort(unit_count=1, type="ethernet", state="up", speed=100)
+        assert "traffic must have at least one entry when state is 'up'" in str(exc_info.value)
+
+    def test_down_omits_speed_and_traffic_via_exclude_none(self):
+        """state=='down' with neither speed nor traffic constructs cleanly;
+        `model_dump(exclude_none=True)` drops both Optional keys so the emitted
+        dict only carries the three populated fields. This is the D-2 universal-
+        blanks emit path for known-down NICs.
+        """
+        port = NetworkPort(unit_count=1, type="ethernet", state="down")
+        assert port.speed is None
+        assert port.traffic is None
+        assert port.model_dump(exclude_none=True) == {
+            "unit_count": 1,
+            "type": "ethernet",
+            "state": "down",
+        }
+
+    def test_invalid_state_value_rejected(self):
+        """Literal["up","down"] rejects any other value (e.g. operstate raw
+        `dormant`). The collector must map operstate to {up, down} BEFORE
+        constructing NetworkPort."""
+        with pytest.raises(ValidationError) as exc_info:
+            NetworkPort(
+                unit_count=1,
+                type="ethernet",
+                state="dormant",
+                speed=100,
+                traffic=["data"],
+            )
+        assert "state" in str(exc_info.value)
+
+    def test_speed_zero_rejected_when_up(self):
+        """Regression-lock per RESEARCH.md line 622: speed=0 must be rejected
+        by the ge=1 field validator BEFORE the after-validator fires. This
+        locks Pydantic v2's field-validator-before-model-validator order; if
+        a future Pydantic release reorders these, the after-validator's
+        "speed is required when up" message would mask the more specific
+        ge=1 violation. This test stays GREEN even pre-Task-2 because the
+        existing field already carries ge=1 — it is a regression lock, not a
+        strict-RED test.
+        """
+        with pytest.raises(ValidationError) as exc_info:
+            NetworkPort(
+                unit_count=1,
+                type="ethernet",
+                state="up",
+                speed=0,
+                traffic=["data"],
+            )
+        assert "speed" in str(exc_info.value)

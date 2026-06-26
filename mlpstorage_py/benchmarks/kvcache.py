@@ -347,6 +347,57 @@ class KVCacheBenchmark(Benchmark):
         self.write_cluster_info()
         return 0
 
+    # ------------------------------------------------------------------
+    # CAP-01 capacity-gate hooks (Phase 5 / Plan 05-03)
+    # ------------------------------------------------------------------
+
+    # Inline model_cache_estimates table mirrored from _execute_datasize()
+    # below. Per A6, CAP-01 routes through THIS internal table — NOT
+    # config.py LLM_SIZE_BY_RANK / LLAMA3_* constants. The two tables track
+    # different things (KV cache footprint vs full model weights).
+    _MODEL_CACHE_ESTIMATES = {
+        'tiny-1b': {'per_token_bytes': 768, 'typical_sequence': 2048},
+        'mistral-7b': {'per_token_bytes': 4096, 'typical_sequence': 4096},
+        'llama2-7b': {'per_token_bytes': 8192, 'typical_sequence': 4096},
+        'llama3.1-8b': {'per_token_bytes': 4096, 'typical_sequence': 8192},
+        'llama3.1-70b-instruct': {'per_token_bytes': 16384, 'typical_sequence': 8192},
+    }
+    _MODEL_CACHE_DEFAULT = {'per_token_bytes': 4096, 'typical_sequence': 4096}
+
+    def required_bytes_for_capacity_gate(self) -> int:
+        """Return KV-cache footprint in bytes (CAP-01).
+
+        A6 lock: enforces the 1x FLOOR — ``int(total_cache_mb * 1024 *
+        1024)``. The 2x NVMe-headroom recommendation at
+        ``kvcache.py:_execute_datasize`` is a performance suggestion, not
+        a benchmark-cannot-run threshold. Operators who want the 2x
+        headroom should size their ``--data-dir`` to 2x manually; CAP-01
+        enforces the minimum-to-not-fail.
+
+        Routes through the inline ``_MODEL_CACHE_ESTIMATES`` table — NOT
+        ``LLM_SIZE_BY_RANK`` from ``config.py`` (those constants describe
+        model weights, not KV cache footprint).
+        """
+        model_info = self._MODEL_CACHE_ESTIMATES.get(self.model, self._MODEL_CACHE_DEFAULT)
+        per_token = model_info['per_token_bytes']
+        seq_len = model_info['typical_sequence']
+        cache_per_user_mb = (per_token * seq_len) / (1024 * 1024)
+        total_cache_mb = cache_per_user_mb * self.num_users
+        return int(total_cache_mb * 1024 * 1024)
+
+    def _capacity_gate_destination(self):
+        """Return the NVMe KV-cache directory the benchmark writes to.
+
+        Falls back to ``None`` (A8 escape hatch) if ``cache_dir`` is unset —
+        the kvcache benchmark may run entirely in CPU/GPU memory tiers when
+        the NVMe tier is unconfigured.
+        """
+        return self.cache_dir if self.cache_dir else None
+
+    # ------------------------------------------------------------------
+    # Per-option argv build + rank layout (from main)
+    # ------------------------------------------------------------------
+
     def _build_option_kvcache_args(self, option: int, is_closed: bool) -> List[str]:
         """Return the kv-cache.py CLI args for this option.
 
@@ -460,6 +511,10 @@ class KVCacheBenchmark(Benchmark):
         Returns:
             Exit code (0 for success).
         """
+        # CAP-01: enforce 1x floor BEFORE printing recommendations. The
+        # 2x figure in the existing log lines below is a recommendation,
+        # not a hard minimum; CAP-01 enforces the floor.
+        self._pre_execution_gate()
         self.logger.status("Calculating KV Cache memory requirements...")
 
         # Import model configs from kv-cache.py or use estimates
@@ -739,6 +794,23 @@ class KVCacheBenchmark(Benchmark):
             'performance_profile': self.performance_profile,
             'num_processes': self.num_processes,  # Include for distributed runs
         })
+
+        # Issue #537: KVCacheRunRulesChecker and reportgen read workload config
+        # from metadata['parameters']. KVCache has no DLIO combined_params, so
+        # the base class fills parameters with {} and every closed run lands as
+        # INVALID 'Missing model parameter'. Mirror the workload keys into
+        # parameters so both live verification and reportgen see the real run
+        # config instead of the run-checker's hard-coded defaults.
+        base_metadata['parameters'] = {
+            'model': self.model,
+            'num_users': self.num_users,
+            'duration': self.duration,
+            'gpu_mem_gb': self.gpu_mem_gb,
+            'cpu_mem_gb': self.cpu_mem_gb,
+            'cache_dir': self.cache_dir,
+            'generation_mode': self.generation_mode,
+            'performance_profile': self.performance_profile,
+        }
 
         # Add execution info for distributed runs
         exec_type = getattr(self.args, 'exec_type', None)

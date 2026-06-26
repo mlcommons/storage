@@ -106,7 +106,15 @@ def _add_checkpointing_core_args(parser, command):
     # submitters can point at a custom DLIO build without flipping to open.
     add_dlio_arguments(parser)
 
-    add_universal_arguments(parser, req_results=(command in ("run", "configview")))
+    add_universal_arguments(
+        parser,
+        req_results=(command in ("run", "configview")),
+        # D-10: checkpointing run/configview emit results and require
+        # --systemname. datasize is a pre-flight calculation; datagen and
+        # validate do not exist on this builder. Per LAY-04 we only opt in
+        # the emitting subcommands present on this builder.
+        req_systemname=(command in ("run", "configview")),
+    )
 
     # Storage type positional for run and configview — NOT datasize
     if command in ("run", "configview"):

@@ -35,7 +35,9 @@ def add_reports_arguments(parser):
         help=HELP_MESSAGES['output_dir']
     )
 
-    add_universal_arguments(reportgen, req_results=True)
+    # D-10 / LAY-04: `reports reportgen` emits aggregated report output under
+    # the canonical layout; require --systemname.
+    add_universal_arguments(reportgen, req_results=True, req_systemname=True)
 
 
 def add_history_arguments(parser):
@@ -77,7 +79,8 @@ def add_history_arguments(parser):
     )
 
     for _parser in [history, rerun]:
-        add_universal_arguments(_parser, req_results=True)
+        # D-10 / LAY-04: history subcommands are scoped per-systemname.
+        add_universal_arguments(_parser, req_results=True, req_systemname=True)
 
 
 def add_version_arguments(parser):

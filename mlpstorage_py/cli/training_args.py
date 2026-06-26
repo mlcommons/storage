@@ -237,7 +237,13 @@ def _add_training_core_args(parser, command, accel_choices):
         help=HELP_MESSAGES['params']
     )
 
-    add_universal_arguments(parser, req_results=(command in ("run", "configview")))
+    add_universal_arguments(
+        parser,
+        req_results=(command in ("run", "configview")),
+        # D-10: training datagen/run/configview/datasize are all emitting
+        # commands and require --systemname (LAY-04).
+        req_systemname=(command in ("datagen", "run", "configview", "datasize")),
+    )
 
     # Storage type positional for datagen, run, configview — NOT datasize
     if command in ("datagen", "run", "configview"):
