@@ -9,6 +9,7 @@ messaging.
 """
 
 import os
+import re
 import signal
 import sys
 import traceback
@@ -39,11 +40,18 @@ from mlpstorage_py.lockfile import (
 )
 from mlpstorage_py.validation_helpers import validate_benchmark_environment
 from mlpstorage_py.progress import progress_context
+from mlpstorage_py.results_dir import resolve_orgname
+from mlpstorage_py.results_dir.errors import ResultsDirNotInitializedError
 from mlpstorage_py.submission_checker.tools.code_image import capture_or_verify_code_image, CodeImageError
 
 logger = setup_logging("MLPerfStorage")
 signal_received = False
 error_formatter = ErrorFormatter(use_colors=True)
+
+# CONTEXT.md D-12 — modes that DO NOT require a sentinel-resolved orgname.
+# Every other mode (closed, open, whatif, reports, history, validate) is
+# subject to the LAY-03 orgname-resolution gate in `_main_impl`.
+NON_BENCHMARK_NO_ORGNAME_MODES = frozenset({"init", "version", "lockfile", "rules-coverage"})
 
 
 def signal_handler(sig, frame):
@@ -286,15 +294,31 @@ def _main_impl():
 
     args = parse_arguments()
 
-    if args.mode == "version":
-        from mlpstorage_py import VERSION
-        print(VERSION)
-        sys.exit(0)
-
+    # CR-03: logging setup is universal — only **benchmark** plumbing is
+    # gated for ``init`` (RESEARCH.md Pitfall 3). Calling
+    # ``apply_logging_options`` BEFORE the init early-return makes the
+    # init dispatcher's ``logger.info(...)`` confirmations visible and
+    # lets ``--debug`` triage init failures. The function is defensive
+    # via ``hasattr`` checks, so missing ``debug``/``verbose``/
+    # ``stream_log_level`` attributes on the init Namespace are fine.
     if getattr(args, 'debug', False) or MLPS_DEBUG:
         sys.excepthook = debugger_hook
 
     apply_logging_options(logger, args)
+
+    # `init` is a filesystem-local utility that must NOT flow through
+    # update_args / validate_benchmark_environment / run_benchmark
+    # (RESEARCH.md Pitfall 3). Early-return BEFORE any benchmark plumbing
+    # — but AFTER apply_logging_options above so the dispatcher's
+    # confirmations are visible.
+    if args.mode == "init":
+        from mlpstorage_py.results_dir.init import run_init
+        return run_init(args)
+
+    if args.mode == "version":
+        from mlpstorage_py import VERSION
+        print(VERSION)
+        sys.exit(0)
 
     datetime_str = DATETIME_STR
 
@@ -303,7 +327,69 @@ def _main_impl():
         # Don't save history commands
         hist.add_entry(sys.argv, datetime_str=datetime_str)
 
-    # Handle history command separately
+    # Bypass dispatch for utility modes that do NOT consume an orgname-pinned
+    # results-dir. Per CONTEXT.md D-12 the bypass list is exactly four modes:
+    # `init` (handled above), `version` (handled above), `lockfile`, and
+    # `rules-coverage`. All other modes (closed/open/whatif/reports/history/
+    # validate) flow through the LAY-03 orgname-resolution gate below.
+    if args.mode == "lockfile":
+        return handle_lockfile_command(args)
+
+    if args.mode == "rules-coverage":
+        from mlpstorage_py.submission_checker.tools.rules_coverage import run as run_rules_coverage
+        return run_rules_coverage(args)
+
+    # ------------------------------------------------------------------ #
+    # LAY-03 orgname-resolution gate.
+    #
+    # Every gated mode that supplies `--results-dir` must have a valid
+    # `mlperf-results.yaml` sentinel in that directory; the gate reads the
+    # sentinel, pins `args.orgname` for downstream consumers (path generator,
+    # banner, benchmark base), and fails fast with the EXACT CONTEXT.md
+    # message when the sentinel is missing or malformed.
+    #
+    # The error message backticks are LOCKED VERBATIM per CONTEXT.md LAY-03
+    # / ROADMAP success criterion #2 — do NOT switch to single quotes (`!r`
+    # would render `'…'`) and do NOT add backslash escapes (the backtick is
+    # not a Python escape sequence; `\\`` produces `\` + backtick on screen).
+    # ------------------------------------------------------------------ #
+    if args.mode not in NON_BENCHMARK_NO_ORGNAME_MODES:
+        results_dir_value = getattr(args, 'results_dir', None)
+        if results_dir_value:
+            try:
+                args.orgname = resolve_orgname(results_dir_value)
+            except ResultsDirNotInitializedError as e:
+                raise ConfigurationError(
+                    f"results-dir `{results_dir_value}` has not been initialized.",
+                    suggestion=f"Run `mlpstorage init <orgname> {results_dir_value}` first.",
+                    code=ErrorCode.CONFIG_MISSING_REQUIRED,
+                ) from e
+            # WR-06: defense-in-depth re-validation at the gate. The schema
+            # (Pydantic v2) already full-match-validates the sentinel's
+            # ``orgname`` against ``[A-Za-z0-9._-]+`` on read, so a properly-
+            # written sentinel cannot reach here with a path separator or
+            # other unsafe character. But ``args.orgname`` lands in
+            # ``os.path.join(..., orgname, "results", ...)`` immediately
+            # downstream, so we want a paranoid post-resolution assertion
+            # that catches:
+            #   * a future Pydantic-version bump that regresses to
+            #     non-anchored regex semantics,
+            #   * a switch to v1's ``regex=`` keyword (which used different
+            #     match semantics),
+            #   * any unit-test path that constructs args.orgname directly
+            #     without going through ``read_sentinel``.
+            if not re.fullmatch(r"[A-Za-z0-9._-]+", args.orgname):
+                raise ConfigurationError(
+                    f"sentinel orgname {args.orgname!r} contains invalid characters",
+                    suggestion=(
+                        "Re-initialize the results-dir with a clean orgname "
+                        "(matches [A-Za-z0-9._-]+)."
+                    ),
+                    code=ErrorCode.CONFIG_INVALID_VALUE,
+                )
+
+    # Handle history command separately (now AFTER the gate so it inherits
+    # a resolved args.orgname when --results-dir is supplied; D-12).
     if args.mode == 'history':
         new_args = hist.handle_history_command(args)
 
@@ -325,8 +411,24 @@ def _main_impl():
             # If handle_history_command returned an exit code, return it
             return new_args
 
-    if args.mode == "lockfile":
-        return handle_lockfile_command(args)
+        # WR-03: the replayed entry may carry a bypass mode (version /
+        # lockfile / rules-coverage) or even 'init'. The bypass dispatches
+        # above ran on the ORIGINAL args (mode='history'), so they did not
+        # match. Re-route here before falling through to the benchmark
+        # loop. Without this, a replayed bypass-mode entry would land in
+        # ``update_args`` → ``run_benchmark`` with a non-benchmark mode.
+        if args.mode == "init":
+            from mlpstorage_py.results_dir.init import run_init
+            return run_init(args)
+        if args.mode == "version":
+            from mlpstorage_py import VERSION
+            print(VERSION)
+            sys.exit(0)
+        if args.mode == "lockfile":
+            return handle_lockfile_command(args)
+        if args.mode == "rules-coverage":
+            from mlpstorage_py.submission_checker.tools.rules_coverage import run as run_rules_coverage
+            return run_rules_coverage(args)
 
     if args.mode == "reports":
         # Lazy-import: ReportGenerator pulls psutil, which is only required
@@ -340,10 +442,6 @@ def _main_impl():
     if args.mode == "validate":
         from mlpstorage_py.submission_checker.main import run as run_submission_checker
         return run_submission_checker(args)
-
-    if args.mode == "rules-coverage":
-        from mlpstorage_py.submission_checker.tools.rules_coverage import run as run_rules_coverage
-        return run_rules_coverage(args)
 
     run_datetime = datetime_str
 

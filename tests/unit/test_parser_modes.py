@@ -29,7 +29,8 @@ class TestParserModeStructure:
     def test_whatif_mode_sets_mode_attr(self):
         """whatif mode must set args.mode='whatif' and args.benchmark='training'."""
         with patch('sys.argv', ['mlpstorage', 'whatif', 'training', 'cosmoflow',
-                                 'datasize', '-cm', '64', '-at', 'h100', '-ma', '4']):
+                                 'datasize', '-cm', '64', '-at', 'h100', '-ma', '4',
+                                 '-rd', '/tmp', '-sn', 'sys-v1']):
             args = parse_arguments()
         assert args.mode == 'whatif'
         assert args.benchmark == 'training'
@@ -41,19 +42,25 @@ class TestParserModeStructure:
     ])
     def test_all_three_modes_set_benchmark(self, mode, model, accel):
         """All three modes must produce args.benchmark == 'training'."""
+        # D-10 / LAY-04: --systemname now required on training datasize.
         with patch('sys.argv', ['mlpstorage', mode, 'training', model,
-                                 'datasize', '-cm', '64', '-at', accel, '-ma', '4']):
+                                 'datasize', '-cm', '64', '-at', accel, '-ma', '4',
+                                 '-rd', '/tmp', '-sn', 'sys-v1']):
             args = parse_arguments()
         assert args.benchmark == 'training'
 
     @pytest.mark.parametrize('benchmark, extra_args', [
-        ('training',      ['unet3d', 'datasize', '-cm', '64', '-at', 'b200', '-ma', '4']),
+        ('training',      ['unet3d', 'datasize', '-cm', '64', '-at', 'b200', '-ma', '4', '-rd', '/tmp', '-sn', 'sys-v1']),
         ('checkpointing', ['datasize', '-cm', '64', '-m', 'llama3-8b', '-np', '2']),
         ('vectordb',      ['datasize']),
-        ('kvcache',       ['run', '-rd', '/tmp']),
+        ('kvcache',       ['run', '-rd', '/tmp', '-sn', 'sys-v1']),
     ])
     def test_all_benchmarks_reachable_in_closed(self, benchmark, extra_args):
-        """All four benchmark types must be reachable under 'closed' mode without error."""
+        """All four benchmark types must be reachable under 'closed' mode without error.
+
+        D-10 / LAY-04: emitting subcommands now require --systemname; the
+        non-emitting datasize variants (checkpointing, vectordb) are exempt.
+        """
         with patch('sys.argv', ['mlpstorage', 'closed', benchmark] + extra_args):
             args = parse_arguments()
         assert args.benchmark == benchmark
@@ -73,7 +80,7 @@ class TestOpenGatedArgExclusion:
     def test_closed_training_rejects_loops(self):
         """closed training run must reject --loops with a non-zero SystemExit."""
         base = ['mlpstorage', 'closed', 'training', 'unet3d', 'run',
-                '-cm', '64', '-at', 'b200', '-na', '4', '-dd', '/tmp', '-rd', '/tmp', 'file']
+                '-cm', '64', '-at', 'b200', '-na', '4', '-dd', '/tmp', '-rd', '/tmp', '-sn', 'sys-v1', 'file']
         with patch('sys.argv', base + ['--loops', '2']):
             with pytest.raises(SystemExit) as exc:
                 parse_arguments()
@@ -89,7 +96,7 @@ class TestOpenGatedArgExclusion:
         concern, not an argparse concern.
         """
         base = ['mlpstorage', 'closed', 'training', 'unet3d', 'run',
-                '-cm', '64', '-at', 'b200', '-na', '4', '-dd', '/tmp', '-rd', '/tmp', 'file']
+                '-cm', '64', '-at', 'b200', '-na', '4', '-dd', '/tmp', '-rd', '/tmp', '-sn', 'sys-v1', 'file']
         with patch('sys.argv', base + ['--params', 'dataset.num_files_train=1000']):
             args = parse_arguments()
         flattened = [kv for batch in (args.params or []) for kv in batch]
@@ -98,7 +105,7 @@ class TestOpenGatedArgExclusion:
     def test_closed_training_rejects_timeseries_interval(self):
         """closed training run must reject --timeseries-interval with a non-zero SystemExit."""
         base = ['mlpstorage', 'closed', 'training', 'unet3d', 'run',
-                '-cm', '64', '-at', 'b200', '-na', '4', '-dd', '/tmp', '-rd', '/tmp', 'file']
+                '-cm', '64', '-at', 'b200', '-na', '4', '-dd', '/tmp', '-rd', '/tmp', '-sn', 'sys-v1', 'file']
         with patch('sys.argv', base + ['--timeseries-interval', '5']):
             with pytest.raises(SystemExit) as exc:
                 parse_arguments()
@@ -107,7 +114,7 @@ class TestOpenGatedArgExclusion:
     def test_closed_training_rejects_allow_invalid_params(self):
         """closed training run must reject --allow-invalid-params with a non-zero SystemExit."""
         base = ['mlpstorage', 'closed', 'training', 'unet3d', 'run',
-                '-cm', '64', '-at', 'b200', '-na', '4', '-dd', '/tmp', '-rd', '/tmp', 'file']
+                '-cm', '64', '-at', 'b200', '-na', '4', '-dd', '/tmp', '-rd', '/tmp', '-sn', 'sys-v1', 'file']
         with patch('sys.argv', base + ['--allow-invalid-params']):
             with pytest.raises(SystemExit) as exc:
                 parse_arguments()
@@ -117,7 +124,8 @@ class TestOpenGatedArgExclusion:
         """closed checkpointing run must reject --loops with a non-zero SystemExit."""
         argv = ['mlpstorage', 'closed', 'checkpointing', 'run',
                 '-cm', '64', '-m', 'llama3-8b', '-np', '2',
-                '-cf', '/tmp', '-rd', '/tmp', 'file', '--loops', '2']
+                '-cf', '/tmp', '-rd', '/tmp', '-sn', 'sys-v1', 'file',
+                '--loops', '2']
         with patch('sys.argv', argv):
             with pytest.raises(SystemExit) as exc:
                 parse_arguments()
@@ -126,7 +134,7 @@ class TestOpenGatedArgExclusion:
     def test_closed_vectordb_rejects_loops(self):
         """closed vectordb run must reject --loops with a non-zero SystemExit."""
         argv = ['mlpstorage', 'closed', 'vectordb', 'run',
-                '-rd', '/tmp', 'file', '--loops', '2']
+                '-rd', '/tmp', '-sn', 'sys-v1', 'file', '--loops', '2']
         with patch('sys.argv', argv):
             with pytest.raises(SystemExit) as exc:
                 parse_arguments()
@@ -135,7 +143,7 @@ class TestOpenGatedArgExclusion:
     def test_closed_kvcache_rejects_loops(self):
         """closed kvcache run must reject --loops (set_defaults; flag absent from parser)."""
         argv = ['mlpstorage', 'closed', 'kvcache', 'run',
-                '-rd', '/tmp', '--loops', '2']
+                '-rd', '/tmp', '-sn', 'sys-v1', '--loops', '2']
         with patch('sys.argv', argv):
             with pytest.raises(SystemExit) as exc:
                 parse_arguments()
@@ -148,7 +156,7 @@ class TestOpenGatedArgExclusion:
     def test_open_training_accepts_loops(self):
         """open training run must accept --loops and set args.loops correctly."""
         argv = ['mlpstorage', 'open', 'training', 'unet3d', 'run',
-                '-cm', '64', '-at', 'b200', '-na', '4', '-dd', '/tmp', '-rd', '/tmp', 'file',
+                '-cm', '64', '-at', 'b200', '-na', '4', '-rd', '/tmp', '-sn', 'sys-v1', '-dd', '/tmp', 'file',
                 '--loops', '3']
         with patch('sys.argv', argv):
             args = parse_arguments()
@@ -157,7 +165,7 @@ class TestOpenGatedArgExclusion:
     def test_open_training_accepts_params(self):
         """open training run must accept --params and set args.params to a non-None value."""
         argv = ['mlpstorage', 'open', 'training', 'unet3d', 'run',
-                '-cm', '64', '-at', 'b200', '-na', '4', '-dd', '/tmp', '-rd', '/tmp', 'file',
+                '-cm', '64', '-at', 'b200', '-na', '4', '-rd', '/tmp', '-sn', 'sys-v1', '-dd', '/tmp', 'file',
                 '--params', 'key=val']
         with patch('sys.argv', argv):
             args = parse_arguments()
@@ -166,7 +174,7 @@ class TestOpenGatedArgExclusion:
     def test_open_training_accepts_timeseries_interval(self):
         """open training run must accept --timeseries-interval and set args.timeseries_interval."""
         argv = ['mlpstorage', 'open', 'training', 'unet3d', 'run',
-                '-cm', '64', '-at', 'b200', '-na', '4', '-dd', '/tmp', '-rd', '/tmp', 'file',
+                '-cm', '64', '-at', 'b200', '-na', '4', '-rd', '/tmp', '-sn', 'sys-v1', '-dd', '/tmp', 'file',
                 '--timeseries-interval', '5.0']
         with patch('sys.argv', argv):
             args = parse_arguments()
@@ -175,7 +183,7 @@ class TestOpenGatedArgExclusion:
     def test_whatif_training_accepts_loops(self):
         """whatif training run must accept --loops and set args.loops correctly."""
         argv = ['mlpstorage', 'whatif', 'training', 'unet3d', 'run',
-                '-cm', '64', '-at', 'h100', '-na', '4', '-dd', '/tmp', '-rd', '/tmp', 'file',
+                '-cm', '64', '-at', 'h100', '-na', '4', '-rd', '/tmp', '-sn', 'sys-v1', '-dd', '/tmp', 'file',
                 '--loops', '2']
         with patch('sys.argv', argv):
             args = parse_arguments()
@@ -194,15 +202,16 @@ class TestOpenGatedArgExclusion:
         ('closed',  'kvcache',       ['datasize']),
         ('open',    'kvcache',       ['datasize']),
         ('whatif',  'kvcache',       ['datasize']),
-        # training — non-run subcommands have no --loops flag
-        ('closed',  'training',      ['unet3d', 'datasize', '-cm', '64', '-at', 'b200', '-ma', '4']),
-        ('open',    'training',      ['unet3d', 'datasize', '-cm', '64', '-at', 'b200', '-ma', '4']),
-        ('whatif',  'training',      ['unet3d', 'datasize', '-cm', '64', '-at', 'h100', '-ma', '4']),
-        ('closed',  'training',      ['unet3d', 'datagen', '-np', '4', '-dd', '/tmp', 'file']),
-        # checkpointing — datasize / configview
+        # training — non-run subcommands have no --loops flag.
+        # D-10/LAY-04: training datasize/datagen are emitting → require -sn.
+        ('closed',  'training',      ['unet3d', 'datasize', '-cm', '64', '-at', 'b200', '-ma', '4', '-rd', '/tmp', '-sn', 'sys-v1']),
+        ('open',    'training',      ['unet3d', 'datasize', '-cm', '64', '-at', 'b200', '-ma', '4', '-rd', '/tmp', '-sn', 'sys-v1']),
+        ('whatif',  'training',      ['unet3d', 'datasize', '-cm', '64', '-at', 'h100', '-ma', '4', '-rd', '/tmp', '-sn', 'sys-v1']),
+        ('closed',  'training',      ['unet3d', 'datagen', '-np', '4', '-dd', '/tmp', 'file', '-rd', '/tmp', '-sn', 'sys-v1']),
+        # checkpointing — datasize / configview (datasize is not emitting per plan).
         ('closed',  'checkpointing', ['datasize', '-cm', '64', '-m', 'llama3-8b', '-np', '2']),
         ('open',    'checkpointing', ['datasize', '-cm', '64', '-m', 'llama3-8b', '-np', '2']),
-        # vectordb — datasize / datagen
+        # vectordb — datasize is not emitting; datagen would be (not exercised here).
         ('closed',  'vectordb',      ['datasize']),
         ('open',    'vectordb',      ['datasize']),
         ('whatif',  'vectordb',      ['datasize']),
@@ -234,7 +243,7 @@ class TestOpenGatedArgExclusion:
         open-only flags (--loops, --allow-invalid-params, --timeseries-interval) must
         still be hidden.
         """
-        with patch('sys.argv', ['mlpstorage', 'closed', 'training', 'unet3d', 'run', 'file', '--help']):
+        with patch('sys.argv', ['mlpstorage', 'closed', 'training', 'unet3d', 'run', '-dd', '/tmp', 'file', '--help']):
             with pytest.raises(SystemExit) as exc:
                 parse_arguments()
         assert exc.value.code == 0
@@ -271,7 +280,8 @@ class TestModelAcceleratorRestrictions:
     def test_closed_training_accepts_closed_models(self, model):
         """closed training must accept all models in MODELS_CLOSED."""
         argv = ['mlpstorage', 'closed', 'training', model,
-                'datasize', '-cm', '64', '-at', 'b200', '-ma', '4']
+                'datasize', '-cm', '64', '-at', 'b200', '-ma', '4',
+                '-rd', '/tmp', '-sn', 'sys-v1']
         with patch('sys.argv', argv):
             args = parse_arguments()
         assert args.model == model
@@ -289,7 +299,8 @@ class TestModelAcceleratorRestrictions:
     def test_whatif_training_accepts_all_models(self, model):
         """whatif training must accept all models in MODELS (6 total)."""
         argv = ['mlpstorage', 'whatif', 'training', model,
-                'datasize', '-cm', '64', '-at', 'h100', '-ma', '4']
+                'datasize', '-cm', '64', '-at', 'h100', '-ma', '4',
+                '-rd', '/tmp', '-sn', 'sys-v1']
         with patch('sys.argv', argv):
             args = parse_arguments()
         assert args.model == model
@@ -312,7 +323,8 @@ class TestModelAcceleratorRestrictions:
     def test_closed_training_accepts_closed_accelerators(self, accel):
         """closed training run must accept all accelerators in ACCELERATORS_CLOSED."""
         argv = ['mlpstorage', 'closed', 'training', 'unet3d', 'run',
-                '-cm', '64', '-at', accel, '-na', '4', '-dd', '/tmp', '-rd', '/tmp', 'file']
+                '-cm', '64', '-at', accel, '-na', '4', '-rd', '/tmp',
+                '-sn', 'sys-v1', '-dd', '/tmp', 'file']
         with patch('sys.argv', argv):
             args = parse_arguments()
         assert args.accelerator_type == accel
@@ -321,7 +333,8 @@ class TestModelAcceleratorRestrictions:
     def test_whatif_training_accepts_all_accelerators(self, accel):
         """whatif training run must accept all accelerators in ACCELERATORS (4 total)."""
         argv = ['mlpstorage', 'whatif', 'training', 'unet3d', 'run',
-                '-cm', '64', '-at', accel, '-na', '4', '-dd', '/tmp', '-rd', '/tmp', 'file']
+                '-cm', '64', '-at', accel, '-na', '4', '-rd', '/tmp',
+                '-sn', 'sys-v1', '-dd', '/tmp', 'file']
         with patch('sys.argv', argv):
             args = parse_arguments()
         assert args.accelerator_type == accel
@@ -332,7 +345,8 @@ class TestModelAcceleratorRestrictions:
 
     def test_closed_kvcache_run_no_model_needed(self):
         """closed kvcache run must parse successfully without any model argument."""
-        with patch('sys.argv', ['mlpstorage', 'closed', 'kvcache', 'run', '-rd', '/tmp']):
+        with patch('sys.argv', ['mlpstorage', 'closed', 'kvcache', 'run',
+                                '-rd', '/tmp', '-sn', 'sys-v1']):
             args = parse_arguments()
         # The parsed result must not require model — assert no exception was raised
         assert args.benchmark == 'kvcache'
@@ -350,7 +364,7 @@ class TestModelAcceleratorRestrictions:
     def test_open_kvcache_accepts_model_flag(self):
         """open kvcache run must accept --model and set args.model correctly."""
         argv = ['mlpstorage', 'open', 'kvcache', 'run', '-rd', '/tmp',
-                '--model', 'llama3.1-8b', '-nu', '100']
+                '-sn', 'sys-v1', '--model', 'llama3.1-8b', '-nu', '100']
         with patch('sys.argv', argv):
             args = parse_arguments()
         assert args.model == 'llama3.1-8b'

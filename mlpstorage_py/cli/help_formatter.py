@@ -22,6 +22,7 @@ SYNOPSIS_TEXT = """\
 SYNOPSIS
   mlpstorage <closed|open|whatif> <benchmark> <model|algorithm> <command> <file|object> [OPTIONS]
   mlpstorage (reports|history|lockfile|version) [subcommand] [OPTIONS]
+  mlpstorage init <orgname> <results-dir>
   mlpstorage validate <submission-dir> [OPTIONS]
   mlpstorage rules-coverage [--rules-md PATH]
 
@@ -117,6 +118,8 @@ mlpstorage
 ├── lockfile
 │   ├── generate                                 {LF_GENERATE}
 │   └── verify                                   {LF_VERIFY}
+│
+├── init <orgname> <results-dir>                Pin orgname to a results-dir via the mlperf-results.yaml sentinel
 │
 ├── validate <submission-dir>                    Run the Rules.md submission checker
 │       --submitters CSV                          Comma-separated submitter allowlist (default: all)
@@ -543,6 +546,19 @@ LF_VERIFY
 VERSION
   No flags.  Prints the installed package version string and exits 0.
   Resolution order: importlib.metadata("mlpstorage") → pyproject.toml → "unknown"
+
+──────────────────────────────────────────────────────────────────
+
+INIT
+  Required (positional):
+    orgname                         Organization name to pin to this results-dir
+                                    (Rules.md §2.1.5 submitter identity)
+    results-dir                     Filesystem path to initialize as a results-dir
+  Behavior:
+    Writes <results-dir>/mlperf-results.yaml as the sentinel that subsequent
+    commands read to resolve orgname. Creates <results-dir> if absent (parent
+    must exist). Idempotent when the sentinel already pins the same orgname;
+    refuses to overwrite a sentinel that pins a different orgname.
 """
 
 # HELP_ALL_TEXT is composed from three pieces so that SYNOPSIS_TEXT can be
@@ -602,7 +618,7 @@ def get_context_help_tokens(argv: list) -> 'str | None':
 
     # Root — no tokens
     if n == 0:
-        return 'next: closed | open | whatif | reports | history | lockfile | version | validate | rules-coverage'
+        return 'next: closed | open | whatif | init | reports | history | lockfile | version | validate | rules-coverage'
 
     t0 = argv[0]
 
@@ -630,6 +646,9 @@ def get_context_help_tokens(argv: list) -> 'str | None':
 
     if t0 == 'rules-coverage':
         return None  # leaf — fall through to argparse
+
+    if t0 == 'init':
+        return None  # leaf — fall through to argparse (positionals <orgname> <results-dir> required)
 
     # ── Three-mode benchmark branch ──────────────────────────────────────────
     if t0 not in _MODES:

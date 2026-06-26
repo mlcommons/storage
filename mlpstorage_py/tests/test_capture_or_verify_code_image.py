@@ -64,13 +64,14 @@ def log():
     return MockLogger()
 
 
-def _make_args(*, mode, command, results_dir, benchmark="training", model="unet3d"):
+def _make_args(*, mode, command, results_dir, benchmark="training", model="unet3d", orgname=None):
     return SimpleNamespace(
         mode=mode,
         command=command,
         results_dir=str(results_dir),
         benchmark=benchmark,
         model=model,
+        orgname=orgname,   # HARDEN-03: args-first orgname source (main.py LAY-03 hook)
     )
 
 
@@ -141,6 +142,35 @@ class TestEnvVarFailFast:
             capture_or_verify_code_image(args, env, log)
         assert "MLPSTORAGE_SYSTEMNAME" in str(exc_info.value)
         assert exc_info.value.parameter == "MLPSTORAGE_SYSTEMNAME"
+
+    def test_args_orgname_satisfies_without_env_var(self, tmp_path, log):
+        """HARDEN-03: args.orgname (populated by main._main_impl's LAY-03 gate)
+        satisfies the orgname requirement when MLPSTORAGE_ORGNAME is unset."""
+        args = _make_args(mode="closed", command="datagen", results_dir=tmp_path, orgname="acme")
+        # No MLPSTORAGE_ORGNAME in env — args.orgname must satisfy the gate.
+        result = capture_or_verify_code_image(args, {}, log)
+        assert result is not None, "expected Path result; got None (helper unexpectedly gated off)"
+        # Downstream consumers depend on _validated_orgname being stashed.
+        assert getattr(args, "_validated_orgname", None) == "acme"
+
+    def test_args_systemname_satisfies_without_env_var(self, tmp_path, log):
+        """HARDEN-03 (symmetric): args.systemname satisfies the OPEN-mode
+        SYSTEMNAME requirement when MLPSTORAGE_SYSTEMNAME is unset."""
+        args = _make_args(mode="open", command="datagen", results_dir=tmp_path, orgname="acme")
+        args.systemname = "sys1"
+        result = capture_or_verify_code_image(args, {}, log)
+        assert result is not None
+        assert getattr(args, "_validated_systemname", None) == "sys1"
+
+    def test_e101_only_when_both_args_and_env_absent(self, tmp_path, log):
+        """HARDEN-03 boundary: E101 fires ONLY when neither args.orgname
+        nor MLPSTORAGE_ORGNAME env var is set."""
+        args = _make_args(mode="closed", command="datagen", results_dir=tmp_path)
+        args.orgname = None  # explicit: both args and env are absent
+        with pytest.raises(ConfigurationError) as exc_info:
+            capture_or_verify_code_image(args, {}, log)
+        assert "MLPSTORAGE_ORGNAME" in str(exc_info.value)
+        assert exc_info.value.parameter == "MLPSTORAGE_ORGNAME"
 
     def test_orgname_with_space_rejected(self, tmp_path, log):
         args = _make_args(mode="closed", command="run", results_dir=tmp_path)

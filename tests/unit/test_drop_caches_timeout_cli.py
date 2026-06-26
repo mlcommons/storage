@@ -17,9 +17,10 @@ from mlpstorage_py.config import EXIT_CODE
 
 
 # Common training-run argv prefix used across tests.
+# D-10/LAY-04: training run is an emitting subcommand → requires --systemname.
 _TRAINING_RUN_BASE = [
     'mlpstorage', 'closed', 'training', 'unet3d', 'run',
-    '-cm', '64', '-at', 'b200', '-na', '4', '-dd', '/tmp', '-rd', '/tmp', 'file',
+    '-cm', '64', '-at', 'b200', '-na', '4', '-dd', '/tmp', '-rd', '/tmp', '-sn', 'sys-v1', 'file',
 ]
 
 

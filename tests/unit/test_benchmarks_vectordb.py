@@ -25,6 +25,9 @@ class TestVectorDBCommandMap:
             verbose=False,
             what_if=False,
             stream_log_level='INFO',
+            mode='closed',
+            orgname='Acme',
+            systemname='sys-v1',
             results_dir=str(tmp_path),
             command='run',
             config='default',
@@ -95,6 +98,9 @@ class TestVectorDBMetadata:
             verbose=False,
             what_if=False,
             stream_log_level='INFO',
+            mode='closed',
+            orgname='Acme',
+            systemname='sys-v1',
             results_dir=str(tmp_path),
             command='run',
             config='10m',
@@ -119,6 +125,9 @@ class TestVectorDBMetadata:
             verbose=False,
             what_if=False,
             stream_log_level='INFO',
+            mode='closed',
+            orgname='Acme',
+            systemname='sys-v1',
             results_dir=str(tmp_path),
             command='datagen',
             config='default',
@@ -327,6 +336,9 @@ class TestVectorDBBenchmarkType:
             verbose=False,
             what_if=False,
             stream_log_level='INFO',
+            mode='closed',
+            orgname='Acme',
+            systemname='sys-v1',
             results_dir=str(tmp_path),
             command='run',
             config='default',
@@ -381,6 +393,9 @@ class TestVectorDBConfigHandling:
             verbose=False,
             what_if=False,
             stream_log_level='INFO',
+            mode='closed',
+            orgname='Acme',
+            systemname='sys-v1',
             results_dir=str(tmp_path),
             command='run',
             config='custom_config',
@@ -426,6 +441,100 @@ class TestVectorDBConfigHandling:
             bm = VectorDBBenchmark(basic_args)
 
         assert bm.config_name == 'default'
+
+
+# ---------------------------------------------------------------------------
+# Phase 02 / Plan 02-05 — non-DLIO regression: assert the shared
+# Benchmark.run() systemname.yaml write hook fires for VectorDBBenchmark.
+# ---------------------------------------------------------------------------
+
+
+class TestVectorDBSystemnameYamlHook:
+    """VectorDBBenchmark inherits Benchmark.run() — the LIFE-01 hook must
+    fire for it just as for DLIO-based benchmarks. If a future refactor
+    overrides run() on the subclass and accidentally drops the hook, these
+    tests catch the regression."""
+
+    @pytest.fixture
+    def run_args(self, tmp_path):
+        return Namespace(
+            debug=False,
+            verbose=False,
+            what_if=False,
+            stream_log_level='INFO',
+            mode='closed',
+            orgname='Acme',
+            systemname='sys-v1',
+            results_dir=str(tmp_path),
+            command='run',
+            config='default',
+            vdb_engine='milvus',
+            host='127.0.0.1',
+            port=19530,
+            collection=None,
+            category=None,
+            num_query_processes=1,
+            batch_size=1,
+            runtime=60,
+            queries=None,
+            report_count=100,
+        )
+
+    def _mock_lifecycle(self, bm):
+        """Mock all Benchmark.run() lifecycle hooks; install a one-host
+        cluster_info on the start hook."""
+        from mlpstorage_py.rules.models import HostCPUInfo, HostInfo, HostMemoryInfo
+        from mlpstorage_py.cluster_collector import HostSystemInfo
+
+        host = HostInfo(
+            hostname='h0',
+            cpu=HostCPUInfo(
+                model='Intel(R) Xeon Platinum 8480+',
+                num_cores=56, num_logical_cores=112, num_sockets=2,
+                architecture='x86_64',
+            ),
+            memory=HostMemoryInfo(total=274_877_906_944),
+            system=HostSystemInfo(
+                hostname='h0',
+                os_release={'NAME': 'Rocky Linux', 'VERSION_ID': '9.5'},
+            ),
+        )
+        cluster_info_mock = MagicMock(host_info_list=[host])
+
+        def _start_side_effect():
+            bm._cluster_info_start = cluster_info_mock
+            bm._collection_method = 'mpi'
+
+        bm._validate_environment = MagicMock()
+        bm._collect_cluster_start = MagicMock(side_effect=_start_side_effect)
+        bm._start_timeseries_collection = MagicMock()
+        bm._stop_timeseries_collection = MagicMock()
+        bm._collect_cluster_end = MagicMock()
+        bm.write_timeseries_data = MagicMock()
+        bm._run = MagicMock(return_value=0)
+
+    def test_vectordb_run_writes_systemname_yaml(self, run_args, tmp_path):
+        """VectorDBBenchmark.run() must write systemname.yaml at the canonical
+        path (Phase 02 LIFE-01, regression coverage for the shared base hook
+        on non-DLIO benchmarks)."""
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen, \
+             patch('mlpstorage_py.benchmarks.vectordbbench.read_config_from_file', return_value={}), \
+             patch('mlpstorage_py.benchmarks.vectordbbench.VectorDBBenchmark.verify_benchmark'), \
+             patch('mlpstorage_py.benchmarks.vectordbbench.VectorDBBenchmark._validate_vdb_dependencies'):
+            mock_gen.return_value = str(tmp_path / 'output')
+            from mlpstorage_py.benchmarks.vectordbbench import VectorDBBenchmark
+            bm = VectorDBBenchmark(run_args, run_datetime='20260619_120000')
+
+        self._mock_lifecycle(bm)
+
+        rc = bm.run()
+        assert rc == 0
+
+        target = tmp_path / 'closed' / 'Acme' / 'systems' / 'sys-v1.yaml'
+        assert target.exists(), (
+            f"VectorDBBenchmark.run() should have written systemname.yaml at "
+            f"{target}; this is the LIFE-01 non-DLIO regression coverage."
+        )
 
 
 class TestVectorDBIndexResolution:

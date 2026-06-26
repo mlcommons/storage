@@ -116,7 +116,14 @@ def add_kvcache_arguments(parser, mode):
     # Storage type args are intentionally absent from this builder.
     for _parser in [run_benchmark, datasize]:
         _add_kvcache_cache_arguments(_parser, mode)
-        add_universal_arguments(_parser, req_results=(_parser is run_benchmark))
+        # D-10 / LAY-04: kvcache `run` emits results; `datasize` is a
+        # pre-flight calculation. Only the emitting subcommand requires
+        # --systemname.
+        add_universal_arguments(
+            _parser,
+            req_results=(_parser is run_benchmark),
+            req_systemname=(_parser is run_benchmark),
+        )
 
     # Run-specific arguments
     _add_kvcache_run_arguments(run_benchmark)

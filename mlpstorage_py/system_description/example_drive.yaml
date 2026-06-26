@@ -48,6 +48,7 @@ system_under_test:
           networking:
              - unit_count: 1
                type: ethernet
+               state: "up"
                speed: 1
                traffic:
                   - management

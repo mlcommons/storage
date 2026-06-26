@@ -28,7 +28,7 @@ class TestKVCacheSubcommands:
 
     def test_run_subcommand_exists(self, parser):
         """KV cache should have run subcommand."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1'])
         assert args.command == 'run'
 
     def test_datasize_subcommand_exists(self, parser):
@@ -49,23 +49,23 @@ class TestKVCacheModelArguments:
 
     def test_model_argument_default(self, parser):
         """Model should default to the first KVCACHE_MODELS entry."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1'])
         assert args.model == KVCACHE_MODELS[0]
 
     def test_model_argument_choices(self, parser):
         """Model should accept valid choices."""
         for model in KVCACHE_MODELS:
-            args = parser.parse_args(['run', '--results-dir', '/tmp', '--model', model])
+            args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--model', model])
             assert args.model == model
 
     def test_num_users_argument(self, parser):
         """Should accept --num-users argument."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--num-users', '200'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--num-users', '200'])
         assert args.num_users == 200
 
     def test_num_users_default(self, parser):
         """num_users should default to 100."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1'])
         assert args.num_users == 100
 
 
@@ -81,17 +81,17 @@ class TestKVCacheCacheArguments:
 
     def test_gpu_mem_gb_argument(self, parser):
         """Should accept --gpu-mem-gb argument."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--gpu-mem-gb', '80.0'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--gpu-mem-gb', '80.0'])
         assert args.gpu_mem_gb == 80.0
 
     def test_cpu_mem_gb_argument(self, parser):
         """Should accept --cpu-mem-gb argument."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--cpu-mem-gb', '256.0'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--cpu-mem-gb', '256.0'])
         assert args.cpu_mem_gb == 256.0
 
     def test_cache_dir_argument(self, parser):
         """Should accept --cache-dir argument."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--cache-dir', '/nvme/cache'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--cache-dir', '/nvme/cache'])
         assert args.cache_dir == '/nvme/cache'
 
 
@@ -107,29 +107,29 @@ class TestKVCacheRunArguments:
 
     def test_duration_argument(self, parser):
         """Should accept --duration argument."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--duration', '300'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--duration', '300'])
         assert args.duration == 300
 
     def test_generation_mode_argument(self, parser):
         """Should accept --generation-mode argument."""
         for mode in ['none', 'fast', 'realistic']:
-            args = parser.parse_args(['run', '--results-dir', '/tmp', '--generation-mode', mode])
+            args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--generation-mode', mode])
             assert args.generation_mode == mode
 
     def test_performance_profile_argument(self, parser):
         """Should accept --performance-profile argument."""
         for profile in ['latency', 'throughput']:
-            args = parser.parse_args(['run', '--results-dir', '/tmp', '--performance-profile', profile])
+            args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--performance-profile', profile])
             assert args.performance_profile == profile
 
     def test_performance_profile_default_is_throughput(self, parser):
         """performance_profile should default to 'throughput' in open/whatif mode."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1'])
         assert args.performance_profile == 'throughput'
 
     def test_seed_argument(self, parser):
         """Should accept --seed argument."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--seed', '42'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--seed', '42'])
         assert args.seed == 42
 
 
@@ -145,54 +145,54 @@ class TestKVCacheDistributedArguments:
 
     def test_hosts_argument(self, parser):
         """Run should accept --hosts argument."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--hosts', 'host1', 'host2', 'host3'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--hosts', 'host1', 'host2', 'host3'])
         assert args.hosts == ['host1', 'host2', 'host3']
 
     def test_hosts_short_flag(self, parser):
         """Run should accept -s shorthand for --hosts."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '-s', 'node1', 'node2'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '-s', 'node1', 'node2'])
         assert args.hosts == ['node1', 'node2']
 
     def test_hosts_default(self, parser):
         """Hosts should default to localhost."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1'])
         assert args.hosts == ['127.0.0.1']
 
     def test_exec_type_argument_mpi(self, parser):
         """Run should accept --exec-type mpi."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--exec-type', 'mpi'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--exec-type', 'mpi'])
         assert args.exec_type == EXEC_TYPE.MPI
 
     def test_exec_type_argument_docker(self, parser):
         """Run should accept --exec-type docker."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--exec-type', 'docker'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--exec-type', 'docker'])
         assert args.exec_type == EXEC_TYPE.DOCKER
 
     def test_exec_type_default(self, parser):
         """exec_type should default to MPI."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1'])
         assert args.exec_type == EXEC_TYPE.MPI
 
     def test_exec_type_short_flag(self, parser):
         """Run should accept -et shorthand for --exec-type."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '-et', 'mpi'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '-et', 'mpi'])
         assert args.exec_type == EXEC_TYPE.MPI
 
     def test_num_processes_argument(self, parser):
         """Run should accept --num-processes argument."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '--num-processes', '16'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--num-processes', '16'])
         assert args.num_processes == 16
 
     def test_num_processes_short_flag(self, parser):
         """Run should accept -np shorthand for --num-processes."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', '-np', '8'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '-np', '8'])
         assert args.num_processes == 8
 
 
 class TestKVCacheMPIArguments:
     """Tests for KV cache MPI-related arguments."""
 
-    BASE_RUN_ARGS = ['run', '--results-dir', '/tmp']
+    BASE_RUN_ARGS = ['run', '--results-dir', '/tmp', '--systemname', 'sys-v1']
 
     @pytest.fixture
     def parser(self):
@@ -278,7 +278,7 @@ class TestKVCacheDatasizeNoDistributedArgs:
 class TestKVCacheOptionalFeatures:
     """Tests for KV cache optional feature arguments."""
 
-    BASE_RUN_ARGS = ['run', '--results-dir', '/tmp']
+    BASE_RUN_ARGS = ['run', '--results-dir', '/tmp', '--systemname', 'sys-v1']
 
     @pytest.fixture
     def parser(self):
@@ -322,7 +322,7 @@ class TestKVCacheOptionalFeatures:
 class TestKVCacheRunMLPerfArguments:
     """Tests for MLPerf sequence arguments now on the run subcommand."""
 
-    BASE_RUN_ARGS = ['run', '--results-dir', '/tmp']
+    BASE_RUN_ARGS = ['run', '--results-dir', '/tmp', '--systemname', 'sys-v1']
 
     @pytest.fixture
     def parser(self):
@@ -398,25 +398,25 @@ class TestKVCacheClosedMode:
 
     def test_closed_run_parses_successfully(self, parser):
         """Closed kvcache run should parse with only --results-dir."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1'])
         assert args.command == 'run'
 
     def test_closed_mode_namespace_has_cache_defaults(self, parser):
         """Closed-mode parse must supply gpu_mem_gb/cpu_mem_gb via set_defaults."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1'])
         assert args.gpu_mem_gb == 16.0
         assert args.cpu_mem_gb == 32.0
 
     def test_closed_mode_namespace_has_open_defaults(self, parser):
         """Closed-mode parse must supply loops/params/allow_invalid_params via set_defaults."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1'])
         assert args.loops == 1
         assert args.allow_invalid_params is False
         assert args.params == ''
 
     def test_closed_mode_namespace_has_enforcement_defaults(self, parser):
         """Closed-mode parse must supply seed/trials/inter_option_delay via set_defaults."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1'])
         assert args.seed == 42
         assert args.trials == 3
         assert args.inter_option_delay == 20
@@ -424,12 +424,12 @@ class TestKVCacheClosedMode:
     def test_closed_mode_rejects_gpu_mem_gb(self, parser):
         """Closed kvcache must reject --gpu-mem-gb (open/whatif only)."""
         with pytest.raises(SystemExit):
-            parser.parse_args(['run', '--results-dir', '/tmp', '--gpu-mem-gb', '32.0'])
+            parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--gpu-mem-gb', '32.0'])
 
     def test_closed_mode_rejects_cpu_mem_gb(self, parser):
         """Closed kvcache must reject --cpu-mem-gb (open/whatif only)."""
         with pytest.raises(SystemExit):
-            parser.parse_args(['run', '--results-dir', '/tmp', '--cpu-mem-gb', '64.0'])
+            parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1', '--cpu-mem-gb', '64.0'])
 
 
 class TestKVCacheClosedModePerformanceProfile:
@@ -443,11 +443,11 @@ class TestKVCacheClosedModePerformanceProfile:
 
     def test_performance_profile_fixed_to_throughput(self, closed_parser):
         """In closed mode performance_profile is silently fixed to 'throughput'."""
-        args = closed_parser.parse_args(['run', '--results-dir', '/tmp'])
+        args = closed_parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1'])
         assert args.performance_profile == 'throughput'
 
     def test_performance_profile_not_a_registered_arg_in_closed(self, closed_parser):
         """In closed mode --performance-profile is hidden and must not be accepted."""
         with pytest.raises(SystemExit):
-            closed_parser.parse_args(['run', '--results-dir', '/tmp',
+            closed_parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1',
                                       '--performance-profile', 'latency'])

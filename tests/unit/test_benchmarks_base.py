@@ -29,6 +29,14 @@ class ConcreteBenchmark(Benchmark):
         """Concrete implementation of abstract _run method."""
         return 0
 
+    def _capacity_gate_destination(self):
+        """Phase 5 CAP-01 hook — return None to skip the gate in unit tests."""
+        return None
+
+    def required_bytes_for_capacity_gate(self) -> int:
+        """Phase 5 CAP-01 hook — return 0 so the gate is a no-op."""
+        return 0
+
 
 class TestBenchmarkInit:
     """Tests for Benchmark initialization."""
@@ -37,6 +45,10 @@ class TestBenchmarkInit:
     def basic_args(self):
         """Create basic args for benchmark."""
         return Namespace(
+            mode='closed',
+            dry_run=False,
+            orgname='Acme',
+            systemname='sys-v1',
             debug=False,
             verbose=False,
             what_if=False,
@@ -110,6 +122,10 @@ class TestBenchmarkMetadata:
     def benchmark(self, tmp_path):
         """Create a benchmark instance."""
         args = Namespace(
+            mode='closed',
+            dry_run=False,
+            orgname='Acme',
+            systemname='sys-v1',
             debug=False,
             verbose=False,
             what_if=False,
@@ -183,6 +199,10 @@ class TestBenchmarkWriteMetadata:
     def benchmark(self, tmp_path):
         """Create a benchmark instance."""
         args = Namespace(
+            mode='closed',
+            dry_run=False,
+            orgname='Acme',
+            systemname='sys-v1',
             debug=False,
             verbose=False,
             what_if=False,
@@ -221,6 +241,10 @@ class TestBenchmarkExecuteCommand:
     def benchmark(self, tmp_path):
         """Create a benchmark instance."""
         args = Namespace(
+            mode='closed',
+            dry_run=False,
+            orgname='Acme',
+            systemname='sys-v1',
             debug=False,
             verbose=False,
             what_if=False,
@@ -287,6 +311,9 @@ class TestBenchmarkVerifyBenchmark:
     def benchmark(self, tmp_path):
         """Create a benchmark instance with closed mode."""
         args = Namespace(
+            mode='closed',
+            orgname='Acme',
+            systemname='sys-v1',
             debug=False,
             verbose=False,
             dry_run=False,
@@ -354,8 +381,12 @@ class TestBenchmarkVerifyBenchmark:
     def test_allows_open_with_open_flag(self, benchmark):
         """Should allow OPEN verification when open mode was passed.
 
-        Post-#349 fix: closed/open are independent boolean flags on args.
+        Post-#412 modal CLI: `args.mode` is the source of truth. The
+        legacy `args.closed` / `args.open` bool fallback was removed
+        during the FileSystemGuy-client-system-collector merge — use
+        `mode='open'` directly.
         """
+        benchmark.args.mode = 'open'
         benchmark.args.closed = False
         benchmark.args.open = True
 
@@ -368,14 +399,21 @@ class TestBenchmarkVerifyBenchmark:
 
         assert result is True
 
-    def test_returns_true_with_neither_flag_set(self, tmp_path):
-        """Should return True and warn when neither --closed nor --open is passed.
+    def test_returns_true_in_whatif_mode_without_verification(self, tmp_path):
+        """`mode='whatif'` short-circuits verification with a warning and returns True.
 
-        Post-#349 fix: the CLI parser now sets both args.closed=False and
-        args.open=False by default. The "no verification" warning branch
-        triggers only when *both* are False.
+        Originally written as `test_returns_true_with_neither_flag_set`,
+        which exercised the legacy `closed=False, open=False` bool case.
+        Post-#412 the modal CLI is argparse-enforced so the only way to
+        reach the "no closed/open" branch is via `mode='whatif'` — which
+        IS a supported execution mode, so the branch (and this test) earn
+        their keep.
         """
         args = Namespace(
+            mode='whatif',
+            dry_run=False,
+            orgname='Acme',
+            systemname='sys-v1',
             debug=False,
             verbose=False,
             what_if=False,
@@ -385,8 +423,8 @@ class TestBenchmarkVerifyBenchmark:
             command='run',
             num_processes=8,
             accelerator_type='h100',
-            closed=False,  # Default when neither flag is passed
-            open=False,    # Default when neither flag is passed
+            closed=False,
+            open=False,
             allow_invalid_params=False
         )
 
@@ -401,7 +439,6 @@ class TestBenchmarkVerifyBenchmark:
 
             result = benchmark.verify_benchmark()
 
-        # Should return True early with warning (the "no verification" branch)
         assert result is True
 
 
@@ -412,6 +449,10 @@ class TestBenchmarkRun:
     def benchmark(self, tmp_path):
         """Create a benchmark instance."""
         args = Namespace(
+            mode='closed',
+            dry_run=False,
+            orgname='Acme',
+            systemname='sys-v1',
             debug=False,
             verbose=False,
             what_if=False,
@@ -485,6 +526,10 @@ class TestBenchmarkGenerateOutputLocation:
     def test_raises_without_benchmark_type(self, tmp_path):
         """Should raise ValueError without BENCHMARK_TYPE."""
         args = Namespace(
+            mode='closed',
+            dry_run=False,
+            orgname='Acme',
+            systemname='sys-v1',
             debug=False,
             verbose=False,
             what_if=False,
@@ -510,6 +555,10 @@ class TestBenchmarkGenerateOutputLocation:
     def test_calls_generate_output_location(self, tmp_path):
         """Should call generate_output_location function."""
         args = Namespace(
+            mode='closed',
+            dry_run=False,
+            orgname='Acme',
+            systemname='sys-v1',
             debug=False,
             verbose=False,
             what_if=False,
@@ -539,6 +588,10 @@ class TestBenchmarkIntegration:
     def test_full_workflow(self, tmp_path):
         """Test full benchmark workflow."""
         args = Namespace(
+            mode='closed',
+            dry_run=False,
+            orgname='Acme',
+            systemname='sys-v1',
             debug=False,
             verbose=False,
             what_if=True,  # Use what-if to avoid actual execution
@@ -588,6 +641,10 @@ class TestBenchmarkValidation:
     def basic_args(self, tmp_path):
         """Create basic args for benchmark."""
         return Namespace(
+            mode='closed',
+            dry_run=False,
+            orgname='Acme',
+            systemname='sys-v1',
             debug=False,
             verbose=False,
             what_if=False,
@@ -614,6 +671,12 @@ class TestBenchmarkValidation:
                 call_order.append('run')
                 return 0
 
+            def _capacity_gate_destination(self):
+                return None
+
+            def required_bytes_for_capacity_gate(self) -> int:
+                return 0
+
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             benchmark = TrackingBenchmark(basic_args)
@@ -634,6 +697,12 @@ class TestBenchmarkValidation:
                 validation_called.append('custom_validation')
 
             def _run(self):
+                return 0
+
+            def _capacity_gate_destination(self):
+                return None
+
+            def required_bytes_for_capacity_gate(self) -> int:
                 return 0
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
@@ -659,6 +728,12 @@ class TestBenchmarkValidation:
 
             def _run(self):
                 run_called.append('run')
+                return 0
+
+            def _capacity_gate_destination(self):
+                return None
+
+            def required_bytes_for_capacity_gate(self) -> int:
                 return 0
 
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
@@ -696,6 +771,12 @@ class TestBenchmarkValidation:
             def _run(self):
                 return 0
 
+            def _capacity_gate_destination(self):
+                return None
+
+            def required_bytes_for_capacity_gate(self) -> int:
+                return 0
+
         with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
             mock_gen.return_value = str(tmp_path / "output")
             benchmark = ConfigErrorBenchmark(basic_args)
@@ -721,6 +802,10 @@ class TestBenchmarkCollectionSelection:
     def _create_benchmark_with_args(self, tmp_path, mock_logger, **kwargs):
         """Helper to create a benchmark with specific args."""
         defaults = {
+            'mode': 'closed',
+            'dry_run': False,
+            'orgname': 'Acme',
+            'systemname': 'sys-v1',
             'hosts': None,
             'exec_type': None,
             'command': 'run',
@@ -853,6 +938,10 @@ class TestBenchmarkClusterSnapshots:
         mock_ssh_collector_class.return_value = mock_collector
 
         args = Namespace(
+            mode='closed',
+            dry_run=False,
+            orgname='Acme',
+            systemname='sys-v1',
             hosts=['localhost'],
             exec_type=None,  # Non-MPI
             command='run',
@@ -900,6 +989,10 @@ class TestBenchmarkClusterSnapshots:
         mock_ssh_collector_class.return_value = mock_collector
 
         args = Namespace(
+            mode='closed',
+            dry_run=False,
+            orgname='Acme',
+            systemname='sys-v1',
             hosts=['localhost'],
             exec_type=None,  # Non-MPI
             command='run',
@@ -953,6 +1046,10 @@ class TestBenchmarkClusterSnapshots:
                 return 0
 
         args = Namespace(
+            mode='closed',
+            dry_run=False,
+            orgname='Acme',
+            systemname='sys-v1',
             debug=False,
             verbose=False,
             stream_log_level='INFO',
@@ -977,6 +1074,10 @@ class TestBenchmarkClusterSnapshots:
         from mlpstorage_py.rules.models import ClusterSnapshots
 
         args = Namespace(
+            mode='closed',
+            dry_run=False,
+            orgname='Acme',
+            systemname='sys-v1',
             debug=False,
             verbose=False,
             stream_log_level='INFO',
@@ -1004,6 +1105,10 @@ class TestBenchmarkClusterSnapshots:
     def test_skips_end_collection_without_start(self, tmp_path, mock_logger):
         """Test that _collect_cluster_end does nothing if start collection was skipped."""
         args = Namespace(
+            mode='closed',
+            dry_run=False,
+            orgname='Acme',
+            systemname='sys-v1',
             debug=False,
             verbose=False,
             stream_log_level='INFO',
@@ -1047,6 +1152,10 @@ class TestTimeSeriesCollectionIntegration:
     def _create_benchmark(self, tmp_path, mock_logger, **kwargs):
         """Helper to create a benchmark with specific args."""
         defaults = {
+            'mode': 'closed',
+            'dry_run': False,
+            'orgname': 'Acme',
+            'systemname': 'sys-v1',
             'debug': False,
             'verbose': False,
             'stream_log_level': 'INFO',
@@ -1382,6 +1491,10 @@ class TestBenchmarkProgress:
     def _create_benchmark(self, tmp_path, mock_logger, **kwargs):
         """Helper to create a benchmark with specific args."""
         defaults = {
+            'mode': 'closed',
+            'dry_run': False,
+            'orgname': 'Acme',
+            'systemname': 'sys-v1',
             'debug': False,
             'verbose': False,
             'stream_log_level': 'INFO',
@@ -1536,6 +1649,10 @@ class TestBenchmarkProgress:
         mock_stage_progress.return_value = mock_cm
 
         args = Namespace(
+            mode='closed',
+            dry_run=False,
+            orgname='Acme',
+            systemname='sys-v1',
             debug=False,
             verbose=False,
             stream_log_level='INFO',

@@ -119,11 +119,28 @@ class TestAddUniversalArguments:
         args = parser.parse_args(['--config-file', '/path/to/config.yaml'])
         assert args.config_file == '/path/to/config.yaml'
 
-    def test_results_dir_required_when_req_results_true(self, parser):
-        """Should make --results-dir required when req_results=True."""
+    def test_results_dir_required_when_req_results_true(self, parser, monkeypatch):
+        """Should make --results-dir required when req_results=True.
+
+        Post-CR-02 fix: the requirement is enforced at the
+        ``validate_args`` (post-parse) layer rather than via argparse
+        ``required=True``, so the env-var-sourced default can satisfy it.
+        With ``MLPERF_RESULTS_DIR`` unset AND ``DEFAULT_RESULTS_DIR`` also
+        emptied (to simulate the "no env var, no fallback" worst case),
+        the validator must error out via SystemExit.
+        """
+        from mlpstorage_py.cli_parser import _check_universal_required_present
+        # Force DEFAULT_RESULTS_DIR to '' so the resolved value is empty
+        # even though argparse no longer demands the CLI flag.
+        import mlpstorage_py.cli.common_args as common_args_mod
+        monkeypatch.setattr(common_args_mod, 'DEFAULT_RESULTS_DIR', '')
         add_universal_arguments(parser, req_results=True)
+        args = parser.parse_args([])  # no error from argparse itself now
+        assert getattr(args, '_mlps_req_results', False) is True, (
+            "req_results=True must seed the _mlps_req_results marker on the namespace"
+        )
         with pytest.raises(SystemExit):
-            parser.parse_args([])  # Missing required --results-dir
+            _check_universal_required_present(args)
 
     def test_results_dir_optional_when_req_results_false(self, parser):
         """Should make --results-dir optional when req_results=False."""
@@ -196,7 +213,8 @@ class TestAddTrainingArguments:
             'datasize',
             '--max-accelerators', '8',
             '--accelerator-type', 'b200',
-            '--client-host-memory-in-gb', '128'
+            '--client-host-memory-in-gb', '128',
+            '--systemname', 'sys-v1',
         ])
         assert args.command == 'datasize'
         assert args.model == 'unet3d'
@@ -209,6 +227,7 @@ class TestAddTrainingArguments:
             'datagen',
             '--num-processes', '16',
             '--data-dir', '/data',
+            '--systemname', 'sys-v1',
             'file'
         ])
         assert args.command == 'datagen'
@@ -225,6 +244,7 @@ class TestAddTrainingArguments:
             '--client-host-memory-in-gb', '256',
             '--data-dir', '/data',
             '--results-dir', '/tmp',
+            '--systemname', 'sys-v1',
             'file'
         ])
         assert args.command == 'run'
@@ -240,6 +260,7 @@ class TestAddTrainingArguments:
             '--client-host-memory-in-gb', '64',
             '--accelerator-type', 'b200',
             '--results-dir', '/tmp',
+            '--systemname', 'sys-v1',
             'file'
         ])
         assert args.command == 'configview'
@@ -256,6 +277,7 @@ class TestAddTrainingArguments:
             '--hosts', 'host1', 'host2',
             '--data-dir', '/data',
             '--results-dir', '/tmp',
+            '--systemname', 'sys-v1',
             'file'
         ])
         assert args.hosts == ['host1', 'host2']
@@ -274,6 +296,7 @@ class TestAddTrainingArguments:
             '--client-host-memory-in-gb', '128',
             '--data-dir', '/data',
             '--results-dir', '/tmp',
+            '--systemname', 'sys-v1',
             'file',
             '--params', 'key1=val1', 'key2=val2',
         ])
@@ -292,6 +315,7 @@ class TestAddTrainingArguments:
             '--client-host-memory-in-gb', '64',
             '--data-dir', '/data',
             '--results-dir', '/tmp',
+            '--systemname', 'sys-v1',
             'file'
         ])
         assert args.model == 'unet3d'
@@ -304,7 +328,8 @@ class TestAddTrainingArguments:
             parser.parse_args([
                 'unet3d', 'run',
                 '--num-accelerators', '1', '--accelerator-type', 'b200',
-                '--client-host-memory-in-gb', '64', '--results-dir', '/tmp', 'file',
+                '--client-host-memory-in-gb', '64', '--results-dir', '/tmp',
+                '--systemname', 'sys-v1', 'file',
                 '--loops', '3'
             ])
 
@@ -315,7 +340,8 @@ class TestAddTrainingArguments:
         args = parser.parse_args([
             'unet3d', 'run',
             '--num-accelerators', '1', '--accelerator-type', 'b200',
-            '--client-host-memory-in-gb', '64', '--data-dir', '/data', '--results-dir', '/tmp', 'file',
+            '--client-host-memory-in-gb', '64', '--data-dir', '/data', '--results-dir', '/tmp',
+            '--systemname', 'sys-v1', 'file',
             '--loops', '3'
         ])
         assert args.loops == 3
@@ -333,7 +359,8 @@ class TestAddTrainingArguments:
         args = parser.parse_args([
             'unet3d', 'run',
             '--num-accelerators', '1', '--accelerator-type', 'b200',
-            '--client-host-memory-in-gb', '64', '--data-dir', '/data', '--results-dir', '/tmp', 'file',
+            '--client-host-memory-in-gb', '64', '--data-dir', '/data', '--results-dir', '/tmp',
+            '--systemname', 'sys-v1', 'file',
         ])
         assert args.loops == 1
         assert args.params is None
@@ -345,7 +372,8 @@ class TestAddTrainingArguments:
         add_training_arguments(parser, 'closed')
         args = parser.parse_args([
             'unet3d', 'datagen',
-            '--num-processes', '8', '--data-dir', '/data', '--results-dir', '/tmp', 'file',
+            '--num-processes', '8', '--data-dir', '/data', '--results-dir', '/tmp',
+            '--systemname', 'sys-v1', 'file',
             '--params', 'dataset.num_files_train=1000', 'dataset.num_subfolders_train=10',
         ])
         flattened = [kv for batch in (args.params or []) for kv in batch]
@@ -383,6 +411,7 @@ class TestAddCheckpointingArguments:
             '--client-host-memory-in-gb', '1024',
             '--checkpoint-folder', '/ckpt',
             '--results-dir', '/tmp',
+            '--systemname', 'sys-v1',
             'file'
         ])
         assert args.command == 'run'
@@ -398,6 +427,7 @@ class TestAddCheckpointingArguments:
             '--client-host-memory-in-gb', '512',
             '--checkpoint-folder', '/ckpt',
             '--results-dir', '/tmp',
+            '--systemname', 'sys-v1',
             '--num-checkpoints-read', '5',
             'file'
         ])
@@ -412,6 +442,7 @@ class TestAddCheckpointingArguments:
             '--client-host-memory-in-gb', '512',
             '--checkpoint-folder', '/ckpt',
             '--results-dir', '/tmp',
+            '--systemname', 'sys-v1',
             '--num-checkpoints-write', '3',
             'file'
         ])
@@ -422,7 +453,8 @@ class TestAddCheckpointingArguments:
         args = parser.parse_args([
             'run', '--model', 'llama3-8b', '--num-processes', '8',
             '--client-host-memory-in-gb', '512', '--checkpoint-folder', '/ckpt',
-            '--results-dir', '/tmp', 'file', '--loops', '5',
+            '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file',
+            '--loops', '5',
         ])
         assert args.loops == 5
 
@@ -431,7 +463,8 @@ class TestAddCheckpointingArguments:
         args = parser.parse_args([
             'run', '--model', 'llama3-8b', '--num-processes', '8',
             '--client-host-memory-in-gb', '512', '--checkpoint-folder', '/ckpt',
-            '--results-dir', '/tmp', 'file', '--params', 'k=v',
+            '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file',
+            '--params', 'k=v',
         ])
         assert args.params == [['k=v']]
 
@@ -440,7 +473,8 @@ class TestAddCheckpointingArguments:
         args = parser.parse_args([
             'run', '--model', 'llama3-8b', '--num-processes', '8',
             '--client-host-memory-in-gb', '512', '--checkpoint-folder', '/ckpt',
-            '--results-dir', '/tmp', '--num-checkpoints-read', '20', 'file',
+            '--results-dir', '/tmp', '--systemname', 'sys-v1',
+            '--num-checkpoints-read', '20', 'file',
         ])
         assert args.num_checkpoints_read == 20
 
@@ -451,7 +485,7 @@ class TestAddCheckpointingArgumentsClosed:
     RUN_ARGS = [
         'run', '--model', 'llama3-8b', '--num-processes', '8',
         '--client-host-memory-in-gb', '512', '--checkpoint-folder', '/ckpt',
-        '--results-dir', '/tmp', 'file',
+        '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file',
     ]
 
     @pytest.fixture
@@ -522,27 +556,35 @@ class TestAddVectordbArguments:
 
     def test_datagen_subcommand_exists(self, parser):
         """VectorDB should have datagen subcommand."""
-        args = parser.parse_args(['datagen', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['datagen', '--results-dir', '/tmp',
+                                  '--systemname', 'sys-v1', 'file'])
         assert args.command == 'datagen'
 
     def test_run_subcommand_exists(self, parser):
         """VectorDB should have run subcommand."""
-        args = parser.parse_args(['run', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['run', '--results-dir', '/tmp',
+                                  '--systemname', 'sys-v1', 'file'])
         assert args.command == 'run'
 
     def test_datagen_dimension_argument(self, parser):
         """Datagen should accept --dimension argument."""
-        args = parser.parse_args(['datagen', '--dimension', '768', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['datagen', '--dimension', '768',
+                                  '--results-dir', '/tmp',
+                                  '--systemname', 'sys-v1', 'file'])
         assert args.dimension == 768
 
     def test_datagen_num_vectors_argument(self, parser):
         """Datagen should accept --num-vectors argument."""
-        args = parser.parse_args(['datagen', '--num-vectors', '100000', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['datagen', '--num-vectors', '100000',
+                                  '--results-dir', '/tmp',
+                                  '--systemname', 'sys-v1', 'file'])
         assert args.num_vectors == 100000
 
     def test_run_batch_size_argument(self, parser):
         """Run should accept --batch-size argument."""
-        args = parser.parse_args(['run', '--batch-size', '32', '--results-dir', '/tmp', 'file'])
+        args = parser.parse_args(['run', '--batch-size', '32',
+                                  '--results-dir', '/tmp',
+                                  '--systemname', 'sys-v1', 'file'])
         assert args.batch_size == 32
 
 
@@ -558,12 +600,15 @@ class TestAddReportsArguments:
 
     def test_reportgen_subcommand_exists(self, parser):
         """Reports should have reportgen subcommand."""
-        args = parser.parse_args(['reportgen', '--results-dir', '/tmp'])
+        args = parser.parse_args(['reportgen', '--results-dir', '/tmp',
+                                  '--systemname', 'sys-v1'])
         assert args.command == 'reportgen'
 
     def test_output_dir_argument(self, parser):
         """Reportgen should accept --output-dir argument."""
-        args = parser.parse_args(['reportgen', '--results-dir', '/tmp', '--output-dir', '/output'])
+        args = parser.parse_args(['reportgen', '--results-dir', '/tmp',
+                                  '--systemname', 'sys-v1',
+                                  '--output-dir', '/output'])
         assert args.output_dir == '/output'
 
 
@@ -579,22 +624,26 @@ class TestAddHistoryArguments:
 
     def test_show_subcommand_exists(self, parser):
         """History should have show subcommand."""
-        args = parser.parse_args(['show', '--results-dir', '/tmp'])
+        args = parser.parse_args(['show', '--results-dir', '/tmp',
+                                  '--systemname', 'sys-v1'])
         assert args.command == 'show'
 
     def test_show_limit_argument(self, parser):
         """Show should accept --limit argument."""
-        args = parser.parse_args(['show', '--results-dir', '/tmp', '--limit', '10'])
+        args = parser.parse_args(['show', '--results-dir', '/tmp',
+                                  '--systemname', 'sys-v1', '--limit', '10'])
         assert args.limit == 10
 
     def test_show_id_argument(self, parser):
         """Show should accept --id argument."""
-        args = parser.parse_args(['show', '--results-dir', '/tmp', '--id', '5'])
+        args = parser.parse_args(['show', '--results-dir', '/tmp',
+                                  '--systemname', 'sys-v1', '--id', '5'])
         assert args.id == 5
 
     def test_rerun_subcommand_exists(self, parser):
         """History should have rerun subcommand."""
-        args = parser.parse_args(['rerun', '42', '--results-dir', '/tmp'])
+        args = parser.parse_args(['rerun', '42', '--results-dir', '/tmp',
+                                  '--systemname', 'sys-v1'])
         assert args.command == 'rerun'
         assert args.rerun_id == 42
 
@@ -990,7 +1039,8 @@ class TestParseArgumentsStoragePositional:
         """Regression test: `reports reportgen` must parse cleanly without storage positional."""
         args = self._run(
             monkeypatch,
-            ["mlpstorage", "reports", "reportgen", "--results-dir", str(tmp_path)],
+            ["mlpstorage", "reports", "reportgen", "--results-dir", str(tmp_path),
+             "--systemname", "sys-v1"],
         )
         assert args.mode == "reports"
         assert args.command == "reportgen"
@@ -1000,7 +1050,8 @@ class TestParseArgumentsStoragePositional:
     def test_history_does_not_need_storage_positional(self, monkeypatch, tmp_path):
         """`history show` must parse cleanly (no storage positional)."""
         args = self._run(monkeypatch, ["mlpstorage", "history", "show",
-                                        "--results-dir", str(tmp_path)])
+                                        "--results-dir", str(tmp_path),
+                                        "--systemname", "sys-v1"])
         assert args.mode == "history"
         assert args.command == "show"
         assert not hasattr(args, "file")
@@ -1027,6 +1078,7 @@ class TestParseArgumentsStoragePositional:
                 "--client-host-memory-in-gb", "64",
                 "--data-dir", str(tmp_path / "data"),
                 "--results-dir", str(tmp_path / "results"),
+                "--systemname", "sys-v1",
                 "file",
             ],
         )
@@ -1045,6 +1097,7 @@ class TestParseArgumentsStoragePositional:
                 "--client-host-memory-in-gb", "64",
                 "--data-dir", str(tmp_path / "data"),
                 "--results-dir", str(tmp_path / "results"),
+                "--systemname", "sys-v1",
                 "object",
             ],
         )

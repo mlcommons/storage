@@ -160,6 +160,25 @@ def _resolve_default_results_dir() -> str:
 
 DEFAULT_RESULTS_DIR = _resolve_default_results_dir()
 
+# DEFAULT_SYSTEMNAME mirrors DEFAULT_RESULTS_DIR (LAY-04): honor the
+# MLPERF_SYSTEMNAME env var if set, fall back to an empty string. The
+# universal-args layer (add_universal_arguments) decides required-vs-optional
+# per subcommand; an empty default plus required=True on emitting commands
+# makes "no --systemname and no env var" fail at parse time rather than
+# silently producing `<results-dir>/<mode>/<orgname>/results//...` (T-1-02).
+def _resolve_default_systemname() -> str:
+    """Resolve DEFAULT_SYSTEMNAME from MLPERF_SYSTEMNAME.
+
+    Extracted so tests can exercise the env-driven branch without
+    reloading this module — reload re-creates the PARAM_VALIDATION enum
+    class, which then fails `in`-checks against any pre-imported copy
+    held by other modules (notably the rules verifier).
+    """
+    return os.environ.get("MLPERF_SYSTEMNAME", "")
+
+
+DEFAULT_SYSTEMNAME = _resolve_default_systemname()
+
 import enum
 
 class EXIT_CODE(enum.IntEnum):

@@ -33,6 +33,7 @@ system_under_test:
                       unit_count: 2
           networking:
               - type: ethernet
+                state: "up"
                 speed: 100
                 traffic:
                     - management
@@ -57,6 +58,7 @@ system_under_test:
           model_name: Mongo 5000
           ports:
              - type: ethernet
+               state: "up"
                speed: 100
                traffic:
                    - data
@@ -93,6 +95,7 @@ system_under_test:
                       unit_count: 2
           networking:
              - type: ethernet
+               state: "up"
                speed: 100
                traffic:
                    - data

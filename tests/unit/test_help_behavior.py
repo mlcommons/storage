@@ -64,6 +64,20 @@ class TestHelpAll:
         assert 'KV_RUN_OPEN' in HELP_ALL_TEXT, \
             'drift: KV_RUN_OPEN missing from HELP_ALL_TEXT'
 
+    def test_synopsis_lists_init(self):
+        """`init` is a top-level subcommand and must appear in the SYNOPSIS."""
+        from mlpstorage_py.cli.help_formatter import SYNOPSIS_TEXT
+        assert 'mlpstorage init <orgname> <results-dir>' in SYNOPSIS_TEXT, \
+            'drift: init synopsis line missing — bare invocation and --help_all will hide it'
+
+    def test_help_all_describes_init(self):
+        """The comprehensive reference must document the init subcommand tree branch + section."""
+        from mlpstorage_py.cli.help_formatter import HELP_ALL_TEXT
+        assert '├── init <orgname> <results-dir>' in HELP_ALL_TEXT, \
+            'drift: init tree branch missing from HELP_ALL_TEXT'
+        assert 'INIT\n' in HELP_ALL_TEXT, \
+            'drift: INIT placeholder section missing from HELP_ALL_TEXT'
+
 
 # =====================================================================
 # 2. TestContextHelp — HELP-02 and R-03-01 (bare mid-tree invocations)
@@ -74,9 +88,9 @@ class TestContextHelp:
 
     @pytest.mark.parametrize('argv, expected_fragment', [
         # ── Bare and top-level --help ──────────────────────────────────────────
-        (['mlpstorage'],           'next: closed | open | whatif | reports | history | lockfile | version'),
-        (['mlpstorage', '--help'], 'next: closed | open | whatif | reports | history | lockfile | version'),
-        (['mlpstorage', '-h'],     'next: closed | open | whatif | reports | history | lockfile | version'),
+        (['mlpstorage'],           'next: closed | open | whatif | init | reports | history | lockfile | version'),
+        (['mlpstorage', '--help'], 'next: closed | open | whatif | init | reports | history | lockfile | version'),
+        (['mlpstorage', '-h'],     'next: closed | open | whatif | init | reports | history | lockfile | version'),
 
         # ── Mode-level --help ──────────────────────────────────────────────────
         (['mlpstorage', 'closed', '--help'],  'next: training | checkpointing | vectordb | kvcache'),
@@ -121,6 +135,11 @@ class TestContextHelp:
         (['mlpstorage', 'reports', '--help'],  'next: reportgen'),
         (['mlpstorage', 'history', '--help'],  'next: show | rerun'),
         (['mlpstorage', 'lockfile', '--help'], 'next: generate | verify'),
+
+        # ── init is a top-level utility sibling and must appear in the root hint ──
+        (['mlpstorage'],           '| init |'),
+        (['mlpstorage', '--help'], '| init |'),
+        (['mlpstorage', '-h'],     '| init |'),
     ])
     def test_context_help(self, argv, expected_fragment, capsys):
         with patch('sys.argv', argv):
@@ -157,6 +176,49 @@ class TestBareInvocation:
 # =====================================================================
 # 4. TestLeafHelp — HELP-03 leaf fallthrough to argparse
 # =====================================================================
+
+class TestUserPositionalsVisible:
+    """B-03: free-form positional args (no choices=) must appear in --help output.
+
+    Regression: MLPStorageHelpFormatter previously filtered every positional
+    on the assumption it was a tree-dispatch token (file|object, subparser
+    selector). That dropped user-supplied positionals like ``validate input``,
+    ``init orgname``, ``init path`` — so submitters could not discover them.
+    """
+
+    @pytest.mark.parametrize('argv, expected_positionals', [
+        (['mlpstorage', 'validate', '-h'], ['input']),
+        (['mlpstorage', 'init', '-h'],     ['orgname', 'path']),
+    ])
+    def test_positionals_in_help_output(self, argv, expected_positionals, capsys):
+        with patch('sys.argv', argv):
+            with pytest.raises(SystemExit) as exc:
+                parse_arguments()
+        assert exc.value.code == 0
+        out = capsys.readouterr().out
+        # Each positional must appear in the usage line AND in the
+        # "positional arguments:" section.
+        assert 'positional arguments:' in out, \
+            f'{argv}: missing "positional arguments:" section\nGot: {out!r}'
+        for name in expected_positionals:
+            # Section label is `  name   help` — anchor on a leading-space match
+            # to avoid false hits inside option help text.
+            assert f'\n  {name}' in out, \
+                f'{argv}: positional {name!r} missing from help body\nGot: {out!r}'
+
+    def test_tree_dispatch_positionals_still_suppressed(self, capsys):
+        """Choices-based positionals (file|object) must NOT appear as a section."""
+        with patch('sys.argv',
+                   ['mlpstorage', 'closed', 'training', 'unet3d', 'datasize', '--help']):
+            with pytest.raises(SystemExit):
+                parse_arguments()
+        out = capsys.readouterr().out
+        # No "data_access_protocol" positional section — it's already in the
+        # command path (well, datasize has no storage selector, but the broader
+        # principle: tree-dispatch positionals do not get their own section).
+        assert 'data_access_protocol' not in out, \
+            f'tree-dispatch positional leaked into help\nGot: {out!r}'
+
 
 class TestLeafHelp:
     """At leaf level, get_context_help_tokens returns None, argparse handles --help.
@@ -200,17 +262,19 @@ class TestRegression:
 
     @pytest.mark.parametrize('argv, expected_attrs', [
         # training datasize with flags interspersed — pre-scan strips flags, leaving
-        # ['closed', 'training', 'unet3d', 'datasize'] → None → falls through to argparse
+        # ['closed', 'training', 'unet3d', 'datasize'] → None → falls through to argparse.
+        # D-10/LAY-04: datasize now requires --systemname + --results-dir.
         (
             ['mlpstorage', 'closed', 'training', 'unet3d', 'datasize',
-             '-cm', '64', '-at', 'b200', '-ma', '4'],
+             '-cm', '64', '-at', 'b200', '-ma', '4',
+             '-rd', '/tmp', '-sn', 'sys-v1'],
             {'mode': 'closed', 'benchmark': 'training', 'command': 'datasize'},
         ),
         # checkpointing run with file storage positional
         (
             ['mlpstorage', 'closed', 'checkpointing', 'run',
              '-cm', '1024', '-m', 'llama3-8b', '-np', '2',
-             '-cf', '/tmp/ckpt', '-rd', '/tmp', 'file'],
+             '-cf', '/tmp/ckpt', '-rd', '/tmp', '-sn', 'sys-v1', 'file'],
             {'benchmark': 'checkpointing', 'command': 'run'},
         ),
         # version subcommand

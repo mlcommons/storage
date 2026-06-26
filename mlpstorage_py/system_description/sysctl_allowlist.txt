@@ -1,0 +1,8 @@
+# Phase 4 (COLL-05): sysctl key allowlist. One shell-style glob per line.
+# Lines starting with '#' are comments; blank lines are ignored.
+# Edit this file to add patterns; no code change required.
+
+vm.dirty_*
+net.core.*
+net.ipv4.tcp_*
+kernel.numa_balancing

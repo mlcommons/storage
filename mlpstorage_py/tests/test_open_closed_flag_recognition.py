@@ -28,6 +28,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+# Stub heavy deps the benchmark imports expect (pre-existing dev-env psutil gap
+# documented in STATE.md Deferred Items). Without this the entire file fails
+# collection — which is how the #412 regression (verify_benchmark still reading
+# args.closed/args.open instead of args.mode) hid from CI.
+for _dep in ("pyarrow", "pyarrow.ipc", "psutil"):
+    if _dep not in sys.modules:
+        sys.modules[_dep] = MagicMock()
+
 from mlpstorage_py.config import PARAM_VALIDATION, BENCHMARK_TYPES
 
 
@@ -216,6 +224,97 @@ class TestVerifyBenchmarkOpenFlag:
             result = bench.verify_benchmark()
 
         assert result is True
+
+
+class TestVerifyBenchmarkPost412ModeDispatch:
+    """Post-PR-#412 CLI redesign: closed/open is now ``args.mode``, not the
+    pair of bools ``args.closed`` / ``args.open``. The dispatch in
+    ``verify_benchmark`` was never migrated, so every live CLI invocation
+    (which sets ``mode='closed'`` / ``mode='open'``) silently fell through
+    to the no-verification warning branch — effectively re-introducing the
+    bug PR #352 fixed for #349.
+
+    These tests build Namespaces in the new post-#412 shape (no
+    ``closed``/``open`` attrs, just ``mode='closed'|'open'``) and assert
+    that verify_benchmark dispatches correctly.
+    """
+
+    def _make_modal_bench(self, tmp_path, mode, **arg_overrides):
+        """Build a benchmark with a post-#412 Namespace shape."""
+        bench = _make_benchmark(tmp_path, **arg_overrides)
+        # Strip the pre-#412 attrs and set the post-#412 mode string.
+        del bench.args.closed
+        del bench.args.open
+        bench.args.mode = mode
+        return bench
+
+    def test_mode_closed_does_not_hit_no_verification_warning(self, tmp_path):
+        """RED for the regression: `mlpstorage closed ...` must route to
+        formal verification, not warn that it's skipping verification."""
+        bench = self._make_modal_bench(tmp_path, mode="closed")
+
+        with patch("mlpstorage_py.benchmarks.base.BenchmarkVerifier") as mock_cls:
+            mock_verifier = MagicMock()
+            mock_verifier.verify.return_value = PARAM_VALIDATION.CLOSED
+            mock_cls.return_value = mock_verifier
+
+            result = bench.verify_benchmark()
+
+        assert result is True
+        for c in bench.logger.warning.call_args_list:
+            assert "without verification for open or closed" not in c.args[0], (
+                f"Post-#412 'mode=closed' Namespace must not hit the "
+                f"no-verification warning. Saw: {c.args[0]}"
+            )
+
+    def test_mode_open_does_not_hit_no_verification_warning(self, tmp_path):
+        bench = self._make_modal_bench(tmp_path, mode="open")
+
+        with patch("mlpstorage_py.benchmarks.base.BenchmarkVerifier") as mock_cls:
+            mock_verifier = MagicMock()
+            mock_verifier.verify.return_value = PARAM_VALIDATION.OPEN
+            mock_cls.return_value = mock_verifier
+
+            result = bench.verify_benchmark()
+
+        assert result is True
+        for c in bench.logger.warning.call_args_list:
+            assert "without verification for open or closed" not in c.args[0]
+        status_msgs = [c.args[0] for c in bench.logger.status.call_args_list]
+        assert any("allowed open configuration" in m for m in status_msgs), (
+            "mode='open' + PARAM_VALIDATION.OPEN must emit the 'allowed open "
+            "configuration' status message (downstream open_mode dispatch)."
+        )
+
+    def test_mode_whatif_routes_to_no_verification_warning(self, tmp_path):
+        """`mlpstorage whatif ...` is the post-#412 way to say 'I don't
+        want submission verification' — the warning is the correct outcome."""
+        bench = self._make_modal_bench(tmp_path, mode="whatif")
+
+        with patch("mlpstorage_py.benchmarks.base.BenchmarkVerifier") as mock_cls:
+            mock_verifier = MagicMock()
+            mock_verifier.verify.return_value = PARAM_VALIDATION.CLOSED
+            mock_cls.return_value = mock_verifier
+
+            result = bench.verify_benchmark()
+
+        assert result is True
+        assert any(
+            "without verification for open or closed" in c.args[0]
+            for c in bench.logger.warning.call_args_list
+        ), "mode='whatif' SHOULD warn — it intentionally bypasses verification."
+
+    def test_mode_closed_rejects_open_only_params(self, tmp_path):
+        """downstream dispatch: closed mode + OPEN-only params must fail-fast."""
+        bench = self._make_modal_bench(tmp_path, mode="closed")
+
+        with patch("mlpstorage_py.benchmarks.base.BenchmarkVerifier") as mock_cls:
+            mock_verifier = MagicMock()
+            mock_verifier.verify.return_value = PARAM_VALIDATION.OPEN
+            mock_cls.return_value = mock_verifier
+
+            with pytest.raises(SystemExit):
+                bench.verify_benchmark()
 
 
 # ---------------------------------------------------------------------------

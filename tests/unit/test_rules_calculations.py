@@ -207,7 +207,17 @@ class TestCalculateTrainingDataSize:
 
 
 class TestGenerateOutputLocation:
-    """Tests for generate_output_location function."""
+    """Tests for generate_output_location function.
+
+    After the Phase 1 / Plan 01-03 rewrite, generate_output_location emits
+    the Rules.md §2.1-shaped canonical layout:
+
+        <results-dir>/<mode>/<orgname>/results/<systemname>/<benchmark>/<model>/<command>/<datetime>/
+
+    Checkpointing omits the <command> segment to preserve the pre-refactor
+    behavior. The function reads args.{mode, orgname, systemname} purely;
+    upstream orgname resolution lives in the Slice 4 main gate.
+    """
 
     @pytest.fixture
     def mock_logger(self):
@@ -215,46 +225,186 @@ class TestGenerateOutputLocation:
         return MagicMock()
 
     def test_training_benchmark_output_location(self, mock_logger):
-        """generate_output_location creates correct path for training benchmarks."""
+        """generate_output_location creates correct canonical path for training benchmarks."""
         mock_benchmark = MagicMock()
         mock_benchmark.BENCHMARK_TYPE = BENCHMARK_TYPES.training
         mock_benchmark.args.results_dir = '/results'
+        mock_benchmark.args.mode = 'closed'
+        mock_benchmark.args.orgname = 'Acme'
+        mock_benchmark.args.systemname = 'sys-v1'
         mock_benchmark.args.model = 'unet3d'
         mock_benchmark.args.command = 'run'
 
         result = generate_output_location(mock_benchmark, datetime_str='20250111_143022')
 
-        assert '/results/training/unet3d/run/20250111_143022' == result
+        # Canonical layout (LAY-05): <rd>/<mode>/<org>/results/<sys>/<bench>/<model>/<cmd>/<dt>/
+        assert '/results/closed/Acme/results/sys-v1/training/unet3d/run/20250111_143022' == result
 
     def test_checkpointing_benchmark_output_location(self, mock_logger):
-        """generate_output_location creates correct path for checkpointing benchmarks."""
+        """generate_output_location creates correct canonical path for checkpointing benchmarks.
+
+        Checkpointing intentionally omits the <command> segment — preserves
+        the pre-refactor shape so existing fixtures/checkers stay aligned.
+        """
         mock_benchmark = MagicMock()
         mock_benchmark.BENCHMARK_TYPE = BENCHMARK_TYPES.checkpointing
         mock_benchmark.args.results_dir = '/results'
+        mock_benchmark.args.mode = 'closed'
+        mock_benchmark.args.orgname = 'Acme'
+        mock_benchmark.args.systemname = 'sys-v1'
         mock_benchmark.args.model = 'llama3-8b'
 
         result = generate_output_location(mock_benchmark, datetime_str='20250111_143022')
 
-        assert '/results/checkpointing/llama3-8b/20250111_143022' == result
+        assert '/results/closed/Acme/results/sys-v1/checkpointing/llama3-8b/20250111_143022' == result
 
     def test_raises_for_training_without_model(self, mock_logger):
-        """generate_output_location raises error for training without model."""
+        """generate_output_location raises ConfigurationError for training without model.
+
+        Post WR-07: missing-required errors now raise the typed
+        ``ConfigurationError`` so the top-level ``main()`` handler can
+        surface them uniformly. Previously this was a bare ``ValueError``,
+        which bypassed the typed-error handler.
+        """
+        from mlpstorage_py.errors import ConfigurationError
         mock_benchmark = MagicMock()
         mock_benchmark.BENCHMARK_TYPE = BENCHMARK_TYPES.training
         mock_benchmark.args.results_dir = '/results'
+        mock_benchmark.args.mode = 'closed'
+        mock_benchmark.args.orgname = 'Acme'
+        mock_benchmark.args.systemname = 'sys-v1'
         del mock_benchmark.args.model  # Remove model attribute
 
-        with pytest.raises(ValueError, match="Model name is required"):
+        with pytest.raises(ConfigurationError, match="Model name is required"):
             generate_output_location(mock_benchmark, datetime_str='20250111_143022')
 
     def test_raises_for_checkpointing_without_model(self, mock_logger):
-        """generate_output_location raises error for checkpointing without model."""
+        """generate_output_location raises ConfigurationError for checkpointing without model.
+
+        Post WR-07: see ``test_raises_for_training_without_model``.
+        """
+        from mlpstorage_py.errors import ConfigurationError
         mock_benchmark = MagicMock()
         mock_benchmark.BENCHMARK_TYPE = BENCHMARK_TYPES.checkpointing
         mock_benchmark.args.results_dir = '/results'
+        mock_benchmark.args.mode = 'closed'
+        mock_benchmark.args.orgname = 'Acme'
+        mock_benchmark.args.systemname = 'sys-v1'
         del mock_benchmark.args.model  # Remove model attribute
 
-        with pytest.raises(ValueError, match="Model name is required"):
+        with pytest.raises(ConfigurationError, match="Model name is required"):
+            generate_output_location(mock_benchmark, datetime_str='20250111_143022')
+
+    def test_vectordb_benchmark_output_location(self, mock_logger):
+        """generate_output_location creates correct canonical path for vectordb benchmarks."""
+        mock_benchmark = MagicMock()
+        mock_benchmark.BENCHMARK_TYPE = BENCHMARK_TYPES.vector_database
+        mock_benchmark.args.results_dir = '/results'
+        mock_benchmark.args.mode = 'open'
+        mock_benchmark.args.orgname = 'Acme'
+        mock_benchmark.args.systemname = 'sys-v1'
+        mock_benchmark.args.vdb_engine = 'milvus'
+        mock_benchmark.args.vdb_index = 'diskann'
+        mock_benchmark.args.command = 'run'
+
+        result = generate_output_location(mock_benchmark, datetime_str='20250111_143022')
+
+        assert '/results/open/Acme/results/sys-v1/vector_database/milvus/diskann/run/20250111_143022' == result
+
+    def test_kvcache_benchmark_output_location(self, mock_logger):
+        """generate_output_location creates correct canonical path for kv_cache benchmarks."""
+        mock_benchmark = MagicMock()
+        mock_benchmark.BENCHMARK_TYPE = BENCHMARK_TYPES.kv_cache
+        mock_benchmark.args.results_dir = '/results'
+        mock_benchmark.args.mode = 'whatif'
+        mock_benchmark.args.orgname = 'Acme'
+        mock_benchmark.args.systemname = 'sys-v1'
+        mock_benchmark.args.model = 'llama3.1-8b'
+        mock_benchmark.args.command = 'run'
+
+        result = generate_output_location(mock_benchmark, datetime_str='20250111_143022')
+
+        assert '/results/whatif/Acme/results/sys-v1/kv_cache/llama3.1-8b/run/20250111_143022' == result
+
+    @pytest.mark.parametrize('mode', ['closed', 'open', 'whatif'])
+    def test_canonical_prefix_training(self, mock_logger, mode):
+        """Canonical-prefix smoke (training): output starts with <rd>/<mode>/<org>/results/<sys>/."""
+        mock_benchmark = MagicMock()
+        mock_benchmark.BENCHMARK_TYPE = BENCHMARK_TYPES.training
+        mock_benchmark.args.results_dir = '/r'
+        mock_benchmark.args.mode = mode
+        mock_benchmark.args.orgname = 'Acme'
+        mock_benchmark.args.systemname = 'sys-v1'
+        mock_benchmark.args.model = 'unet3d'
+        mock_benchmark.args.command = 'run'
+
+        result = generate_output_location(mock_benchmark, datetime_str='20250111_143022')
+
+        assert result.startswith(f'/r/{mode}/Acme/results/sys-v1/'), result
+
+    @pytest.mark.parametrize('benchmark_type, model_or_engine_field, model_or_engine, expected_segment', [
+        (BENCHMARK_TYPES.training, 'model', 'unet3d', 'training/unet3d/run/'),
+        (BENCHMARK_TYPES.vector_database, 'vdb_engine', 'milvus', 'vector_database/milvus/diskann/run/'),
+        (BENCHMARK_TYPES.kv_cache, 'model', 'llama3.1-8b', 'kv_cache/llama3.1-8b/run/'),
+    ])
+    def test_canonical_prefix_all_benchmark_types(
+        self, mock_logger, benchmark_type, model_or_engine_field, model_or_engine,
+        expected_segment,
+    ):
+        """Canonical-prefix smoke across benchmark types (training, vectordb, kvcache)."""
+        mock_benchmark = MagicMock()
+        mock_benchmark.BENCHMARK_TYPE = benchmark_type
+        mock_benchmark.args.results_dir = '/r'
+        mock_benchmark.args.mode = 'closed'
+        mock_benchmark.args.orgname = 'Acme'
+        mock_benchmark.args.systemname = 'sys-v1'
+        mock_benchmark.args.command = 'run'
+        # vector_database also requires --vdb-index per Rules.md §2.1.27 split
+        # (AISAQ vs DISKANN/HNSW must live in separate trees). Harmless for
+        # other benchmark types since they don't read this attribute.
+        mock_benchmark.args.vdb_index = 'diskann'
+        setattr(mock_benchmark.args, model_or_engine_field, model_or_engine)
+
+        result = generate_output_location(mock_benchmark, datetime_str='20250111_143022')
+
+        assert result.startswith('/r/closed/Acme/results/sys-v1/'), result
+        assert expected_segment in result, result
+
+    def test_generate_output_location_empty_systemname_raises(self, mock_logger):
+        """T-1-02: empty args.systemname must raise ConfigurationError, not produce //results//."""
+        from mlpstorage_py.errors import ConfigurationError
+
+        mock_benchmark = MagicMock()
+        mock_benchmark.BENCHMARK_TYPE = BENCHMARK_TYPES.training
+        mock_benchmark.args.results_dir = '/r'
+        mock_benchmark.args.mode = 'closed'
+        mock_benchmark.args.orgname = 'Acme'
+        mock_benchmark.args.systemname = ''  # explicitly empty (post-resolution miss)
+        mock_benchmark.args.model = 'unet3d'
+        mock_benchmark.args.command = 'run'
+
+        with pytest.raises(ConfigurationError, match=r'systemname'):
+            generate_output_location(mock_benchmark, datetime_str='20250111_143022')
+
+    def test_generate_output_location_empty_orgname_raises(self, mock_logger):
+        """Pitfall 1 defense-in-depth: empty args.orgname must raise ConfigurationError.
+
+        The user-facing actionable error comes from main._main_impl()'s
+        orgname-resolution gate (Slice 4). This raise is purely defensive
+        — it guards against a code path that bypasses the gate.
+        """
+        from mlpstorage_py.errors import ConfigurationError
+
+        mock_benchmark = MagicMock()
+        mock_benchmark.BENCHMARK_TYPE = BENCHMARK_TYPES.training
+        mock_benchmark.args.results_dir = '/r'
+        mock_benchmark.args.mode = 'closed'
+        mock_benchmark.args.orgname = ''  # sentinel not resolved
+        mock_benchmark.args.systemname = 'sys-v1'
+        mock_benchmark.args.model = 'unet3d'
+        mock_benchmark.args.command = 'run'
+
+        with pytest.raises(ConfigurationError, match=r'orgname'):
             generate_output_location(mock_benchmark, datetime_str='20250111_143022')
 
 

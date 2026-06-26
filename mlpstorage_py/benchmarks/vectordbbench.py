@@ -691,8 +691,55 @@ class VectorDBBenchmark(Benchmark):
     # datagen / load
     # ------------------------------------------------------------------
 
+    # ------------------------------------------------------------------
+    # CAP-01 capacity-gate hooks (Phase 5 / Plan 05-03)
+    # ------------------------------------------------------------------
+
+    def required_bytes_for_capacity_gate(self) -> int:
+        """Return total bytes the VDB dataset will occupy (CAP-01).
+
+        Mirrors the math in ``VectorDBBenchmark.execute_datasize``
+        (vectordbbench.py:657-685): ``num_vectors * dim * 4 * overhead *
+        num_shards`` with the inline overhead table (DISKANN=1.3,
+        HNSW=1.5, AISAQ=0.15, IVF_FLAT=1.05, IVF_SQ8=0.40, FLAT=1.0;
+        default 1.3 for unknown index types).
+        """
+        dim = self.args.dimension
+        num_vectors = self.args.num_vectors
+        dtype_bytes = 4
+        index_type = self._effective_index_type()
+        num_shards = getattr(self.args, "num_shards", 1)
+        overhead = {
+            "DISKANN": 1.3,
+            "HNSW": 1.5,
+            "AISAQ": 0.15,
+            "IVF_FLAT": 1.05,
+            "IVF_SQ8": 0.40,
+            "FLAT": 1.0,
+        }.get(index_type, 1.3)
+        total_bytes = num_vectors * dim * dtype_bytes * overhead * num_shards
+        return int(total_bytes)
+
+    def _capacity_gate_destination(self):
+        """Return ``None`` — VectorDB is fundamentally a remote-engine
+        benchmark (A8 escape hatch).
+
+        Per A8: remote vector-DB backends (milvus URI, elasticsearch URL,
+        pgvector DSN) bypass CAP-01 because local statvfs is meaningless
+        against a remote engine; the submitter is expected to size their
+        remote service via the engine's own admin path. Even on a
+        ``--host localhost`` run, the data lives inside the VDB process,
+        not on a path the benchmark itself owns — so the local statvfs
+        would check the wrong filesystem. Always return None.
+        """
+        return None
+
     def execute_datagen(self) -> int:
         """Execute VectorDB data generation / load."""
+        # CAP-01 (A8 escape hatch — destination is always None for VDB).
+        # The gate logs "CAP-01 skipped" and returns; we still fire it so
+        # the skip is visible to the operator.
+        self._pre_execution_gate()
         if self._is_distributed():
             return self._execute_datagen_distributed()
 

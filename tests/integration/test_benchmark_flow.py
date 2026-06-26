@@ -20,6 +20,26 @@ from tests.fixtures import (
 )
 
 
+@pytest.fixture(autouse=True)
+def _bypass_pre_execution_gate():
+    """Stub `Benchmark._pre_execution_gate` for this file's tests.
+
+    Phase 5 added CAP-01 (disk-space) and CAP-02 (shared-FS probe) checks
+    that fire from `_pre_execution_gate`. The integration tests in this
+    module pre-date those gates and use synthetic fixtures that would
+    require terabytes of free disk. They're not testing CAP — they're
+    testing benchmark flow, command generation, and verification — so
+    bypassing the gate here keeps the test intent intact. Dedicated
+    capacity-gate coverage lives in tests/unit/test_capacity_gate.py and
+    tests/unit/test_shared_fs_probe.py.
+    """
+    with patch(
+        "mlpstorage_py.benchmarks.base.Benchmark._pre_execution_gate",
+        return_value=None,
+    ):
+        yield
+
+
 class TestTrainingBenchmarkFlow:
     """Integration tests for training benchmark execution flow."""
 
@@ -54,6 +74,7 @@ class TestTrainingBenchmarkFlow:
     def test_training_benchmark_what_if_mode(self, training_args, mock_setup, tmp_path):
         """Training benchmark in dry-run mode generates command but doesn't execute."""
         training_args.what_if = True
+        training_args.mode = 'whatif'
         training_args.dry_run = True
         training_args.results_dir = str(tmp_path)
         training_args.data_dir = str(tmp_path / 'data')
@@ -83,6 +104,7 @@ class TestTrainingBenchmarkFlow:
     def test_training_benchmark_generates_correct_command(self, training_args, mock_setup, tmp_path):
         """Training benchmark generates correct DLIO command."""
         training_args.what_if = True
+        training_args.mode = 'whatif'
         training_args.dry_run = True
         training_args.results_dir = str(tmp_path)
         training_args.data_dir = str(tmp_path / 'data')
@@ -132,6 +154,7 @@ class TestCheckpointingBenchmarkFlow:
     def test_checkpointing_benchmark_what_if_mode(self, checkpointing_args, tmp_path):
         """Checkpointing benchmark in what-if mode."""
         checkpointing_args.what_if = True
+        checkpointing_args.mode = 'whatif'
         checkpointing_args.results_dir = str(tmp_path)
 
         try:
@@ -177,6 +200,7 @@ class TestBenchmarkWithMockExecutor:
         # dry_run skips fail-fast MPI/DLIO dependency validation in the constructor;
         # this test only verifies mock infrastructure, not real execution.
         training_args.dry_run = True
+        training_args.allow_invalid_params = True
         training_args.data_dir = str(tmp_path / 'data')
 
         try:
@@ -228,6 +252,7 @@ class TestBenchmarkWithMockCollector:
         """Benchmark can use mock cluster collector for initialization."""
         training_args.results_dir = str(tmp_path)
         training_args.what_if = True
+        training_args.mode = 'whatif'
         training_args.dry_run = True
         training_args.data_dir = str(tmp_path / 'data')
 
@@ -274,6 +299,7 @@ class TestMetadataGeneration:
         """Running benchmark creates metadata file."""
         training_args.results_dir = str(tmp_path)
         training_args.what_if = True
+        training_args.mode = 'whatif'
         training_args.dry_run = True
         training_args.data_dir = str(tmp_path / 'data')
 
@@ -534,6 +560,7 @@ class TestDependencyValidationIntegration:
     def test_benchmark_skips_dependency_check_in_whatif_mode(self, training_args):
         """Benchmark should skip dependency validation in dry-run mode."""
         training_args.what_if = True
+        training_args.mode = 'whatif'
         training_args.dry_run = True
 
         # Even with no executables found, what-if mode should succeed
@@ -552,7 +579,7 @@ class TestDependencyValidationIntegration:
     def test_dependency_check_finds_dlio_in_custom_path(self, training_args, tmp_path):
         """Benchmark should find DLIO in custom path specified by --dlio-bin-path."""
         training_args.what_if = True
-
+        training_args.mode = 'whatif'
         # Create fake DLIO executable in custom path
         custom_bin_path = tmp_path / "custom_bin"
         custom_bin_path.mkdir()
@@ -592,7 +619,16 @@ class TestKVCacheRunIntegration:
         import os
         from argparse import Namespace
         from unittest.mock import MagicMock
+        # mode='whatif' for what-if runs; mode='open' for the regular path
+        # so the strict CLOSED-mode override checks in _execute_run
+        # (seed/trials/inter-option-delay) don't fire — these tests
+        # deliberately override those args. Matches the unit-test pattern
+        # at tests/unit/test_benchmarks_kvcache.py::_make_run_benchmark.
         args = Namespace(
+            mode=('whatif' if what_if else 'open'),
+            dry_run=True,
+            orgname='Acme',
+            systemname='sys-v1',
             debug=False, verbose=False, what_if=what_if, stream_log_level='INFO',
             results_dir=str(tmp_path), command='run',
             npernode=1, seed=42, cache_dir=str(tmp_path / 'cache'),
