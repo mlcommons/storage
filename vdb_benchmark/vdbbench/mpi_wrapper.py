@@ -191,9 +191,17 @@ def _build_index_params(args: argparse.Namespace) -> dict[str, Any]:
 
 
 def _set_load_is_default(args: argparse.Namespace) -> None:
+    # merge_config_with_args() uses is_default to decide whether a YAML value
+    # may overwrite an arg. Args missing from this map are treated as "not
+    # explicitly set" and the YAML wins — so the three required, default-less
+    # args (collection_name, dimension, num_vectors) must be listed too, with
+    # None as their argparse default (issue #541).
     defaults = {
         "host": "localhost",
         "port": "19530",
+        "collection_name": None,
+        "dimension": None,
+        "num_vectors": None,
         "num_shards": 1,
         "vector_dtype": "FLOAT_VECTOR",
         "distribution": "uniform",

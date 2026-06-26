@@ -65,10 +65,18 @@ def parse_args():
     
     args = parser.parse_args()
     
-    # Track which arguments were explicitly set vs using defaults
+    # Track which arguments were explicitly set vs using defaults.
+    # merge_config_with_args() relies on this map to decide whether a YAML value
+    # may overwrite an arg. Args missing from this map are treated as "not
+    # explicitly set" and the YAML wins — so every CLI flag must be listed
+    # (issue #541). The three required, default-less args (collection_name,
+    # dimension, num_vectors) start as None and are "default" iff still None.
     args.is_default = {
         'host': args.host == "localhost",
         'port': args.port == "19530",
+        'collection_name': args.collection_name is None,
+        'dimension': args.dimension is None,
+        'num_vectors': args.num_vectors is None,
         'num_shards': args.num_shards == 1,
         'vector_dtype': args.vector_dtype == "float",
         'distribution': args.distribution == "uniform",
