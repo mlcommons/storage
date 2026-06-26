@@ -112,6 +112,23 @@ def _add_checkpointing_core_args(parser, command):
     if command in ("run", "configview"):
         add_storage_type_arguments(parser, required=True)
 
+    # --o-direct: available for run and configview (not datasize).
+    # Routes all checkpoint I/O through s3dlio's direct:// URI scheme with
+    # O_DIRECT, bypassing the OS page cache.  Incompatible with --object.
+    # See mlcommons/storage#507.
+    if command in ("run", "configview"):
+        parser.add_argument(
+            '--o-direct',
+            action='store_true',
+            default=False,
+            dest='o_direct',
+            help=(
+                "Route all checkpoint I/O through s3dlio's O_DIRECT local "
+                "filesystem mode (direct:// URI scheme), bypassing the OS "
+                "page cache.  Incompatible with --object."
+            ),
+        )
+
     # Checkpoint folder required for run only
     if command == "run":
         parser.add_argument(
@@ -199,6 +216,15 @@ def validate_checkpointing_arguments(args):
             error_messages.append(
                 "CLOSED submissions cannot set both --num-checkpoints-write=0 and "
                 "--num-checkpoints-read=0 in the same invocation."
+            )
+
+    if getattr(args, 'o_direct', False):
+        protocol = getattr(args, 'data_access_protocol', None)
+        if protocol == 'object':
+            error_messages.append(
+                "--o-direct is incompatible with --object. "
+                "O_DIRECT mode reads from the local filesystem via s3dlio's "
+                "direct:// URI scheme; it cannot be combined with an S3 endpoint."
             )
 
     if error_messages:

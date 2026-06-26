@@ -217,6 +217,39 @@ class DLIOBenchmark(Benchmark, abc.ABC):
             f'uri_scheme={uri_scheme}, force_path_style={is_http_scheme and bool(endpoint_url)})'
         )
 
+    def _apply_odirect_params(self, storage_root=None):
+        """When --o-direct is used, route I/O through s3dlio's O_DIRECT local filesystem mode.
+
+        Configures DLIO to use the direct:// URI scheme so s3dlio opens every
+        file with O_DIRECT, bypassing the OS page cache.  Works for ALL training
+        and checkpointing workloads regardless of data format — this is distinct
+        from reader.odirect which is the legacy NPY/NPZ-only path.
+
+        storage_root is the filesystem directory that becomes the s3dlio "bucket"
+        root.  For training it is --data-dir; for checkpointing it is
+        --checkpoint-folder.  The full URI of a file is:
+            direct://<storage_root>/<relative-path>
+            e.g. direct:///mnt/data/unet3d/train/img_000000_of_007200.npz
+
+        This method is a no-op when --o-direct was not passed.  Incompatibility
+        with --object is enforced at CLI-validation time, not here.
+        See mlcommons/storage#507.
+        """
+        if not getattr(self.args, 'o_direct', False):
+            return
+        if 'storage.storage_type' not in self.params_dict:
+            self.params_dict['storage.storage_type'] = 's3'
+        if 'storage.storage_options.storage_library' not in self.params_dict:
+            self.params_dict['storage.storage_options.storage_library'] = 's3dlio'
+        if 'storage.storage_options.uri_scheme' not in self.params_dict:
+            self.params_dict['storage.storage_options.uri_scheme'] = 'direct'
+        if storage_root is not None and 'storage.storage_root' not in self.params_dict:
+            self.params_dict['storage.storage_root'] = storage_root.rstrip('/')
+        self.logger.info(
+            '--o-direct: routing I/O through s3dlio direct:// (O_DIRECT, bypasses page cache); '
+            f'storage_root={storage_root!r}'
+        )
+
     @staticmethod
     def _compute_validation_interval(num_files: int) -> int:
         """Return a validation-sample interval scaled to dataset size.
@@ -400,6 +433,10 @@ class TrainingBenchmark(DLIOBenchmark):
         # Inject object storage params before add_datadir_param (which reads storage_type
         # from params_dict to decide whether to create local directories).
         self._apply_object_storage_params()
+        # For --o-direct: switch to s3dlio direct:// mode after object-storage check
+        # (object-storage already sets storage_type=s3; the two are mutually exclusive
+        # and rejected at CLI-validation time, so only one branch can be active here).
+        self._apply_odirect_params(storage_root=getattr(self.args, 'data_dir', None))
         # Enable skip_listing for all storage types (file and object).  Must be
         # called after _apply_object_storage_params so combined_params is final.
         self._apply_skip_listing_params()
@@ -415,12 +452,27 @@ class TrainingBenchmark(DLIOBenchmark):
         self.logger.verboser(f'Instantiated the Training Benchmark...')
 
     def add_datadir_param(self):
-        self.params_dict['dataset.data_folder'] = self.args.data_dir
-        # Detect object storage: if storage.storage_type is not 'local' (or unset),
-        # data_folder is an S3/object-store key prefix — never a local filesystem path.
+        # Detect storage mode set by _apply_object_storage_params or _apply_odirect_params.
         storage_type = self.params_dict.get('storage.storage_type', 'local')
         is_object_storage = storage_type != 'local'
 
+        # For --o-direct: storage_root is already set to data_dir; data_folder must
+        # be the model-relative path so URIs don't double-include data_dir.
+        # URI = direct://<storage_root>/<data_folder>/train/<file>
+        #       = direct:///<data_dir>/<model>/train/<file>
+        if getattr(self.args, 'o_direct', False) and is_object_storage:
+            if any(self.args.data_dir.rstrip('/').endswith(m) for m in MODELS):
+                # data_dir already includes the model name; data_folder is empty (root of storage_root)
+                self.params_dict['dataset.data_folder'] = ''
+            else:
+                self.params_dict['dataset.data_folder'] = self.args.model
+            self.logger.debug(
+                f'--o-direct: dataset.data_folder={self.params_dict["dataset.data_folder"]!r} '
+                f'(relative to storage_root={self.params_dict.get("storage.storage_root")!r})'
+            )
+            return
+
+        self.params_dict['dataset.data_folder'] = self.args.data_dir
         if not any([self.args.data_dir.endswith(m) for m in MODELS]):
             # Append the model name to the data dir path
             self.params_dict['dataset.data_folder'] = os.path.join(self.args.data_dir, self.args.model)
@@ -555,6 +607,8 @@ class CheckpointingBenchmark(DLIOBenchmark):
         self.config_file = f'{self.config_name}.yaml'
         self.params_dict, self.yaml_params, self.combined_params = self.process_dlio_params(self.config_file)
         self._apply_object_storage_params()
+        # For --o-direct: checkpoint_folder is the s3dlio "bucket" root.
+        self._apply_odirect_params(storage_root=getattr(self.args, 'checkpoint_folder', None))
         self.verify_benchmark()
         self.add_checkpoint_params()
         self.logger.status(f'Instantiated the Checkpointing Benchmark...')
@@ -571,7 +625,13 @@ class CheckpointingBenchmark(DLIOBenchmark):
         self.params_dict['checkpoint.num_checkpoints_read'] = self.args.num_checkpoints_read
         self.params_dict['checkpoint.num_checkpoints_write'] = self.args.num_checkpoints_write
         if self.args.checkpoint_folder:
-            self.params_dict['checkpoint.checkpoint_folder'] = os.path.join(self.args.checkpoint_folder, self.args.model)
+            if getattr(self.args, 'o_direct', False) and self.params_dict.get('storage.storage_type') == 's3':
+                # In direct:// mode: storage_root = checkpoint_folder (set by _apply_odirect_params).
+                # DLIO's checkpoint_folder param is the model-relative subdirectory within storage_root.
+                # URI = direct://<checkpoint_folder>/<model>/checkpoint_file
+                self.params_dict['checkpoint.checkpoint_folder'] = self.args.model
+            else:
+                self.params_dict['checkpoint.checkpoint_folder'] = os.path.join(self.args.checkpoint_folder, self.args.model)
 
 
     def add_workflow_to_cmd(self, cmd) -> str:

@@ -199,6 +199,28 @@ def _add_training_core_args(parser, command, accel_choices):
             ),
         )
 
+    # --o-direct: available for datagen, run, and configview (not datasize).
+    # Routes all training I/O through s3dlio's direct:// URI scheme, opening
+    # every file with O_DIRECT so reads bypass the OS page cache entirely.
+    # Works for ALL training workloads regardless of data format — this is
+    # independent of reader.odirect, which is the legacy NPY/NPZ-only path.
+    # Incompatible with --object (O_DIRECT targets local filesystem only).
+    # See mlcommons/storage#507.
+    if command != 'datasize':
+        parser.add_argument(
+            '--o-direct',
+            action='store_true',
+            default=False,
+            dest='o_direct',
+            help=(
+                "Route all training I/O through s3dlio's O_DIRECT local "
+                "filesystem mode (direct:// URI scheme), bypassing the OS "
+                "page cache.  Works for every training workload regardless "
+                "of data format.  Incompatible with --object (O_DIRECT "
+                "targets the local filesystem only)."
+            ),
+        )
+
     # --params is allowed in CLOSED mode for the parameters listed in
     # TrainingRunRulesChecker.CLOSED_ALLOWED_PARAMS (e.g. dataset.num_files_train,
     # dataset.num_subfolders_train). Register it in the core args so closed
@@ -271,6 +293,16 @@ def validate_training_arguments(args):
             f"ERROR: --data-dir is required for training {command} with object storage.\n"
             "  Specify --data-dir <key-prefix-or-URI> on the command line, or set\n"
             "  'data_dir:' in the file passed via --config-file.",
+            file=sys.stderr,
+        )
+        sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
+
+    if getattr(args, 'o_direct', False) and protocol == 'object':
+        print(
+            "ERROR: --o-direct is incompatible with --object.\n"
+            "  --o-direct routes I/O through s3dlio's direct:// URI scheme, which\n"
+            "  reads from the local filesystem with O_DIRECT — not from an S3 endpoint.\n"
+            "  Use --file with --o-direct, or use --object without --o-direct.",
             file=sys.stderr,
         )
         sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
