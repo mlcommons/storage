@@ -896,18 +896,14 @@ class Benchmark(BenchmarkInterface, abc.ABC):
             May call sys.exit(1) if invalid and --allow-invalid-params not set.
         """
         self.logger.verboser(f'Verifying benchmark parameters: {self.args}')
-        if not self.benchmark_run_verifier:
-            self.benchmark_run_verifier = BenchmarkVerifier(self, logger=self.logger)
-
-        self.verification = self.benchmark_run_verifier.verify()
-        self.logger.verboser(f'Benchmark verification result: {self.verification}')
 
         # ``args.mode`` is the source of truth (post-PR #412 modal CLI:
         # closed|open|whatif as the first positional, argparse-enforced).
-        # The ``not closed_mode and not open_mode`` branch below is the
-        # explicit short-circuit for ``mode == 'whatif'``: whatif runs
-        # without verification by design. Do not delete it — whatif is a
-        # supported execution mode.
+        # whatif short-circuits BEFORE the verifier runs so checks like
+        # ``check_num_files_train`` don't log INVALID errors against runs
+        # that aren't subject to compliance (issue #571 Q3). ``self.verification``
+        # stays ``None`` for whatif and surfaces as ``"verification": null`` in
+        # the run metadata — which is accurate: no verification was performed.
         mode = self.args.mode
         closed_mode = (mode == 'closed')
         open_mode = (mode == 'open')
@@ -915,6 +911,13 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         if not closed_mode and not open_mode:
             self.logger.warning(f'Running the benchmark without verification for open or closed configurations. These results are not valid for submission. Use closed or open as the first positional argument to specify a configuration.')
             return True
+
+        if not self.benchmark_run_verifier:
+            self.benchmark_run_verifier = BenchmarkVerifier(self, logger=self.logger)
+
+        self.verification = self.benchmark_run_verifier.verify()
+        self.logger.verboser(f'Benchmark verification result: {self.verification}')
+
         if not self.BENCHMARK_TYPE:
             raise ValueError(f'No benchmark specified. Unable to verify benchmark')
 

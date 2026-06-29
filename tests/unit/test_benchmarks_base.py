@@ -402,6 +402,12 @@ class TestBenchmarkVerifyBenchmark:
     def test_returns_true_in_whatif_mode_without_verification(self, tmp_path):
         """`mode='whatif'` short-circuits verification with a warning and returns True.
 
+        Issue #571 Q3: whatif must NOT run the BenchmarkVerifier at all —
+        before the fix the verifier ran and emitted ERROR-level INVALID
+        lines for checks like ``check_num_files_train`` even though
+        ``verify_benchmark`` then returned True. Asserting the verifier
+        was never instantiated is what locks the bypass in place.
+
         Originally written as `test_returns_true_with_neither_flag_set`,
         which exercised the legacy `closed=False, open=False` bool case.
         Post-#412 the modal CLI is argparse-enforced so the only way to
@@ -440,6 +446,49 @@ class TestBenchmarkVerifyBenchmark:
             result = benchmark.verify_benchmark()
 
         assert result is True
+        mock_verifier_class.assert_not_called()
+        assert benchmark.verification is None
+
+    def test_whatif_bypasses_invalid_verification(self, tmp_path):
+        """Issue #571 Q3: a whatif run whose params would be INVALID under
+        closed/open rules must still proceed (return True) and must NOT
+        call sys.exit(1). Before the fix, the verifier ran first and
+        emitted ERROR-level INVALID lines; the mode short-circuit returned
+        True afterwards. After the fix, the verifier never runs in whatif
+        so the INVALID branch is unreachable.
+        """
+        args = Namespace(
+            mode='whatif',
+            dry_run=False,
+            orgname='Acme',
+            systemname='sys-v1',
+            debug=False,
+            verbose=False,
+            what_if=False,
+            stream_log_level='INFO',
+            results_dir=str(tmp_path),
+            model='unet3d',
+            command='run',
+            num_processes=8,
+            accelerator_type='h100',
+            closed=False,
+            open=False,
+            allow_invalid_params=False,
+        )
+
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen:
+            mock_gen.return_value = str(tmp_path / "output")
+            benchmark = ConcreteBenchmark(args, run_datetime="20250115_120000")
+
+        with patch('mlpstorage_py.benchmarks.base.BenchmarkVerifier') as mock_verifier_class:
+            mock_verifier = MagicMock()
+            mock_verifier.verify.return_value = PARAM_VALIDATION.INVALID
+            mock_verifier_class.return_value = mock_verifier
+
+            result = benchmark.verify_benchmark()
+
+        assert result is True
+        mock_verifier_class.assert_not_called()
 
 
 class TestBenchmarkRun:
