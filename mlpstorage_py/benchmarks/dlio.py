@@ -380,6 +380,15 @@ class DLIOBenchmark(Benchmark, abc.ABC):
     _OBJECT_URI_SCHEMES = frozenset({'s3', 's3a', 'az', 'gs'})
     _LOCAL_URI_SCHEMES = frozenset({'file', 'direct'})
 
+    def _is_object_storage(self) -> bool:
+        """True when storage_type selects an object backend (s3/s3_torch)."""
+        storage_type = (
+            self.params_dict.get('storage.storage_type')
+            or (self.combined_params or {}).get('storage', {}).get('storage_type')
+            or 'local'
+        )
+        return storage_type in self._OBJECT_STORAGE_TYPES
+
     def _check_storage_scheme_consistency(self):
         """Fail fast on storage.storage_type vs data/checkpoint folder mismatch.
 
@@ -811,10 +820,11 @@ class TrainingBenchmark(DLIOBenchmark):
         )
         return int(total_disk_bytes)
 
-    def _capacity_gate_destination(self) -> str:
-        """Return ``args.data_dir`` — the training dataset destination per
-        REQUIREMENTS.md CAP-01.
-        """
+    def _capacity_gate_destination(self):
+        """Return ``args.data_dir`` (CAP-01); ``None`` for object storage,
+        which has no local filesystem to statvfs."""
+        if self._is_object_storage():
+            return None
         return self.args.data_dir
 
     def datasize(self):
@@ -961,8 +971,11 @@ class CheckpointingBenchmark(DLIOBenchmark):
         If ``args.checkpoint_folder`` is None or empty, returns ``None`` so
         the ``_pre_execution_gate`` A8 escape hatch fires cleanly. The
         upstream CLI validation already requires checkpoint_folder for
-        real runs; this is defensive.
+        real runs; this is defensive.  ``None`` for object storage too —
+        no local filesystem to statvfs.
         """
+        if self._is_object_storage():
+            return None
         cf = getattr(self.args, "checkpoint_folder", None)
         if not cf:
             return None
