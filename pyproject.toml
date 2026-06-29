@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlpstorage"
-version = "3.0.25"
+version = "3.0.26"
 description = "MLPerf Storage Benchmark Suite"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -129,6 +129,9 @@ torchaudio = [{ index = "pytorch-cpu" }]
 # Pinned to a specific commit for reproducibility; bump by updating `rev` and
 # re-running `uv lock --upgrade-package dlio-benchmark`.
 # Commit history (most recent first):
+#   - DLIO PR #39 fix for storage #567: O_DIRECT path triggers on
+#     uri_scheme=direct so direct_fs (--o-direct) reaches s3dlio instead of
+#     crashing buffered open() with a direct:// URI
 #   - DLIO PR #38 fix for storage #538: wire DIRECT_FS for --o-direct local
 #     O_DIRECT I/O (merged form supersedes the pre-merge pin from 3.0.23)
 #   - DLIO PR #37: restrict default `pytest` to checkin suite; full suite must
@@ -142,7 +145,7 @@ torchaudio = [{ index = "pytorch-cpu" }]
 #   - DLIO PR #23 fix for storage #391 part 2 (sudo -n + warn-once for drop_caches)
 #   - DLIO PR #22 fix for storage #415 (mpi4py auto-init in spawn workers)
 #   - DLIO PR #21 fix for storage #391 part 1 (TorchIterableDatasetSimple gating)
-dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "252a54b18d113541e1e8e24832921fac0a7f2b96" }
+dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "f16fe43f657360e80f56fd3e9826b167620866e7" }
 
 [dependency-groups]
 dev = [
