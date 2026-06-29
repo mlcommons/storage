@@ -501,3 +501,153 @@ class TestProcessDlioParamsFullChain:
             obj.params_dict = params_dict
             DLIOBenchmark._apply_object_storage_params(obj)
         assert 'storage.storage_root' not in obj.params_dict
+
+
+# ---------------------------------------------------------------------------
+# Issue #583: checkpoint_folder scheme stripping + env-var bridge
+# ---------------------------------------------------------------------------
+
+CHECKPOINT_URI_SCHEME_ENV = 'MLPSTORAGE_CHECKPOINT_URI_SCHEME'
+
+
+def _make_checkpoint_obj(
+    checkpoint_folder,
+    model='llama3-8b',
+    storage_type='s3',
+    num_processes=8,
+):
+    """Stand-in for CheckpointingBenchmark 'self' when testing
+    add_checkpoint_params scheme handling. ``storage_type`` controls
+    whether the strip-and-set-env branch fires (object backends only)
+    so file-mode mismatches stay catchable by
+    ``_check_storage_scheme_consistency`` downstream."""
+    from mlpstorage_py.config import LLM_ALLOWED_VALUES
+    _, _, _, closed_gpus = LLM_ALLOWED_VALUES[model]
+    obj = MagicMock(spec=['args', 'params_dict', 'logger'])
+    obj.args = Namespace(
+        o_direct=False,
+        checkpoint_folder=checkpoint_folder,
+        model=model,
+        num_processes=num_processes,
+        num_checkpoints_read=10,
+        num_checkpoints_write=10,
+    )
+    obj.params_dict = {'storage.storage_type': storage_type}
+    obj.logger = MagicMock()
+    return obj
+
+
+class TestAddCheckpointParamsSchemeStripping:
+    """Issue #583: object-mode checkpointing must strip the URI scheme
+    from ``checkpoint_folder`` so DLIO's preflight (which prepends the
+    scheme itself) doesn't produce ``s3://s3://…``. The stripped scheme
+    is plumbed to the writer subprocess via env so it can reconstruct.
+
+    Mirrors the #459 fix for ``storage.storage_root`` but conditioned on
+    object-storage mode — leaving the strip out for ``local`` /
+    ``direct_fs`` preserves the existing
+    ``_check_storage_scheme_consistency`` guardrail (which catches
+    ``--file`` + ``--checkpoint-folder s3://…`` user mistakes).
+    """
+
+    def test_strips_s3_scheme_in_object_mode(self, monkeypatch):
+        monkeypatch.delenv(CHECKPOINT_URI_SCHEME_ENV, raising=False)
+        from mlpstorage_py.benchmarks.dlio import CheckpointingBenchmark
+        obj = _make_checkpoint_obj('s3://mybucket/ckpt', storage_type='s3')
+        CheckpointingBenchmark.add_checkpoint_params(obj)
+        assert (
+            obj.params_dict['checkpoint.checkpoint_folder']
+            == 'mybucket/ckpt/llama3-8b'
+        )
+
+    def test_strips_az_scheme_in_object_mode(self, monkeypatch):
+        monkeypatch.delenv(CHECKPOINT_URI_SCHEME_ENV, raising=False)
+        from mlpstorage_py.benchmarks.dlio import CheckpointingBenchmark
+        obj = _make_checkpoint_obj('az://container/ckpt', storage_type='s3')
+        CheckpointingBenchmark.add_checkpoint_params(obj)
+        assert (
+            obj.params_dict['checkpoint.checkpoint_folder']
+            == 'container/ckpt/llama3-8b'
+        )
+
+    def test_strips_gs_scheme_in_object_mode(self, monkeypatch):
+        monkeypatch.delenv(CHECKPOINT_URI_SCHEME_ENV, raising=False)
+        from mlpstorage_py.benchmarks.dlio import CheckpointingBenchmark
+        obj = _make_checkpoint_obj('gs://bucket/ckpt', storage_type='s3')
+        CheckpointingBenchmark.add_checkpoint_params(obj)
+        assert (
+            obj.params_dict['checkpoint.checkpoint_folder']
+            == 'bucket/ckpt/llama3-8b'
+        )
+
+    def test_no_strip_for_bare_path_in_object_mode(self, monkeypatch):
+        """If the operator already passed the bare form, behave the same
+        as before — no double-strip, no env clobber from an empty scheme."""
+        monkeypatch.delenv(CHECKPOINT_URI_SCHEME_ENV, raising=False)
+        from mlpstorage_py.benchmarks.dlio import CheckpointingBenchmark
+        obj = _make_checkpoint_obj('bucket/ckpt', storage_type='s3')
+        CheckpointingBenchmark.add_checkpoint_params(obj)
+        assert (
+            obj.params_dict['checkpoint.checkpoint_folder']
+            == 'bucket/ckpt/llama3-8b'
+        )
+        assert CHECKPOINT_URI_SCHEME_ENV not in os.environ
+
+    def test_no_strip_in_file_mode_preserves_consistency_guard(self, monkeypatch):
+        """``_check_storage_scheme_consistency`` is what catches the
+        ``--file --checkpoint-folder s3://…`` user mistake. If we strip
+        unconditionally, that guard sees a bare path and lets the
+        misconfiguration through. The strip must be conditioned on
+        object storage mode."""
+        monkeypatch.delenv(CHECKPOINT_URI_SCHEME_ENV, raising=False)
+        from mlpstorage_py.benchmarks.dlio import CheckpointingBenchmark
+        obj = _make_checkpoint_obj('s3://mybucket/ckpt', storage_type='local')
+        CheckpointingBenchmark.add_checkpoint_params(obj)
+        assert (
+            obj.params_dict['checkpoint.checkpoint_folder']
+            == 's3://mybucket/ckpt/llama3-8b'
+        )
+        assert CHECKPOINT_URI_SCHEME_ENV not in os.environ
+
+    def test_no_strip_for_direct_fs_odirect_mode(self, monkeypatch):
+        """--o-direct sets storage_type='direct_fs'; the namespace is a
+        local path — no preflight double-prefix problem to solve."""
+        monkeypatch.delenv(CHECKPOINT_URI_SCHEME_ENV, raising=False)
+        from mlpstorage_py.benchmarks.dlio import CheckpointingBenchmark
+        obj = _make_checkpoint_obj('/mnt/ckpts', storage_type='direct_fs')
+        CheckpointingBenchmark.add_checkpoint_params(obj)
+        assert (
+            obj.params_dict['checkpoint.checkpoint_folder']
+            == '/mnt/ckpts/llama3-8b'
+        )
+        assert CHECKPOINT_URI_SCHEME_ENV not in os.environ
+
+    def test_env_var_set_to_scheme_when_stripped(self, monkeypatch):
+        monkeypatch.delenv(CHECKPOINT_URI_SCHEME_ENV, raising=False)
+        from mlpstorage_py.benchmarks.dlio import CheckpointingBenchmark
+        obj = _make_checkpoint_obj('s3://mybucket/ckpt', storage_type='s3')
+        CheckpointingBenchmark.add_checkpoint_params(obj)
+        assert os.environ.get(CHECKPOINT_URI_SCHEME_ENV) == 's3'
+
+    def test_env_var_set_for_each_object_scheme(self, monkeypatch):
+        from mlpstorage_py.benchmarks.dlio import CheckpointingBenchmark
+        for folder, scheme in (
+            ('s3://b/p', 's3'),
+            ('az://c/p', 'az'),
+            ('gs://b/p', 'gs'),
+        ):
+            monkeypatch.delenv(CHECKPOINT_URI_SCHEME_ENV, raising=False)
+            obj = _make_checkpoint_obj(folder, storage_type='s3')
+            CheckpointingBenchmark.add_checkpoint_params(obj)
+            assert os.environ.get(CHECKPOINT_URI_SCHEME_ENV) == scheme, (
+                f'expected scheme {scheme!r} for {folder!r}'
+            )
+
+    def test_env_var_not_set_when_no_checkpoint_folder(self, monkeypatch):
+        monkeypatch.delenv(CHECKPOINT_URI_SCHEME_ENV, raising=False)
+        from mlpstorage_py.benchmarks.dlio import CheckpointingBenchmark
+        obj = _make_checkpoint_obj('', storage_type='s3')
+        # Empty folder → the ``if self.args.checkpoint_folder`` guard
+        # in add_checkpoint_params short-circuits, no strip, no env.
+        CheckpointingBenchmark.add_checkpoint_params(obj)
+        assert CHECKPOINT_URI_SCHEME_ENV not in os.environ

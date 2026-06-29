@@ -7,6 +7,7 @@ from typing import Optional
 from urllib.parse import urlparse
 
 from mlpstorage_py.benchmarks.base import Benchmark
+from mlpstorage_py.checkpointing.storage_writers import CHECKPOINT_URI_SCHEME_ENV
 from mlpstorage_py.config import (CONFIGS_ROOT_DIR, BENCHMARK_TYPES, EXEC_TYPE, MPIRUN, MLPSTORAGE_BIN_NAME,
                                LLM_ALLOWED_VALUES, LLM_SUBSET_PROCS, EXIT_CODE, MODELS, HYDRA_OUTPUT_SUBDIR,
                                LLM_SIZE_BY_RANK)
@@ -920,7 +921,26 @@ class CheckpointingBenchmark(DLIOBenchmark):
             # For direct:// / file:// schemes, ObjStoreLibStorage._preflight validates
             # that namespace as a local directory — so it must be an absolute path,
             # not relative to storage.storage_root. See issue #536.
-            self.params_dict['checkpoint.checkpoint_folder'] = os.path.join(self.args.checkpoint_folder, self.args.model)
+            folder = self.args.checkpoint_folder
+            storage_type = self.params_dict.get('storage.storage_type', 'local')
+            if storage_type in DLIOBenchmark._OBJECT_STORAGE_TYPES:
+                # Issue #583: mirror the #459 storage_root fix — DLIO's
+                # ObjStoreLibStorage._preflight prepends the scheme itself,
+                # so feeding it s3://bucket/... produces s3://s3://bucket/...
+                # Strip the scheme and stash it in an env var so the
+                # streaming-checkpoint writer (forked from DLIO, inherits
+                # env) can reconstruct the qualified URI at dispatch time.
+                normalized = DLIOBenchmark._strip_uri_scheme(folder)
+                if normalized != folder:
+                    scheme = urlparse(folder).scheme
+                    os.environ[CHECKPOINT_URI_SCHEME_ENV] = scheme
+                    self.logger.debug(
+                        f'Normalized checkpoint_folder: {folder!r} -> {normalized!r}; '
+                        f'set {CHECKPOINT_URI_SCHEME_ENV}={scheme!r} for the '
+                        'streaming-writer subprocess (issue #583).'
+                    )
+                folder = normalized
+            self.params_dict['checkpoint.checkpoint_folder'] = os.path.join(folder, self.args.model)
 
 
     def add_workflow_to_cmd(self, cmd) -> str:

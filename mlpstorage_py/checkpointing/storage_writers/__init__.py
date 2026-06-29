@@ -12,6 +12,8 @@ Use StorageWriterFactory.create() to automatically select the appropriate
 backend based on URI scheme or explicit backend name.
 """
 
+import os
+
 from .base import StorageWriter
 from .file_writer import FileStorageWriter
 from .s3dlio_writer import S3DLIOStorageWriter
@@ -19,9 +21,35 @@ from .s3dlio_writer import S3DLIOStorageWriter
 from typing import Optional, Any
 
 
+CHECKPOINT_URI_SCHEME_ENV = 'MLPSTORAGE_CHECKPOINT_URI_SCHEME'
+
+
+def _normalize_checkpoint_uri(uri: str) -> str:
+    """Reconstruct an object-storage URI when mlpstorage stripped the scheme.
+
+    Issue #583: ``CheckpointingBenchmark.add_checkpoint_params`` strips the
+    URI scheme from ``checkpoint_folder`` so DLIO's
+    ``ObjStoreLibStorage._preflight`` (which prepends the scheme itself,
+    the #392 / #459 pattern) doesn't produce ``s3://s3://…``. The writer
+    process — forked from DLIO, inheriting env — reads
+    ``MLPSTORAGE_CHECKPOINT_URI_SCHEME`` to put the scheme back before
+    dispatch. Without this bridge the writer would silently fall back to
+    the local FileStorageWriter on a scheme-less path, a data integrity
+    failure rather than a loud one.
+
+    No-op when the URI already has a scheme OR the env var is unset/empty.
+    """
+    if '://' in uri:
+        return uri
+    scheme = os.environ.get(CHECKPOINT_URI_SCHEME_ENV)
+    if not scheme:
+        return uri
+    return f'{scheme}://{uri}'
+
+
 class StorageWriterFactory:
     """Factory for creating storage writer instances based on URI or explicit backend."""
-    
+
     @staticmethod
     def create(
         uri_or_path: str,
@@ -60,6 +88,11 @@ class StorageWriterFactory:
             ...     use_direct_io=True
             ... )
         """
+        # Issue #583: reconstruct the URI scheme mlpstorage stripped to
+        # work around the DLIO preflight double-prefix bug. No-op if the
+        # URI already has a scheme or the env hint isn't set.
+        uri_or_path = _normalize_checkpoint_uri(uri_or_path)
+
         # Explicit backend selection
         if backend:
             if backend == 'file':

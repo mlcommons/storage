@@ -76,7 +76,14 @@ class S3DLIOStorageWriter(StorageWriter):
             raise ImportError(
                 "s3dlio not available. Install with: pip install s3dlio"
             )
-        
+
+        # Issue #583: reconstruct the URI scheme if mlpstorage stripped it
+        # in CheckpointingBenchmark.add_checkpoint_params to dodge the
+        # DLIO ObjStoreLibStorage preflight double-prefix bug. Caller-
+        # supplied scheme-qualified URIs pass through unchanged.
+        from . import _normalize_checkpoint_uri
+        uri = _normalize_checkpoint_uri(uri)
+
         self.uri = uri
         self.chunk_size = chunk_size
         self.part_size = part_size
