@@ -50,6 +50,14 @@ mpi = [
   "mpi4py>=4.0.0",
 ]
 
+test = [
+  "pytest>=7.0",
+  "pyyaml",
+  "h5py",
+  "psutil",
+  "mpi4py>=4.0.0",
+]
+
 [project.urls]
 "Homepage" = "https://github.com/mlcommons/storage/tree/main/vdb_benchmark"
 "Bug Tracker" = "https://github.com/mlcommons/storage/issues"

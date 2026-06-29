@@ -122,8 +122,8 @@ def _add_checkpointing_core_args(parser, command):
 
     # --o-direct: available for run and configview (not datasize).
     # Routes all checkpoint I/O through s3dlio's direct:// URI scheme with
-    # O_DIRECT, bypassing the OS page cache.  Incompatible with --object.
-    # See mlcommons/storage#507.
+    # O_DIRECT, bypassing the OS page cache.  Requires the 'file'
+    # data-access protocol.  See mlcommons/storage#507.
     if command in ("run", "configview"):
         parser.add_argument(
             '--o-direct',
@@ -133,7 +133,7 @@ def _add_checkpointing_core_args(parser, command):
             help=(
                 "Route all checkpoint I/O through s3dlio's O_DIRECT local "
                 "filesystem mode (direct:// URI scheme), bypassing the OS "
-                "page cache.  Incompatible with --object."
+                "page cache.  Requires the 'file' data-access protocol."
             ),
         )
 
@@ -230,9 +230,18 @@ def validate_checkpointing_arguments(args):
         protocol = getattr(args, 'data_access_protocol', None)
         if protocol == 'object':
             error_messages.append(
-                "--o-direct is incompatible with --object. "
+                "--o-direct is incompatible with the 'object' data-access protocol. "
                 "O_DIRECT mode reads from the local filesystem via s3dlio's "
-                "direct:// URI scheme; it cannot be combined with an S3 endpoint."
+                "direct:// URI scheme; it cannot be combined with an S3 endpoint. "
+                "Use the 'file' positional with --o-direct for O_DIRECT local I/O, "
+                "e.g. `mlpstorage <mode> checkpointing run file --o-direct`."
+            )
+        elif protocol != 'file':
+            error_messages.append(
+                "--o-direct requires the 'file' data-access protocol. "
+                "O_DIRECT mode routes I/O through s3dlio's direct:// URI scheme on the "
+                "local filesystem and must be combined with the 'file' positional, "
+                "e.g. `mlpstorage <mode> checkpointing run file --o-direct`."
             )
 
     if error_messages:

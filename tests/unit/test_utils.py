@@ -472,7 +472,7 @@ class TestGenerateMpiPrefixCmd:
         assert '--map-by node' in result  # Multi-host uses node
 
     def test_mpiexec_command(self, mock_logger):
-        """mpiexec generates correct command prefix."""
+        """mpiexec (HPE Cray PALS) generates a PALS-native prefix."""
         result = generate_mpi_prefix_cmd(
             mpi_cmd=MPIEXEC,
             hosts=['host1'],
@@ -482,7 +482,48 @@ class TestGenerateMpiPrefixCmd:
             params=None,
             logger=mock_logger
         )
-        assert 'mpiexec' in result or '-n 4' in result
+        # PALS-native flags
+        assert 'mpiexec' in result
+        assert '-n 4' in result
+        assert '--ppn 4' in result
+        assert '--hosts host1' in result
+        assert '--cpu-bind' in result
+        # OpenMPI-only flags PALS cannot parse must be absent
+        assert '--npernode' not in result
+        assert '--bind-to' not in result
+        assert '--map-by' not in result
+        assert '-host ' not in result  # PALS uses --hosts, not OpenMPI -host
+
+    def test_mpiexec_multi_host_ppn(self, mock_logger):
+        """mpiexec spreads ranks per node via --ppn over a bare --hosts list."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIEXEC,
+            hosts=['host1', 'host2'],
+            num_processes=8,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=None,
+            logger=mock_logger,
+            processes_per_node=4
+        )
+        assert '-n 8' in result
+        assert '--ppn 4' in result
+        assert '--hosts host1,host2' in result
+        assert '--npernode' not in result and '--map-by' not in result
+
+    def test_mpiexec_user_cpu_bind_suppresses_default(self, mock_logger):
+        """A user-supplied --cpu-bind via params suppresses the injected default."""
+        result = generate_mpi_prefix_cmd(
+            mpi_cmd=MPIEXEC,
+            hosts=['host1'],
+            num_processes=4,
+            oversubscribe=False,
+            allow_run_as_root=False,
+            params=['--cpu-bind', 'depth'],
+            logger=mock_logger
+        )
+        assert result.count('--cpu-bind') == 1
+        assert 'depth' in result
 
     def test_oversubscribe_flag(self, mock_logger):
         """Oversubscribe flag is added when True."""

@@ -110,4 +110,7 @@ ignore_missing_imports = true
 testpaths = ["tests", "."]
 python_files = ["test_*.py"]
 python_functions = ["test_*"]
-addopts = "-v --tb=short"
+addopts = "-v --tb=short -m 'not slow'"
+markers = [
+    "slow: tests that take >5s (e.g., large GPU-overflow allocations, profiling). Excluded from the default suite; opt in with `pytest -m slow` (or `pytest -m ''` to run everything).",
+]

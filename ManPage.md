@@ -507,6 +507,23 @@ Required positionals: `<model>` then `<command>` and, for `datagen`/`run`/`confi
 - **`--accelerator-type <type>`, `-at <type>`**
   Accelerator the workload should emulate (e.g. `h100`, `b200`, `mi355`). Determines per-accelerator access patterns and data rates. Required for `datasize`, `run`, `configview`.
 
+  **Supported (model, accelerator) combinations**
+
+  | Model     | a100   | h100   | b200       | mi355      |
+  |-----------|:------:|:------:|:----------:|:----------:|
+  | unet3d    | whatif | —      | **v3.0**   | —          |
+  | retinanet | —      | —      | **v3.0**   | **v3.0**   |
+  | cosmoflow | whatif | whatif | —          | —          |
+  | resnet50  | whatif | whatif | —          | —          |
+  | dlrm      | —      | —      | whatif     | whatif     |
+  | flux      | —      | —      | whatif     | whatif     |
+
+  - **v3.0** — submittable in CLOSED or OPEN.
+  - **whatif** — available only via `mlpstorage whatif …` for planning. Not submittable.
+  - **—** — no workload definition file. `mlpstorage` will fail with a "combination not supported" error pointing at the missing YAML.
+
+  Any (model, accelerator) combination not marked **v3.0** is available under `whatif` for planning purposes if a workload definition file is provided.
+
 - **`--num-accelerators <N>`, `-na <N>`**
   Number of simulated accelerators for `run`/`configview`. Ranks are distributed round-robin across `--hosts`.
 

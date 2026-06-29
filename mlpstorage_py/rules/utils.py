@@ -168,9 +168,6 @@ def calculate_training_data_size(args, cluster_information, dataset_params, read
 def generate_output_location(
     benchmark,
     datetime_str=None,
-    *,
-    orgname: Optional[str] = None,
-    systemname: Optional[str] = None,
     **kwargs,
 ) -> str:
     """
@@ -193,9 +190,9 @@ def generate_output_location(
 
     This function is PURE with respect to args.{mode, orgname, systemname} —
     it does NOT resolve orgname from the sentinel or read MLPERF_SYSTEMNAME
-    here. Per RESEARCH.md Pitfall 1, orgname resolution lives upstream in
-    main._main_impl()'s sentinel-resolution gate (Slice 4); the universal
-    --systemname plumbing (Slice 3 / this plan) populates args.systemname.
+    here. orgname resolution lives upstream in main._main_impl()'s
+    orgname-resolution gate (reads `orgname.yaml` written by
+    `mlpstorage init`); --systemname plumbing populates args.systemname.
 
     Every path segment appended to results_dir is validated via
     _check_safe_path_component() to block path-traversal ('../') and
@@ -242,6 +239,7 @@ def generate_output_location(
         raise ConfigurationError(
             "Cannot generate output location: orgname is empty "
             "(sentinel not resolved).",
+            parameter="orgname",
             suggestion=(
                 "Internal error: the upstream orgname-resolution gate in "
                 "main._main_impl() must populate args.orgname before "
@@ -253,9 +251,10 @@ def generate_output_location(
     if not systemname:
         raise ConfigurationError(
             "Cannot generate output location: --systemname is empty.",
+            parameter="systemname",
             suggestion=(
                 "Pass --systemname <name> on the CLI or set the "
-                "MLPERF_SYSTEMNAME environment variable before re-running."
+                "MLPSTORAGE_SYSTEMNAME environment variable before re-running."
             ),
             code=ErrorCode.CONFIG_MISSING_REQUIRED,
         )

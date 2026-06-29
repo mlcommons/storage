@@ -3554,6 +3554,11 @@ class TestSharedFsProbeNonRank0Silence:
             ["probe", str(tmp_path), "silence-test-uuid"],
         )
 
+        # The probe's rank-0 D-49 quiesce path sleeps 5s; neutralize for the
+        # unit test (we're only locking the stdout marker contract).
+        import time as _time
+        monkeypatch.setattr(_time, "sleep", lambda *_a, **_kw: None)
+
         from mlpstorage_py.cluster_collector import SHARED_FS_PROBE_SCRIPT
 
         captured = io.StringIO()

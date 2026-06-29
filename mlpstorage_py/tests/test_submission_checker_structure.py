@@ -553,7 +553,7 @@ def _write_valid_hash_json(code_path, mock_logger, **overrides):
     digest = compute_code_tree_md5(str(code_path), mock_logger)
     payload = {
         "hash": digest,
-        "algorithm": "md5-tree-v1",
+        "algorithm": "md5-tree-v2",
         "captured_at": "2026-06-17T00:00:00Z",
         "mlpstorage_version": "3.0.9",
         "git_sha": None,

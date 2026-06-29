@@ -155,7 +155,11 @@ class TestValidateBenchmarkEnvironment:
         mock_logger = MagicMock()
 
         with pytest.raises(DependencyError) as exc_info:
-            validate_benchmark_environment(args, logger=mock_logger)
+            # skip_remote_checks: hosts=['node1','node2'] would otherwise
+            # trigger a real SSH probe to nonexistent hosts (~20s of
+            # connect timeouts); this test only asserts that multiple
+            # errors accumulate, which the MPI+DLIO mocks already cover.
+            validate_benchmark_environment(args, logger=mock_logger, skip_remote_checks=True)
 
         # First error should be raised (MPI)
         assert "MPI not found" in str(exc_info.value)

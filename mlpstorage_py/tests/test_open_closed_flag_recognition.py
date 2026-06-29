@@ -1,24 +1,28 @@
 #!/usr/bin/env python3
 """
-Regression tests for issue #349: ``--open`` was indistinguishable from "no flag".
+Regression tests for the closed/open/whatif mode dispatch in
+``Benchmark.verify_benchmark()``.
 
-Before the fix:
+History:
 
-* ``--open`` was defined with ``action="store_false", dest="closed"``, so it
-  produced the same Namespace (``args.closed=False``, no ``args.open``) as
-  passing nothing at all.
-* ``verify_benchmark()`` used ``hasattr(self.args, "open")`` which is
-  *always* False, so ``--open`` fell through to the "Running the benchmark
-  without verification for open or closed configurations" warning branch
-  and skipped formal verification.
+* Issue #349: a pre-#412 design had ``--open`` and ``--closed`` as boolean
+  flags. Tests verifying that the flags reached argparse and that
+  ``verify_benchmark`` distinguished them used to live here. PR #412
+  reshaped the CLI to use a positional ``mode`` argument (``closed`` |
+  ``open`` | ``whatif``), retiring those flags entirely.
 
-After the fix:
+* Issue #412: a second regression nearly slipped in when
+  ``verify_benchmark()`` was not migrated to the new ``args.mode`` shape and
+  silently fell back to the "no verification" warning branch for every live
+  invocation. The tests in this file pin the post-#412 dispatch contract.
 
-* ``--open`` sets ``args.open=True`` as an independent boolean.
-* ``verify_benchmark()`` uses ``getattr`` on both ``open`` and ``closed``;
-  the warning branch triggers only when **neither** flag is set.
+Coverage today:
 
-These tests pin that behavior.
+* ``TestVerifyBenchmarkPost412ModeDispatch`` — ``args.mode`` drives the
+  closed/open/whatif branches inside ``verify_benchmark``; this is the
+  current production contract.
+* ``TestKVCacheOpenFlag`` — pins the helper predicate shape that downstream
+  kvcache code uses to check "did the user opt in to verification?".
 """
 
 import sys
@@ -40,55 +44,7 @@ from mlpstorage_py.config import PARAM_VALIDATION, BENCHMARK_TYPES
 
 
 # ---------------------------------------------------------------------------
-# Part 1: CLI parser produces distinguishable --open / --closed / neither
-# ---------------------------------------------------------------------------
-
-class TestOpenClosedCLIFlags:
-    """The argparse definition must let callers tell the three cases apart."""
-
-    def _build_parser(self):
-        import argparse
-        from mlpstorage_py.cli.common_args import (
-            add_universal_arguments,
-            add_storage_type_arguments,
-        )
-        parser = argparse.ArgumentParser()
-        add_universal_arguments(parser)
-        # --file/--object now live exclusively in add_storage_type_arguments
-        # (see issue #376). Real benchmark subparsers call both, so the
-        # test mirrors that to keep ``--file`` available in parse_args calls.
-        add_storage_type_arguments(parser)
-        return parser
-
-    def test_neither_flag_sets_both_false(self):
-        parser = self._build_parser()
-        # --file is required by a separate mutually-exclusive group; pass it
-        # to avoid the unrelated "one of --file --object required" error.
-        args = parser.parse_args(["--file"])
-        assert getattr(args, "closed", None) is False
-        assert getattr(args, "open", None) is False
-
-    def test_open_flag_sets_open_true_closed_false(self):
-        parser = self._build_parser()
-        args = parser.parse_args(["--file", "--open"])
-        assert args.open is True
-        assert args.closed is False
-
-    def test_closed_flag_sets_closed_true_open_false(self):
-        parser = self._build_parser()
-        args = parser.parse_args(["--file", "--closed"])
-        assert args.closed is True
-        assert args.open is False
-
-    def test_open_and_closed_are_mutually_exclusive(self):
-        parser = self._build_parser()
-        # argparse exits with SystemExit(2) on mutually-exclusive violation
-        with pytest.raises(SystemExit):
-            parser.parse_args(["--file", "--open", "--closed"])
-
-
-# ---------------------------------------------------------------------------
-# Part 2: verify_benchmark() respects the new semantics
+# verify_benchmark() ``args.mode`` dispatch (post-#412)
 # ---------------------------------------------------------------------------
 
 def _make_benchmark(tmp_path, **arg_overrides):
@@ -111,8 +67,6 @@ def _make_benchmark(tmp_path, **arg_overrides):
         num_processes=8,
         accelerator_type="h100",
         allow_invalid_params=False,
-        closed=False,
-        open=False,
     )
     defaults.update(arg_overrides)
 
@@ -129,103 +83,6 @@ def _make_benchmark(tmp_path, **arg_overrides):
     return bench
 
 
-class TestVerifyBenchmarkOpenFlag:
-    """Fixes for issue #349 — the heart of the bug."""
-
-    def test_open_flag_does_not_hit_no_verification_warning(self, tmp_path):
-        """
-        Regression test for #349: passing --open must NOT route through the
-        "Running the benchmark without verification" warning branch.
-        """
-        bench = _make_benchmark(tmp_path, open=True, closed=False)
-
-        with patch("mlpstorage_py.benchmarks.base.BenchmarkVerifier") as mock_cls:
-            mock_verifier = MagicMock()
-            mock_verifier.verify.return_value = PARAM_VALIDATION.OPEN
-            mock_cls.return_value = mock_verifier
-
-            result = bench.verify_benchmark()
-
-        assert result is True
-        # The "no verification" warning must NOT have been emitted.
-        for call in bench.logger.warning.call_args_list:
-            assert "without verification for open or closed" not in call.args[0], \
-                "--open should route to formal verification, not the 'no verification' warning"
-        # A proper OPEN-allowed status message should have been emitted instead.
-        status_msgs = [c.args[0] for c in bench.logger.status.call_args_list]
-        assert any("allowed open configuration" in m for m in status_msgs), \
-            "Expected 'Running as allowed open configuration' status message"
-
-    def test_closed_flag_accepts_closed_verification(self, tmp_path):
-        bench = _make_benchmark(tmp_path, closed=True, open=False)
-
-        with patch("mlpstorage_py.benchmarks.base.BenchmarkVerifier") as mock_cls:
-            mock_verifier = MagicMock()
-            mock_verifier.verify.return_value = PARAM_VALIDATION.CLOSED
-            mock_cls.return_value = mock_verifier
-
-            result = bench.verify_benchmark()
-
-        assert result is True
-
-    def test_closed_flag_rejects_open_only_params(self, tmp_path):
-        """If user asked for --closed but params only qualify for OPEN, exit."""
-        bench = _make_benchmark(tmp_path, closed=True, open=False)
-
-        with patch("mlpstorage_py.benchmarks.base.BenchmarkVerifier") as mock_cls:
-            mock_verifier = MagicMock()
-            mock_verifier.verify.return_value = PARAM_VALIDATION.OPEN
-            mock_cls.return_value = mock_verifier
-
-            with pytest.raises(SystemExit):
-                bench.verify_benchmark()
-
-    def test_neither_flag_emits_no_verification_warning(self, tmp_path):
-        """
-        Unchanged contract: when neither --open nor --closed is passed, the
-        benchmark runs with a warning and skips formal verification.
-        """
-        bench = _make_benchmark(tmp_path, closed=False, open=False)
-
-        with patch("mlpstorage_py.benchmarks.base.BenchmarkVerifier") as mock_cls:
-            mock_verifier = MagicMock()
-            mock_verifier.verify.return_value = PARAM_VALIDATION.CLOSED
-            mock_cls.return_value = mock_verifier
-
-            result = bench.verify_benchmark()
-
-        assert result is True
-        assert any(
-            "without verification for open or closed" in c.args[0]
-            for c in bench.logger.warning.call_args_list
-        ), "Default (neither flag) should warn that no verification is being performed"
-
-    def test_invalid_params_exits_without_allow_flag(self, tmp_path):
-        bench = _make_benchmark(tmp_path, closed=True, open=False,
-                                allow_invalid_params=False)
-
-        with patch("mlpstorage_py.benchmarks.base.BenchmarkVerifier") as mock_cls:
-            mock_verifier = MagicMock()
-            mock_verifier.verify.return_value = PARAM_VALIDATION.INVALID
-            mock_cls.return_value = mock_verifier
-
-            with pytest.raises(SystemExit):
-                bench.verify_benchmark()
-
-    def test_invalid_params_allowed_with_flag(self, tmp_path):
-        bench = _make_benchmark(tmp_path, closed=True, open=False,
-                                allow_invalid_params=True)
-
-        with patch("mlpstorage_py.benchmarks.base.BenchmarkVerifier") as mock_cls:
-            mock_verifier = MagicMock()
-            mock_verifier.verify.return_value = PARAM_VALIDATION.INVALID
-            mock_cls.return_value = mock_verifier
-
-            result = bench.verify_benchmark()
-
-        assert result is True
-
-
 class TestVerifyBenchmarkPost412ModeDispatch:
     """Post-PR-#412 CLI redesign: closed/open is now ``args.mode``, not the
     pair of bools ``args.closed`` / ``args.open``. The dispatch in
@@ -234,17 +91,14 @@ class TestVerifyBenchmarkPost412ModeDispatch:
     to the no-verification warning branch — effectively re-introducing the
     bug PR #352 fixed for #349.
 
-    These tests build Namespaces in the new post-#412 shape (no
-    ``closed``/``open`` attrs, just ``mode='closed'|'open'``) and assert
-    that verify_benchmark dispatches correctly.
+    These tests build Namespaces in the post-#412 shape (``mode='closed'`` |
+    ``'open'`` | ``'whatif'``) and assert that verify_benchmark dispatches
+    correctly.
     """
 
     def _make_modal_bench(self, tmp_path, mode, **arg_overrides):
         """Build a benchmark with a post-#412 Namespace shape."""
         bench = _make_benchmark(tmp_path, **arg_overrides)
-        # Strip the pre-#412 attrs and set the post-#412 mode string.
-        del bench.args.closed
-        del bench.args.open
         bench.args.mode = mode
         return bench
 
@@ -318,7 +172,7 @@ class TestVerifyBenchmarkPost412ModeDispatch:
 
 
 # ---------------------------------------------------------------------------
-# Part 3: kvcache triggers verification for --open too (not just --closed)
+# kvcache helper predicate shape
 # ---------------------------------------------------------------------------
 
 class TestKVCacheOpenFlag:

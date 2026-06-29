@@ -2975,21 +2975,22 @@ class MPIClusterCollector:
         # Build host string with 1 slot per host (we only need one process per node)
         host_slots = [f"{host}:1" for host in unique_hosts]
 
-        # Select MPI binary
-        if self.mpi_bin == MPIRUN:
-            mpi_executable = MPI_RUN_BIN
-        elif self.mpi_bin == MPIEXEC:
-            mpi_executable = MPI_EXEC_BIN
+        # Select MPI binary + launcher-family flags (one process per node).
+        if self.mpi_bin == MPIEXEC:
+            # HPE Cray PALS mpiexec (ALCF Crux/Polaris/Aurora): use --ppn and a
+            # bare comma-separated --hosts list with --cpu-bind. PALS rejects the
+            # OpenMPI flags (-host h:slots, --bind-to, --map-by,
+            # --allow-run-as-root). Mirrors utils.generate_mpi_prefix_cmd (#549).
+            cmd = (
+                f"{MPI_EXEC_BIN} -n {num_hosts} --ppn 1"
+                f" --hosts {','.join(unique_hosts)} --cpu-bind none"
+            )
         else:
-            mpi_executable = self.mpi_bin
-
-        cmd = f"{mpi_executable} -n {num_hosts} -host {','.join(host_slots)}"
-
-        # Add common flags
-        cmd += " --bind-to none --map-by node"
-
-        if self.allow_run_as_root:
-            cmd += " --allow-run-as-root"
+            mpi_executable = MPI_RUN_BIN if self.mpi_bin == MPIRUN else self.mpi_bin
+            cmd = f"{mpi_executable} -n {num_hosts} -host {','.join(host_slots)}"
+            cmd += " --bind-to none --map-by node"
+            if self.allow_run_as_root:
+                cmd += " --allow-run-as-root"
 
         # Add the Python script and output path
         cmd += f" python3 {script_path} {output_path}"
@@ -3471,33 +3472,41 @@ def run_shared_fs_probe(destination, hosts, run_uuid, logger,
                 code=ErrorCode.FS_INVALID_STRUCTURE,
             )
 
-    # ---- Build the mpirun command.
-    if mpi_bin == MPIRUN:
-        mpi_executable = MPI_RUN_BIN
-    elif mpi_bin == MPIEXEC:
-        mpi_executable = MPI_EXEC_BIN
-    else:
-        mpi_executable = mpi_bin
-
+    # ---- Build the launcher command (one process per host).
     n = len(unique_hosts)
-    host_slots = ",".join("{0}:1".format(h) for h in unique_hosts)
-    cmd_parts = [
-        mpi_executable,
-        "-n", str(n),
-        "-host", host_slots,
-        "--bind-to", "none",
-        "--map-by", "node",
-        # HARDEN-02 D-55.1: --tag-output gives PRRTE per-line atomicity and
-        # prefixes each forwarded line with [rank,jobid]<channel>: (OpenMPI 4.x
-        # format; verified on 4.1.6 per HARDEN-04 — channel is <stdout>,
-        # <stderr>, or <stddiag>, sometimes with a trailing colon). The launcher's
-        # marker regex tolerates the prefix; the post-extract _strip_tag_output_prefix()
-        # consumes both the bracketed identifier AND the optional <channel>: marker.
-        # Must appear BEFORE --allow-run-as-root per OpenMPI's accepted arg ordering.
-        "--tag-output",
-    ]
-    if allow_run_as_root:
-        cmd_parts.append("--allow-run-as-root")
+    if mpi_bin == MPIEXEC:
+        # HPE Cray PALS mpiexec (ALCF Crux/Polaris/Aurora): --ppn + bare --hosts
+        # + --cpu-bind. PALS rejects OpenMPI's -host h:slots / --bind-to /
+        # --map-by / --tag-output / --allow-run-as-root. There is no tag-output
+        # prefix to strip; rank-0's stdout markers are parsed verbatim below.
+        # Mirrors utils.generate_mpi_prefix_cmd (#549).
+        cmd_parts = [
+            MPI_EXEC_BIN,
+            "-n", str(n),
+            "--ppn", "1",
+            "--hosts", ",".join(unique_hosts),
+            "--cpu-bind", "none",
+        ]
+    else:
+        mpi_executable = MPI_RUN_BIN if mpi_bin == MPIRUN else mpi_bin
+        host_slots = ",".join("{0}:1".format(h) for h in unique_hosts)
+        cmd_parts = [
+            mpi_executable,
+            "-n", str(n),
+            "-host", host_slots,
+            "--bind-to", "none",
+            "--map-by", "node",
+            # HARDEN-02 D-55.1: --tag-output gives PRRTE per-line atomicity and
+            # prefixes each forwarded line with [rank,jobid]<channel>: (OpenMPI 4.x
+            # format; verified on 4.1.6 per HARDEN-04 — channel is <stdout>,
+            # <stderr>, or <stddiag>, sometimes with a trailing colon). The launcher's
+            # marker regex tolerates the prefix; the post-extract _strip_tag_output_prefix()
+            # consumes both the bracketed identifier AND the optional <channel>: marker.
+            # Must appear BEFORE --allow-run-as-root per OpenMPI's accepted arg ordering.
+            "--tag-output",
+        ]
+        if allow_run_as_root:
+            cmd_parts.append("--allow-run-as-root")
     cmd_parts += [
         "python3",
         remote_script_path,

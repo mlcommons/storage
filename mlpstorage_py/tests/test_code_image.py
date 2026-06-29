@@ -260,7 +260,7 @@ class TestLoadCodeImage:
         img = load_code_image(image_parent / "code", mock_logger)
         assert img.path == image_parent / "code"
         assert len(img.hash) == 32
-        assert img.algorithm == "md5-tree-v1"
+        assert img.algorithm == "md5-tree-v2"
         assert img.mlpstorage_version == MLPSTORAGE_VERSION
 
     def test_load_missing_file_raises(self, tmp_path, mock_logger):
@@ -271,16 +271,19 @@ class TestLoadCodeImage:
 
         path = tmp_path / "img"
         path.mkdir()
-        
+
         with pytest.raises(MissingHashFile, match=".code-hash.json not found"):
             load_code_image(path, mock_logger)
 
     @pytest.mark.parametrize("payload, reason", [
         ({"bad": "json"}, "Missing required field"),
-        ({"hash": "a", "algorithm": "md5-tree-v1", "captured_at": "2026-01-01T00:00:00Z", "mlpstorage_version": "1", "git_sha": None}, "Invalid MD5 hash format"),
+        # algorithm must be the current production version (md5-tree-v2) so the
+        # specific field-validation path under test fires, not the unknown-
+        # algorithm short-circuit that runs first.
+        ({"hash": "a", "algorithm": "md5-tree-v2", "captured_at": "2026-01-01T00:00:00Z", "mlpstorage_version": "1", "git_sha": None}, "Invalid MD5 hash format"),
         ({"hash": "a"*32, "algorithm": "v2", "captured_at": "2026-01-01T00:00:00Z", "mlpstorage_version": "1", "git_sha": None}, "Unknown algorithm"),
-        ({"hash": "a"*32, "algorithm": "md5-tree-v1", "captured_at": "bad", "mlpstorage_version": "1", "git_sha": None}, "Invalid captured_at"),
-        ({"hash": "a"*32, "algorithm": "md5-tree-v1", "captured_at": "2026-01-01T00:00:00Z", "mlpstorage_version": "1", "git_sha": "bad"}, "Invalid git_sha"),
+        ({"hash": "a"*32, "algorithm": "md5-tree-v2", "captured_at": "bad", "mlpstorage_version": "1", "git_sha": None}, "Invalid captured_at"),
+        ({"hash": "a"*32, "algorithm": "md5-tree-v2", "captured_at": "2026-01-01T00:00:00Z", "mlpstorage_version": "1", "git_sha": "bad"}, "Invalid git_sha"),
     ])
     def test_load_malformed_json_raises(self, tmp_path, mock_logger, payload, reason):
         """D-15: MalformedHashFile raised for various invalid schemas."""
@@ -381,7 +384,7 @@ class TestCodeHashJsonSchema:
         
         payload = json.loads((image_parent / "code" / ".code-hash.json").read_text())
         
-        assert payload["algorithm"] == "md5-tree-v1"
+        assert payload["algorithm"] == "md5-tree-v2"
         assert re.fullmatch(r"\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z", payload["captured_at"])
         assert payload["mlpstorage_version"] == MLPSTORAGE_VERSION
         assert re.fullmatch(r"[0-9a-f]{32}", payload["hash"])

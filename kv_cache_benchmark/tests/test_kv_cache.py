@@ -1102,6 +1102,7 @@ class TestMultiTierCacheWithGPU:
         assert success is True
         assert location == 'gpu'
     
+    @pytest.mark.slow
     def test_gpu_overflow_to_cpu(self, multi_tier_cache_with_gpu):
         """When GPU is full, should overflow to CPU."""
         # Fill GPU with large allocations
@@ -2623,11 +2624,24 @@ class TestThreeTierEvictionCascade:
             # Key was evicted entirely — that's also valid if NVMe was tiny
             print("    Key was evicted (deleted). Skipping data comparison.")
 
-    def test_tier_order_includes_fake_gpu(self, tiny_model_config):
+    def test_tier_order_includes_fake_gpu(self, tiny_model_config, monkeypatch):
         """
         Confirm that injecting a GPU backend adds 'gpu' to the tier order,
         giving us the full 3-tier cascade path.
+
+        Baseline assumption: a fresh MultiTierCache has no 'gpu' backend.
+        MultiTierCache.__init__ adds one whenever ``TORCH_AVAILABLE`` or
+        ``CUPY_AVAILABLE`` is true (cache.py:243), regardless of
+        ``gpu_memory_gb`` — so on a dev box / CI runner with torch in
+        the venv, the cache starts with a real GPU backend (0-byte limit)
+        and the baseline check would fail. Force both flags off for this
+        test so the post-construction state matches the test's stated
+        precondition.
         """
+        import kv_cache.cache as cache_mod
+        monkeypatch.setattr(cache_mod, "TORCH_AVAILABLE", False)
+        monkeypatch.setattr(cache_mod, "CUPY_AVAILABLE", False)
+
         cache = MultiTierCache(
             model_config=tiny_model_config,
             gpu_memory_gb=0,
@@ -3899,6 +3913,7 @@ class TestVisualizeUserRequestFlow:
 class TestBottleneckProfiling:
     """Profile bottleneck detection in the KV cache benchmark."""
 
+    @pytest.mark.slow
     def test_profile_allocate_vs_access_overhead(self):
         """Profile allocate vs access operations to identify bottleneck ratios."""
         import time as time_mod

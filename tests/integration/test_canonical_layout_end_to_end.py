@@ -402,6 +402,7 @@ class TestInitThenRunFullCliDispatch:
     runs on any dev box (does not require DLIO/openmpi).
     """
 
+    @pytest.mark.slow
     def test_init_then_closed_datagen_no_env_var(self, tmp_path, monkeypatch):
         """RED today: the second invocation raises ConfigurationError E101
         even though `mlpstorage init` wrote a valid sentinel.

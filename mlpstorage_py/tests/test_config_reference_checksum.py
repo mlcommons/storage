@@ -51,9 +51,22 @@ class TestConstantsImport:
             assert prefix in MD5_EXCLUDE_PREFIXES, f"Missing prefix: {prefix}"
 
     def test_md5_exclude_prefixes_exact_membership(self):
-        """MD5_EXCLUDE_PREFIXES must contain exactly the expected entries — no extras (D-13 locked set)."""
+        """MD5_EXCLUDE_PREFIXES must contain exactly the expected entries — no extras (D-13 locked set).
+
+        Kept in sync with constants.MD5_EXCLUDE_PREFIXES: when adding/removing
+        entries there, update the expected tuple here so the gate keeps catching
+        unintended drops as well as unintended additions.
+        """
         expected = (
             ".git/",
+            ".idea/",          # JetBrains IDE workspace
+            ".vscode/",        # VS Code workspace
+            ".claude/",        # Claude CLI runtime / settings
+            ".agent/",         # Agent runtime (per project .gitignore "Coding Agents")
+            ".agents/",        # Same, alternate name
+            ".roo/",           # Roo agent runtime
+            ".planning/",      # GSD planning artifacts (project-local)
+            ".gsd-tmp/",       # GSD code-fixer worktree (project-local)
             "__pycache__/",
             ".pytest_cache/",
             ".venv/",

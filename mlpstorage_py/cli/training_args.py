@@ -204,8 +204,8 @@ def _add_training_core_args(parser, command, accel_choices):
     # every file with O_DIRECT so reads bypass the OS page cache entirely.
     # Works for ALL training workloads regardless of data format — this is
     # independent of reader.odirect, which is the legacy NPY/NPZ-only path.
-    # Incompatible with --object (O_DIRECT targets local filesystem only).
-    # See mlcommons/storage#507.
+    # Requires the 'file' data-access protocol (O_DIRECT targets local
+    # filesystem only).  See mlcommons/storage#507.
     if command != 'datasize':
         parser.add_argument(
             '--o-direct',
@@ -216,8 +216,8 @@ def _add_training_core_args(parser, command, accel_choices):
                 "Route all training I/O through s3dlio's O_DIRECT local "
                 "filesystem mode (direct:// URI scheme), bypassing the OS "
                 "page cache.  Works for every training workload regardless "
-                "of data format.  Incompatible with --object (O_DIRECT "
-                "targets the local filesystem only)."
+                "of data format.  Requires the 'file' data-access protocol "
+                "(O_DIRECT targets the local filesystem only)."
             ),
         )
 
@@ -303,12 +303,22 @@ def validate_training_arguments(args):
         )
         sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
 
-    if getattr(args, 'o_direct', False) and protocol == 'object':
-        print(
-            "ERROR: --o-direct is incompatible with --object.\n"
-            "  --o-direct routes I/O through s3dlio's direct:// URI scheme, which\n"
-            "  reads from the local filesystem with O_DIRECT — not from an S3 endpoint.\n"
-            "  Use --file with --o-direct, or use --object without --o-direct.",
-            file=sys.stderr,
-        )
+    if getattr(args, 'o_direct', False) and protocol != 'file':
+        if protocol == 'object':
+            print(
+                "ERROR: --o-direct is incompatible with the 'object' data-access protocol.\n"
+                "  --o-direct routes I/O through s3dlio's direct:// URI scheme on the\n"
+                "  local filesystem — it cannot be combined with S3 object storage.\n"
+                "  Use the 'file' positional with --o-direct for O_DIRECT local I/O,\n"
+                "  e.g. `mlpstorage <mode> training <model> run file --o-direct`.",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                "ERROR: --o-direct requires the 'file' data-access protocol.\n"
+                "  --o-direct routes I/O through s3dlio's direct:// URI scheme on the\n"
+                "  local filesystem. It must be combined with the 'file' positional,\n"
+                "  e.g. `mlpstorage <mode> training <model> run file --o-direct`.",
+                file=sys.stderr,
+            )
         sys.exit(EXIT_CODE.INVALID_ARGUMENTS)

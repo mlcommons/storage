@@ -419,7 +419,11 @@ def validate_kvcache_arguments(args):
     error_messages = []
 
     if hasattr(args, 'data_access_protocol') and args.data_access_protocol != 'file':
-        error_messages.append("KVCache only supports POSIX file storage, ie: --object= is not supported")
+        error_messages.append(
+            "KVCache only supports POSIX file storage; the 'object' data-access "
+            "protocol is not supported. Use the 'file' positional, "
+            "e.g. `mlpstorage <mode> kvcache run file ...`."
+        )
 
     if error_messages:
         for msg in error_messages:

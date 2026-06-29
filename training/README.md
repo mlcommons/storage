@@ -368,8 +368,26 @@ View Only:
 Note: The `reportgen` script must be run in the launcher client host. 
 
 ## Training Models
-Currently, the storage benchmark suite supports benchmarking of 3 deep learning workloads
-- Image classification using a Unet3D model 
+
+### Supported (model, accelerator) combinations
+
+| Model     | a100   | h100   | b200       | mi355      |
+|-----------|:------:|:------:|:----------:|:----------:|
+| unet3d    | whatif | —      | **v3.0**   | —          |
+| retinanet | —      | —      | **v3.0**   | **v3.0**   |
+| cosmoflow | whatif | whatif | —          | —          |
+| resnet50  | whatif | whatif | —          | —          |
+| dlrm      | —      | —      | whatif     | whatif     |
+| flux      | —      | —      | whatif     | whatif     |
+
+- **v3.0** — submittable in CLOSED or OPEN.
+- **whatif** — available only via `mlpstorage whatif …` for planning. Not submittable.
+- **—** — no workload definition file. `mlpstorage` will fail with a "combination not supported" error pointing at the missing YAML.
+
+Any (model, accelerator) combination not marked **v3.0** is available under `whatif` for planning purposes if a workload definition file is provided.
+
+The closed-submittable training models are Unet3D and RetinaNet:
+- Image classification using a Unet3D model
 - Image recognition using a RetinaNet model
 
 ### unet3d

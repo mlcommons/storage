@@ -31,6 +31,23 @@ from mlpstorage_py.rules.submission_checkers.training import (
 REPO_ROOT = Path(__file__).resolve().parents[2]
 MLPSTORAGE_CLI = REPO_ROOT / "mlpstorage"
 
+# Identity values pinned into each results-dir by `mlpstorage init` and
+# supplied to every benchmark CLI invocation. They surface as path segments
+# under the canonical layout:
+#   <results_dir>/<mode>/<TEST_ORGNAME>/results/<TEST_SYSTEMNAME>/<type>/...
+# Both are POSIX-filename-safe (Rules.md §2.1.1 ^[A-Za-z0-9._-]+$).
+TEST_ORGNAME = "TestOrg"
+TEST_SYSTEMNAME = "test-sys"
+
+
+def _canonical_prefix(results_dir: Path, mode: str = "whatif") -> Path:
+    """Return the canonical-layout prefix under ``results_dir`` produced by
+    a run of mode ``mode`` against this file's init/systemname identity.
+
+    Centralizes the per-test path math so a future layout tweak (e.g. an
+    added segment) is one edit, not a dozen."""
+    return results_dir / mode / TEST_ORGNAME / "results" / TEST_SYSTEMNAME
+
 
 def _have_environment() -> tuple[bool, str]:
     """Return (ok, reason). Reason is empty when ok."""
@@ -87,6 +104,13 @@ def real_accumulation_env(tmp_path_factory):
     data_dir.mkdir()
     results_dir.mkdir()
 
+    # `mlpstorage init` pins `<orgname>` to the results-dir by writing
+    # `mlperf-results.yaml`. main._main_impl()'s orgname-resolution gate
+    # then sets `args.orgname` for every subsequent benchmark invocation
+    # against this dir. Without this, every benchmark CLI call below would
+    # exit with E101 "results-dir has not been initialized".
+    _run_cli(["init", TEST_ORGNAME, str(results_dir)], cwd=REPO_ROOT)
+
     common = [
         "whatif",
         "training",
@@ -96,6 +120,7 @@ def real_accumulation_env(tmp_path_factory):
     paths = [
         "--data-dir", str(data_dir),
         "--results-dir", str(results_dir),
+        "--systemname", TEST_SYSTEMNAME,
     ]
     # --allow-run-as-root lets the test pass in containerised CI that runs
     # as root; OpenMPI refuses by default. Harmless when invoked as a
@@ -125,12 +150,14 @@ def real_accumulation_env(tmp_path_factory):
 
 
 def test_datagen_and_runs_produce_expected_path_layout(real_accumulation_env):
-    """Each invocation lands in
-    <results_dir>/training/unet3d/<command>/<YYYYMMDD_HHMMSS>/."""
+    """Each invocation lands in the canonical layout:
+    <results_dir>/whatif/<orgname>/results/<systemname>/training/unet3d/<command>/<YYYYMMDD_HHMMSS>/.
+    """
     results_dir, _ = real_accumulation_env
+    base = _canonical_prefix(results_dir) / "training" / "unet3d"
 
-    datagen_dirs = sorted((results_dir / "training" / "unet3d" / "datagen").iterdir())
-    run_dirs = sorted((results_dir / "training" / "unet3d" / "run").iterdir())
+    datagen_dirs = sorted((base / "datagen").iterdir())
+    run_dirs = sorted((base / "run").iterdir())
 
     assert len(datagen_dirs) == 1
     assert len(run_dirs) == 2
@@ -147,7 +174,9 @@ def test_real_metadata_has_complete_schema(real_accumulation_env):
     BenchmarkRun.from_result_dir needs, plus the executed_command and
     runtime that the production code adds."""
     results_dir, _ = real_accumulation_env
-    run_dirs = sorted((results_dir / "training" / "unet3d" / "run").iterdir())
+    run_dirs = sorted(
+        (_canonical_prefix(results_dir) / "training" / "unet3d" / "run").iterdir()
+    )
     metadata_file = next(run_dirs[0].glob("training_*_metadata.json"))
 
     metadata = json.loads(metadata_file.read_text())
@@ -207,7 +236,7 @@ def test_subsequent_runs_get_distinct_directories(real_accumulation_env):
     results_dir, _ = real_accumulation_env
 
     run_dirs = sorted(
-        (results_dir / "training" / "unet3d" / "run").iterdir(),
+        (_canonical_prefix(results_dir) / "training" / "unet3d" / "run").iterdir(),
         key=lambda p: p.name,
     )
 
@@ -231,12 +260,14 @@ def real_vectordb_env(tmp_path_factory):
     results_dir = base / "results"
     results_dir.mkdir()
 
+    _run_cli(["init", TEST_ORGNAME, str(results_dir)], cwd=REPO_ROOT)
     _run_cli(
         [
             "whatif", "vectordb", "datasize",
             "--num-vectors", "1000000",
             "--dimension", "1536",
             "--results-dir", str(results_dir),
+            "--systemname", TEST_SYSTEMNAME,
         ],
         cwd=REPO_ROOT,
     )
@@ -244,13 +275,20 @@ def real_vectordb_env(tmp_path_factory):
 
 
 def test_vectordb_path_includes_engine_real_run(real_vectordb_env):
-    """The real CLI produces vector_database/<engine>/<command>/<datetime>/."""
+    """The real CLI produces
+    <results_dir>/whatif/<orgname>/results/<systemname>/vector_database/<engine>/<index_type>/<command>/<datetime>/.
+
+    The <index_type> segment (DISKANN here — the default) keeps AISAQ
+    results in a separate tree from DISKANN/HNSW per Rules.md §2.1.27."""
     results_dir = real_vectordb_env
 
-    engine_dir = results_dir / "vector_database" / "milvus" / "datasize"
+    engine_dir = (
+        _canonical_prefix(results_dir)
+        / "vector_database" / "milvus" / "DISKANN" / "datasize"
+    )
     assert engine_dir.is_dir(), (
-        f"Expected vector_database/milvus/datasize/ under {results_dir}; "
-        f"got {sorted((results_dir / 'vector_database').iterdir())}"
+        f"Expected {engine_dir}; "
+        f"got {sorted((_canonical_prefix(results_dir) / 'vector_database').iterdir())}"
     )
 
     datetime_dirs = list(engine_dir.iterdir())
@@ -264,18 +302,26 @@ def test_vectordb_metadata_records_engine_in_model_slot(real_vectordb_env):
     args.model so the existing metadata extractor and workload grouping
     (keyed on (model, accelerator)) treat distinct engines as distinct
     workloads. Pre-PR-3 the metadata override would have clobbered this
-    with config_name."""
+    with config_name.
+
+    The current production combines engine + index_type into the model slot
+    (e.g. `milvus_DISKANN`) so AISAQ vs DISKANN runs on the same engine
+    also group as distinct workloads — matching the per-index_type path
+    split under <results_dir>/.../vector_database/<engine>/<index_type>/."""
     results_dir = real_vectordb_env
     metadata_file = next(
-        (results_dir / "vector_database" / "milvus" / "datasize").rglob(
+        (
+            _canonical_prefix(results_dir)
+            / "vector_database" / "milvus" / "DISKANN" / "datasize"
+        ).rglob(
             "vector_database_*_metadata.json"
         )
     )
     metadata = json.loads(metadata_file.read_text())
 
     assert metadata["benchmark_type"] == "vector_database"
-    assert metadata["model"] == "milvus", (
-        f"Expected model=milvus (the engine), got {metadata.get('model')!r}. "
+    assert metadata["model"] == "milvus_DISKANN", (
+        f"Expected model=milvus_DISKANN (engine_indextype), got {metadata.get('model')!r}. "
         "If this is 'default' the metadata override on VectorDBBenchmark.metadata "
         "has regressed; engines sharing a config would merge into one workload."
     )
@@ -287,7 +333,7 @@ def test_vectordb_discovery_attributes_engine(real_vectordb_env, mock_logger):
     runs = get_runs_files(str(real_vectordb_env), logger=mock_logger)
     assert len(runs) == 1
     assert runs[0].benchmark_type == BENCHMARK_TYPES.vector_database
-    assert runs[0].model == "milvus"
+    assert runs[0].model == "milvus_DISKANN"
     assert runs[0].command == "datasize"
 
 
@@ -308,10 +354,12 @@ def real_kvcache_env(tmp_path_factory):
     results_dir = base / "results"
     results_dir.mkdir()
 
+    _run_cli(["init", TEST_ORGNAME, str(results_dir)], cwd=REPO_ROOT)
     _run_cli(
         [
             "whatif", "kvcache", "run",
             "--results-dir", str(results_dir),
+            "--systemname", TEST_SYSTEMNAME,
             "--model", "tiny-1b",
             "--num-users", "10",
             "--duration", "5",
@@ -324,13 +372,14 @@ def real_kvcache_env(tmp_path_factory):
 
 
 def test_kvcache_path_includes_model_real_run(real_kvcache_env):
-    """The real CLI produces kv_cache/<model>/<command>/<datetime>/."""
+    """The real CLI produces
+    <results_dir>/whatif/<orgname>/results/<systemname>/kv_cache/<model>/<command>/<datetime>/."""
     results_dir = real_kvcache_env
 
-    model_dir = results_dir / "kv_cache" / "tiny-1b" / "run"
+    model_dir = _canonical_prefix(results_dir) / "kv_cache" / "tiny-1b" / "run"
     assert model_dir.is_dir(), (
-        f"Expected kv_cache/tiny-1b/run/ under {results_dir}; "
-        f"got {sorted((results_dir / 'kv_cache').iterdir())}"
+        f"Expected {model_dir}; "
+        f"got {sorted((_canonical_prefix(results_dir) / 'kv_cache').iterdir())}"
     )
 
     datetime_dirs = list(model_dir.iterdir())
@@ -345,7 +394,9 @@ def test_kvcache_metadata_records_model(real_kvcache_env):
     class's metadata always carries the model."""
     results_dir = real_kvcache_env
     metadata_file = next(
-        (results_dir / "kv_cache" / "tiny-1b" / "run").rglob(
+        (
+            _canonical_prefix(results_dir) / "kv_cache" / "tiny-1b" / "run"
+        ).rglob(
             "kv_cache_*_metadata.json"
         )
     )
@@ -382,11 +433,15 @@ def test_heterogeneous_tree_discovers_all_three(
     surface keeps the benchmark types independent."""
     combined = tmp_path / "combined"
     combined.mkdir()
-    # Symlink each per-fixture results tree into the combined dir; discovery
-    # follows symlinks (PR 2's followlinks=True change in get_runs_files).
-    (combined / "training").symlink_to(real_accumulation_env[0] / "training")
-    (combined / "vector_database").symlink_to(real_vectordb_env / "vector_database")
-    (combined / "kv_cache").symlink_to(real_kvcache_env / "kv_cache")
+    # Symlink each per-fixture canonical results prefix into the combined dir
+    # at the per-type level so discovery (followlinks=True) walks all three
+    # trees as if they were one canonical results-dir.
+    training_prefix = _canonical_prefix(real_accumulation_env[0])
+    vdb_prefix = _canonical_prefix(real_vectordb_env)
+    kvcache_prefix = _canonical_prefix(real_kvcache_env)
+    (combined / "training").symlink_to(training_prefix / "training")
+    (combined / "vector_database").symlink_to(vdb_prefix / "vector_database")
+    (combined / "kv_cache").symlink_to(kvcache_prefix / "kv_cache")
 
     runs = get_runs_files(str(combined), logger=mock_logger)
 
@@ -399,5 +454,7 @@ def test_heterogeneous_tree_discovers_all_three(
     assert len(by_type[BENCHMARK_TYPES.vector_database]) == 1
     assert len(by_type[BENCHMARK_TYPES.kv_cache]) == 1
 
-    assert by_type[BENCHMARK_TYPES.vector_database][0].model == "milvus"
+    # Current production combines engine + index_type into the model slot
+    # for vector_database runs (see test_vectordb_metadata_records_engine_in_model_slot).
+    assert by_type[BENCHMARK_TYPES.vector_database][0].model == "milvus_DISKANN"
     assert by_type[BENCHMARK_TYPES.kv_cache][0].model == "tiny-1b"

@@ -577,9 +577,7 @@ class TestBenchmarkGenerateOutputLocation:
 
             result = benchmark.generate_output_location()
 
-            mock_gen.assert_called_once_with(
-                benchmark, "20250115_120000", orgname=None, systemname=None
-            )
+            mock_gen.assert_called_once_with(benchmark, "20250115_120000")
 
 
 class TestBenchmarkIntegration:

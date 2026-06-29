@@ -45,8 +45,29 @@ jobs:
         sudo apt-get install -y libopenmpi-dev openmpi-common openmpi-bin 
 
     - name: Install package and test dependencies
-      run: uv sync # Automatically creates the environment and locks dependencies
+      run: uv sync --extra test
 
-    # 4. Heavy Lifting (Runs only if linting passed)
-    - name: Run unit tests
-      run: uv run pytest # Runs your tests safely inside the managed environment
+    - name: Install subpackages (vdb_benchmark, kv_cache_benchmark)
+      # These have their own pyproject.toml and tests; install editable so
+      # their imports resolve and their `test` extras are available.
+      run: |
+        uv pip install -e ./vdb_benchmark
+        uv pip install -e ./kv_cache_benchmark
+
+    # 4. Run the four test suites separately.
+    # We can't collect them together: `tests/` and `vdb_benchmark/tests/`
+    # both have a top-level package named `tests` whose conftest.py modules
+    # collide under pytest's rootdir-relative import (ImportPathMismatchError).
+    # Each suite's pyproject defines its own `slow` marker and `-m 'not slow'`
+    # default, so subprocess-level invocation is correct.
+    - name: Run root test suite (tests/)
+      run: uv run pytest tests
+
+    - name: Run mlpstorage_py test suite
+      run: uv run pytest mlpstorage_py/tests
+
+    - name: Run vdb_benchmark test suite
+      run: uv run pytest vdb_benchmark/tests
+
+    - name: Run kv_cache_benchmark test suite
+      run: uv run pytest kv_cache_benchmark/tests

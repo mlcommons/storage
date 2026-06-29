@@ -570,10 +570,39 @@ def generate_mpi_prefix_cmd(
         logger.debug(f"Configured slots for hosts: {hosts}")
 
     # Build MPI command prefix
+    # ---- HPE Cray PALS mpiexec (ALCF Crux/Polaris/Aurora) ----
+    # PALS mpiexec uses `--ppn` and a bare comma-separated `--hosts` list, with
+    # `--cpu-bind` for affinity. It does NOT accept the OpenMPI flags this
+    # function emits for mpirun (`-host h:slots`, `--npernode`, `--bind-to`,
+    # `--map-by`, `--mca`, `--oversubscribe`, `--allow-run-as-root`), so build a
+    # PALS-native prefix and return early. Without this, `--mpi-bin mpiexec`
+    # produces an argv PALS cannot parse and every ALCF run fails to launch.
+    if mpi_cmd == MPIEXEC:
+        pals_hosts: List[str] = []
+        for host in hosts:
+            host_part = host.split(':')[0]
+            if host_part not in pals_hosts:
+                pals_hosts.append(host_part)
+        ranks_per_node = processes_per_node
+        if ranks_per_node is None:
+            # Ceil-divide so every node has enough slots for num_processes.
+            ranks_per_node = -(-num_processes // len(pals_hosts))
+        prefix = (
+            f"{MPI_EXEC_BIN} -n {num_processes}"
+            f" --ppn {ranks_per_node}"
+            f" --hosts {','.join(pals_hosts)}"
+        )
+        # PALS affinity flag is --cpu-bind (not OpenMPI's --bind-to/--map-by).
+        if not _mpi_params_contain_flag(params, "cpu-bind"):
+            prefix += " --cpu-bind none"
+        if params:
+            for param in params:
+                prefix += f" {param}"
+        return prefix
+
+    # ---- OpenMPI mpirun ----
     if mpi_cmd == MPIRUN:
         prefix = f"{MPI_RUN_BIN} -n {num_processes} -host {','.join(hosts)}"
-    elif mpi_cmd == MPIEXEC:
-        prefix = f"{MPI_EXEC_BIN} -n {num_processes} -host {','.join(hosts)}"
     else:
         raise ValueError(f"Unsupported MPI command: {mpi_cmd}")
 

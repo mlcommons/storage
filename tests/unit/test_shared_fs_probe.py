@@ -45,6 +45,7 @@ from mlpstorage_py.cluster_collector import (
     SHARED_FS_PROBE_SCRIPT,
     run_shared_fs_probe,
 )
+from mlpstorage_py.config import MPIRUN, MPIEXEC
 from mlpstorage_py.errors import ErrorCode, FileSystemError
 
 
@@ -618,15 +619,21 @@ class TestPitfall4BcastStatusPreventsProceed:
         saved_argv = sys.argv
         saved_mpi4py = sys.modules.get("mpi4py")
         saved_mpi = sys.modules.get("mpi4py.MPI")
+        # The probe's rank-0 D-49 quiesce path sleeps 5s; neutralize for the
+        # unit test (we're only locking call ordering, not timing).
+        import time as _time
+        saved_sleep = _time.sleep
         try:
             sys.modules["mpi4py"] = fake_mpi4py
             sys.modules["mpi4py.MPI"] = _FakeMPI()
+            _time.sleep = lambda *_a, **_kw: None
             sys.argv = ["<probe>", str(tmp_path), "test-uuid", out_file]
             namespace = {"__name__": "__main__"}
             # The heredoc body calls sys.exit at the end; trap it.
             with pytest.raises(SystemExit):
                 exec(SHARED_FS_PROBE_SCRIPT, namespace)
         finally:
+            _time.sleep = saved_sleep
             sys.argv = saved_argv
             if saved_mpi4py is not None:
                 sys.modules["mpi4py"] = saved_mpi4py
@@ -782,3 +789,69 @@ class TestQuiesceTimingD49:
             "(making the quiesce useless because the barrier already "
             "released). Pattern: {0}".format(pattern)
         )
+
+
+# =============================================================================
+# TestLauncherFlags — CAP-02 probe argv is launcher-family correct
+# (#549 follow-up: HPE Cray PALS mpiexec support for ALCF Crux/Polaris/Aurora)
+# =============================================================================
+
+
+class TestLauncherFlags:
+    """The probe must emit PALS-native flags for mpiexec, OpenMPI flags for mpirun."""
+
+    def _capture_probe_cmd(self, mpi_bin, tmp_path):
+        captured = {}
+
+        def _side_effect(cmd_str, **kwargs):
+            captured["cmd"] = cmd_str
+            result = MagicMock()
+            result.returncode = 0
+            result.stderr = ""
+            result.stdout = (
+                "__CAP02_RESULT_BEGIN__\n"
+                + json.dumps(_OK_PAYLOAD_TWO_HOSTS, separators=(",", ":"))
+                + "\n__CAP02_RESULT_END__\n"
+            )
+            return result
+
+        logger = MagicMock()
+        with patch(
+            "mlpstorage_py.cluster_collector.subprocess.run",
+            side_effect=_side_effect,
+        ), patch(
+            "mlpstorage_py.cluster_collector.MPIClusterCollector"
+        ) as mock_coll_cls:
+            mock_coll = mock_coll_cls.return_value
+            mock_coll._stage_script_on_remote_hosts.return_value = {
+                "h1": None, "h2": None
+            }
+            run_shared_fs_probe(
+                destination=str(tmp_path),
+                hosts=["h1", "h2"],
+                run_uuid="test-uuid",
+                logger=logger,
+                mpi_bin=mpi_bin,
+            )
+        return captured.get("cmd", "")
+
+    def test_mpiexec_emits_pals_flags(self, tmp_path):
+        cmd = self._capture_probe_cmd(MPIEXEC, tmp_path)
+        # PALS-native
+        assert "--ppn 1" in cmd
+        assert "--hosts h1,h2" in cmd
+        assert "--cpu-bind none" in cmd
+        # OpenMPI-only flags PALS cannot parse must be absent
+        assert "--map-by" not in cmd
+        assert "--bind-to" not in cmd
+        assert "--tag-output" not in cmd
+        assert "--allow-run-as-root" not in cmd
+        assert "-host " not in cmd  # PALS uses --hosts, not OpenMPI -host
+
+    def test_mpirun_unchanged(self, tmp_path):
+        cmd = self._capture_probe_cmd(MPIRUN, tmp_path)
+        assert "-host h1:1,h2:1" in cmd
+        assert "--bind-to none" in cmd
+        assert "--map-by node" in cmd
+        assert "--tag-output" in cmd
+        assert "--ppn" not in cmd
