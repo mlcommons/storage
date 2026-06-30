@@ -4,7 +4,11 @@ from ..constants import *
 from ..configuration.configuration import Config
 from ..loader import SubmissionLogs
 from ..rule_registry import rule
-from .helpers import _check_filesystem_separation, _check_code_image_layered
+from .helpers import (
+    _check_filesystem_separation,
+    _check_code_image_layered,
+    read_fs_separation_sidecar,
+)
 
 # Shared with the in-process verifier (mlpstorage_py.rules.run_checkers.training)
 # so both checkers stay in lockstep about which dotted-keys the mlpstorage
@@ -732,7 +736,20 @@ class TrainingCheck(BaseCheck):
                     self.path, timestamp,
                 )
                 continue
-            logfile_path = os.path.join(self.run_path, timestamp, "training_run.stdout.log")
+            run_dir = os.path.join(self.run_path, timestamp)
+            logfile_path = os.path.join(run_dir, "training_run.stdout.log")
+            # CAP-03 sidecar is the authoritative input (#601). The
+            # df-block parser remains for one release as a pre-cutover
+            # fallback (D-601-3) — removed in v3.1.
+            sidecar = read_fs_separation_sidecar(run_dir)
+            if sidecar is not None:
+                if sidecar.get("same_filesystem"):
+                    self.log_violation(
+                        "3.4.2", "trainingMlpstorageFilesystemCheck", logfile_path,
+                        "data_dir and results_dir are on the same filesystem",
+                    )
+                    valid = False
+                continue
             args = metadata.get("args", {})
             ok, df_found = _check_filesystem_separation(args, logfile_path)
             if not df_found:

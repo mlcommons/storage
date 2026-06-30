@@ -33,7 +33,11 @@ from .base import BaseCheck
 from ..configuration.configuration import Config
 from ..loader import SubmissionLogs
 from ..rule_registry import rule
-from .helpers import _check_code_image_layered, _check_filesystem_separation
+from .helpers import (
+    _check_code_image_layered,
+    _check_filesystem_separation,
+    read_fs_separation_sidecar,
+)
 from mlpstorage_py.config import VDB_INDEX_TYPES_CLOSED
 
 
@@ -635,6 +639,20 @@ class VdbCheck(BaseCheck):
                 )
                 continue
             args = metadata.get("args", {}) or {}
+            run_dir = os.path.join(self.run_path, ts)
+            logfile_path = os.path.join(run_dir, "vdb_run.stdout.log")
+            # CAP-03 sidecar is authoritative (#601). Pre-cutover df-block
+            # fallback retained for one release (D-601-3).
+            sidecar = read_fs_separation_sidecar(run_dir)
+            if sidecar is not None:
+                if sidecar.get("same_filesystem"):
+                    self.log_violation(
+                        "5.4.2", "vdbFilesystemCheck", logfile_path,
+                        "vdbFilesystemCheck: vdb data path and results_dir are on the "
+                        "same filesystem",
+                    )
+                    valid = False
+                continue
             # _check_filesystem_separation looks up "data_dir" or
             # "checkpoint_folder"; for vdb the analog is storage_root. Synthesize
             # a flat dict so the helper sees data_dir + results_dir.
@@ -643,7 +661,6 @@ class VdbCheck(BaseCheck):
                 storage_root = args.get("storage_root") or args.get("vdb_data_path")
                 if storage_root:
                     shim_args["data_dir"] = storage_root
-            logfile_path = os.path.join(self.run_path, ts, "vdb_run.stdout.log")
             ok, df_found = _check_filesystem_separation(shim_args, logfile_path)
             if not df_found:
                 self.log_violation(

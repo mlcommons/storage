@@ -320,8 +320,15 @@ def _make_stub_benchmark(*, data_path, results_path, skip_flag=False, hosts=None
     return bench
 
 
-class TestPreExecutionGate:
-    """CAP-03 slice in Benchmark._pre_execution_gate."""
+class TestFsSeparationGate:
+    """CAP-03 dispatch point in Benchmark — _run_fs_separation_probe().
+
+    These tests exercise the CAP-03 slice in isolation (not the full
+    _pre_execution_gate, which also runs CAP-01/CAP-02 plumbing that
+    requires real-or-mocked MPI). The wiring test below confirms
+    _pre_execution_gate calls _run_fs_separation_probe in the right
+    order.
+    """
 
     def test_gate_raises_on_same_filesystem(self, tmp_path):
         """Same FS detected → FileSystemError BEFORE the workload starts."""
@@ -332,7 +339,7 @@ class TestPreExecutionGate:
         bench = _make_stub_benchmark(data_path=data, results_path=results)
 
         with pytest.raises(FileSystemError):
-            bench._pre_execution_gate()
+            bench._run_fs_separation_probe()
 
     def test_gate_silent_on_different_filesystem(self, tmp_path, monkeypatch):
         """Different FS → no raise, no logger.error / .warning calls (SC#6)."""
@@ -347,7 +354,7 @@ class TestPreExecutionGate:
         monkeypatch.setattr(os, "link", fake_link)
         bench = _make_stub_benchmark(data_path=data, results_path=results)
 
-        bench._pre_execution_gate()  # must not raise
+        bench._run_fs_separation_probe()  # must not raise
 
         bench.logger.error.assert_not_called()
         bench.logger.warning.assert_not_called()
@@ -365,7 +372,7 @@ class TestPreExecutionGate:
         monkeypatch.setattr(os, "link", fake_link)
         bench = _make_stub_benchmark(data_path=data, results_path=results)
         bench.run_result_output = str(results)
-        bench._pre_execution_gate()
+        bench._run_fs_separation_probe()
 
         sidecar = results / "fs_separation.json"
         assert sidecar.exists(), (
@@ -390,7 +397,7 @@ class TestPreExecutionGate:
         )
         bench.run_result_output = str(results)
 
-        bench._pre_execution_gate()  # must not raise even on same FS
+        bench._run_fs_separation_probe()  # must not raise even on same FS
 
         sidecar = results / "fs_separation.json"
         assert sidecar.exists()
@@ -405,9 +412,51 @@ class TestObjectApiSkip:
         bench = _make_stub_benchmark(data_path=None, results_path=tmp_path)
         bench.run_result_output = str(tmp_path)
 
-        bench._pre_execution_gate()  # must not raise
+        bench._run_fs_separation_probe()  # must not raise
 
         sidecar = tmp_path / "fs_separation.json"
         assert not sidecar.exists(), (
             "object-API runs must not emit an fs_separation sidecar"
         )
+
+
+class TestPreExecutionGateWiring:
+    """_pre_execution_gate dispatches to CAP-03 after CAP-02 (locked order).
+
+    A single wiring test is enough — the CAP-03 dispatch is one line.
+    Behavior of CAP-03 itself is exhaustively covered by TestFsSeparationGate
+    above.
+    """
+
+    def test_pre_execution_gate_calls_run_fs_separation_probe(self, tmp_path, monkeypatch):
+        """Stub CAP-01 + CAP-02 out and confirm CAP-03 dispatch happens."""
+        from mlpstorage_py.benchmarks import base as _base
+        data = tmp_path / "data"
+        results = tmp_path / "results"
+        data.mkdir()
+        results.mkdir()
+
+        # CAP-01 returns a real path; CAP-02 is patched to no-op.
+        bench = _make_stub_benchmark(data_path=data, results_path=results)
+        bench.required_bytes_for_capacity_gate = lambda: 0
+        # Override stub's None-returning _capacity_gate_destination to a real path.
+        bench.__class__._capacity_gate_destination = lambda self: str(results)
+        bench.run_result_output = str(results)
+
+        monkeypatch.setattr(_base, "check_capacity_4field", lambda *a, **k: None)
+        monkeypatch.setattr(_base, "run_shared_fs_probe", lambda **kwargs: None)
+
+        called = {"fs_sep": False}
+        orig = bench._run_fs_separation_probe
+
+        def spy():
+            called["fs_sep"] = True
+            return orig()
+
+        bench._run_fs_separation_probe = spy
+
+        # Same-FS will raise — that's the proof CAP-03 fired post-CAP-02.
+        with pytest.raises(FileSystemError):
+            bench._pre_execution_gate()
+
+        assert called["fs_sep"], "CAP-03 must be invoked from _pre_execution_gate"
