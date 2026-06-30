@@ -97,26 +97,12 @@ CHECKPOINT_REQUIRED_FOLDERS = {
     "default": ["dlio_config"],
 }
 
-# TODO: Ask for correct values
-NUM_DATASET_TRAIN_FILES = {
-    "unet3d": 14000,
-    "retinanet": 0
-}
-
-NUM_DATASET_EVAL_FILES = {
-    "unet3d": 0,
-    "retinanet": 0
-}
-
-NUM_DATASET_TRAIN_FOLDERS = {
-    "unet3d": 0,
-    "retinanet": 0
-}
-
-NUM_DATASET_EVAL_FOLDERS = {
-    "unet3d": 0,
-    "retinanet": 0
-}
+# Issue #608: NUM_DATASET_TRAIN_FILES / NUM_DATASET_EVAL_FILES /
+# NUM_DATASET_TRAIN_FOLDERS / NUM_DATASET_EVAL_FOLDERS placeholder dicts
+# (`# TODO: Ask for correct values`) were deleted here. Rule 3.3.1 now
+# reads the per-submission `datasize/<ts>/training_<ts>_metadata.json`
+# instead, which is the value the datasize phase actually wrote and is
+# guaranteed to match the configuration the submitter ran.
 
 CHECKPOINT_FILE_MAP = {
     "llama3-1t": "llama3_1t.yaml",

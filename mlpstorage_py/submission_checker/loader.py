@@ -26,6 +26,7 @@ class SubmissionLogs:
     transfer object passed between loading and validation phases.
     """
     datagen_files: list = None
+    datasize_files: list = None
     run_files: list = None
     checkpoint_files: list = None
     system_file: dict = None
@@ -103,13 +104,18 @@ class Loader:
                             loader_metadata = LoaderMetadata(division=division, submitter=submitter, system=system, mode=mode, benchmark=benchmark, folder=benchmark_path)
                             if mode == "training":
                                 datagen_path = os.path.join(benchmark_path, "datagen")
+                                datasize_path = os.path.join(benchmark_path, "datasize")
                                 run_path = os.path.join(benchmark_path, "run")
                                 datagen_files = []
+                                datasize_files = []
                                 run_files = []
-                                # Missing datagen/ or run/ is a structural violation caught by
-                                # SubmissionStructureCheck STRUCT-12 (2.1.12). The loader yields
-                                # empty file lists so the rest of the corpus traversal continues.
+                                # Missing datagen/ / datasize/ / run/ is a structural violation
+                                # caught by SubmissionStructureCheck STRUCT-12 (2.1.12) and by
+                                # rule 3.3.1's DATASIZE-MISSING / DATAGEN-MISSING warnings.
+                                # The loader yields empty file lists so the rest of the corpus
+                                # traversal continues.
                                 datagen_timestamps = list_dir(datagen_path) if os.path.isdir(datagen_path) else []
+                                datasize_timestamps = list_dir(datasize_path) if os.path.isdir(datasize_path) else []
                                 run_timestamps = list_dir(run_path) if os.path.isdir(run_path) else []
                                 for timestamp in datagen_timestamps:
                                     timestamp_path = os.path.join(datagen_path, timestamp)
@@ -119,6 +125,17 @@ class Loader:
                                     datagen_file = self.load_single_log(summary_path, "Summary")
                                     datagen_files.append((datagen_file, metadata_file, timestamp))
 
+                                # Issue #608: walk datasize/<ts>/ so rule 3.3.1 can cross-check
+                                # run.num_files_train against the value the datasize phase
+                                # actually prescribed for this submission. Datasize directories
+                                # carry only a metadata file (no summary.json); the summary slot
+                                # in each tuple is therefore None.
+                                for timestamp in datasize_timestamps:
+                                    timestamp_path = os.path.join(datasize_path, timestamp)
+                                    metadata_path = self.find_metadata_path(timestamp_path)
+                                    metadata_file = self.load_single_log(metadata_path, "Metadata")
+                                    datasize_files.append((None, metadata_file, timestamp))
+
                                 for timestamp in run_timestamps:
                                     timestamp_path = os.path.join(run_path, timestamp)
                                     summary_path = os.path.join(timestamp_path, "summary.json")
@@ -127,8 +144,8 @@ class Loader:
                                     metadata_file = self.load_single_log(metadata_path, "Metadata")
                                     run_file = self.load_single_log(summary_path, "Summary")
                                     run_files.append((run_file, metadata_file, timestamp))
-                                
-                                yield SubmissionLogs(datagen_files, run_files, system_file=system_file, loader_metadata=loader_metadata)
+
+                                yield SubmissionLogs(datagen_files=datagen_files, datasize_files=datasize_files, run_files=run_files, system_file=system_file, loader_metadata=loader_metadata)
                             else:
                                 checkpoint_path = os.path.join(mode_path, benchmark)
                                 checkpoint_files = []

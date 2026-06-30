@@ -144,9 +144,9 @@ def _build_training_tree(
 
 
 def _run_rule(root: Path, caplog):
-    """Instantiate DirectoryCheck and run rule 3.3.1; return (result, log_records)."""
-    from mlpstorage_py.submission_checker.checks.directory_checks import (
-        DirectoryCheck,
+    """Instantiate TrainingCheck and run rule 3.3.1; return (result, log_records)."""
+    from mlpstorage_py.submission_checker.checks.training_checks import (
+        TrainingCheck,
     )
     from mlpstorage_py.submission_checker.configuration.configuration import Config
     from mlpstorage_py.submission_checker.constants import DEFAULT_SPEC_VERSION
@@ -165,10 +165,9 @@ def _run_rule(root: Path, caplog):
     )
 
     log = logging.getLogger("test_submission_checker_run_matches_datasize")
-    check = DirectoryCheck(log=log, config=config, submissions_logs=logs)
+    check = TrainingCheck(log=log, config=config, submissions_logs=logs)
 
-    caplog.set_level(logging.WARNING, logger=log.name)
-    caplog.set_level(logging.ERROR, logger=log.name)
+    caplog.set_level(logging.WARNING)
     result = check.run_data_matches_datasize()
     return result, caplog.records
 
@@ -214,6 +213,8 @@ class TestPositiveCases:
             datasize_num_files=n,
             datagen_num_files=n,
             run_num_files=n,
+            eval_run=0,
+            eval_datasize=0,
         )
         assert result is True, (
             f"rule 3.3.1 must pass when datasize = datagen = run = {n}"
@@ -236,6 +237,8 @@ class TestPositiveCases:
             datasize_num_files=84_375,
             datagen_num_files=450_000,
             run_num_files=84_375,
+            eval_run=0,
+            eval_datasize=0,
         )
         assert result is True
         violation_records = [r for r in records if "[3.3.1" in r.getMessage()]
