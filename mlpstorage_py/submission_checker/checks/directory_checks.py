@@ -82,11 +82,14 @@ class DirectoryCheck(BaseCheck):
         Check that each datagen timestamp directory contains:
         - training_datagen.stdout.log
         - training_datagen.stderr.log
-        - *output.json
-        - *per_epoch_stats.json
-        - *summary.json
         - dlio.log
+        - training_<datetime>_metadata.json   (mlpstorage-injected)
         - dlio_config/ (subdirectory)
+
+        Note: `output.json`, `per_epoch_stats.json`, and `summary.json` are
+        emitted by the DLIO training loop only, so they are NOT required
+        here (see RUN_REQUIRED_FILES / rule 2.1.19 for the run-side
+        contract). Issue #600.
 
         (Rules.md 2.1.14 datagenFiles)
         """
