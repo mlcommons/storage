@@ -212,12 +212,20 @@ class TestReportGeneratorGenerateReports:
         results_dir = tmp_path / "results"
         results_dir.mkdir()
 
+        # The per-run-folder rollup lives at `<parent of leaf result_dir>/`,
+        # so the mock run must expose a real path that os.path.dirname can
+        # resolve. Use the canonical shape `<results>/<bench>/<model>/run/<ts>/`.
+        self._run_folder = results_dir / "training" / "unet3d" / "run"
+        leaf = self._run_folder / "20250111_120000"
+        leaf.mkdir(parents=True)
+
         with patch.object(ReportGenerator, 'accumulate_results'):
             with patch.object(ReportGenerator, 'print_results'):
                 gen = ReportGenerator(str(results_dir), validate_structure=False)
 
         # Add mock run results
         mock_run = MagicMock()
+        mock_run.result_dir = str(leaf)
         mock_run.as_dict.return_value = {
             'run_id': 'test_run',
             'benchmark_type': 'training',
@@ -245,16 +253,20 @@ class TestReportGeneratorGenerateReports:
         assert result == EXIT_CODE.SUCCESS
 
     def test_creates_json_file(self, generator):
-        """Should create results.json."""
+        """Should create results.json inside the parent run/ folder."""
         generator.generate_reports()
-        json_file = os.path.join(generator.results_dir, 'results.json')
-        assert os.path.exists(json_file)
+        json_file = os.path.join(str(self._run_folder), 'results.json')
+        assert os.path.exists(json_file), (
+            f"Expected per-run-folder rollup at {json_file}"
+        )
 
     def test_creates_csv_file(self, generator):
-        """Should create results.csv."""
+        """Should create results.csv inside the parent run/ folder."""
         generator.generate_reports()
-        csv_file = os.path.join(generator.results_dir, 'results.csv')
-        assert os.path.exists(csv_file)
+        csv_file = os.path.join(str(self._run_folder), 'results.csv')
+        assert os.path.exists(csv_file), (
+            f"Expected per-run-folder rollup at {csv_file}"
+        )
 
 
 class TestReportGeneratorPrintResults:
@@ -493,6 +505,12 @@ class TestReportGeneratorIntegration:
         results_dir = tmp_path / "results"
         results_dir.mkdir()
 
+        # Per-run-folder rollups land at `<parent of leaf result_dir>/`, so
+        # the mock leaf must be a real path under results_dir.
+        run_folder = results_dir / "training" / "unet3d" / "run"
+        leaf = run_folder / "20250111_120000"
+        leaf.mkdir(parents=True)
+
         # Create mock benchmark run
         mock_run = MagicMock()
         mock_run.run_id = "training_run_20250111"
@@ -500,6 +518,7 @@ class TestReportGeneratorIntegration:
         mock_run.command = 'run'
         mock_run.model = 'unet3d'
         mock_run.accelerator = 'h100'
+        mock_run.result_dir = str(leaf)
         mock_run.metrics = {
             'train_throughput_samples_per_second': 1250.5,
             'train_au_percentage': 95.2
@@ -525,6 +544,6 @@ class TestReportGeneratorIntegration:
         result = generator.generate_reports()
         assert result == EXIT_CODE.SUCCESS
 
-        # Check files were created
-        assert os.path.exists(os.path.join(results_dir, 'results.json'))
-        assert os.path.exists(os.path.join(results_dir, 'results.csv'))
+        # Files land inside the parent run/ folder, not the results_dir root
+        assert os.path.exists(os.path.join(str(run_folder), 'results.json'))
+        assert os.path.exists(os.path.join(str(run_folder), 'results.csv'))

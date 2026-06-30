@@ -83,13 +83,10 @@ class ReportGenerator:
         # No-op when --results-dir already points at a flat benchmark-type root.
         self.results_dir = self._resolve_effective_results_dir(self.results_dir)
 
-        # Honor --output-dir for write_{json,csv}_file (falls back to results_dir).
-        output_dir = None
-        if self.args is not None:
-            output_dir = getattr(self.args, 'output_dir', None)
-        self.output_dir = output_dir or self.results_dir
-        if self.output_dir and self.output_dir != self.results_dir:
-            os.makedirs(self.output_dir, exist_ok=True)
+        # NOTE: results.json / results.csv are written into each discovered
+        # <...>/run/ folder, one rollup per run/ folder containing only the
+        # timestamps inside that folder. --output-dir is intentionally not
+        # honored — the rollup location is dictated by the on-disk layout.
 
         # Initialize formatters
         self.msg_formatter = ValidationMessageFormatter(use_colors=use_colors)
@@ -197,15 +194,39 @@ class ReportGenerator:
         # Verify the results directory exists:
         self.logger.info(f'Generating reports for {self.results_dir}')
 
-        # Always traverse the full directory and emit one rollup
-        # results.json / results.csv covering every discovered run, written
-        # to self.output_dir (which defaults to self.results_dir when
-        # --output-dir is not supplied).
-        run_result_dicts = [
-            report.benchmark_run.as_dict() for report in self.run_results.values()
-        ]
-        self.write_csv_file(run_result_dicts)
-        self.write_json_file(run_result_dicts)
+        # Group accumulated runs by their parent `run/` folder. Each leaf
+        # `benchmark_run.result_dir` is `<...>/<benchmark>/<model>/run/<timestamp>/`;
+        # the rollup is written INSIDE the parent `<...>/<benchmark>/<model>/run/`
+        # directory and contains only the timestamps that live in that
+        # specific `run/` folder. One results.json + one results.csv per
+        # run/ folder; nothing is written elsewhere in the tree.
+        groups: Dict[str, List[dict]] = {}
+        skipped = 0
+        for result in self.run_results.values():
+            leaf = getattr(result.benchmark_run, 'result_dir', None)
+            if not leaf:
+                self.logger.warning(
+                    "Run %s has no result_dir on its BenchmarkRun; "
+                    "cannot place a rollup next to it. Skipping.",
+                    result.benchmark_run.run_id,
+                )
+                skipped += 1
+                continue
+            run_folder = os.path.dirname(os.path.abspath(leaf))
+            groups.setdefault(run_folder, []).append(
+                result.benchmark_run.as_dict()
+            )
+
+        if not groups:
+            self.logger.warning(
+                "No run/ folders to write rollups for (skipped %d runs without result_dir).",
+                skipped,
+            )
+            return EXIT_CODE.SUCCESS
+
+        for run_folder, run_dicts in sorted(groups.items()):
+            self.write_json_file(run_dicts, target_dir=run_folder)
+            self.write_csv_file(run_dicts, target_dir=run_folder)
 
         return EXIT_CODE.SUCCESS
 
@@ -490,14 +511,16 @@ class ReportGenerator:
                 print(f"\n    {checklist}")
 
 
-    def write_json_file(self, results):
-        json_file = os.path.join(self.output_dir, 'results.json')
+    def write_json_file(self, results, target_dir: Optional[str] = None):
+        out_dir = target_dir if target_dir is not None else self.results_dir
+        json_file = os.path.join(out_dir, 'results.json')
         self.logger.info(f'Writing results to {json_file}')
         with open(json_file, 'w') as f:
             json.dump(results, f, indent=2)
 
-    def write_csv_file(self, results):
-        csv_file = os.path.join(self.output_dir, 'results.csv')
+    def write_csv_file(self, results, target_dir: Optional[str] = None):
+        out_dir = target_dir if target_dir is not None else self.results_dir
+        csv_file = os.path.join(out_dir, 'results.csv')
         self.logger.info(f'Writing results to {csv_file}')
         flattened_results = [flatten_nested_dict(r) for r in results]
         flattened_results = [remove_nan_values(r) for r in flattened_results]
