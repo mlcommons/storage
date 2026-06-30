@@ -70,14 +70,14 @@ def test_f1b_method_tolerates_mixed_none_and_well_formed(method_name, tmp_path):
                    "train_au_mean_percentage": 99.0},
     }
     well_formed_metadata = {
-        "combined_params": {
+        "parameters": {
             "dataset": {"num_files_train": 1, "num_samples_per_file": 1,
                         "record_length_bytes": 1024},
             "reader": {"batch_size": 1},
         },
         "args": {"hosts": ["h1"], "data_dir": "/data", "results_dir": "/results"},
         "verification": "open",
-        "params_dict": {},
+        "override_parameters": {},
     }
     run_files = [
         (None, None, "20250101_000000"),

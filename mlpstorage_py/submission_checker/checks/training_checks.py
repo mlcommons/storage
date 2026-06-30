@@ -4,7 +4,12 @@ from ..constants import *
 from ..configuration.configuration import Config
 from ..loader import SubmissionLogs
 from ..rule_registry import rule
-from .helpers import _check_filesystem_separation, _check_code_image_layered
+from .helpers import (
+    _check_filesystem_separation,
+    _check_code_image_layered,
+    get_override_parameters,
+    get_parameters,
+)
 
 # Shared with the in-process verifier (mlpstorage_py.rules.run_checkers.training)
 # so both checkers stay in lockstep about which dotted-keys the mlpstorage
@@ -104,7 +109,7 @@ class TrainingCheck(BaseCheck):
                 continue
             # Check if datasize-related parameters are in the metadata
             params = metadata.get("args", {})
-            combined_params = metadata.get("combined_params", {})
+            combined_params = get_parameters(metadata)
 
             if not params and not combined_params:
                 self.log_violation(
@@ -149,7 +154,7 @@ class TrainingCheck(BaseCheck):
                 continue
             try:
                 # Get parameters
-                combined_params = metadata.get("combined_params", {})
+                combined_params = get_parameters(metadata)
                 dataset_params = combined_params.get("dataset", {})
                 reader_params = combined_params.get("reader", {})
 
@@ -224,7 +229,7 @@ class TrainingCheck(BaseCheck):
         for summary, metadata, _ in self.submissions_logs.run_files:
             if metadata is None:
                 continue
-            dataset_params = metadata.get("combined_params", {}).get("dataset", {})
+            dataset_params = get_parameters(metadata).get("dataset", {})
             num_files = int(dataset_params.get("num_files_train", 0))
             record_length = float(dataset_params.get("record_length_bytes", 0))
             num_samples_per_file = int(dataset_params.get("num_samples_per_file", 1))
@@ -235,7 +240,7 @@ class TrainingCheck(BaseCheck):
         for summary, metadata, _ in self.submissions_logs.datagen_files:
             if metadata is None:
                 continue
-            dataset_params = metadata.get("combined_params", {}).get("dataset", {})
+            dataset_params = get_parameters(metadata).get("dataset", {})
             num_files = int(dataset_params.get("num_files_train", 0))
             record_length = float(dataset_params.get("record_length_bytes", 0))
             num_samples_per_file = int(dataset_params.get("num_samples_per_file", 1))
@@ -576,7 +581,7 @@ class TrainingCheck(BaseCheck):
             verification = metadata.get("verification", "open")
 
             if verification == "closed":
-                params_dict = metadata.get("params_dict", {})
+                params_dict = get_override_parameters(metadata)
 
                 for param_key in params_dict.keys():
                     # Tool-injected params (skip_listing, data_folder derived
@@ -639,7 +644,7 @@ class TrainingCheck(BaseCheck):
             verification = metadata.get("verification", "open")
 
             if verification == "open":
-                params_dict = metadata.get("params_dict", {})
+                params_dict = get_override_parameters(metadata)
 
                 for param_key in params_dict.keys():
                     # Tool-injected params (skip_listing, data_folder derived

@@ -136,8 +136,11 @@ _DEFAULT_METADATA = {
         "num_checkpoints_write": 10,
         "num_checkpoints_read": 10,
     },
-    "combined_params": {},
-    "params_dict": {},
+    # #598: writer emits "parameters" / "override_parameters" (renamed from
+    # "combined_params" / "params_dict" as part of the #365 fix). Fixtures
+    # mirror the writer shape so tests assert against what really ships.
+    "parameters": {},
+    "override_parameters": {},
 }
 
 # ---------------------------------------------------------------------------

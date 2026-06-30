@@ -91,16 +91,15 @@ def test_every_retrofitted_training_method_has_rule_id_attribute(rule_id, method
 # ---------------------------------------------------------------------------
 
 def test_3_1_1_missing_dataset_params_emits_prefixed_violation(tmp_path, mock_logger):
-    """3.1.1: when run metadata has no combined_params (no dataset block),
+    """3.1.1: when run metadata has no parameters (no dataset block),
     verify_datasize_usage emits a [3.1.1 trainingVerifyDatasizeUsage] violation
     and returns False.
 
-    The default build_submission writes metadata.json with empty combined_params
-    (default _DEFAULT_METADATA has `"combined_params": {}`) and a non-empty
-    args dict. The first branch (no params and no combined_params) is skipped
-    because args is non-empty; the second branch ("dataset parameters not
-    found in metadata") fires because combined_params.get('dataset', {}) is
-    empty.
+    The default build_submission writes metadata.json with empty parameters
+    (default _DEFAULT_METADATA has `"parameters": {}`) and a non-empty args
+    dict. The first branch (no params and no parameters) is skipped because
+    args is non-empty; the second branch ("dataset parameters not found in
+    metadata") fires because parameters.get('dataset', {}) is empty.
     """
     from mlpstorage_py.tests.conftest import build_submission
     root = build_submission(tmp_path)

@@ -15,6 +15,8 @@ Exports:
                                   (Phase 4 CD-04; shared by §3.6.1 and §5.6.1)
   _pair_checkpoint_runs — write/read run pairing helper (D-D2)
   _parse_iso_gap        — ISO-timestamp gap helper (D-D2, CHKPT-03)
+  get_parameters        — read merged DLIO parameters dict from metadata (#598)
+  get_override_parameters — read user-supplied overrides dict from metadata (#598)
 
 References:
   - D-B1..B7 in Phase 2 CONTEXT.md (df parsing, longest-prefix mount match)
@@ -38,6 +40,58 @@ from ..tools.code_image import (
     MissingHashFile,
     MalformedHashFile,
 )
+
+
+# ---------------------------------------------------------------------------
+# Metadata key accessors (#598)
+# ---------------------------------------------------------------------------
+#
+# BaseBenchmark.metadata writes two top-level dicts into *_metadata.json:
+#
+#   metadata["parameters"]           — YAML defaults with CLI overrides folded
+#                                       in (was: "combined_params" pre-#365)
+#   metadata["override_parameters"]  — user-specified overrides only
+#                                       (was: "params_dict" pre-#365)
+#
+# These accessors are the single source of truth for the lookup so a future
+# key rename is a one-site change instead of an N-site treasure hunt.
+
+
+def get_parameters(metadata: dict) -> dict:
+    """Return the merged DLIO parameters dict from a metadata.json mapping.
+
+    Reads ``metadata['parameters']`` as written by ``BaseBenchmark.metadata``
+    (see ``mlpstorage_py/benchmarks/base.py``). Returns ``{}`` if the key is
+    absent so callers can chain ``.get("dataset", {})`` safely.
+
+    Args:
+        metadata: A parsed ``*_metadata.json`` dict, or ``None``.
+
+    Returns:
+        The merged parameters dict, or ``{}`` if metadata is ``None`` or the
+        key is missing.
+    """
+    if not metadata:
+        return {}
+    return metadata.get("parameters", {}) or {}
+
+
+def get_override_parameters(metadata: dict) -> dict:
+    """Return the user-overrides dict from a metadata.json mapping.
+
+    Reads ``metadata['override_parameters']`` as written by
+    ``BaseBenchmark.metadata``. Returns ``{}`` if the key is absent.
+
+    Args:
+        metadata: A parsed ``*_metadata.json`` dict, or ``None``.
+
+    Returns:
+        The override_parameters dict, or ``{}`` if metadata is ``None`` or
+        the key is missing.
+    """
+    if not metadata:
+        return {}
+    return metadata.get("override_parameters", {}) or {}
 
 
 # ---------------------------------------------------------------------------

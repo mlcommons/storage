@@ -61,7 +61,7 @@ def _make_check(
 
     metadata = {
         "verification": verification,
-        "params_dict": {"checkpoint.mode": checkpoint_mode},
+        "override_parameters": {"checkpoint.mode": checkpoint_mode},
         "args": {
             "model": model,
             "num_processes": num_processes,

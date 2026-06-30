@@ -75,7 +75,7 @@ def test_bug_t2_method_does_not_crash_on_mixed_tuples(method_name, tmp_path):
              "num_files_train": 0, "num_files_eval": 0,
              "metric": {"train_au_meet_expectation": "success",
                         "train_au_mean_percentage": 99.0}},
-            {"combined_params": {
+            {"parameters": {
                 "dataset": {"num_files_train": 1, "num_samples_per_file": 1,
                             "record_length_bytes": 1024},
                 "reader": {"batch_size": 1}},

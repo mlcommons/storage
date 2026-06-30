@@ -33,7 +33,11 @@ from .base import BaseCheck
 from ..configuration.configuration import Config
 from ..loader import SubmissionLogs
 from ..rule_registry import rule
-from .helpers import _check_code_image_layered, _check_filesystem_separation
+from .helpers import (
+    _check_code_image_layered,
+    _check_filesystem_separation,
+    get_override_parameters,
+)
 from mlpstorage_py.config import VDB_INDEX_TYPES_CLOSED
 
 
@@ -877,7 +881,7 @@ class VdbCheck(BaseCheck):
                     self.path, ts,
                 )
                 continue
-            params_dict = metadata.get("params_dict", {}) or {}
+            params_dict = get_override_parameters(metadata)
             for param_key in params_dict.keys():
                 if param_key not in _CLOSED_ALLOWED_PARAMS:
                     self.log_violation(
@@ -938,7 +942,7 @@ class VdbCheck(BaseCheck):
                     backend, self.path, ts,
                 )
                 continue
-            params_dict = metadata.get("params_dict", {}) or {}
+            params_dict = get_override_parameters(metadata)
             for param_key in params_dict.keys():
                 if param_key not in allowed_params:
                     self.log_violation(

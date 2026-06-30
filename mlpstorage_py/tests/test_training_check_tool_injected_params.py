@@ -38,10 +38,11 @@ def _make_training_check(tmp_path, run_files, mode='training'):
 
 
 def _make_run_tuple(params_dict, verification='closed'):
+    # #598: writer emits "override_parameters" (renamed from "params_dict").
     summary = {}
     metadata = {
         'verification': verification,
-        'params_dict': params_dict,
+        'override_parameters': params_dict,
     }
     return (summary, metadata, '20260624_000000')
 

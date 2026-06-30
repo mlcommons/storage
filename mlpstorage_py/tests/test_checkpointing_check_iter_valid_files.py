@@ -96,8 +96,8 @@ def test_f1a_method_tolerates_mixed_none_and_valid_entries(method_name, tmp_path
         "args": {"model": "llama3_8b", "num_processes": 8,
                  "checkpoint_folder": "/cf", "results_dir": "/rd"},
         "verification": "closed",
-        "combined_params": {"checkpoint": {"fsync": True}},
-        "params_dict": {"checkpoint.mode": "combined"},
+        "parameters": {"checkpoint": {"fsync": True}},
+        "override_parameters": {"checkpoint.mode": "combined"},
         "yaml_params": {},
     }
     checkpoint_files = [

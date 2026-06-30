@@ -4,7 +4,13 @@ from ..constants import *
 from ..configuration.configuration import Config
 from ..loader import SubmissionLogs
 from ..rule_registry import rule
-from .helpers import _check_filesystem_separation, _pair_checkpoint_runs, _parse_iso_gap
+from .helpers import (
+    _check_filesystem_separation,
+    _pair_checkpoint_runs,
+    _parse_iso_gap,
+    get_override_parameters,
+    get_parameters,
+)
 
 import os
 import re
@@ -157,7 +163,7 @@ class CheckpointingCheck(BaseCheck):
             return valid
 
         for summary, metadata, _ in self._iter_valid_files():
-            combined_params = metadata.get("combined_params", {})
+            combined_params = get_parameters(metadata)
             checkpoint_params = combined_params.get("checkpoint", {})
             fsync_enabled = checkpoint_params.get("fsync", False)
 
@@ -220,7 +226,7 @@ class CheckpointingCheck(BaseCheck):
             verification = metadata.get("verification", "closed")
 
             if verification == "closed":
-                checkpoint_mode = metadata.get("params_dict", {}).get("checkpoint.mode", "").lower()
+                checkpoint_mode = get_override_parameters(metadata).get("checkpoint.mode", "").lower()
                 model_name = metadata.get("args", {}).get("model", "").lower()
                 num_processes = metadata.get("args", {}).get("num_processes", 0)
 
@@ -501,7 +507,7 @@ class CheckpointingCheck(BaseCheck):
             return valid
 
         for summary, metadata, _ in self._iter_valid_files():
-            params_dict = metadata.get("params_dict", {})
+            params_dict = get_override_parameters(metadata)
             checkpoint_mode = params_dict.get("checkpoint.mode", "")
 
             if checkpoint_mode == "subset":

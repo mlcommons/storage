@@ -150,10 +150,12 @@ def _summary_datagen(**overrides):
 
 
 def _metadata(**arg_overrides):
-    """Build a metadata.json dict with args + params_dict.
+    """Build a metadata.json dict with args + override_parameters.
 
-    Pop "params_dict" to override the params dict itself; everything else
-    is treated as an args.* override.
+    Pop "params_dict" to override the user-supplied overrides dict; everything
+    else is treated as an args.* override. The "params_dict" kwarg name is
+    kept for caller backwards-compatibility, but it maps to the
+    "override_parameters" key the writer actually emits (#598 / #365).
     """
     params_dict = arg_overrides.pop("params_dict", None)
     args = {
@@ -163,7 +165,7 @@ def _metadata(**arg_overrides):
     args.update(arg_overrides)
     return {
         "args": args,
-        "params_dict": params_dict if params_dict is not None else {},
+        "override_parameters": params_dict if params_dict is not None else {},
     }
 
 
