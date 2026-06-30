@@ -1293,16 +1293,187 @@ class TestBuildOptionKvcacheArgs:
         assert out[out.index('--num-users') + 1] == str(WORKLOAD_PARAMS[2]['num-users'])
         assert out[out.index('--cpu-mem-gb') + 1] == str(WORKLOAD_PARAMS[2]['cpu-mem-gb'])
 
-    def test_max_concurrent_allocs_always_from_workload_params(self, tmp_path):
-        """max-concurrent-allocs is not user-exposed even in OPEN — it
-        always tracks the per-option WORKLOAD_PARAMS value."""
+    def test_max_concurrent_allocs_falls_back_to_workload_params_when_unset(self, tmp_path):
+        """When the user has not set --max-concurrent-allocs (args attr is
+        absent or None), both CLOSED and OPEN emit the per-option
+        WORKLOAD_PARAMS value."""
         from mlpstorage_py.benchmarks.kvcache import WORKLOAD_PARAMS
         bm = _make_run_benchmark(tmp_path)
+        # Ensure the attr is absent so the OPEN getattr-or-default lands on the
+        # WORKLOAD_PARAMS fallback path (mirrors a parser namespace where the
+        # user did not pass --max-concurrent-allocs).
+        if hasattr(bm.args, 'max_concurrent_allocs'):
+            delattr(bm.args, 'max_concurrent_allocs')
         out_open = bm._build_option_kvcache_args(3, is_closed=False)
         out_closed = bm._build_option_kvcache_args(3, is_closed=True)
         expected = str(WORKLOAD_PARAMS[3]['max-concurrent-allocs'])
         assert out_open[out_open.index('--max-concurrent-allocs') + 1] == expected
         assert out_closed[out_closed.index('--max-concurrent-allocs') + 1] == expected
+
+    def test_max_concurrent_allocs_user_value_overrides_in_open(self, tmp_path):
+        """In OPEN, a user-set --max-concurrent-allocs supersedes the
+        per-option WORKLOAD_PARAMS default — same precedence as
+        --num-users / --gpu-mem-gb / etc."""
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.max_concurrent_allocs = 8
+        out = bm._build_option_kvcache_args(3, is_closed=False)
+        # Option 3's WORKLOAD_PARAMS default is 4; user's 8 must win.
+        assert out[out.index('--max-concurrent-allocs') + 1] == '8'
+
+    def test_max_concurrent_allocs_zero_overrides_in_open(self, tmp_path):
+        """0 is a legal kv-cache.py value meaning 'no semaphore cap' — must
+        flow through, not be treated as falsy."""
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.max_concurrent_allocs = 0
+        out = bm._build_option_kvcache_args(1, is_closed=False)
+        # Option 1's WORKLOAD_PARAMS default is 16; user's 0 must win.
+        assert out[out.index('--max-concurrent-allocs') + 1] == '0'
+
+    def test_max_concurrent_allocs_ignored_in_closed_even_if_set(self, tmp_path):
+        """In CLOSED the user cannot override max-concurrent-allocs — the
+        per-option MLPerf-mandated value is emitted verbatim regardless of
+        what's on args. (Defense in depth: the CLI also doesn't register
+        --max-concurrent-allocs in CLOSED mode.)"""
+        from mlpstorage_py.benchmarks.kvcache import WORKLOAD_PARAMS
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.max_concurrent_allocs = 9999  # absurd, must be ignored
+        out = bm._build_option_kvcache_args(1, is_closed=True)
+        assert out[out.index('--max-concurrent-allocs') + 1] == str(
+            WORKLOAD_PARAMS[1]['max-concurrent-allocs']
+        )
+
+
+class TestBuildGlobalKvcacheArgs:
+    """Global (non-per-option) tuning knobs forwarded by
+    _build_global_kvcache_args.
+
+    CLOSED must return an empty list — the MLPerf-mandated invocation only
+    carries WORKLOAD_PARAMS keys and no optional features (verified against
+    the v3 KV Cache Proposal reference command in
+    kv_cache_benchmark/docs/MLperf_v3_KV_cache_proposal.md).
+
+    OPEN/whatif forward each user-supplied knob exactly once. store_true
+    flags are emitted iff truthy; value flags are emitted iff non-None.
+    """
+
+    def test_closed_returns_empty_list(self, tmp_path):
+        bm = _make_run_benchmark(tmp_path)
+        # Even if the args namespace carries values (the CLOSED set_defaults
+        # block pre-populates these), CLOSED must not forward them.
+        bm.args.enable_rag = True
+        bm.args.enable_autoscaling = True
+        bm.args.enable_latency_tracing = True
+        bm.args.autoscaler_mode = 'qos'
+        bm.args.rag_num_docs = 10
+        bm.args.performance_profile = 'throughput'
+        out = bm._build_global_kvcache_args(is_closed=True)
+        assert out == [], (
+            "CLOSED must forward zero global flags — MLPerf-mandated "
+            f"invocation only carries WORKLOAD_PARAMS. Got: {out!r}"
+        )
+
+    def test_open_with_no_user_flags_returns_empty(self, tmp_path):
+        """No store_true flag set, no value flag set → no forwarding.
+        kv-cache.py's own defaults apply for every untouched knob."""
+        bm = _make_run_benchmark(tmp_path)
+        # Strip every attribute the global builder consults so the namespace
+        # mirrors "user did not touch any optional-feature flag."
+        for attr in (
+            'disable_multi_turn', 'disable_prefix_caching', 'enable_rag',
+            'enable_autoscaling', 'enable_latency_tracing',
+            'rag_num_docs', 'autoscaler_mode', 'performance_profile',
+        ):
+            if hasattr(bm.args, attr):
+                delattr(bm.args, attr)
+        assert bm._build_global_kvcache_args(is_closed=False) == []
+
+    @pytest.mark.parametrize('attr,flag', [
+        ('disable_multi_turn', '--disable-multi-turn'),
+        ('disable_prefix_caching', '--disable-prefix-caching'),
+        ('enable_rag', '--enable-rag'),
+        ('enable_autoscaling', '--enable-autoscaling'),
+        ('enable_latency_tracing', '--enable-latency-tracing'),
+    ])
+    def test_open_store_true_flag_emits_flag(self, tmp_path, attr, flag):
+        """Each store_true flag must appear exactly once in the global argv
+        when truthy — including the two new flags (#594 sibling fix) and the
+        previously-dead ones (#498/#500 follow-up)."""
+        bm = _make_run_benchmark(tmp_path)
+        # Strip non-target attrs so the result is unambiguously about `attr`.
+        for other in (
+            'disable_multi_turn', 'disable_prefix_caching', 'enable_rag',
+            'enable_autoscaling', 'enable_latency_tracing',
+            'rag_num_docs', 'autoscaler_mode', 'performance_profile',
+        ):
+            if other != attr and hasattr(bm.args, other):
+                delattr(bm.args, other)
+        setattr(bm.args, attr, True)
+        out = bm._build_global_kvcache_args(is_closed=False)
+        assert out.count(flag) == 1, (
+            f"expected {flag!r} exactly once; got {out!r}"
+        )
+
+    @pytest.mark.parametrize('attr,flag', [
+        ('disable_multi_turn', '--disable-multi-turn'),
+        ('disable_prefix_caching', '--disable-prefix-caching'),
+        ('enable_rag', '--enable-rag'),
+        ('enable_autoscaling', '--enable-autoscaling'),
+        ('enable_latency_tracing', '--enable-latency-tracing'),
+    ])
+    def test_open_store_true_flag_false_does_not_emit(self, tmp_path, attr, flag):
+        """A store_true flag set to False must NOT appear — that's what
+        keeps kv-cache.py's own defaults intact for unset knobs."""
+        bm = _make_run_benchmark(tmp_path)
+        for other in (
+            'rag_num_docs', 'autoscaler_mode', 'performance_profile',
+        ):
+            if hasattr(bm.args, other):
+                delattr(bm.args, other)
+        for x in (
+            'disable_multi_turn', 'disable_prefix_caching', 'enable_rag',
+            'enable_autoscaling', 'enable_latency_tracing',
+        ):
+            setattr(bm.args, x, False)
+        out = bm._build_global_kvcache_args(is_closed=False)
+        assert flag not in out
+
+    @pytest.mark.parametrize('attr,flag,value', [
+        ('rag_num_docs', '--rag-num-docs', 25),
+        ('autoscaler_mode', '--autoscaler-mode', 'capacity'),
+        ('performance_profile', '--performance-profile', 'throughput'),
+    ])
+    def test_open_value_flag_emits_value(self, tmp_path, attr, flag, value):
+        bm = _make_run_benchmark(tmp_path)
+        for other in (
+            'disable_multi_turn', 'disable_prefix_caching', 'enable_rag',
+            'enable_autoscaling', 'enable_latency_tracing',
+            'rag_num_docs', 'autoscaler_mode', 'performance_profile',
+        ):
+            if other != attr and hasattr(bm.args, other):
+                delattr(bm.args, other)
+        setattr(bm.args, attr, value)
+        out = bm._build_global_kvcache_args(is_closed=False)
+        idx = out.index(flag)
+        assert out[idx + 1] == str(value)
+
+    @pytest.mark.parametrize('attr,flag', [
+        ('rag_num_docs', '--rag-num-docs'),
+        ('autoscaler_mode', '--autoscaler-mode'),
+        ('performance_profile', '--performance-profile'),
+    ])
+    def test_open_value_flag_none_does_not_emit(self, tmp_path, attr, flag):
+        """An explicitly-None value flag must not be forwarded."""
+        bm = _make_run_benchmark(tmp_path)
+        for other in (
+            'disable_multi_turn', 'disable_prefix_caching', 'enable_rag',
+            'enable_autoscaling', 'enable_latency_tracing',
+            'rag_num_docs', 'autoscaler_mode', 'performance_profile',
+        ):
+            if hasattr(bm.args, other):
+                delattr(bm.args, other)
+        setattr(bm.args, attr, None)
+        out = bm._build_global_kvcache_args(is_closed=False)
+        assert flag not in out
 
 
 class TestWrapperCommandForwardsPerOptionArgs:
@@ -1419,6 +1590,126 @@ class TestWrapperCommandForwardsPerOptionArgs:
         # And the wrapper-adjacent default must NOT also be present.
         assert 'kv_cache_benchmark/config.yaml' not in cmd0, \
             f"Default config path leaked into cmd alongside user override: {cmd0}"
+
+
+class TestWrapperCommandForwardsGlobalArgs:
+    """End-to-end checks that the wrapper command built by _execute_run
+    forwards the global tuning knobs (the new --enable-latency-tracing and
+    the previously-dead --enable-rag / --disable-multi-turn / etc.) in
+    OPEN/whatif but never in CLOSED."""
+
+    def _capture_first_cmd(self, bm):
+        agg = {
+            'option': 1, 'aggregated_read_bandwidth_gbps': 0.0,
+            'aggregated_write_bandwidth_gbps': 0.0,
+            'aggregated_avg_throughput_tokens_per_sec': 0.0,
+            'aggregated_storage_throughput_tokens_per_sec': 0.0,
+            'aggregated_p95_latency_ms': 0.0,
+            'rank_count': 1, 'trial_count': 1,
+            'partial_failure': False, 'missing_files': [], 'cpu_tier_ranks': [],
+        }
+        executed = []
+        def fake_execute(cmd, **kwargs):
+            executed.append(cmd)
+            return ('', '', 0)
+        with patch.object(bm, '_execute_command', side_effect=fake_execute), \
+             patch.object(bm, '_interruptible_sleep'), \
+             patch.object(bm, '_aggregate_option_results', return_value=agg), \
+             patch.object(bm, '_write_run_summary'), \
+             patch.object(bm, 'write_metadata'):
+            bm._execute_run()
+        return executed[0]
+
+    def test_open_enable_latency_tracing_reaches_wrapper(self, tmp_path):
+        """The end-to-end smoke test for the latency-tracing fix: setting
+        --enable-latency-tracing in OPEN must put `--enable-latency-tracing`
+        into the wrapper argv. Pre-fix this flag was unreachable from
+        mlpstorage at any mode."""
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.mode = 'open'
+        bm.args.trials = 1
+        bm.args.inter_option_delay = 0
+        bm.args.enable_latency_tracing = True
+        cmd0 = self._capture_first_cmd(bm)
+        assert '--enable-latency-tracing' in cmd0, (
+            f"--enable-latency-tracing missing from wrapper argv: {cmd0!r}"
+        )
+
+    def test_open_user_max_concurrent_allocs_reaches_wrapper(self, tmp_path):
+        """Setting --max-concurrent-allocs in OPEN must override the
+        per-option WORKLOAD_PARAMS default in the wrapper argv."""
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.mode = 'open'
+        bm.args.trials = 1
+        bm.args.inter_option_delay = 0
+        bm.args.max_concurrent_allocs = 32
+        cmd0 = self._capture_first_cmd(bm)
+        # Option 1's default is 16; the user's 32 must appear instead.
+        assert '--max-concurrent-allocs 32' in cmd0, cmd0
+        assert '--max-concurrent-allocs 16' not in cmd0, cmd0
+
+    def test_open_dead_optional_features_reach_wrapper(self, tmp_path):
+        """The previously-dead optional-feature flags (--enable-rag,
+        --disable-multi-turn, --enable-autoscaling, --rag-num-docs,
+        --autoscaler-mode, --performance-profile) must now propagate to
+        the wrapper argv in OPEN."""
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.mode = 'open'
+        bm.args.trials = 1
+        bm.args.inter_option_delay = 0
+        bm.args.disable_multi_turn = True
+        bm.args.disable_prefix_caching = True
+        bm.args.enable_rag = True
+        bm.args.enable_autoscaling = True
+        bm.args.rag_num_docs = 25
+        bm.args.autoscaler_mode = 'capacity'
+        bm.args.performance_profile = 'throughput'
+        cmd0 = self._capture_first_cmd(bm)
+        assert '--disable-multi-turn' in cmd0
+        assert '--disable-prefix-caching' in cmd0
+        assert '--enable-rag' in cmd0
+        assert '--enable-autoscaling' in cmd0
+        assert '--rag-num-docs 25' in cmd0
+        assert '--autoscaler-mode capacity' in cmd0
+        assert '--performance-profile throughput' in cmd0
+
+    def test_closed_does_not_forward_global_args_even_if_namespace_carries_them(
+        self, tmp_path,
+    ):
+        """The CLOSED set_defaults block in kvcache_args.py pre-populates
+        enable_rag=True / enable_autoscaling=True on the namespace, but the
+        CLOSED branch of _build_global_kvcache_args must drop them — the
+        MLPerf-mandated invocation only carries WORKLOAD_PARAMS keys.
+        Behaviour pre-fix: the dead flags were never forwarded; this test
+        locks that property under the new plumb-through code path."""
+        bm = _make_run_benchmark(tmp_path)
+        bm.args.mode = 'closed'
+        # The CLOSED set_defaults block sets these to True / non-None.
+        bm.args.enable_rag = True
+        bm.args.enable_autoscaling = True
+        bm.args.enable_latency_tracing = True
+        bm.args.disable_multi_turn = True
+        bm.args.autoscaler_mode = 'qos'
+        bm.args.rag_num_docs = 10
+        bm.args.performance_profile = 'throughput'
+        bm.args.max_concurrent_allocs = 999
+        cmd0 = self._capture_first_cmd(bm)
+        # None of the global / latency-tracing / dead-flag tokens may appear.
+        for token in (
+            '--enable-rag', '--enable-autoscaling', '--enable-latency-tracing',
+            '--disable-multi-turn', '--disable-prefix-caching',
+            '--autoscaler-mode', '--rag-num-docs', '--performance-profile',
+        ):
+            assert token not in cmd0, (
+                f"CLOSED forwarded {token!r} despite namespace value being "
+                f"pre-populated: {cmd0!r}"
+            )
+        # max-concurrent-allocs DOES appear (it's a WORKLOAD_PARAMS key) but
+        # must use the per-option mandated value, not the namespace override.
+        assert '--max-concurrent-allocs 16' in cmd0, (
+            f"CLOSED option-1 must emit MLPerf-mandated 16, not user 999: "
+            f"{cmd0!r}"
+        )
 
 
 class TestResolveRankLayout:
