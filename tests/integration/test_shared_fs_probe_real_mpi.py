@@ -144,12 +144,15 @@ class TestSharedFsProbeRealMpi:
         parsed = json.loads(payload)
         assert parsed.get('status') == 'ok', f"expected status='ok', got {parsed!r}"
 
-        # All ranks reported the same (st_dev, st_ino) — cardinality 1.
-        ranks = parsed.get('ranks', [])
-        assert len(ranks) == 2, f"expected 2 ranks in output, got {len(ranks)}"
-        fsids = {(r.get('st_dev'), r.get('st_ino')) for r in ranks}
-        assert len(fsids) == 1, (
-            f"expected cardinality 1 (same FS on both ranks), got {fsids!r}"
+        # Issue #573: the per-rank ``ranks`` array is intentionally NOT
+        # emitted on the wire (it pushes the line past PIPE_BUF at scale
+        # and the launcher never reads it). Cardinality-1 success is
+        # observable from ``status == 'ok'`` alone — the cardinality
+        # check ran on rank 0 before serialization and would have
+        # produced status='fail' on a mismatch.
+        assert parsed.get('failure_summary') is None, (
+            f"cardinality-1 run must produce no failure_summary; "
+            f"got: {parsed.get('failure_summary')!r}"
         )
 
         # D-44 sentinel unlink: the sentinel file is removed in the finally

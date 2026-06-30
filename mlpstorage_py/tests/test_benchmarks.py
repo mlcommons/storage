@@ -535,7 +535,7 @@ class TestWriteClusterInfo:
 class TestVectorDBBenchmark:
     """Tests for VectorDBBenchmark single-node integration."""
 
-    def test_constructor_accepts_kwargs(self, mock_logger):
+    def test_constructor_accepts_kwargs(self, mock_logger, tmp_path):
         """VectorDBBenchmark must accept run_datetime and logger kwargs
         because main.py passes them (line 216)."""
         from mlpstorage_py.benchmarks.vectordbbench import VectorDBBenchmark
@@ -548,7 +548,11 @@ class TestVectorDBBenchmark:
             debug=False,
             verbose=False,
             stream_log_level='INFO',
-            results_dir='/tmp/test',
+            # Use tmp_path (per-test) so reserve_run_directory's 10-slot
+            # retry window doesn't fill up across repeated dev runs —
+            # the hardcoded `/tmp/test` + fixed run_datetime combination
+            # only allows 10 invocations before exhausting reservations.
+            results_dir=str(tmp_path),
             what_if=False,
             dimension=1536,
             num_vectors=1_000_000,
@@ -575,7 +579,7 @@ class TestVectorDBBenchmark:
             assert bench.command == 'datasize'
             assert bench.config_name == 'default'
 
-    def test_datasize_does_not_require_pymilvus(self, mock_logger):
+    def test_datasize_does_not_require_pymilvus(self, mock_logger, tmp_path):
         """datasize command should skip dependency validation."""
         from mlpstorage_py.benchmarks.vectordbbench import VectorDBBenchmark
         from unittest.mock import patch
@@ -587,7 +591,8 @@ class TestVectorDBBenchmark:
             debug=False,
             verbose=False,
             stream_log_level='INFO',
-            results_dir='/tmp/test',
+            # Per-test tmp dir — see test_constructor_accepts_kwargs.
+            results_dir=str(tmp_path),
             what_if=False,
             dimension=768,
             num_vectors=5_000_000,

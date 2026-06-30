@@ -2572,16 +2572,19 @@ if __name__ == '__main__':
 # JSON output schema (rank 0 only, between BEGIN/END markers):
 #   {
 #     "status": "ok" | "fail",
-#     "ranks": [
-#       {"hostname": str, "rank": int, "failure": None | dict, "st_dev": int|None, "st_ino": int|None},
-#       ...
-#     ],
 #     "failure_summary": None | {
 #       "kind": "cardinality" | "per_rank",
-#       "message": str   # human-readable, used by the launcher verbatim
+#       "message": str   # human-readable, used by the launcher verbatim;
+#                        # built from per-rank payloads in Step E so the
+#                        # detail survives without shipping the array.
 #     },
 #     "unlink_warning": None | str    # set if rank-0 unlink failed (D-44 cosmetic)
 #   }
+#
+# Issue #573: the per-rank gather (``all_payloads``) is NOT emitted on
+# the wire. The launcher never consumed it, and at >=~40 ranks the
+# array pushed the JSON line past PIPE_BUF (4096 B), causing
+# non-atomic stdout truncation and a json.loads failure at char 4095.
 #
 # Exit codes:
 #   0 on status='ok'
@@ -2605,6 +2608,10 @@ import sys
 import time
 
 
+_PER_HOST_LINE_CAP = 16  # Issue #573: sample-plus-summary cap so the
+                         # wire JSON stays under PIPE_BUF at any scale.
+
+
 def _build_cardinality_message(payloads):
     """Build the verbatim multi-line error body for a cardinality > 1 fault.
 
@@ -2617,13 +2624,19 @@ def _build_cardinality_message(payloads):
         ...
       This typically means one or more hosts have a local-disk path where a
       shared mount was expected.
+
+    Issue #573: per-host lines are capped at _PER_HOST_LINE_CAP. Above
+    the cap, a "... and N more ranks omitted" tail line tells the
+    operator the true scale of the failure without pushing the wire
+    JSON over PIPE_BUF.
     """
     lines = []
     lines.append(
         "CAP-02: shared-FS probe detected the data-dir is NOT the same "
         "filesystem on every participating host."
     )
-    for p in payloads:
+    shown = payloads[:_PER_HOST_LINE_CAP]
+    for p in shown:
         lines.append(
             "  host={h} rank={r} st_dev={d} st_ino={i}".format(
                 h=p.get("hostname", "?"),
@@ -2632,6 +2645,9 @@ def _build_cardinality_message(payloads):
                 i=p.get("st_ino"),
             )
         )
+    omitted = len(payloads) - len(shown)
+    if omitted > 0:
+        lines.append("  ... and {n} more ranks omitted (issue #573 PIPE_BUF cap)".format(n=omitted))
     # REQUIREMENTS.md CAP-02 verbatim hint lock (single-line literal so the
     # plan's `grep -c '...'` acceptance criterion matches exactly):
     lines.append("this typically means one or more hosts have a local-disk path where a shared mount was expected.")
@@ -2643,13 +2659,18 @@ def _build_per_rank_message(payloads):
 
     Mentions every failing rank's hostname + mode + errno + message so the
     operator can identify the failing node(s) in a heterogeneous fleet.
+
+    Issue #573 defensive cap: a pathological "permission denied on
+    every node" scenario could re-create the PIPE_BUF truncation
+    through this builder. Cap matches _build_cardinality_message.
     """
     failed = [p for p in payloads if p.get("failure") is not None]
     lines = []
     lines.append(
         "CAP-02: shared-FS probe failed on one or more participating hosts."
     )
-    for p in failed:
+    shown = failed[:_PER_HOST_LINE_CAP]
+    for p in shown:
         f = p["failure"]
         lines.append(
             "  host={h} rank={r} mode={m} errno={e} message={msg}".format(
@@ -2660,6 +2681,9 @@ def _build_per_rank_message(payloads):
                 msg=f.get("message", ""),
             )
         )
+    omitted = len(failed) - len(shown)
+    if omitted > 0:
+        lines.append("  ... and {n} more failing ranks omitted (issue #573 PIPE_BUF cap)".format(n=omitted))
     lines.append(
         "Verify the data-dir path is accessible and has correct "
         "permissions on every participating host."
@@ -2842,10 +2866,18 @@ def main():
         try:
             _result = {
                 "status": status if status is not None else "fail",
-                "ranks": all_payloads,
                 "failure_summary": rank0_failure_summary,
                 "unlink_warning": unlink_warning,
             }
+            # Issue #573: the per-rank ``all_payloads`` array USED to ride
+            # along here under a "ranks" key, but the launcher never read
+            # it (only status / failure_summary / unlink_warning are
+            # consumed downstream). At >=~40 ranks the line crossed
+            # PIPE_BUF (4096 B), the I/O forwarder stopped writing
+            # atomically, and the launcher's marker regex captured a
+            # truncated line that failed json.loads at char 4095. The
+            # user-facing per-rank detail is preserved via
+            # failure_summary.message, built from all_payloads in Step E.
             # Compact single-line JSON to stay under PIPE_BUF and avoid framing ambiguity.
             print("__CAP02_RESULT_BEGIN__", flush=True)
             print(json.dumps(_result, separators=(",", ":")), flush=True)
