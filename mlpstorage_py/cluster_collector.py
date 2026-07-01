@@ -13,6 +13,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import threading
 import time
 import warnings
@@ -2905,6 +2906,31 @@ if __name__ == "__main__":
 # MPI Cluster Collector Class
 # =============================================================================
 
+
+def _read_staged_mpi_import_error(output_path: str) -> Optional[Dict[str, str]]:
+    """Return the staged mpi4py-import-error payload if present, else None.
+
+    On import failure the collector script writes a JSON sentinel containing
+    `_mpi_import_error: True`, `_error_message`, and `_hostname` before
+    exiting (see line 2466). When that happens during an MPI run, the
+    surviving ranks deadlock in comm.gather() and the launcher hits a
+    timeout — but the staged file still carries the actionable diagnosis.
+    """
+    if not os.path.exists(output_path):
+        return None
+    try:
+        with open(output_path, 'r') as f:
+            staged = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
+    if not isinstance(staged, dict) or not staged.get('_mpi_import_error'):
+        return None
+    return {
+        'message': staged.get('_error_message', 'mpi4py not available'),
+        'hostname': staged.get('_hostname', 'unknown'),
+    }
+
+
 class MPIClusterCollector:
     """
     Collects system information from all nodes in a cluster using MPI.
@@ -3036,8 +3062,11 @@ class MPIClusterCollector:
             if self.allow_run_as_root:
                 cmd += " --allow-run-as-root"
 
-        # Add the Python script and output path
-        cmd += f" python3 {script_path} {output_path}"
+        # Use sys.executable (not bare `python3`) so the per-rank interpreter
+        # picks up the launcher's venv when the venv lives on a shared FS —
+        # otherwise mpirun resolves `python3` to the remote node's
+        # /usr/bin/python3 which has no mpi4py (issue #594).
+        cmd += f" {sys.executable} {script_path} {output_path}"
 
         return cmd
 
@@ -3268,6 +3297,18 @@ class MPIClusterCollector:
                 env=env,
             )
         except subprocess.TimeoutExpired:
+            # Issue #594: when mpi4py is missing on some ranks, the failing
+            # rank writes _mpi_import_error to the staged cluster_info.json
+            # and exits while the remaining ranks deadlock in comm.gather().
+            # Surface that diagnostic instead of just the timeout message.
+            staged_error = _read_staged_mpi_import_error(output_path)
+            if staged_error is not None:
+                raise RuntimeError(
+                    f"MPI collection timed out after {self.timeout} seconds; "
+                    f"staged diagnostic from host '{staged_error['hostname']}': "
+                    f"{staged_error['message']}. "
+                    "Ensure mpi4py is installed on all cluster nodes."
+                )
             raise RuntimeError(
                 f"MPI collection timed out after {self.timeout} seconds"
             )
@@ -3556,7 +3597,9 @@ def run_shared_fs_probe(destination, hosts, run_uuid, logger,
         if allow_run_as_root:
             cmd_parts.append("--allow-run-as-root")
     cmd_parts += [
-        "python3",
+        # sys.executable (not bare `python3`) — see issue #594: bare python3
+        # bypasses the launcher's venv on remote ranks, missing mpi4py.
+        sys.executable,
         remote_script_path,
         destination,
         run_uuid,
