@@ -212,12 +212,22 @@ class TestReportGeneratorGenerateReports:
         results_dir = tmp_path / "results"
         results_dir.mkdir()
 
+        # Model-level rollup: one results.{json,csv} per <model>/ folder,
+        # covering every command's timestamps for that model. The mock
+        # leaf must live under the canonical training layout
+        # `<results>/training/<model>/<command>/<ts>/` so the grouping
+        # helper can walk up two levels to land at `<model>/`.
+        self._model_folder = results_dir / "training" / "unet3d"
+        leaf = self._model_folder / "run" / "20250111_120000"
+        leaf.mkdir(parents=True)
+
         with patch.object(ReportGenerator, 'accumulate_results'):
             with patch.object(ReportGenerator, 'print_results'):
                 gen = ReportGenerator(str(results_dir), validate_structure=False)
 
         # Add mock run results
         mock_run = MagicMock()
+        mock_run.result_dir = str(leaf)
         mock_run.as_dict.return_value = {
             'run_id': 'test_run',
             'benchmark_type': 'training',
@@ -245,16 +255,20 @@ class TestReportGeneratorGenerateReports:
         assert result == EXIT_CODE.SUCCESS
 
     def test_creates_json_file(self, generator):
-        """Should create results.json."""
+        """Should create results.json inside the <model>/ folder."""
         generator.generate_reports()
-        json_file = os.path.join(generator.results_dir, 'results.json')
-        assert os.path.exists(json_file)
+        json_file = os.path.join(str(self._model_folder), 'results.json')
+        assert os.path.exists(json_file), (
+            f"Expected model-level rollup at {json_file}"
+        )
 
     def test_creates_csv_file(self, generator):
-        """Should create results.csv."""
+        """Should create results.csv inside the <model>/ folder."""
         generator.generate_reports()
-        csv_file = os.path.join(generator.results_dir, 'results.csv')
-        assert os.path.exists(csv_file)
+        csv_file = os.path.join(str(self._model_folder), 'results.csv')
+        assert os.path.exists(csv_file), (
+            f"Expected model-level rollup at {csv_file}"
+        )
 
 
 class TestReportGeneratorPrintResults:
@@ -374,11 +388,21 @@ class TestReportGeneratorPrintResults:
         mock_runs = [MagicMock(), MagicMock()]
         mock_runs[0].run_id = "run1"
         mock_runs[0].accelerator = "h100"
+        # result_dir + benchmark_type are consumed by _system_scope_key
+        # (called from _print_workload_details' warmup badge lookup).
+        # Explicit strings prevent MagicMock's auto-attribute machinery
+        # from producing unpredictable paths.
+        mock_runs[0].result_dir = "/results/training/unet3d/run/20250101_000001"
+        mock_runs[0].benchmark_type = BENCHMARK_TYPES.training
         mock_runs[1].run_id = "run2"
         mock_runs[1].accelerator = "h100"
+        mock_runs[1].result_dir = "/results/training/unet3d/run/20250101_000002"
+        mock_runs[1].benchmark_type = BENCHMARK_TYPES.training
 
+        # Both leaves walk up 4 dirs from `/results/training/unet3d/run/<ts>/`
+        # to `/results`, so both share scope '/results'.
         generator.run_results = {
-            'run1': Result(
+            ('/results', 'run1'): Result(
                 multi=False,
                 benchmark_type=BENCHMARK_TYPES.training,
                 benchmark_command='run',
@@ -388,7 +412,7 @@ class TestReportGeneratorPrintResults:
                 category=PARAM_VALIDATION.CLOSED,
                 metrics={}
             ),
-            'run2': Result(
+            ('/results', 'run2'): Result(
                 multi=False,
                 benchmark_type=BENCHMARK_TYPES.training,
                 benchmark_command='run',
@@ -446,8 +470,14 @@ class TestReportGeneratorAccumulateResults:
                 with patch.object(ReportGenerator, 'print_results'):
                     generator = ReportGenerator(str(results_dir), validate_structure=False)
 
-        assert 'test_run' in generator.run_results
-        assert generator.run_results['test_run'].category == PARAM_VALIDATION.CLOSED
+        # run_results is keyed by (system_scope, run_id) tuple so that
+        # identical run_ids from different systems don't collide as
+        # warmups. There's exactly one entry here; extract it via .values()
+        # rather than depending on the exact scope-key string, which is
+        # derived from the MagicMock's .result_dir attribute path.
+        assert len(generator.run_results) == 1
+        (only_result,) = generator.run_results.values()
+        assert only_result.category == PARAM_VALIDATION.CLOSED
 
     def test_groups_by_workload(self, tmp_path):
         """Should group runs by workload (model, accelerator)."""
@@ -493,6 +523,13 @@ class TestReportGeneratorIntegration:
         results_dir = tmp_path / "results"
         results_dir.mkdir()
 
+        # Model-level rollups land at `<...>/training/<model>/`, so the
+        # mock leaf must live under the canonical layout for the parent
+        # arithmetic in _model_group_folder() to resolve correctly.
+        model_folder = results_dir / "training" / "unet3d"
+        leaf = model_folder / "run" / "20250111_120000"
+        leaf.mkdir(parents=True)
+
         # Create mock benchmark run
         mock_run = MagicMock()
         mock_run.run_id = "training_run_20250111"
@@ -500,6 +537,7 @@ class TestReportGeneratorIntegration:
         mock_run.command = 'run'
         mock_run.model = 'unet3d'
         mock_run.accelerator = 'h100'
+        mock_run.result_dir = str(leaf)
         mock_run.metrics = {
             'train_throughput_samples_per_second': 1250.5,
             'train_au_percentage': 95.2
@@ -525,9 +563,9 @@ class TestReportGeneratorIntegration:
         result = generator.generate_reports()
         assert result == EXIT_CODE.SUCCESS
 
-        # Check files were created
-        assert os.path.exists(os.path.join(results_dir, 'results.json'))
-        assert os.path.exists(os.path.join(results_dir, 'results.csv'))
+        # Files land inside the <model>/ folder, not the results_dir root
+        assert os.path.exists(os.path.join(str(model_folder), 'results.json'))
+        assert os.path.exists(os.path.join(str(model_folder), 'results.csv'))
 
 
 # ---------------------------------------------------------------------------

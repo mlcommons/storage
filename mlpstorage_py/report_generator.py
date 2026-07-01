@@ -118,10 +118,17 @@ class ReportGenerator:
             if not self._validate_directory_structure():
                 sys.exit(EXIT_CODE.FILE_NOT_FOUND)
 
-        self.run_results: Dict[RunID, Result] = {}
+        # Keyed by (system_scope, run_id) so two systems producing the
+        # same RunID (RunID is program+command+model+run_datetime — no
+        # system field) do not collide and get mislabelled as warmup/real
+        # pairs. See _process_single_run for the collision-detection logic
+        # and _system_scope_key for how the scope is derived from the
+        # canonical result-tree layout.
+        self.run_results: Dict[tuple, Result] = {}
         self.workload_results: Dict[tuple, Result] = {}
-        # Basenames of result_dir directories detected as warmup runs.
-        # See _process_single_run for the collision-detection logic.
+        # Absolute paths of result_dir directories detected as warmup runs.
+        # Absolute (not basenames) so two systems with the same <ts>
+        # basename cannot cross-mark each other's real runs as warmups.
         self.warmup_result_dirs: set = set()
         self.processing_errors: List[str] = []
 
@@ -243,18 +250,110 @@ class ReportGenerator:
         # Verify the results directory exists:
         self.logger.info(f'Generating reports for {self.results_dir}')
 
-        # Always traverse the full directory and emit one rollup
-        # results.json / results.csv covering every discovered run, written
-        # inside the submission tree at <results_dir>/results.{csv,json}.
-        # --output-dir was removed in #616 to prevent submitters from
-        # accidentally excluding the summary from their submission.
-        run_result_dicts = [
-            report.benchmark_run.as_dict() for report in self.run_results.values()
-        ]
-        self.write_csv_file(run_result_dicts)
-        self.write_json_file(run_result_dicts)
+        # Aggregate at the MODEL level: one results.{json,csv} per model
+        # folder, containing every command's runs for that model (i.e. run/
+        # + datagen/ + datasize/ + configview/ for training, all commands
+        # for kv_cache, etc.).
+        #
+        # Grouping key is the parent directory of `<command>` (or, for
+        # checkpointing which omits the <command> segment, the parent of
+        # `<ts>` — which is `<model>` itself). See
+        # rules/utils.generate_output_location for the canonical layouts.
+        groups: Dict[str, List[dict]] = {}
+        skipped = 0
+        for result in self.run_results.values():
+            model_folder = self._model_group_folder(result)
+            if model_folder is None:
+                skipped += 1
+                continue
+            groups.setdefault(model_folder, []).append(
+                result.benchmark_run.as_dict()
+            )
+
+        if not groups:
+            self.logger.warning(
+                "No model folders to write rollups for (skipped %d runs without result_dir).",
+                skipped,
+            )
+            return EXIT_CODE.SUCCESS
+
+        for model_folder, run_dicts in sorted(groups.items()):
+            self.write_json_file(run_dicts, target_dir=model_folder)
+            self.write_csv_file(run_dicts, target_dir=model_folder)
 
         return EXIT_CODE.SUCCESS
+
+    def _model_group_folder(self, result: 'Result') -> Optional[str]:
+        """Return the on-disk folder that groups runs at the model level.
+
+        Uses the canonical layouts from generate_output_location():
+
+        * training / kv_cache     — leaf is `.../<model>/<command>/<ts>/`
+                                  → walk up two levels to land at `<model>/`.
+        * checkpointing           — leaf is `.../<model>/<ts>/` (no <command>)
+                                  → walk up one level to land at `<model>/`.
+        * vector_database         — leaf is `.../<engine>/<index>/<command>/<ts>/`
+                                  → walk up two levels to land at `<engine>/<index>/`
+                                     (the "model-like" grouping key for vdb).
+
+        Returns None (and logs a warning) if the run has no result_dir.
+        """
+        leaf = getattr(result.benchmark_run, 'result_dir', None)
+        if not leaf:
+            self.logger.warning(
+                "Run %s has no result_dir on its BenchmarkRun; "
+                "cannot place a model-level rollup for it. Skipping.",
+                result.benchmark_run.run_id,
+            )
+            return None
+        leaf_abs = os.path.abspath(leaf)
+        bt = result.benchmark_type
+        if bt == BENCHMARK_TYPES.checkpointing:
+            # <ts>/ → <model>/
+            return os.path.dirname(leaf_abs)
+        # training, kv_cache, vector_database: <ts>/ → <command>/ → group folder
+        return os.path.dirname(os.path.dirname(leaf_abs))
+
+    # Canonical result-tree depths: number of parent hops from the run's
+    # <ts>/ leaf up to the <system>/ folder. Derived from
+    # rules/utils.generate_output_location:
+    #   training     : <system>/training/<model>/<command>/<ts>/       → 4
+    #   kv_cache     : <system>/kv_cache/<model>/<command>/<ts>/       → 4
+    #   checkpointing: <system>/checkpointing/<model>/<ts>/            → 3
+    #   vector_db    : <system>/vector_database/<engine>/<index>/<command>/<ts>/ → 5
+    _SYSTEM_SCOPE_LEVELS_UP = {
+        BENCHMARK_TYPES.training: 4,
+        BENCHMARK_TYPES.kv_cache: 4,
+        BENCHMARK_TYPES.checkpointing: 3,
+        BENCHMARK_TYPES.vector_database: 5,
+    }
+
+    def _system_scope_key(self, benchmark_run: 'BenchmarkRun') -> str:
+        """Return the ``<system>/`` folder that owns this run.
+
+        Used as the collision-detection namespace for ``run_results`` so
+        that identical RunIDs originating from different systems are
+        kept as distinct real runs (they only collide with warmups
+        *within* one system's <model>/ subtree). Falls back to the
+        absolute leaf path (which is inherently unique per system) if
+        the layout cannot be resolved — never returns "" so it can
+        always serve as a dict key.
+        """
+        leaf = getattr(benchmark_run, 'result_dir', None) or ''
+        if not leaf:
+            # Distinct sentinel per run so unknowns never share a scope.
+            return f"<no-result-dir:{benchmark_run.run_id}>"
+        leaf_abs = os.path.abspath(leaf)
+        levels = self._SYSTEM_SCOPE_LEVELS_UP.get(
+            benchmark_run.benchmark_type, 4
+        )
+        parent = leaf_abs
+        for _ in range(levels):
+            new_parent = os.path.dirname(parent)
+            if new_parent == parent:  # hit filesystem root; stop climbing
+                break
+            parent = new_parent
+        return parent
 
     def accumulate_results(self) -> None:
         """
@@ -352,29 +451,39 @@ class ReportGenerator:
             metrics=benchmark_run.metrics or {}
         )
 
-        existing = self.run_results.get(benchmark_run.run_id)
+        # Collision-check scope: (<system>, run_id). Two runs with the
+        # same RunID under different systems are distinct real runs and
+        # must both be kept — the warmup collision only exists within a
+        # single system's <model>/ subtree, where DLIO stamps the warmup's
+        # summary.start to equal the first real run's start time.
+        scope_key = self._system_scope_key(benchmark_run)
+        result_key = (scope_key, benchmark_run.run_id)
+
+        existing = self.run_results.get(result_key)
         if existing is not None:
-            incoming_dir = benchmark_run.result_dir or ""
-            existing_dir = existing.benchmark_run.result_dir or ""
+            incoming_dir = os.path.abspath(benchmark_run.result_dir or "")
+            existing_dir = os.path.abspath(existing.benchmark_run.result_dir or "")
             incoming_base = os.path.basename(incoming_dir)
             existing_base = os.path.basename(existing_dir)
             if incoming_base < existing_base:
-                self.warmup_result_dirs.add(incoming_base)
+                self.warmup_result_dirs.add(incoming_dir)
                 # Keep the existing (later-basename, real) run in run_results.
                 self.logger.debug(
-                    f"Detected warmup run (collision on {benchmark_run.run_id}): "
-                    f"{incoming_base} (excluded from aggregate)"
+                    f"Detected warmup run (collision on {benchmark_run.run_id} "
+                    f"within system {scope_key!r}): {incoming_base} "
+                    "(excluded from aggregate)"
                 )
                 return
             else:
-                self.warmup_result_dirs.add(existing_base)
+                self.warmup_result_dirs.add(existing_dir)
                 self.logger.debug(
-                    f"Detected warmup run (collision on {benchmark_run.run_id}): "
-                    f"{existing_base} (excluded from aggregate)"
+                    f"Detected warmup run (collision on {benchmark_run.run_id} "
+                    f"within system {scope_key!r}): {existing_base} "
+                    "(excluded from aggregate)"
                 )
                 # Fall through to overwrite the existing (warmup) entry.
 
-        self.run_results[benchmark_run.run_id] = result
+        self.run_results[result_key] = result
 
         # Log category for the run
         self.logger.debug(
@@ -578,14 +687,16 @@ class ReportGenerator:
             key=lambda r: os.path.basename(r.result_dir or "")
         )
         for run in sorted_runs:
-            base = os.path.basename(run.result_dir or "")
-            if base in self.warmup_result_dirs:
+            abs_dir = os.path.abspath(run.result_dir or "")
+            base = os.path.basename(abs_dir)
+            if abs_dir in self.warmup_result_dirs:
                 # Warmup runs are excluded from the aggregate — render with
                 # a WARMUP label + disk basename (which is unique, unlike
                 # the mis-stamped run_id shared with the first real run).
                 print(f"      - {run.run_id} [WARMUP, not aggregated — dir: {base}]")
             else:
-                run_category = self.run_results[run.run_id].category
+                result_key = (self._system_scope_key(run), run.run_id)
+                run_category = self.run_results[result_key].category
                 run_badge = self.msg_formatter.format_category_badge(run_category)
                 print(f"      - {run.run_id} {run_badge}")
 
@@ -600,14 +711,16 @@ class ReportGenerator:
                 print(f"\n    {checklist}")
 
 
-    def write_json_file(self, results):
-        json_file = os.path.join(self.results_dir, 'results.json')
+    def write_json_file(self, results, target_dir: Optional[str] = None):
+        out_dir = target_dir if target_dir is not None else self.results_dir
+        json_file = os.path.join(out_dir, 'results.json')
         self.logger.info(f'Writing results to {json_file}')
         with open(json_file, 'w') as f:
             json.dump(results, f, indent=2)
 
-    def write_csv_file(self, results):
-        csv_file = os.path.join(self.results_dir, 'results.csv')
+    def write_csv_file(self, results, target_dir: Optional[str] = None):
+        out_dir = target_dir if target_dir is not None else self.results_dir
+        csv_file = os.path.join(out_dir, 'results.csv')
         self.logger.info(f'Writing results to {csv_file}')
         flattened_results = [flatten_nested_dict(r) for r in results]
         flattened_results = [remove_nan_values(r) for r in flattened_results]
