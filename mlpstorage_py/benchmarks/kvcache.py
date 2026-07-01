@@ -401,6 +401,13 @@ class KVCacheBenchmark(Benchmark):
         """
         return self.cache_dir if self.cache_dir else None
 
+    def _fs_separation_paths(self):
+        """Return ``None`` — kvcache has no separate dataset/results FS
+        invariant. The cache_dir IS the working set; rules 3.4.2 / 4.4.2 /
+        5.4.2 don't apply to the kvcache benchmark.
+        """
+        return None
+
     # ------------------------------------------------------------------
     # Per-option argv build + rank layout (from main)
     # ------------------------------------------------------------------

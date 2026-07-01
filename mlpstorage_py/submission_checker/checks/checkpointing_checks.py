@@ -4,7 +4,12 @@ from ..constants import *
 from ..configuration.configuration import Config
 from ..loader import SubmissionLogs
 from ..rule_registry import rule
-from .helpers import _check_filesystem_separation, _pair_checkpoint_runs, _parse_iso_gap
+from .helpers import (
+    _check_filesystem_separation,
+    _pair_checkpoint_runs,
+    _parse_iso_gap,
+    read_fs_separation_sidecar,
+)
 
 import os
 import re
@@ -868,7 +873,19 @@ class CheckpointingCheck(BaseCheck):
         if self._get_benchmark_api() == "object":
             return valid
         for summary, metadata, timestamp in self._iter_valid_files():
-            logfile_path = os.path.join(self.checkpointing_path, timestamp, "checkpointing_run.stdout.log")
+            run_dir = os.path.join(self.checkpointing_path, timestamp)
+            logfile_path = os.path.join(run_dir, "checkpointing_run.stdout.log")
+            # CAP-03 sidecar is authoritative (#601). Pre-cutover df-block
+            # fallback retained for one release (D-601-3).
+            sidecar = read_fs_separation_sidecar(run_dir)
+            if sidecar is not None:
+                if sidecar.get("same_filesystem"):
+                    self.log_violation(
+                        "4.4.2", "checkpointFilesystemCheck", logfile_path,
+                        "checkpoint_folder and results_dir are on the same filesystem",
+                    )
+                    valid = False
+                continue
             args = metadata.get("args", {})
             # For checkpointing, checkpoint_folder is the "data path" analog (RESEARCH.md).
             chkpt_args = {
@@ -877,16 +894,15 @@ class CheckpointingCheck(BaseCheck):
             }
             ok, df_found = _check_filesystem_separation(chkpt_args, logfile_path)
             if not df_found:
-                # TODO-001: runtime df capture is missing in mlpstorage CLI
-                # (`Benchmark._execute_command` in benchmarks/base.py never invokes
-                # `df` before/after the DLIO subprocess). Emit a warning rather
-                # than an error so conforming submissions are not blocked on
-                # an upstream producer gap. Restore log_violation once the
-                # writer side ships the `df` block in *_run.stdout.log.
-                self.warn_violation(
+                # D-B8: no CAP-03 sidecar AND no df block → no evidence of
+                # FS separation at all. Fire a hard violation so producers
+                # that predate #601 and never captured df cannot silently
+                # pass 4.4.2.
+                self.log_violation(
                     "4.4.2", "checkpointFilesystemCheck", logfile_path,
-                    "df output not found (mlpstorage CLI does not yet capture df; TODO-001)",
+                    "fs_separation.json sidecar not found; df block also absent",
                 )
+                valid = False
                 continue
             if not ok:
                 # df WAS found (e.g. submitter manually injected it), so this
