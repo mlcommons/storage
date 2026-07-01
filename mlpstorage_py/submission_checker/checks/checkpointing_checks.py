@@ -157,7 +157,7 @@ class CheckpointingCheck(BaseCheck):
             return valid
 
         for summary, metadata, _ in self._iter_valid_files():
-            combined_params = metadata.get("combined_params", {})
+            combined_params = metadata.get("parameters", {})
             checkpoint_params = combined_params.get("checkpoint", {})
             fsync_enabled = checkpoint_params.get("fsync", False)
 
@@ -220,7 +220,7 @@ class CheckpointingCheck(BaseCheck):
             verification = metadata.get("verification", "closed")
 
             if verification == "closed":
-                checkpoint_mode = metadata.get("params_dict", {}).get("checkpoint.mode", "").lower()
+                checkpoint_mode = metadata.get("override_parameters", {}).get("checkpoint.mode", "").lower()
                 model_name = metadata.get("args", {}).get("model", "").lower()
                 num_processes = metadata.get("args", {}).get("num_processes", 0)
 
@@ -501,7 +501,7 @@ class CheckpointingCheck(BaseCheck):
             return valid
 
         for summary, metadata, _ in self._iter_valid_files():
-            params_dict = metadata.get("params_dict", {})
+            params_dict = metadata.get("override_parameters", {})
             checkpoint_mode = params_dict.get("checkpoint.mode", "")
 
             if checkpoint_mode == "subset":
@@ -877,13 +877,20 @@ class CheckpointingCheck(BaseCheck):
             }
             ok, df_found = _check_filesystem_separation(chkpt_args, logfile_path)
             if not df_found:
-                self.log_violation(
+                # TODO-001: runtime df capture is missing in mlpstorage CLI
+                # (`Benchmark._execute_command` in benchmarks/base.py never invokes
+                # `df` before/after the DLIO subprocess). Emit a warning rather
+                # than an error so conforming submissions are not blocked on
+                # an upstream producer gap. Restore log_violation once the
+                # writer side ships the `df` block in *_run.stdout.log.
+                self.warn_violation(
                     "4.4.2", "checkpointFilesystemCheck", logfile_path,
-                    "df output not found",
+                    "df output not found (mlpstorage CLI does not yet capture df; TODO-001)",
                 )
-                valid = False
                 continue
             if not ok:
+                # df WAS found (e.g. submitter manually injected it), so this
+                # is a real same-mount finding and remains an error.
                 self.log_violation(
                     "4.4.2", "checkpointFilesystemCheck", logfile_path,
                     "checkpoint_folder and results_dir are on the same filesystem",

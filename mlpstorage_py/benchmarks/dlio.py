@@ -597,11 +597,15 @@ class DLIOBenchmark(Benchmark, abc.ABC):
                                                  self.args.oversubscribe, self.args.allow_run_as_root,
                                                  self.args.mpi_params, self.logger,
                                                  mpi_btl=getattr(self.args, 'mpi_btl', 'auto'))
-            # Forward DLIO_DROP_CACHES_TIMEOUT to ranks so multi-host runs honor
-            # the operator's CLI choice (mlcommons/storage #487).  OpenMPI does
-            # not forward arbitrary env vars by default; -x VAR opts VAR in.
+            # Forward env vars to ranks — OpenMPI does not propagate arbitrary
+            # env vars to remote hosts by default; -x VAR opts each one in.
             if 'DLIO_DROP_CACHES_TIMEOUT' in os.environ:
                 mpi_prefix += " -x DLIO_DROP_CACHES_TIMEOUT"
+            # S3/object-storage vars required for multi-host runs (storage #592).
+            for _v in sorted(os.environ):
+                if (_v.startswith('AWS_') or _v.startswith('S3DLIO_')
+                        or _v in ('STORAGE_LIBRARY', 'BUCKET')):
+                    mpi_prefix += f" -x {_v}"
             cmd = f"{mpi_prefix} {cmd}"
 
         return cmd
