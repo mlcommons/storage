@@ -769,16 +769,15 @@ class TrainingCheck(BaseCheck):
             args = metadata.get("args", {})
             ok, df_found = _check_filesystem_separation(args, logfile_path)
             if not df_found:
-                # TODO-001: runtime df capture is missing in mlpstorage CLI
-                # (`Benchmark._execute_command` in benchmarks/base.py never invokes
-                # `df` before/after the DLIO subprocess). Emit a warning rather
-                # than an error so conforming submissions are not blocked on
-                # an upstream producer gap. Restore log_violation once the
-                # writer side ships the `df` block in *_run.stdout.log.
-                self.warn_violation(
+                # D-B8: no CAP-03 sidecar AND no df block → no evidence of
+                # FS separation at all. Fire a hard violation so producers
+                # that predate #601 and never captured df cannot silently
+                # pass 3.4.2.
+                self.log_violation(
                     "3.4.2", "trainingMlpstorageFilesystemCheck", logfile_path,
-                    "df output not found (mlpstorage CLI does not yet capture df; TODO-001)",
+                    "fs_separation.json sidecar not found; df block also absent",
                 )
+                valid = False
                 continue
             if not ok:
                 # df WAS found (e.g. submitter manually injected it), so this
