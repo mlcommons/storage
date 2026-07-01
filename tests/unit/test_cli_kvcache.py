@@ -313,8 +313,11 @@ class TestKVCacheOptionalFeatures:
         assert args.enable_autoscaling is True
 
     def test_autoscaler_mode_argument(self, parser):
-        """Run should accept --autoscaler-mode argument."""
-        for mode in ['qos', 'predictive']:
+        """Run should accept --autoscaler-mode argument. Choices must match
+        kv_cache.cli upstream (qos | capacity) — the prior 'predictive' value
+        did not exist downstream and would have been rejected by kv-cache.py
+        once the flag was actually plumbed through the wrapper."""
+        for mode in ['qos', 'capacity']:
             args = parser.parse_args(self.BASE_RUN_ARGS + ['--autoscaler-mode', mode])
             assert args.autoscaler_mode == mode
 
@@ -451,3 +454,156 @@ class TestKVCacheClosedModePerformanceProfile:
         with pytest.raises(SystemExit):
             closed_parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1',
                                       '--performance-profile', 'latency'])
+
+
+class TestKVCacheMaxConcurrentAllocs:
+    """OPEN/whatif expose --max-concurrent-allocs as an int tuning knob;
+    CLOSED rejects it (per-option value is MLPerf-mandated from
+    WORKLOAD_PARAMS)."""
+
+    @pytest.fixture
+    def open_parser(self):
+        parser = argparse.ArgumentParser()
+        add_kvcache_arguments(parser, 'open')
+        return parser
+
+    @pytest.fixture
+    def whatif_parser(self):
+        parser = argparse.ArgumentParser()
+        add_kvcache_arguments(parser, 'whatif')
+        return parser
+
+    @pytest.fixture
+    def closed_parser(self):
+        parser = argparse.ArgumentParser()
+        add_kvcache_arguments(parser, 'closed')
+        return parser
+
+    def test_open_accepts_max_concurrent_allocs(self, open_parser):
+        args = open_parser.parse_args([
+            'run', '--results-dir', '/tmp', '--systemname', 'sys-v1',
+            '--max-concurrent-allocs', '8',
+        ])
+        assert args.max_concurrent_allocs == 8
+
+    def test_open_default_is_none_so_workload_params_fallback_fires(self, open_parser):
+        """When the user does not supply --max-concurrent-allocs, the parser
+        default is None so the benchmark-side getattr-or-default lands on
+        the per-option WORKLOAD_PARAMS value."""
+        args = open_parser.parse_args([
+            'run', '--results-dir', '/tmp', '--systemname', 'sys-v1',
+        ])
+        assert args.max_concurrent_allocs is None
+
+    def test_whatif_accepts_max_concurrent_allocs(self, whatif_parser):
+        args = whatif_parser.parse_args([
+            'run', '--results-dir', '/tmp', '--systemname', 'sys-v1',
+            '--max-concurrent-allocs', '4',
+        ])
+        assert args.max_concurrent_allocs == 4
+
+    def test_closed_rejects_max_concurrent_allocs_flag(self, closed_parser):
+        with pytest.raises(SystemExit):
+            closed_parser.parse_args([
+                'run', '--results-dir', '/tmp', '--systemname', 'sys-v1',
+                '--max-concurrent-allocs', '8',
+            ])
+
+    def test_closed_default_attr_is_none(self, closed_parser):
+        """CLOSED uses set_defaults so the namespace carries the attr even
+        though the flag is unregistered. The benchmark's CLOSED branch in
+        _build_option_kvcache_args reads only from WORKLOAD_PARAMS and
+        ignores this value, but the attr must exist so the OPEN getattr
+        check on the same namespace does not raise."""
+        args = closed_parser.parse_args([
+            'run', '--results-dir', '/tmp', '--systemname', 'sys-v1',
+        ])
+        assert args.max_concurrent_allocs is None
+
+
+class TestKVCacheEnableLatencyTracing:
+    """OPEN/whatif expose --enable-latency-tracing (bpftrace device
+    latency); CLOSED rejects it (observability flag, not benchmark-defining,
+    but bpftrace requires sudo + a tracing-capable kernel and the CLOSED
+    invocation must be reproducible by anyone)."""
+
+    @pytest.fixture
+    def open_parser(self):
+        parser = argparse.ArgumentParser()
+        add_kvcache_arguments(parser, 'open')
+        return parser
+
+    @pytest.fixture
+    def whatif_parser(self):
+        parser = argparse.ArgumentParser()
+        add_kvcache_arguments(parser, 'whatif')
+        return parser
+
+    @pytest.fixture
+    def closed_parser(self):
+        parser = argparse.ArgumentParser()
+        add_kvcache_arguments(parser, 'closed')
+        return parser
+
+    def test_open_accepts_enable_latency_tracing(self, open_parser):
+        args = open_parser.parse_args([
+            'run', '--results-dir', '/tmp', '--systemname', 'sys-v1',
+            '--enable-latency-tracing',
+        ])
+        assert args.enable_latency_tracing is True
+
+    def test_open_default_is_false(self, open_parser):
+        args = open_parser.parse_args([
+            'run', '--results-dir', '/tmp', '--systemname', 'sys-v1',
+        ])
+        assert args.enable_latency_tracing is False
+
+    def test_whatif_accepts_enable_latency_tracing(self, whatif_parser):
+        args = whatif_parser.parse_args([
+            'run', '--results-dir', '/tmp', '--systemname', 'sys-v1',
+            '--enable-latency-tracing',
+        ])
+        assert args.enable_latency_tracing is True
+
+    def test_closed_rejects_enable_latency_tracing_flag(self, closed_parser):
+        with pytest.raises(SystemExit):
+            closed_parser.parse_args([
+                'run', '--results-dir', '/tmp', '--systemname', 'sys-v1',
+                '--enable-latency-tracing',
+            ])
+
+    def test_closed_default_attr_is_false(self, closed_parser):
+        args = closed_parser.parse_args([
+            'run', '--results-dir', '/tmp', '--systemname', 'sys-v1',
+        ])
+        assert args.enable_latency_tracing is False
+
+
+class TestKVCacheAutoscalerModeChoices:
+    """The pre-fix code declared choices=['qos', 'predictive'] in mlpstorage
+    but kv-cache.py accepts choices=['qos', 'capacity']. Plumbing the flag
+    through to kv-cache.py would have caused 'predictive' to be rejected
+    downstream. The mlpstorage choices were corrected to match upstream."""
+
+    @pytest.fixture
+    def open_parser(self):
+        parser = argparse.ArgumentParser()
+        add_kvcache_arguments(parser, 'open')
+        return parser
+
+    def test_open_accepts_capacity(self, open_parser):
+        """'capacity' is the second valid kv-cache.py value — must be
+        accepted by mlpstorage."""
+        args = open_parser.parse_args([
+            'run', '--results-dir', '/tmp', '--systemname', 'sys-v1',
+            '--autoscaler-mode', 'capacity',
+        ])
+        assert args.autoscaler_mode == 'capacity'
+
+    def test_open_rejects_predictive(self, open_parser):
+        """'predictive' was the stale value that did not exist downstream."""
+        with pytest.raises(SystemExit):
+            open_parser.parse_args([
+                'run', '--results-dir', '/tmp', '--systemname', 'sys-v1',
+                '--autoscaler-mode', 'predictive',
+            ])

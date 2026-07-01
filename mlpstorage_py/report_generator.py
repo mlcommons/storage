@@ -26,6 +26,7 @@ from mlpstorage_py.reporting import (
     ValidationMessageFormatter,
     ClosedRequirementsFormatter,
     ReportSummaryFormatter,
+    discover_scan_roots,
 )
 
 
@@ -82,6 +83,31 @@ class ReportGenerator:
         # the benchmark-type directories the rest of ReportGenerator expects.
         # No-op when --results-dir already points at a flat benchmark-type root.
         self.results_dir = self._resolve_effective_results_dir(self.results_dir)
+
+        # Issue #599: resolve the effective scan roots up-front.
+        #
+        # When --results-dir is a sentinel-bearing submission root (the
+        # canonical layout that `mlpstorage init` / `<bench> run` / `validate`
+        # all produce), the runs live at
+        # `<results-dir>/<closed|open>/<orgname>/results/<systemname>/...`
+        # — five levels below the directory the user passed in. Pre-fix,
+        # ResultsDirectoryValidator looked for benchmark-type dirs at the
+        # top level only and `get_runs_files` would walk every system's
+        # subtree, mashing them into one report tagged with the requested
+        # systemname.
+        #
+        # discover_scan_roots probes both modes against args.orgname (pinned
+        # by the LAY-03 sentinel gate in main.py) and args.systemname (the
+        # required CLI flag), returning per-mode slices when found and
+        # falling back to [results_dir] for legacy flat layouts.
+        orgname = getattr(self.args, 'orgname', None) if self.args else None
+        systemname = (
+            getattr(self.args, 'systemname', None) if self.args else None
+        )
+        self.scan_roots: List[str] = discover_scan_roots(
+            results_dir, orgname=orgname, systemname=systemname,
+            logger=self.logger,
+        )
 
         # Initialize formatters
         self.msg_formatter = ValidationMessageFormatter(use_colors=use_colors)
@@ -163,28 +189,53 @@ class ReportGenerator:
         """
         Validate the results directory structure before processing.
 
+        When the canonical submission layout is detected (one or both of
+        ``<results-dir>/{closed,open}/<orgname>/results/<systemname>/``),
+        the validator runs against each canonical slice independently —
+        each slice is itself a flat-layout root structurally
+        (``<benchmark>/<model>/<command>/<datetime>/`` immediately below).
+
         Returns:
             True if structure is valid, False otherwise.
         """
-        validator = ResultsDirectoryValidator(self.results_dir, logger=self.logger)
-        result = validator.validate()
+        total_runs = 0
+        total_benchmark_types: set = set()
+        all_warnings: List[str] = []
+        any_failed = False
+        last_validator: Optional[ResultsDirectoryValidator] = None
 
-        if not result.is_valid:
-            self.logger.error("Results directory structure validation failed:")
-            self.logger.error(validator.get_error_report())
+        for scan_root in self.scan_roots:
+            validator = ResultsDirectoryValidator(scan_root, logger=self.logger)
+            last_validator = validator
+            result = validator.validate()
+
+            if not result.is_valid:
+                self.logger.error(
+                    f"Results directory structure validation failed for "
+                    f"{scan_root}:"
+                )
+                self.logger.error(validator.get_error_report())
+                any_failed = True
+                continue
+
+            total_runs += result.found_runs
+            total_benchmark_types.update(result.found_benchmark_types)
+            all_warnings.extend(result.warnings)
+
+        if any_failed:
             self.logger.error("")
             self.logger.error("Expected structure:")
-            self.logger.error(validator.get_expected_structure_help())
+            if last_validator is not None:
+                self.logger.error(last_validator.get_expected_structure_help())
             return False
 
-        # Log warnings if any
-        if result.warnings:
-            for warning in result.warnings:
-                self.logger.warning(warning)
+        for warning in all_warnings:
+            self.logger.warning(warning)
 
         self.logger.info(
-            f"Directory validation passed: found {result.found_runs} runs "
-            f"in {len(result.found_benchmark_types)} benchmark types"
+            f"Directory validation passed: found {total_runs} runs "
+            f"in {len(total_benchmark_types)} benchmark types "
+            f"across {len(self.scan_roots)} scan root(s)"
         )
         return True
 
@@ -217,16 +268,28 @@ class ReportGenerator:
 
         Errors in individual runs are logged but do not stop processing.
         """
-        try:
-            benchmark_runs = get_runs_files(self.results_dir, logger=self.logger)
-        except Exception as e:
-            self.logger.error(f"Failed to scan results directory: {e}")
-            self.processing_errors.append(f"Directory scan failed: {e}")
-            return
+        # Walk each effective scan root and accumulate runs. In canonical
+        # mode, this naturally narrows to the requested system's subtree
+        # (issue #599 bug 3); in flat mode, it's a single pass over the
+        # original results_dir.
+        benchmark_runs: List = []
+        for scan_root in self.scan_roots:
+            try:
+                benchmark_runs.extend(
+                    get_runs_files(scan_root, logger=self.logger)
+                )
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to scan results directory {scan_root}: {e}"
+                )
+                self.processing_errors.append(
+                    f"Directory scan failed for {scan_root}: {e}"
+                )
 
         if not benchmark_runs:
+            scan_paths = ', '.join(self.scan_roots)
             self.logger.warning(
-                f"No valid benchmark runs found in {self.results_dir}. "
+                f"No valid benchmark runs found in {scan_paths}. "
                 "Ensure runs have completed and contain metadata files."
             )
             return

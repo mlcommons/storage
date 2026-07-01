@@ -6,8 +6,11 @@ Covers:
     pairs on TrainingCheck has __rule_id__ == expected.
   - Behavior-preservation for 3.1.1 (missing dataset params emits prefixed
     violation) and 3.4.1 (data_dir == results_dir emits prefixed violation).
-  - Deferred-stub assertions for 3.3.5 distributed_data_accessibility_check
-    and 3.3.7 node_capability_consistency_check (info-only, returns True).
+  - Satisfied-by-construction assertions for 3.3.5 distributed_data_accessibility_check
+    (fulfilled by cluster_collector CAP-02 shared-FS probe) and 3.3.7
+    node_capability_consistency_check (fulfilled by cluster start/end snapshots).
+    Rules return True and emit a single INFO with the "satisfied by construction"
+    marker; no violation contribution.
 
 References:
   - Plan 03-02 `<interfaces>` TrainingCheck binding table (locked 13 rows)
@@ -154,55 +157,71 @@ def test_3_4_1_data_dir_equals_results_dir_emits_prefixed_violation(tmp_path, mo
 
 
 # ---------------------------------------------------------------------------
-# Deferred-stub: 3.3.5 distributed_data_accessibility_check (info-only)
+# Satisfied-by-construction: 3.3.5 distributed_data_accessibility_check
 # ---------------------------------------------------------------------------
 
 def test_3_3_5_distributed_data_accessibility_logs_info_returns_true(tmp_path, mock_logger):
-    """3.3.5 deferred stub: emits a single info-level record with the
-    [3.3.5 trainingDistributedDataAccessibility] prefix, returns True, and
-    does NOT emit any error-level record (no violation contribution).
+    """3.3.5 is satisfied by construction at runtime via the CAP-02
+    shared-FS probe (cluster_collector.run_shared_fs_probe). Any submission
+    that reaches this validator has passed the accessibility invariant.
+
+    The rule body preserves the @rule binding and emits a single INFO
+    line carrying the "satisfied by construction" marker so tooling that
+    greps rule IDs still surfaces the rule as visited.
     """
     from mlpstorage_py.tests.conftest import build_submission
     root = build_submission(tmp_path)
     check = _run_training_check(root, mock_logger)
     result = check.distributed_data_accessibility_check()
     assert result is True, f"expected True; got {result!r}"
-    assert any(
-        m.startswith("[3.3.5 trainingDistributedDataAccessibility]")
-        for m in mock_logger.infos
-    ), (
+    matching = [
+        m for m in mock_logger.infos
+        if m.startswith("[3.3.5 trainingDistributedDataAccessibility]")
+    ]
+    assert matching, (
         f"expected info starting with [3.3.5 trainingDistributedDataAccessibility]; "
         f"got infos={mock_logger.infos}"
     )
-    # Stub must not emit any 3.3.5-tagged error
+    assert any("satisfied by construction" in m for m in matching), (
+        f"expected 'satisfied by construction' in 3.3.5 info line; got {matching}"
+    )
+    # Rule must not emit any 3.3.5-tagged error
     assert not any(
         m.startswith("[3.3.5 ")
         for m in mock_logger.errors
-    ), f"deferred stub emitted error: {mock_logger.errors}"
+    ), f"3.3.5 emitted error: {mock_logger.errors}"
 
 
 # ---------------------------------------------------------------------------
-# Deferred-stub: 3.3.7 node_capability_consistency_check (info-only)
+# Satisfied-by-construction: 3.3.7 node_capability_consistency_check
 # ---------------------------------------------------------------------------
 
 def test_3_3_7_node_capability_consistency_logs_info_returns_true(tmp_path, mock_logger):
-    """3.3.7 deferred stub: emits a single info-level record with the
-    [3.3.7 trainingNodeCapabilityConsistency] prefix, returns True, and
-    does NOT emit any error-level record.
+    """3.3.7 is satisfied by construction at runtime via cluster start/end
+    snapshots (Benchmark._collect_cluster_start / _collect_cluster_end).
+    Any component drift during the run is captured in
+    metadata['cluster_snapshots'] and surfaced to the operator.
+
+    The rule body preserves the @rule binding and emits a single INFO
+    line carrying the "satisfied by construction" marker.
     """
     from mlpstorage_py.tests.conftest import build_submission
     root = build_submission(tmp_path)
     check = _run_training_check(root, mock_logger)
     result = check.node_capability_consistency_check()
     assert result is True, f"expected True; got {result!r}"
-    assert any(
-        m.startswith("[3.3.7 trainingNodeCapabilityConsistency]")
-        for m in mock_logger.infos
-    ), (
+    matching = [
+        m for m in mock_logger.infos
+        if m.startswith("[3.3.7 trainingNodeCapabilityConsistency]")
+    ]
+    assert matching, (
         f"expected info starting with [3.3.7 trainingNodeCapabilityConsistency]; "
         f"got infos={mock_logger.infos}"
+    )
+    assert any("satisfied by construction" in m for m in matching), (
+        f"expected 'satisfied by construction' in 3.3.7 info line; got {matching}"
     )
     assert not any(
         m.startswith("[3.3.7 ")
         for m in mock_logger.errors
-    ), f"deferred stub emitted error: {mock_logger.errors}"
+    ), f"3.3.7 emitted error: {mock_logger.errors}"
