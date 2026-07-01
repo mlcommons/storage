@@ -270,6 +270,20 @@ class TestReportGeneratorGenerateReports:
             f"Expected model-level rollup at {csv_file}"
         )
 
+    def test_creates_global_summary_files(self, generator):
+        """Should also emit the global <results-dir>/results.{json,csv}
+        summary alongside the per-model rollups. Preserves the
+        pre-model-rollup contract downstream tooling relies on."""
+        generator.generate_reports()
+        global_json = os.path.join(generator.results_dir, 'results.json')
+        global_csv = os.path.join(generator.results_dir, 'results.csv')
+        assert os.path.exists(global_json), (
+            f"Expected global summary at {global_json}"
+        )
+        assert os.path.exists(global_csv), (
+            f"Expected global summary at {global_csv}"
+        )
+
 
 class TestReportGeneratorPrintResults:
     """Tests for print_results method."""
@@ -563,9 +577,12 @@ class TestReportGeneratorIntegration:
         result = generator.generate_reports()
         assert result == EXIT_CODE.SUCCESS
 
-        # Files land inside the <model>/ folder, not the results_dir root
+        # Per-model rollup lands inside the <model>/ folder.
         assert os.path.exists(os.path.join(str(model_folder), 'results.json'))
         assert os.path.exists(os.path.join(str(model_folder), 'results.csv'))
+        # Global summary is preserved at the results_dir root alongside it.
+        assert os.path.exists(os.path.join(str(results_dir), 'results.json'))
+        assert os.path.exists(os.path.join(str(results_dir), 'results.csv'))
 
 
 # ---------------------------------------------------------------------------
@@ -725,3 +742,58 @@ class TestIssue599CanonicalTreeAccepted:
                             validate_structure=True)
 
         assert seen_scan_roots == [str(tmp_path)]
+
+
+class TestGlobalSummaryLocation:
+    """The global results.{json,csv} rollup must NOT land inside the
+    per-system slice when a canonical submission tree is in use. It
+    belongs one level up, in the `<sentinel>/<div>/<org>/results/`
+    directory that is the parent of every `<system>/` subfolder, so a
+    submitter sees a single aggregate alongside each per-system slice
+    instead of an aggregate buried under one system's directory."""
+
+    def test_global_summary_dir_is_results_parent_under_canonical_tree(
+        self, tmp_path
+    ):
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysA")
+        args = Namespace(
+            debug=False, output_dir=None,
+            orgname="Acme", systemname="sysA",
+        )
+
+        with patch('mlpstorage_py.report_generator.get_runs_files',
+                   return_value=[]), \
+             patch.object(ReportGenerator, 'print_results'):
+            gen = ReportGenerator(str(tmp_path), args=args,
+                                  validate_structure=True)
+
+        # results_dir is rebound to the per-system slice…
+        assert gen.results_dir == str(
+            tmp_path / "closed" / "Acme" / "results" / "sysA"
+        )
+        # …but the global summary lands in the org's results/ parent.
+        assert gen.global_summary_dir == str(
+            tmp_path / "closed" / "Acme" / "results"
+        )
+        # And critically, the global summary dir is NOT the system slice.
+        assert gen.global_summary_dir != gen.results_dir
+        assert "sysA" not in os.path.basename(gen.global_summary_dir)
+
+    def test_global_summary_dir_equals_results_dir_for_flat_layout(
+        self, tmp_path
+    ):
+        """Flat layout (no canonical rebind): global summary dir stays
+        equal to results_dir — preserves the pre-canonical-tree
+        contract."""
+        run_dir = tmp_path / "training" / "unet3d" / "run" / "20260123_120000"
+        run_dir.mkdir(parents=True)
+        (run_dir / "training_unet3d_metadata.json").write_text("{}")
+        (run_dir / "summary.json").write_text("{}")
+
+        with patch('mlpstorage_py.report_generator.get_runs_files',
+                   return_value=[]), \
+             patch.object(ReportGenerator, 'print_results'):
+            gen = ReportGenerator(str(tmp_path), args=None,
+                                  validate_structure=True)
+
+        assert gen.global_summary_dir == gen.results_dir == str(tmp_path)

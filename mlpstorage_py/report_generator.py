@@ -84,6 +84,21 @@ class ReportGenerator:
         # No-op when --results-dir already points at a flat benchmark-type root.
         self.results_dir = self._resolve_effective_results_dir(self.results_dir)
 
+        # Directory where the GLOBAL results.{json,csv} summary is written.
+        # When we rebind results_dir to a per-system slice (canonical
+        # submission tree), the global summary should NOT land inside that
+        # system's folder — it should land one level up, in the
+        # `<sentinel>/<div>/<org>/results/` directory that houses every
+        # system's slice. That way a submitter reviewing the tree sees
+        # one aggregate at the org's results/ level, next to each
+        # per-system subdirectory.
+        #
+        # If results_dir was not rebound (flat layout / no canonical
+        # match), the parent lookup falls back to results_dir itself.
+        self.global_summary_dir = self._global_summary_dir_for(
+            self.results_dir
+        )
+
         # Issue #599: resolve the effective scan roots up-front.
         #
         # When --results-dir is a sentinel-bearing submission root (the
@@ -192,6 +207,29 @@ class ReportGenerator:
                         return str(systems[0])
         return results_dir
 
+    def _global_summary_dir_for(self, effective_results_dir: str) -> str:
+        """Return the directory where the GLOBAL rollup should be written.
+
+        When ``effective_results_dir`` is a per-system slice under a
+        canonical submission tree (i.e. its parent directory is literally
+        named ``results``, as produced by
+        ``<sentinel>/<div>/<org>/results/<system>/``), return that parent
+        ``results/`` directory so the global summary sits next to each
+        per-system subdirectory rather than inside one of them.
+
+        Otherwise (flat layout, or the resolver did not rebind), return
+        ``effective_results_dir`` unchanged.
+        """
+        parent = os.path.dirname(os.path.abspath(effective_results_dir))
+        if os.path.basename(parent) == "results" and os.path.isdir(parent):
+            self.logger.debug(
+                "Global summary directory resolved to canonical results/ "
+                "parent: %s",
+                parent,
+            )
+            return parent
+        return effective_results_dir
+
     def _validate_directory_structure(self) -> bool:
         """
         Validate the results directory structure before processing.
@@ -250,33 +288,54 @@ class ReportGenerator:
         # Verify the results directory exists:
         self.logger.info(f'Generating reports for {self.results_dir}')
 
-        # Aggregate at the MODEL level: one results.{json,csv} per model
-        # folder, containing every command's runs for that model (i.e. run/
-        # + datagen/ + datasize/ + configview/ for training, all commands
-        # for kv_cache, etc.).
+        # Two rollups are written on every reportgen invocation:
         #
-        # Grouping key is the parent directory of `<command>` (or, for
-        # checkpointing which omits the <command> segment, the parent of
-        # `<ts>` — which is `<model>` itself). See
-        # rules/utils.generate_output_location for the canonical layouts.
+        # 1. GLOBAL summary at `<results-dir>/results.{json,csv}` — every
+        #    successfully-processed run in one file. Preserves the
+        #    pre-model-rollup contract that downstream tooling and the
+        #    submission-review flow rely on.
+        # 2. PER-MODEL rollups at `<model>/results.{json,csv}` (or the
+        #    equivalent grouping folder per benchmark type — see
+        #    _model_group_folder for the layout map). Same runs, but
+        #    partitioned so a submitter can inspect one model in isolation.
+        #
+        # Both derive from the same `self.run_results` collection; the
+        # per-model loop groups by `_model_group_folder(result)`.
+
+        all_run_dicts: List[dict] = []
         groups: Dict[str, List[dict]] = {}
         skipped = 0
         for result in self.run_results.values():
+            run_dict = result.benchmark_run.as_dict()
+            all_run_dicts.append(run_dict)
             model_folder = self._model_group_folder(result)
             if model_folder is None:
                 skipped += 1
                 continue
-            groups.setdefault(model_folder, []).append(
-                result.benchmark_run.as_dict()
-            )
+            groups.setdefault(model_folder, []).append(run_dict)
 
-        if not groups:
+        if not all_run_dicts:
             self.logger.warning(
-                "No model folders to write rollups for (skipped %d runs without result_dir).",
+                "No runs to write rollups for (skipped %d runs without result_dir).",
                 skipped,
             )
             return EXIT_CODE.SUCCESS
 
+        # (1) Global summary — written to self.global_summary_dir. For a
+        # canonical submission tree that is the org's `results/` folder
+        # (one level above each per-system slice), so the aggregate sits
+        # alongside every system's subdirectory instead of inside one of
+        # them. For a flat layout it equals self.results_dir.
+        self.write_json_file(all_run_dicts, target_dir=self.global_summary_dir)
+        self.write_csv_file(all_run_dicts, target_dir=self.global_summary_dir)
+
+        # (2) Per-model rollups.
+        if not groups:
+            self.logger.warning(
+                "No model folders to write per-model rollups for "
+                "(skipped %d runs without result_dir).",
+                skipped,
+            )
         for model_folder, run_dicts in sorted(groups.items()):
             self.write_json_file(run_dicts, target_dir=model_folder)
             self.write_csv_file(run_dicts, target_dir=model_folder)
