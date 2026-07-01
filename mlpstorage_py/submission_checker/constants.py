@@ -58,6 +58,12 @@ PARSER_MAP = {
     "default": JSONParser
 }
 
+# Issue #600: prior versions copied this list from RUN_REQUIRED_FILES, which
+# wrongly demanded `*output.json` / `*per_epoch_stats.json` / `*summary.json`
+# in datagen directories — those are training-loop outputs, never written by
+# DLIO datagen (`workflow.generate_data=True, workflow.train=False` skips the
+# loop). `training_<ts>_metadata.json` is the mlpstorage-injected metadata
+# file written by `Benchmark.write_metadata` for every command.
 DATAGEN_REQUIRED_FILES = {
     # DLIO datagen runs with workflow.generate_data=True, workflow.train=False, so it
     # does NOT emit the *output.json / *per_epoch_stats.json / *summary.json files that
