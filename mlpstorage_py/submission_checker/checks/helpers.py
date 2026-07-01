@@ -24,6 +24,7 @@ References:
 """
 
 import datetime
+import json
 import logging
 import os
 import re
@@ -38,6 +39,48 @@ from ..tools.code_image import (
     MissingHashFile,
     MalformedHashFile,
 )
+
+
+# ---------------------------------------------------------------------------
+# CAP-03 FS-separation sidecar reader (#601)
+# ---------------------------------------------------------------------------
+#
+# Producer side (mlpstorage_py/benchmarks/fs_separation_probe.py +
+# Benchmark._run_fs_separation_probe) writes
+# ``<run_dir>/fs_separation.json`` at pre-execution. This is the
+# authoritative artifact for rules 3.4.2 / 4.4.2 / 5.4.2; the old df-block
+# parser remains for one release as a pre-cutover fallback (D-601-3).
+
+_FS_SEPARATION_SIDECAR_NAME = "fs_separation.json"
+
+
+def read_fs_separation_sidecar(run_dir: str) -> dict | None:
+    """Return the parsed CAP-03 sidecar from ``<run_dir>/fs_separation.json``.
+
+    Args:
+        run_dir: Absolute path to the per-timestamp run directory that
+            holds the sidecar (the same dir that holds
+            ``<bench>_run.stdout.log``).
+
+    Returns:
+        Parsed sidecar dict on success. ``None`` if the sidecar is
+        absent or unreadable (FileNotFoundError, malformed JSON, OSError).
+        The rule sites treat ``None`` as "no sidecar — fall through to
+        the df-block fallback".
+    """
+    sidecar_path = os.path.join(run_dir, _FS_SEPARATION_SIDECAR_NAME)
+    try:
+        with open(sidecar_path, "r", encoding="utf-8") as fd:
+            return json.load(fd)
+    except FileNotFoundError:
+        return None
+    except (OSError, json.JSONDecodeError) as exc:
+        _LOG.warning(
+            "CAP-03 sidecar at %s could not be read (%s); falling back to "
+            "df-block parser",
+            sidecar_path, exc,
+        )
+        return None
 
 
 # ---------------------------------------------------------------------------

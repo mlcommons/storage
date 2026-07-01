@@ -26,6 +26,7 @@ from mlpstorage_py.reporting import (
     ValidationMessageFormatter,
     ClosedRequirementsFormatter,
     ReportSummaryFormatter,
+    discover_scan_roots,
 )
 
 
@@ -90,6 +91,41 @@ class ReportGenerator:
         self.output_dir = output_dir or self.results_dir
         if self.output_dir and self.output_dir != self.results_dir:
             os.makedirs(self.output_dir, exist_ok=True)
+
+        # Issue #599: resolve the effective scan roots up-front.
+        #
+        # When --results-dir is a sentinel-bearing submission root (the
+        # canonical layout that `mlpstorage init` / `<bench> run` / `validate`
+        # all produce), the runs live at
+        # `<results-dir>/<closed|open>/<orgname>/results/<systemname>/...`
+        # — five levels below the directory the user passed in. Pre-fix,
+        # ResultsDirectoryValidator looked for benchmark-type dirs at the
+        # top level only and `get_runs_files` would walk every system's
+        # subtree, mashing them into one report tagged with the requested
+        # systemname.
+        #
+        # discover_scan_roots probes both modes against args.orgname (pinned
+        # by the LAY-03 sentinel gate in main.py) and args.systemname (the
+        # required CLI flag), returning per-mode slices when found and
+        # falling back to [results_dir] for legacy flat layouts.
+        orgname = getattr(self.args, 'orgname', None) if self.args else None
+        systemname = (
+            getattr(self.args, 'systemname', None) if self.args else None
+        )
+        self.scan_roots: List[str] = discover_scan_roots(
+            results_dir, orgname=orgname, systemname=systemname,
+            logger=self.logger,
+        )
+
+        # Resolve the artifacts output dir. --output-dir was accepted by the
+        # CLI but never read by write_json_file / write_csv_file pre-fix
+        # (issue #599 bug 2 — they hard-coded self.results_dir, polluting
+        # the input tree). Fall back to results_dir for backward-compat
+        # when the flag is unset.
+        output_dir = (
+            getattr(self.args, 'output_dir', None) if self.args else None
+        )
+        self.output_dir: str = output_dir if output_dir else self.results_dir
 
         # Initialize formatters
         self.msg_formatter = ValidationMessageFormatter(use_colors=use_colors)
@@ -168,28 +204,53 @@ class ReportGenerator:
         """
         Validate the results directory structure before processing.
 
+        When the canonical submission layout is detected (one or both of
+        ``<results-dir>/{closed,open}/<orgname>/results/<systemname>/``),
+        the validator runs against each canonical slice independently —
+        each slice is itself a flat-layout root structurally
+        (``<benchmark>/<model>/<command>/<datetime>/`` immediately below).
+
         Returns:
             True if structure is valid, False otherwise.
         """
-        validator = ResultsDirectoryValidator(self.results_dir, logger=self.logger)
-        result = validator.validate()
+        total_runs = 0
+        total_benchmark_types: set = set()
+        all_warnings: List[str] = []
+        any_failed = False
+        last_validator: Optional[ResultsDirectoryValidator] = None
 
-        if not result.is_valid:
-            self.logger.error("Results directory structure validation failed:")
-            self.logger.error(validator.get_error_report())
+        for scan_root in self.scan_roots:
+            validator = ResultsDirectoryValidator(scan_root, logger=self.logger)
+            last_validator = validator
+            result = validator.validate()
+
+            if not result.is_valid:
+                self.logger.error(
+                    f"Results directory structure validation failed for "
+                    f"{scan_root}:"
+                )
+                self.logger.error(validator.get_error_report())
+                any_failed = True
+                continue
+
+            total_runs += result.found_runs
+            total_benchmark_types.update(result.found_benchmark_types)
+            all_warnings.extend(result.warnings)
+
+        if any_failed:
             self.logger.error("")
             self.logger.error("Expected structure:")
-            self.logger.error(validator.get_expected_structure_help())
+            if last_validator is not None:
+                self.logger.error(last_validator.get_expected_structure_help())
             return False
 
-        # Log warnings if any
-        if result.warnings:
-            for warning in result.warnings:
-                self.logger.warning(warning)
+        for warning in all_warnings:
+            self.logger.warning(warning)
 
         self.logger.info(
-            f"Directory validation passed: found {result.found_runs} runs "
-            f"in {len(result.found_benchmark_types)} benchmark types"
+            f"Directory validation passed: found {total_runs} runs "
+            f"in {len(total_benchmark_types)} benchmark types "
+            f"across {len(self.scan_roots)} scan root(s)"
         )
         return True
 
@@ -221,16 +282,28 @@ class ReportGenerator:
 
         Errors in individual runs are logged but do not stop processing.
         """
-        try:
-            benchmark_runs = get_runs_files(self.results_dir, logger=self.logger)
-        except Exception as e:
-            self.logger.error(f"Failed to scan results directory: {e}")
-            self.processing_errors.append(f"Directory scan failed: {e}")
-            return
+        # Walk each effective scan root and accumulate runs. In canonical
+        # mode, this naturally narrows to the requested system's subtree
+        # (issue #599 bug 3); in flat mode, it's a single pass over the
+        # original results_dir.
+        benchmark_runs: List = []
+        for scan_root in self.scan_roots:
+            try:
+                benchmark_runs.extend(
+                    get_runs_files(scan_root, logger=self.logger)
+                )
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to scan results directory {scan_root}: {e}"
+                )
+                self.processing_errors.append(
+                    f"Directory scan failed for {scan_root}: {e}"
+                )
 
         if not benchmark_runs:
+            scan_paths = ', '.join(self.scan_roots)
             self.logger.warning(
-                f"No valid benchmark runs found in {self.results_dir}. "
+                f"No valid benchmark runs found in {scan_paths}. "
                 "Ensure runs have completed and contain metadata files."
             )
             return
@@ -490,13 +563,24 @@ class ReportGenerator:
                 print(f"\n    {checklist}")
 
 
+    def _ensure_output_dir(self) -> None:
+        """Make sure self.output_dir exists before writing artifacts.
+
+        --output-dir may point at a path the user has not created yet
+        (issue #599: the expected behaviour is `mlpstorage` creates it).
+        Idempotent — exist_ok=True keeps the existing-tree case silent.
+        """
+        os.makedirs(self.output_dir, exist_ok=True)
+
     def write_json_file(self, results):
+        self._ensure_output_dir()
         json_file = os.path.join(self.output_dir, 'results.json')
         self.logger.info(f'Writing results to {json_file}')
         with open(json_file, 'w') as f:
             json.dump(results, f, indent=2)
 
     def write_csv_file(self, results):
+        self._ensure_output_dir()
         csv_file = os.path.join(self.output_dir, 'results.csv')
         self.logger.info(f'Writing results to {csv_file}')
         flattened_results = [flatten_nested_dict(r) for r in results]

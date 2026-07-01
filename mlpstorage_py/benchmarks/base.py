@@ -47,7 +47,7 @@ from typing import Tuple, Dict, Any, List, Optional, Callable, Set, TYPE_CHECKIN
 from functools import wraps
 
 from mlpstorage_py.config import PARAM_VALIDATION, DATETIME_STR, MLPS_DEBUG, EXEC_TYPE
-from mlpstorage_py.errors import ConfigurationError, ErrorCode
+from mlpstorage_py.errors import ConfigurationError, ErrorCode, FileSystemError
 from mlpstorage_py.run_directory import (
     DEFAULT_COLLISION_BUMP_BUDGET,
     reserve_run_directory,
@@ -65,6 +65,7 @@ from mlpstorage_py.cluster_collector import (
     MultiHostTimeSeriesCollector,
     run_shared_fs_probe,
 )
+from mlpstorage_py.benchmarks.fs_separation_probe import probe_fs_separation
 from mlpstorage_py.progress import create_stage_progress, progress_context
 from mlpstorage_py.system_description.auto_generator import write_systemname_yaml
 from mlpstorage_py.benchmarks.capacity_gate import check_capacity_4field
@@ -976,6 +977,20 @@ class Benchmark(BenchmarkInterface, abc.ABC):
             f"_capacity_gate_destination() for CAP-01"
         )
 
+    def _fs_separation_paths(self) -> Optional[tuple]:
+        """Return the (data_or_chkpt_path, results_path) pair for CAP-03.
+
+        Return ``None`` to skip the FS-separation probe — same A8 escape
+        hatch as ``_capacity_gate_destination`` (object-storage / remote
+        DB submissions where there is no local data path to probe).
+
+        Subclasses MUST override. Issue #601 / CAP-03.
+        """
+        raise NotImplementedError(
+            f"{type(self).__name__} must override "
+            f"_fs_separation_paths() for CAP-03"
+        )
+
     def _pre_execution_gate(self) -> None:
         """Run all pre-execution capacity/environment gates (CAP-01 in
         Slice 3; CAP-02 shared-FS verification is appended in Slice 4 of
@@ -1025,6 +1040,89 @@ class Benchmark(BenchmarkInterface, abc.ABC):
             allow_run_as_root=getattr(self.args, 'allow_run_as_root', False),
             ssh_username=getattr(self.args, 'ssh_username', None),
         )
+        # ------------------------------------------------------------------
+        # Slice 5 / CAP-03: FS-separation probe (issue #601).
+        # ------------------------------------------------------------------
+        # Verify data_dir (or checkpoint_folder) and results_dir live on
+        # DIFFERENT filesystems via the kernel link()/EXDEV test. Writes a
+        # structured sidecar at <run_result_output>/fs_separation.json so
+        # the submission_checker validator (rules 3.4.2 / 4.4.2 / 5.4.2)
+        # has a stable artifact to read. On same-FS detection, raise
+        # FileSystemError BEFORE the workload starts (hard gate, locked
+        # design decision D-601-1). --skip-fs-separation-gate bypasses the
+        # raise but still writes the sidecar so the validator gets telemetry.
+        self._run_fs_separation_probe()
+
+    def _run_fs_separation_probe(self) -> None:
+        """Run the CAP-03 FS-separation probe and write the sidecar.
+
+        Single dispatch point so subclasses don't need to know the
+        sidecar location or skip-flag handling.
+        """
+        fs_paths = self._fs_separation_paths()
+        if fs_paths is None:
+            # A8 escape hatch — object-API runs (storage_type=object on
+            # training/checkpointing, milvus/elasticsearch/pgvector on
+            # VectorDB). No local FS to probe. Log INFO and skip; do not
+            # write a sidecar so the validator's object-API silent-pass
+            # path (training_checks.py:730 et al.) keeps owning the skip.
+            self.logger.info(
+                "CAP-03 skipped: no local data/results paths to probe "
+                "(e.g., object storage or remote vector-DB backend)"
+            )
+            return
+
+        path_a, path_b = fs_paths
+        result = probe_fs_separation(
+            path_a=path_a,
+            path_b=path_b,
+            run_uuid=self._run_uuid,
+            logger=self.logger,
+        )
+
+        # Sidecar always written — even on the skip-gate code path — so the
+        # validator can confirm the operator's intent in post-hoc audit.
+        sidecar_path = os.path.join(
+            self.run_result_output, "fs_separation.json"
+        )
+        try:
+            os.makedirs(os.path.dirname(sidecar_path) or ".", exist_ok=True)
+            with open(sidecar_path, "w", encoding="utf-8") as fd:
+                json.dump(result, fd, indent=2)
+        except OSError as exc:
+            # Sidecar-write failures don't block the run — the validator's
+            # one-release df-block fallback (D-601-3) catches the gap. Log
+            # at warning so the operator sees it.
+            self.logger.warning(
+                "CAP-03: could not write FS-separation sidecar to %s: %s",
+                sidecar_path, exc,
+            )
+
+        if result["same_filesystem"]:
+            if getattr(self.args, "skip_fs_separation_gate", False):
+                self.logger.warning(
+                    "CAP-03: data and results paths are on the SAME filesystem "
+                    "(%s vs %s); proceeding because --skip-fs-separation-gate "
+                    "is set. This run will fail submission_checker rules "
+                    "3.4.2 / 4.4.2 / 5.4.2.",
+                    path_a, path_b,
+                )
+                return
+            raise FileSystemError(
+                (
+                    f"CAP-03: data and results paths are on the same filesystem.\n"
+                    f"  data_or_chkpt_path: {path_a}\n"
+                    f"  results_path:       {path_b}\n"
+                    f"  method:             link_exdev\n"
+                    f"Rules 3.4.2 / 4.4.2 / 5.4.2 require these be on different "
+                    f"filesystems so results-side writes can't pollute the dataset-side "
+                    f"page cache. Re-run with --results-dir on a separate mount, or "
+                    f"pass --skip-fs-separation-gate for non-submission dev runs."
+                ),
+                path=path_b,
+                operation="cap03-gate",
+                code=ErrorCode.FS_INVALID_STRUCTURE,
+            )
 
     @abc.abstractmethod
     def _run(self) -> int:
