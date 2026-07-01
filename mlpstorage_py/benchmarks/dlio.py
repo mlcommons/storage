@@ -865,6 +865,21 @@ class TrainingBenchmark(DLIOBenchmark):
             return None
         return self.args.data_dir
 
+    def _fs_separation_paths(self) -> Optional[tuple]:
+        """Return ``(data_dir, results_dir)`` for CAP-03 (issue #601).
+
+        Object-storage runs skip the probe via the same A8 escape hatch
+        as CAP-01 — the dataset side is an s3:// URI with no local FS
+        identity to probe against the local results_dir.
+        """
+        if self._is_object_storage():
+            return None
+        data_dir = getattr(self.args, "data_dir", None)
+        results_dir = getattr(self.args, "results_dir", None)
+        if not data_dir or not results_dir:
+            return None
+        return (data_dir, results_dir)
+
     def datasize(self):
         # CAP-01: fail fast BEFORE the size calc prints its results so a
         # starved disk surfaces with the locked four-field message rather
@@ -1039,6 +1054,21 @@ class CheckpointingBenchmark(DLIOBenchmark):
         if not cf:
             return None
         return os.path.join(cf, self.args.model)
+
+    def _fs_separation_paths(self) -> Optional[tuple]:
+        """Return ``(checkpoint_folder, results_dir)`` for CAP-03 (issue #601).
+
+        For checkpointing the dataset analog is the checkpoint_folder —
+        rule 4.4.2 verifies checkpoint_folder vs results_dir live on
+        different filesystems. Object-storage runs skip via A8.
+        """
+        if self._is_object_storage():
+            return None
+        cf = getattr(self.args, "checkpoint_folder", None)
+        results_dir = getattr(self.args, "results_dir", None)
+        if not cf or not results_dir:
+            return None
+        return (cf, results_dir)
 
     def datasize(self):
         # CAP-01: fail fast BEFORE the rank-by-rank size table prints.
