@@ -41,7 +41,9 @@ def _make_run_tuple(params_dict, verification='closed'):
     summary = {}
     metadata = {
         'verification': verification,
-        'params_dict': params_dict,
+        # `override_parameters` is the key mlpstorage actually writes; the
+        # reader site in training_checks.py:595/:658 reads from there.
+        'override_parameters': params_dict,
     }
     return (summary, metadata, '20260624_000000')
 

@@ -104,7 +104,7 @@ class TrainingCheck(BaseCheck):
                 continue
             # Check if datasize-related parameters are in the metadata
             params = metadata.get("args", {})
-            combined_params = metadata.get("combined_params", {})
+            combined_params = metadata.get("parameters", {})
 
             if not params and not combined_params:
                 self.log_violation(
@@ -149,7 +149,7 @@ class TrainingCheck(BaseCheck):
                 continue
             try:
                 # Get parameters
-                combined_params = metadata.get("combined_params", {})
+                combined_params = metadata.get("parameters", {})
                 dataset_params = combined_params.get("dataset", {})
                 reader_params = combined_params.get("reader", {})
 
@@ -224,7 +224,7 @@ class TrainingCheck(BaseCheck):
         for summary, metadata, _ in self.submissions_logs.run_files:
             if metadata is None:
                 continue
-            dataset_params = metadata.get("combined_params", {}).get("dataset", {})
+            dataset_params = metadata.get("parameters", {}).get("dataset", {})
             num_files = int(dataset_params.get("num_files_train", 0))
             record_length = float(dataset_params.get("record_length_bytes", 0))
             num_samples_per_file = int(dataset_params.get("num_samples_per_file", 1))
@@ -235,7 +235,7 @@ class TrainingCheck(BaseCheck):
         for summary, metadata, _ in self.submissions_logs.datagen_files:
             if metadata is None:
                 continue
-            dataset_params = metadata.get("combined_params", {}).get("dataset", {})
+            dataset_params = metadata.get("parameters", {}).get("dataset", {})
             num_files = int(dataset_params.get("num_files_train", 0))
             record_length = float(dataset_params.get("record_length_bytes", 0))
             num_samples_per_file = int(dataset_params.get("num_samples_per_file", 1))
@@ -722,7 +722,7 @@ class TrainingCheck(BaseCheck):
             verification = metadata.get("verification", "open")
 
             if verification == "closed":
-                params_dict = metadata.get("params_dict", {})
+                params_dict = metadata.get("override_parameters", {})
 
                 for param_key in params_dict.keys():
                     # Tool-injected params (skip_listing, data_folder derived
@@ -785,7 +785,7 @@ class TrainingCheck(BaseCheck):
             verification = metadata.get("verification", "open")
 
             if verification == "open":
-                params_dict = metadata.get("params_dict", {})
+                params_dict = metadata.get("override_parameters", {})
 
                 for param_key in params_dict.keys():
                     # Tool-injected params (skip_listing, data_folder derived
@@ -882,13 +882,20 @@ class TrainingCheck(BaseCheck):
             args = metadata.get("args", {})
             ok, df_found = _check_filesystem_separation(args, logfile_path)
             if not df_found:
-                self.log_violation(
+                # TODO-001: runtime df capture is missing in mlpstorage CLI
+                # (`Benchmark._execute_command` in benchmarks/base.py never invokes
+                # `df` before/after the DLIO subprocess). Emit a warning rather
+                # than an error so conforming submissions are not blocked on
+                # an upstream producer gap. Restore log_violation once the
+                # writer side ships the `df` block in *_run.stdout.log.
+                self.warn_violation(
                     "3.4.2", "trainingMlpstorageFilesystemCheck", logfile_path,
-                    "df output not found",
+                    "df output not found (mlpstorage CLI does not yet capture df; TODO-001)",
                 )
-                valid = False
                 continue
             if not ok:
+                # df WAS found (e.g. submitter manually injected it), so this
+                # is a real same-mount finding and remains an error.
                 self.log_violation(
                     "3.4.2", "trainingMlpstorageFilesystemCheck", logfile_path,
                     "data_dir and results_dir are on the same filesystem",
