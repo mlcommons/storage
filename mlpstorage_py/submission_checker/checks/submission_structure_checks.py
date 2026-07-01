@@ -74,8 +74,19 @@ _REQUIRED_SUBMITTER_SUBDIRS_OPEN = frozenset({"results", "systems"})
 # Legacy alias for CLOSED — see _REQUIRED_SUBMITTER_SUBDIRS_CLOSED.
 _REQUIRED_SUBMITTER_SUBDIRS = _REQUIRED_SUBMITTER_SUBDIRS_CLOSED
 
-# Valid workload categories under results/<system>/
-_VALID_WORKLOAD_CATEGORIES = frozenset({"training", "checkpointing"})
+# Valid workload categories under results/<system>/. These are the on-disk
+# directory names produced by `BENCHMARK_TYPES.name` in
+# `mlpstorage_py/rules/utils.py::generate_output_location` — `vector_database`
+# and `kv_cache` carry underscores, NOT the `vectordb` / `kvcache` short forms
+# used elsewhere in the CLI. Pre-fix this set excluded both, so every vdb /
+# kvcache submission tripped a `[2.1.10 workloadCategories] unexpected
+# workload category` error (issue #612).
+_VALID_WORKLOAD_CATEGORIES = frozenset({
+    "training",
+    "checkpointing",
+    "vector_database",
+    "kv_cache",
+})
 
 # Valid training workload names under training/
 _VALID_TRAINING_WORKLOADS = frozenset({"unet3d", "retinanet"})
@@ -849,8 +860,13 @@ class SubmissionStructureCheck(BaseCheck):
 
     @rule("2.1.10", "workloadCategories")
     def workload_categories_check(self):
-        """STRUCT-10: results/<system>/ must contain only {training, checkpointing}."""
+        """STRUCT-10: results/<system>/ must contain only categories drawn
+        from ``_VALID_WORKLOAD_CATEGORIES`` (training, checkpointing,
+        vector_database, kv_cache — the on-disk directory names produced
+        by ``BENCHMARK_TYPES.name``)."""
         valid = True
+        # Sorted list rendered once for stable, deterministic error messages.
+        allowed_list = sorted(_VALID_WORKLOAD_CATEGORIES)
         for _division, _submitter, sub_path in self._iter_submitter_dirs():
             results_path = os.path.join(sub_path, "results")
             if not os.path.isdir(results_path):
@@ -865,8 +881,8 @@ class SubmissionStructureCheck(BaseCheck):
                         "2.1.10", "workloadCategories",
                         os.path.join(sys_path, cat),
                         "unexpected workload category %r in results/%s/ "
-                        "(only 'training' and 'checkpointing' allowed)",
-                        cat, sys_name,
+                        "(allowed: %s)",
+                        cat, sys_name, allowed_list,
                     )
                     valid = False
 
@@ -874,8 +890,9 @@ class SubmissionStructureCheck(BaseCheck):
                     self.log_violation(
                         "2.1.10", "workloadCategories",
                         sys_path,
-                        "results/%s/ contains neither 'training' nor 'checkpointing'",
-                        sys_name,
+                        "results/%s/ contains no recognized workload "
+                        "category (allowed: %s)",
+                        sys_name, allowed_list,
                     )
                     valid = False
 

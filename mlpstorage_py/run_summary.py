@@ -390,6 +390,7 @@ _KVCACHE_FIELDS_RUN: List[Tuple[str, str]] = [
     ("duration",                  'duration'),
     ("generation_mode",           'generation_mode'),
     ("performance_profile",       'performance_profile'),
+    ("max_concurrent_allocs",     'max_concurrent_allocs'),
     ("loops",                     'loops'),
 ]
 
@@ -400,6 +401,7 @@ _KVCACHE_FIELDS_FEATURES: List[Tuple[str, str]] = [
     ("rag_num_docs",              'rag_num_docs'),
     ("enable_autoscaling",        'enable_autoscaling'),
     ("autoscaler_mode",           'autoscaler_mode'),
+    ("enable_latency_tracing",    'enable_latency_tracing'),
 ]
 
 _KVCACHE_FIELDS_DISTRIBUTED: List[Tuple[str, str]] = [

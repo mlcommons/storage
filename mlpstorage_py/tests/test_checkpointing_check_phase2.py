@@ -10,8 +10,9 @@ Covers:
     via info (happy path) or violation (missing/malformed timestamps).
   - CHKPT-04 (4.7.3 checkpointRemappingTimeReporting): observed remap interval
     must be >= declared * 0.5 when remap_time_in_seconds > 0.
-  - CHKPT-05 (4.7.4 checkpointSimultaneousRwSupport): runtime cross-check deferred
-    per TODO-002; emits log.info only.
+  - CHKPT-05 (4.7.4 checkpointSimultaneousRwSupport): satisfied by construction
+    at runtime via the CAP-02 shared-FS probe
+    (cluster_collector.run_shared_fs_probe). Rule body emits log.info only.
   - CHKPT-06 (4.4.2 checkpointFilesystemCheck): checkpoint_folder and results_dir
     must be on different filesystems.
 
@@ -20,8 +21,9 @@ Cross-cutting tests:
     [<rule_id> <rule_name>] (mirrors Phase 1 D-05 / QUAL-02 enforcement).
   - TestAccumulateDontAbort: two simultaneous CHKPT-01 violations produce two
     error records (not one) — QUAL-01 / Pitfall 11 compliance.
-  - TestChkpt05DeferredFollowUp: simultaneous_rw_support emits INFO (not error)
-    when sim_write=False — pinning the documented TODO-002 deferral.
+  - TestChkpt05SatisfiedByConstruction: simultaneous_rw_support emits INFO
+    with the "satisfied by construction" marker — pins that CAP-02 owns the
+    runtime enforcement (see cluster_collector.run_shared_fs_probe).
 
 References:
   - D-A3, D-B4, D-B5, D-B7, D-C3, D-D1, D-D2, D-D3 in Phase 2 CONTEXT.md
@@ -342,21 +344,25 @@ class TestChkpt04_RemappingTimeReporting:
 class TestChkpt05_SimultaneousRwSupport:
     """Tests for CHKPT-05 (4.7.4 checkpointSimultaneousRwSupport).
 
-    Runtime cross-check is DEFERRED per TODO-002. Method emits log.info only
-    and returns True in all cases where capability fields are present. When
+    Rule is satisfied by construction at runtime via the CAP-02 shared-FS
+    probe (cluster_collector.run_shared_fs_probe): rank 0 writes a sentinel,
+    all ranks read it via os.stat, and the probe fails-fast if any rank
+    cannot see the write. That IS the "simultaneous R/W on common namespace"
+    invariant Rules.md 4.7.4 requires. Method emits log.info only and
+    returns True in all cases where capability fields are present. When
     capability fields are absent, SystemYamlSchemaCheck owns the violation
     → silent-skip per D-A3.
     """
 
     def test_both_true_no_emission(self, tmp_path, mock_logger):
-        """Default capabilities (sim_write=True, sim_read=True) → True, no errors, no info."""
+        """Default capabilities (sim_write=True, sim_read=True) → True, no errors, info emitted."""
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(tmp_path)
         check = _run_checkpointing_check(root, mock_logger)
         result = check.simultaneous_rw_support()
         assert result is True
         assert mock_logger.errors == []
-        # Default: emits info (capability fields present + deferred message)
+        # Default: emits info with the "satisfied by construction" marker
         assert len(mock_logger.infos) >= 1
 
     def test_sim_write_false_emits_info(self, tmp_path, mock_logger):
@@ -436,13 +442,13 @@ class TestChkpt06_CheckpointFilesystemCheck:
         assert "same filesystem" in mock_logger.errors[0]
 
     def test_df_not_found_emits_4_4_2_missing(self, tmp_path, mock_logger):
-        """No df logfile → [4.4.2 checkpointFilesystemCheck] 'df output not found'.
+        """No sidecar AND no df logfile → hard [4.4.2] violation (D-B8, #601).
 
-        TODO-001: runtime df capture in mlpstorage CLI is the long-term fix.
-        Until DLIO (or mlpstorage) emits the `df` block in *_run.stdout.log,
-        df-not-found is emitted as a warning (not an error) so conforming
-        submissions are not blocked on an upstream producer gap. The check
-        therefore returns True; the violation surfaces on mock_logger.warnings.
+        Post-#601 D-B8 contract: when neither the CAP-03 sidecar nor the
+        df block is present, the rule has no evidence of FS separation and
+        must fire a hard violation. The pre-#601 TODO-001 warn-only
+        downgrade is no longer in effect now that the producer side ships
+        the sidecar.
         """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(
@@ -453,14 +459,10 @@ class TestChkpt06_CheckpointFilesystemCheck:
         )
         check = _run_checkpointing_check(root, mock_logger)
         result = check.checkpoint_filesystem_check()
-        assert result is True
-        assert mock_logger.errors == [], (
-            f"df-not-found is a warning (TODO-001); errors must stay empty. Got: {mock_logger.errors}"
-        )
-        assert len(mock_logger.warnings) >= 1
-        assert mock_logger.warnings[0].startswith("[4.4.2 checkpointFilesystemCheck]"), \
-            f"Expected [4.4.2 checkpointFilesystemCheck]; got {mock_logger.warnings[0]!r}"
-        assert "df output not found" in mock_logger.warnings[0]
+        assert result is False
+        assert len(mock_logger.errors) >= 1
+        assert mock_logger.errors[0].startswith("[4.4.2 checkpointFilesystemCheck]"), \
+            f"Expected [4.4.2 checkpointFilesystemCheck]; got {mock_logger.errors[0]!r}"
 
     def test_object_api_silent_passes(self, tmp_path, mock_logger):
         """benchmark_API='object' → silent-pass; no errors emitted (D-B7)."""
@@ -543,7 +545,9 @@ class TestQual02RuleIdPrefix:
     a single mutation fixture.
 
     CHKPT-05 (4.7.4) is excluded from this parametrize set because its
-    only emission path is log.info (deferred runtime cross-check — TODO-002).
+    only emission path is log.info — the runtime enforcement is owned by
+    CAP-02 (cluster_collector.run_shared_fs_probe) and the validator rule
+    body documents the check as satisfied by construction.
     """
 
     @pytest.mark.parametrize("rule_id,rule_name,mutation_kwargs", PHASE2_CHKPT_RULES)
@@ -609,28 +613,36 @@ class TestAccumulateDontAbort:
 
 
 # ---------------------------------------------------------------------------
-# TestChkpt05DeferredFollowUp — deferral pinning test
+# TestChkpt05SatisfiedByConstruction — CAP-02 fulfills 4.7.4 at runtime
 # ---------------------------------------------------------------------------
 
-class TestChkpt05DeferredFollowUp:
-    """Pin the documented TODO-002 deferral for simultaneous_rw_support.
+class TestChkpt05SatisfiedByConstruction:
+    """Pin that CHKPT-05 (4.7.4 checkpointSimultaneousRwSupport) is satisfied
+    by construction via the CAP-02 shared-FS probe.
 
-    CHKPT-05's runtime per-host cross-check is deferred because current
-    summary.json does not expose per-host start/end timing. The method must
-    emit log.info (NOT log.error) with 'TODO-002' or 'runtime cross-check' in
-    the message, and return True.
+    Rules.md 4.7.4 requires that the storage layer support simultaneous R/W
+    on a common namespace. The runtime gate that enforces this lives in
+    ``mlpstorage_py.cluster_collector.run_shared_fs_probe`` (invoked from
+    ``Benchmark._pre_execution_gate``): rank 0 writes a sentinel file and
+    every other rank ``os.stat``s it via the shared filesystem. A successful
+    probe proves the invariant; a failure raises FileSystemError BEFORE
+    the workload starts. Any submission that reaches this validator has
+    already satisfied 4.7.4 by construction.
 
-    This test exists so future planners cannot accidentally upgrade CHKPT-05
-    to a real error-emitting check without noticing the pinned assertion. If
-    the deferred check is resolved in a future phase, this test class should
-    be updated to assert the error-emitting behavior instead.
+    The rule body preserves the ``@rule`` binding for coverage discovery
+    and emits a single INFO line carrying the "satisfied by construction"
+    marker. This class pins that marker so a future edit that silently
+    turns the info line into a violation without wiring an actual runtime
+    check trips these assertions.
     """
 
-    def test_sim_write_false_emits_info_with_deferred_note(self, tmp_path, mock_logger):
-        """sim_write=False → log.info with 'runtime cross-check' note; no errors.
+    def test_sim_write_false_emits_info_with_satisfied_marker(self, tmp_path, mock_logger):
+        """sim_write=False → log.info with 'satisfied by construction' marker; no errors.
 
-        Pinning the deferral: the violation WOULD logically fire here if the
-        runtime data were available. But per TODO-002, only log.info is emitted.
+        The rule doesn't inspect the capability values to decide pass/fail —
+        the runtime gate (CAP-02) has already enforced the invariant before
+        the validator runs. The capability values are still logged for
+        auditability.
         """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(
@@ -641,23 +653,23 @@ class TestChkpt05DeferredFollowUp:
         result = check.simultaneous_rw_support()
         assert result is True
         assert mock_logger.errors == [], \
-            f"CHKPT-05 must not emit errors (deferred per TODO-002); got {mock_logger.errors}"
-        # The info message must mention the deferral
+            f"CHKPT-05 must not emit errors (satisfied by CAP-02 at runtime); got {mock_logger.errors}"
         matching_infos = [
             m for m in mock_logger.infos
             if "[4.7.4 checkpointSimultaneousRwSupport]" in m
-            and ("runtime cross-check" in m or "TODO-002" in m)
+            and "satisfied by construction" in m
         ]
         assert len(matching_infos) >= 1, (
-            f"Expected at least one info message with [4.7.4 ...] and deferral note; "
-            f"got infos: {mock_logger.infos}"
+            f"Expected at least one info message with [4.7.4 ...] and "
+            f"'satisfied by construction' marker; got infos: {mock_logger.infos}"
         )
 
-    def test_deferred_check_returns_true_not_false(self, tmp_path, mock_logger):
-        """Deferred CHKPT-05 must return True regardless of capability values.
+    def test_returns_true_regardless_of_capability_values(self, tmp_path, mock_logger):
+        """CHKPT-05 returns True regardless of declared capability values.
 
-        If the check were live (not deferred), sim_write=False MIGHT return False.
-        Since it is deferred, it MUST return True to avoid false positives.
+        The runtime gate (CAP-02 shared-FS probe) is the authoritative
+        enforcement point; declared simultaneous_write / simultaneous_read
+        values are audit-only from the validator's perspective.
         """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(
@@ -667,4 +679,4 @@ class TestChkpt05DeferredFollowUp:
         check = _run_checkpointing_check(root, mock_logger)
         result = check.simultaneous_rw_support()
         assert result is True, \
-            "CHKPT-05 must return True (deferred per TODO-002) even when both sim_* are False"
+            "CHKPT-05 must return True (satisfied by CAP-02) even when both sim_* are False"

@@ -181,7 +181,6 @@ HELP_MESSAGES = {
     'query_batch_size': "Number of vectors to query in each batch (per process).",
 
     # Reports help messages
-    'output_dir': "Directory where the benchmark report will be saved.",
     'config_file': "Path to YAML file with argument overrides that will be applied after CLI arguments",
 
     # System-under-test name (LAY-04 / D-10) — folder under results/ in canonical layout
@@ -320,6 +319,18 @@ def add_universal_arguments(parser, req_results, req_systemname=False):
         "--skip-validation",
         action="store_true",
         help="Skip environment validation (MPI, SSH, DLIO checks). Useful for debugging.",
+    )
+    validation_args.add_argument(
+        "--skip-fs-separation-gate",
+        action="store_true",
+        help=(
+            "Bypass the CAP-03 hard gate that raises when data/checkpoint and "
+            "results directories live on the same filesystem. The probe still "
+            "runs and writes fs_separation.json so the validator has telemetry, "
+            "but no exception is raised. Use only for dev runs that are not "
+            "intended for submission — rules 3.4.2 / 4.4.2 / 5.4.2 will still "
+            "fail at validation time."
+        ),
     )
 
 

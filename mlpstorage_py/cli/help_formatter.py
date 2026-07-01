@@ -502,7 +502,6 @@ RP_REPORTGEN
   Required:
     --results-dir/-rd PATH
   Optional:
-    --output-dir PATH
     --config-file/-c PATH
     --debug
     --verbose

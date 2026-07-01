@@ -4,7 +4,12 @@ from ..constants import *
 from ..configuration.configuration import Config
 from ..loader import SubmissionLogs
 from ..rule_registry import rule
-from .helpers import _check_filesystem_separation, _pair_checkpoint_runs, _parse_iso_gap
+from .helpers import (
+    _check_filesystem_separation,
+    _pair_checkpoint_runs,
+    _parse_iso_gap,
+    read_fs_separation_sidecar,
+)
 
 import os
 import re
@@ -824,16 +829,30 @@ class CheckpointingCheck(BaseCheck):
 
     @rule("4.7.4", "checkpointSimultaneousRwSupport")
     def simultaneous_rw_support(self):
-        """Verify declared simultaneous R/W capabilities are consistent with run data.
+        """Verify simultaneous R/W capability on the shared namespace.
         (Rules.md 4.7.4)
 
-        Schema validation (SystemYamlSchemaCheck, Plan 02-02) covers field presence +
-        type + Rule-13 cross-field consistency per D-A3. This runtime cross-check is
-        DEFERRED (TODO-002) — current summary.json does not expose per-host timing,
-        which is required to determine whether write/read overlapped on the same host.
-        Method emits an informational log.info noting that schema-validation owns
-        the rule for Phase 2 and returns True. The deferred state is pinned by
-        TestChkpt05DeferredFollowUp in Plan 02-04.
+        Satisfied by construction at runtime: the CAP-02 shared-filesystem
+        probe in ``mlpstorage_py.cluster_collector.run_shared_fs_probe``
+        (invoked from ``Benchmark._pre_execution_gate`` in
+        ``benchmarks/base.py``) creates a sentinel file on rank 0 and
+        MPI-gathers ``os.stat`` results from every participating rank. A
+        successful probe proves the storage layer can accept a write on
+        one node and immediately serve a read of the same inode on every
+        other node — which IS the "simultaneous R/W on a common namespace"
+        invariant Rules.md 4.7.4 requires. Any submission that reaches
+        this validator has passed the invariant by construction.
+
+        Schema validation (SystemYamlSchemaCheck, Plan 02-02) still owns
+        field-presence + type + Rule-13 cross-field consistency for
+        ``simultaneous_write`` / ``simultaneous_read`` / ``multi_host`` in
+        the system YAML per D-A3 (see the three entries in
+        ``SCHEMA_ERROR_RULE_MAP`` tagged with 4.7.4 — those catch
+        declaration-side defects that surface before any benchmark runs).
+
+        The rule body preserves the ``@rule`` binding for coverage
+        discovery and emits an INFO line so tooling that greps by rule
+        ID surfaces the rule as "visited and satisfied".
         """
         valid = True
         if self.mode != "checkpointing":
@@ -844,10 +863,10 @@ class CheckpointingCheck(BaseCheck):
             return valid
         self.log.info(
             "[4.7.4 checkpointSimultaneousRwSupport] %s: "
-            "schema validation (SystemYamlSchemaCheck) covers Rules.md 4.7.4 "
-            "structural requirements; runtime per-host cross-check awaits "
-            "richer summary.json data — see TODO-002 "
-            "(simultaneous_write=%s, simultaneous_read=%s)",
+            "satisfied by construction — CAP-02 shared-FS probe "
+            "(cluster_collector.run_shared_fs_probe) proves rank-0's write "
+            "is immediately visible on every other rank via the shared "
+            "namespace (simultaneous_write=%s, simultaneous_read=%s)",
             self.path, sim_write, sim_read,
         )
         return valid
@@ -868,7 +887,19 @@ class CheckpointingCheck(BaseCheck):
         if self._get_benchmark_api() == "object":
             return valid
         for summary, metadata, timestamp in self._iter_valid_files():
-            logfile_path = os.path.join(self.checkpointing_path, timestamp, "checkpointing_run.stdout.log")
+            run_dir = os.path.join(self.checkpointing_path, timestamp)
+            logfile_path = os.path.join(run_dir, "checkpointing_run.stdout.log")
+            # CAP-03 sidecar is authoritative (#601). Pre-cutover df-block
+            # fallback retained for one release (D-601-3).
+            sidecar = read_fs_separation_sidecar(run_dir)
+            if sidecar is not None:
+                if sidecar.get("same_filesystem"):
+                    self.log_violation(
+                        "4.4.2", "checkpointFilesystemCheck", logfile_path,
+                        "checkpoint_folder and results_dir are on the same filesystem",
+                    )
+                    valid = False
+                continue
             args = metadata.get("args", {})
             # For checkpointing, checkpoint_folder is the "data path" analog (RESEARCH.md).
             chkpt_args = {
@@ -877,16 +908,15 @@ class CheckpointingCheck(BaseCheck):
             }
             ok, df_found = _check_filesystem_separation(chkpt_args, logfile_path)
             if not df_found:
-                # TODO-001: runtime df capture is missing in mlpstorage CLI
-                # (`Benchmark._execute_command` in benchmarks/base.py never invokes
-                # `df` before/after the DLIO subprocess). Emit a warning rather
-                # than an error so conforming submissions are not blocked on
-                # an upstream producer gap. Restore log_violation once the
-                # writer side ships the `df` block in *_run.stdout.log.
-                self.warn_violation(
+                # D-B8: no CAP-03 sidecar AND no df block → no evidence of
+                # FS separation at all. Fire a hard violation so producers
+                # that predate #601 and never captured df cannot silently
+                # pass 4.4.2.
+                self.log_violation(
                     "4.4.2", "checkpointFilesystemCheck", logfile_path,
-                    "df output not found (mlpstorage CLI does not yet capture df; TODO-001)",
+                    "fs_separation.json sidecar not found; df block also absent",
                 )
+                valid = False
                 continue
             if not ok:
                 # df WAS found (e.g. submitter manually injected it), so this

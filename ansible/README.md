@@ -30,14 +30,14 @@ ansible-galaxy collection install -r collections/requirements.yml
 
 ## 🗂️ Preparing Mount Directories
 
-Before running benchmarks, **ensure dataset folders exist** on **every node**.
+Before running benchmarks, **ensure the `--data-dir` parent exists** on **every node**. `mlpstorage datagen` will create the per-workload internal structure (`<data-dir>/<model>/{train,valid,test}/`) on first use — you do not need to pre-create those subdirectories.
 
 ### Option 1: Local Directory
 
-Create local folders:
+Create the parent folder:
 
 ```bash
-mkdir -p /mnt/nfs/train /mnt/nfs/valid
+mkdir -p /mnt/nfs
 ```
 
 ### Option 2: NFS Mounted Directory

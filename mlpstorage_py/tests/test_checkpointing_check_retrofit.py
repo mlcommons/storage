@@ -4,12 +4,10 @@ Tests for Plan 03-02 Task 4: CheckpointingCheck @rule retrofit (D-R3).
 Covers:
   - Parametrized assertion that each of the 8 retrofitted (rule_id, method)
     pairs on CheckpointingCheck has __rule_id__ == expected.
-  - 4.3.1 routing pin (xfail under W-03 lock — the conftest
-    build_submission factory does NOT expose a kwarg to inject
-    summary["metric"]["checkpoint_size_GB"], so the warning path inside
-    checkpoint_data_size_ratio is unreachable through the fixture API).
-    The xfail decoration documents the W-03 follow-up; removing it once
-    conftest is extended promotes the test to a passing assertion.
+  - 4.3.1 routing pin — asserts warn_violation (not log_violation) when
+    checkpoint data per node < 3x host memory. Uses the
+    `chkpt_summary_checkpoint_size_GB` conftest kwarg to inject a positive
+    checkpoint_size_GB and reach the advisory branch.
   - 4.4.1 (checkpoint_folder == results_dir) emits prefixed violation.
   - 4.6.3 (closed CLOSED metadata with disallowed yaml_params) emits
     prefixed violation — uses an in-test metadata mutation helper rather
@@ -105,43 +103,23 @@ def test_every_retrofitted_checkpointing_method_has_rule_id_attribute(rule_id, m
 
 
 # ---------------------------------------------------------------------------
-# 4.3.1 routing pin — W-03 lock: xfail until conftest gains
-# summary.metric.checkpoint_size_GB injection kwarg.
+# 4.3.1 routing pin — warn_violation on undersized checkpoint per node.
 # ---------------------------------------------------------------------------
 
-@pytest.mark.xfail(
-    reason=(
-        "conftest build_submission has no kwarg to inject "
-        "summary.metric.checkpoint_size_GB; the 4.3.1 advisory trigger requires "
-        "checkpoint_size_GB > 0. Follow-up: extend conftest in a later phase to "
-        "enable this assertion. Tracking: TODO-W03."
-    ),
-    strict=False,
-)
 def test_4_3_1_undersized_checkpoint_emits_warn_prefix_not_error(tmp_path, mock_logger):
     """4.3.1 routing pin: when checkpoint data per node < 3x host memory,
     checkpoint_data_size_ratio MUST emit a [4.3.1 checkpointDataSizeRatio]
     warning (via warn_violation) and NOT an error (via log_violation).
 
-    Currently xfails because conftest's _DEFAULT_SUMMARY has no
-    metric.checkpoint_size_GB field and build_submission does not expose a
-    kwarg to inject one, so the early `continue` in
-    checkpoint_data_size_ratio (when checkpoint_size_gb == 0) prevents the
-    warn-violation branch from ever executing.
-
-    Once conftest gains a `chkpt_summary_checkpoint_size_GB` kwarg (or
-    equivalent), remove the xfail decoration to promote this to a passing
-    assertion. The structural pin (Task 2 grep that 4.3.1 routes through
-    warn_violation) covers the routing decision at source-code level today.
+    Default fixture has host_memory_GB=[256, 256] and num_hosts=2, so the
+    per-node threshold is 3 * 256 = 768 GiB. Injecting checkpoint_size_GB=100
+    puts data_per_node at 50 GiB — well under threshold — which triggers the
+    warn-violation branch.
     """
     from mlpstorage_py.tests.conftest import build_submission
-    # The default fixture passes through the early-continue guard.
-    # We invoke the method anyway so the test body documents the expected
-    # post-extension behavior.
-    root = build_submission(tmp_path)
+    root = build_submission(tmp_path, chkpt_summary_checkpoint_size_GB=100)
     check = _run_checkpointing_check(root, mock_logger)
     check.checkpoint_data_size_ratio()
-    # Expected behavior (post conftest extension):
     assert any(
         m.startswith("[4.3.1 checkpointDataSizeRatio]")
         for m in mock_logger.warnings
@@ -149,7 +127,6 @@ def test_4_3_1_undersized_checkpoint_emits_warn_prefix_not_error(tmp_path, mock_
         f"expected warning starting with [4.3.1 checkpointDataSizeRatio]; "
         f"got warnings={mock_logger.warnings}"
     )
-    # Expected behavior (post conftest extension): no error-level 4.3.1 record
     assert not any(
         m.startswith("[4.3.1 ")
         for m in mock_logger.errors

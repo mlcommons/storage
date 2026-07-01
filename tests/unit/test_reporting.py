@@ -528,3 +528,162 @@ class TestReportGeneratorIntegration:
         # Check files were created
         assert os.path.exists(os.path.join(results_dir, 'results.json'))
         assert os.path.exists(os.path.join(results_dir, 'results.csv'))
+
+
+# ---------------------------------------------------------------------------
+# Issue #599 regression tests — canonical-tree support, --output-dir, and
+# --systemname filtering. See the issue body for the full reproduction.
+# ---------------------------------------------------------------------------
+
+
+def _write_canonical_run(tmp_path, mode, orgname, systemname,
+                         benchmark="training", model="unet3d",
+                         timestamp="20260123_120000"):
+    """Create one fake run under the canonical layout that `mlpstorage init`
+    + `<bench> run` actually produces, and return the run dir."""
+    run_dir = (
+        tmp_path / mode / orgname / "results" / systemname
+        / benchmark / model / "run" / timestamp
+    )
+    run_dir.mkdir(parents=True, exist_ok=True)
+    (run_dir / f"{benchmark}_{model}_metadata.json").write_text("{}")
+    (run_dir / "summary.json").write_text("{}")
+    return run_dir
+
+
+def _make_generator(results_dir, *, args=None, validate_structure=False):
+    """Build a ReportGenerator with the heavy stages stubbed out so the
+    init constructor lands on `self` without touching real result files."""
+    with patch.object(ReportGenerator, 'accumulate_results'), \
+         patch.object(ReportGenerator, 'print_results'):
+        return ReportGenerator(
+            str(results_dir), args=args,
+            validate_structure=validate_structure,
+        )
+
+
+class TestIssue599CanonicalTreeAccepted:
+    """Bug 1: the validator rejected the canonical
+    `<results-dir>/<closed|open>/<orgname>/results/<systemname>/<bench>/...`
+    layout that the rest of the toolchain produces. After the fix,
+    ReportGenerator discovers the canonical slice via discover_scan_roots
+    and validates that slice, accepting the tree the user already has."""
+
+    def test_canonical_closed_tree_is_accepted_and_walked(self, tmp_path):
+        """The validator must pass and accumulate_results must walk the
+        closed slice for the requested system. Pre-fix this raised
+        SystemExit at validation time."""
+        _write_canonical_run(
+            tmp_path, "closed", "Acme", "sysA",
+            benchmark="training", model="unet3d",
+        )
+
+        args = Namespace(
+            debug=False, output_dir=None,
+            orgname="Acme", systemname="sysA",
+        )
+
+        # Intercept get_runs_files so we can assert it was called with the
+        # canonical slice path (NOT the bare tmp_path) — that's the key
+        # post-fix contract.
+        seen_scan_roots = []
+        def fake_get_runs(path, logger=None):
+            seen_scan_roots.append(path)
+            return []
+
+        with patch('mlpstorage_py.report_generator.get_runs_files',
+                   side_effect=fake_get_runs), \
+             patch.object(ReportGenerator, 'print_results'):
+            gen = ReportGenerator(str(tmp_path), args=args,
+                                  validate_structure=True)
+
+        expected_slice = str(
+            tmp_path / "closed" / "Acme" / "results" / "sysA"
+        )
+        assert seen_scan_roots == [expected_slice], (
+            f"accumulate_results must walk the canonical slice, "
+            f"not the bare results-dir. Saw: {seen_scan_roots!r}"
+        )
+        assert gen.scan_roots == [expected_slice]
+
+    def test_canonical_tree_does_not_aggregate_other_systems(self, tmp_path):
+        """Bug 3: a multi-system tree must aggregate ONLY the requested
+        system. Pre-fix, get_runs_files walked everything under
+        --results-dir and tagged every run with the requested
+        --systemname, mashing systems together."""
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysA")
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysB")
+
+        args = Namespace(
+            debug=False, output_dir=None,
+            orgname="Acme", systemname="sysA",
+        )
+        seen_scan_roots = []
+        def fake_get_runs(path, logger=None):
+            seen_scan_roots.append(path)
+            return []
+
+        with patch('mlpstorage_py.report_generator.get_runs_files',
+                   side_effect=fake_get_runs), \
+             patch.object(ReportGenerator, 'print_results'):
+            ReportGenerator(str(tmp_path), args=args,
+                            validate_structure=True)
+
+        # Only sysA's slice may be scanned.
+        assert seen_scan_roots == [
+            str(tmp_path / "closed" / "Acme" / "results" / "sysA")
+        ], seen_scan_roots
+        # And definitely NOT sysB's.
+        assert not any(
+            "sysB" in p for p in seen_scan_roots
+        ), seen_scan_roots
+
+    def test_canonical_both_modes_walked(self, tmp_path):
+        """When the submitter has staged both closed/ and open/ subtrees
+        for the same system, both slices are walked."""
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysA")
+        _write_canonical_run(tmp_path, "open", "Acme", "sysA")
+
+        args = Namespace(
+            debug=False, output_dir=None,
+            orgname="Acme", systemname="sysA",
+        )
+        seen_scan_roots = []
+        def fake_get_runs(path, logger=None):
+            seen_scan_roots.append(path)
+            return []
+
+        with patch('mlpstorage_py.report_generator.get_runs_files',
+                   side_effect=fake_get_runs), \
+             patch.object(ReportGenerator, 'print_results'):
+            ReportGenerator(str(tmp_path), args=args,
+                            validate_structure=True)
+
+        assert sorted(seen_scan_roots) == sorted([
+            str(tmp_path / "closed" / "Acme" / "results" / "sysA"),
+            str(tmp_path / "open" / "Acme" / "results" / "sysA"),
+        ])
+
+    def test_flat_layout_still_works_without_orgname(self, tmp_path):
+        """Backward-compat: without orgname/systemname (programmatic
+        callers, the existing test fixtures, pre-LAY-03 trees), reportgen
+        still walks --results-dir directly."""
+        # Build a flat tree (no closed/open wrapper).
+        run_dir = tmp_path / "training" / "unet3d" / "run" / "20260123_120000"
+        run_dir.mkdir(parents=True)
+        (run_dir / "training_unet3d_metadata.json").write_text("{}")
+        (run_dir / "summary.json").write_text("{}")
+
+        seen_scan_roots = []
+        def fake_get_runs(path, logger=None):
+            seen_scan_roots.append(path)
+            return []
+
+        with patch('mlpstorage_py.report_generator.get_runs_files',
+                   side_effect=fake_get_runs), \
+             patch.object(ReportGenerator, 'print_results'):
+            # No args — exercises the no-orgname/no-systemname fallback.
+            ReportGenerator(str(tmp_path), args=None,
+                            validate_structure=True)
+
+        assert seen_scan_roots == [str(tmp_path)]

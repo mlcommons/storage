@@ -49,10 +49,18 @@ log = logging.getLogger("main")
 # "...main.MODE_TO_CHECKERS", {...}) injection of mock checkers, mirroring
 # the STUB_COVERAGE/OUT_OF_SCOPE_RULES pattern in test_rules_coverage.py.
 MODE_TO_CHECKERS = {
-    "training":      [DirectoryCheck, TrainingCheck],
-    "checkpointing": [DirectoryCheck, CheckpointingCheck],
-    "vectordb":      [VdbCheck],
-    "kvcache":       [KVCacheCheck],
+    "training":         [DirectoryCheck, TrainingCheck],
+    "checkpointing":    [DirectoryCheck, CheckpointingCheck],
+    # Keys must match the on-disk directory names produced by
+    # ``mlpstorage_py.rules.utils.generate_output_location`` —
+    # ``BENCHMARK_TYPES.name`` for vdb / kvcache is ``vector_database`` /
+    # ``kv_cache``. Pre-fix these were keyed ``vectordb`` / ``kvcache``,
+    # so the loader's ``mode = list_dir(system_path)[i]`` (which yields
+    # the disk-canonical name) never matched and every vdb / kvcache
+    # submission tripped the [2.1.10 workloadCategories] unrecognized-mode
+    # error at line 174 below (issue #612).
+    "vector_database":  [VdbCheck],
+    "kv_cache":         [KVCacheCheck],
 }
 
 def get_args():
