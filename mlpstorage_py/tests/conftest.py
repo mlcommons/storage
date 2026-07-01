@@ -365,6 +365,12 @@ def build_submission(tmp_path, **overrides) -> Path:
       ``args.checkpoint_folder`` in each checkpoint metadata.json.
     * ``chkpt_results_dir`` (str | None) — CHKPT-06: sets ``args.results_dir``
       in each checkpoint metadata.json.
+    * ``chkpt_summary_checkpoint_size_GB`` (int | float | None) — rule 4.3.1:
+      when non-None, injects ``summary.metric.checkpoint_size_GB`` into each
+      checkpoint summary.json. Required to exercise
+      ``checkpoint_data_size_ratio`` — the code short-circuits when the field
+      is 0/missing, so tests that assert the advisory-warning branch need a
+      positive value here.
     * ``run_data_dir`` (str | None) — TRAIN-02: sets ``args.data_dir`` in each
       run metadata.json.
     * ``run_results_dir`` (str | None) — TRAIN-02: sets ``args.results_dir`` in
@@ -420,6 +426,7 @@ def build_submission(tmp_path, **overrides) -> Path:
     chkpt_simultaneous_flags = overrides.pop("chkpt_simultaneous_flags", None)
     chkpt_checkpoint_folder = overrides.pop("chkpt_checkpoint_folder", None)
     chkpt_results_dir = overrides.pop("chkpt_results_dir", None)
+    chkpt_summary_checkpoint_size_GB = overrides.pop("chkpt_summary_checkpoint_size_GB", None)
     run_data_dir = overrides.pop("run_data_dir", None)
     run_results_dir = overrides.pop("run_results_dir", None)
 
@@ -735,6 +742,11 @@ def build_submission(tmp_path, **overrides) -> Path:
                         chkpt_summary["end"] = ts_end.isoformat()
                         chkpt_summary["start_time"] = ts_start.isoformat()
                         chkpt_summary["end_time"] = ts_end.isoformat()
+
+                if chkpt_summary_checkpoint_size_GB is not None:
+                    metric = dict(chkpt_summary.get("metric", {}))
+                    metric["checkpoint_size_GB"] = chkpt_summary_checkpoint_size_GB
+                    chkpt_summary["metric"] = metric
 
                 (ts_dir / "summary.json").write_text(
                     json.dumps(chkpt_summary), encoding="utf-8"
