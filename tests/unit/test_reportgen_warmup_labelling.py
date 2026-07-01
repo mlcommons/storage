@@ -182,13 +182,13 @@ class TestWarmupPrintLabel:
         gen._print_workload_details(('resnet50', 'h100'), workload_result)
         out = capsys.readouterr().out
 
-        assert '[WARMUP, not aggregated]' in out
+        assert '[WARMUP, not aggregated' in out
         # Warmup's disk basename must appear so submitters can locate the dir.
         assert '20250710_141219' in out
 
         warmup_line = next(
             line for line in out.splitlines()
-            if '[WARMUP, not aggregated]' in line
+            if '[WARMUP, not aggregated' in line
         )
         # Warmup line must NOT carry a CLOSED/OPEN/INVALID category badge —
         # WARMUP is a separate axis from the submission category.
@@ -246,18 +246,20 @@ class TestWarmupPrintLabel:
         gen._print_workload_details(('resnet50', 'h100'), workload_result)
         out = capsys.readouterr().out
 
-        # Find positions of each disk basename in the output; must be
-        # monotonically increasing.
-        positions = [
-            out.find('20250710_141219'),
-            out.find('20250710_142219'),
-            out.find('20250710_143012'),
-            out.find('20250710_143805'),
-        ]
+        # Warmup (basename 141219) must render first — its disk basename
+        # is the only unique-in-output token for it (its run_id is
+        # mis-stamped to match run_a's).
+        warmup_pos = out.find('20250710_141219')
+        # Real runs are identified by their unique run_datetime timestamps.
+        ts_a_pos = out.rfind('14:22:24')  # rfind: second occurrence (run_a),
+                                          # first is inside the warmup line.
+        ts_b_pos = out.find('14:30:16')
+        ts_c_pos = out.find('14:38:09')
+        positions = [warmup_pos, ts_a_pos, ts_b_pos, ts_c_pos]
         assert all(p >= 0 for p in positions), \
-            "All disk basenames must appear in output"
+            f"All runs must appear in output; positions={positions}"
         assert positions == sorted(positions), \
-            f"Runs must render in lex order of disk basename; got {positions}"
+            f"Runs must render in disk-basename lex order; got {positions}"
 
     def test_no_warmup_prints_all_runs_with_category_badge(self, tmp_path,
                                                            capsys):
@@ -299,7 +301,7 @@ class TestWarmupPrintLabel:
         gen._print_workload_details(('llama3-8b', None), workload_result)
         out = capsys.readouterr().out
 
-        assert '[WARMUP, not aggregated]' not in out
+        assert '[WARMUP, not aggregated' not in out
         assert 'CLOSED' in out
 
 

@@ -181,7 +181,6 @@ HELP_MESSAGES = {
     'query_batch_size': "Number of vectors to query in each batch (per process).",
 
     # Reports help messages
-    'output_dir': "Directory where the benchmark report will be saved.",
     'config_file': "Path to YAML file with argument overrides that will be applied after CLI arguments",
 
     # System-under-test name (LAY-04 / D-10) — folder under results/ in canonical layout

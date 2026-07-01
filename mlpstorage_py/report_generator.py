@@ -83,14 +83,6 @@ class ReportGenerator:
         # No-op when --results-dir already points at a flat benchmark-type root.
         self.results_dir = self._resolve_effective_results_dir(self.results_dir)
 
-        # Honor --output-dir for write_{json,csv}_file (falls back to results_dir).
-        output_dir = None
-        if self.args is not None:
-            output_dir = getattr(self.args, 'output_dir', None)
-        self.output_dir = output_dir or self.results_dir
-        if self.output_dir and self.output_dir != self.results_dir:
-            os.makedirs(self.output_dir, exist_ok=True)
-
         # Initialize formatters
         self.msg_formatter = ValidationMessageFormatter(use_colors=use_colors)
         self.summary_formatter = ReportSummaryFormatter(use_colors=use_colors)
@@ -102,6 +94,9 @@ class ReportGenerator:
 
         self.run_results: Dict[RunID, Result] = {}
         self.workload_results: Dict[tuple, Result] = {}
+        # Basenames of result_dir directories detected as warmup runs.
+        # See _process_single_run for the collision-detection logic.
+        self.warmup_result_dirs: set = set()
         self.processing_errors: List[str] = []
 
         self.accumulate_results()
@@ -199,8 +194,9 @@ class ReportGenerator:
 
         # Always traverse the full directory and emit one rollup
         # results.json / results.csv covering every discovered run, written
-        # to self.output_dir (which defaults to self.results_dir when
-        # --output-dir is not supplied).
+        # inside the submission tree at <results_dir>/results.{csv,json}.
+        # --output-dir was removed in #616 to prevent submitters from
+        # accidentally excluding the summary from their submission.
         run_result_dicts = [
             report.benchmark_run.as_dict() for report in self.run_results.values()
         ]
@@ -254,6 +250,22 @@ class ReportGenerator:
         """
         Process and validate a single benchmark run.
 
+        Training workloads have 6 disk directories per (model, accelerator):
+        1 throwaway warmup run + 5 submission runs. Only the 5 real runs
+        should be aggregated into results.{csv,json}. Checkpointing has
+        1 disk dir = 1 run (write-then-read self-warms), no warmup.
+
+        DLIO writes the warmup's ``summary.start`` value to match the FIRST
+        real run's start time (not the warmup's own directory timestamp), so
+        the two runs produce equal ``run_id`` values and collide in
+        ``self.run_results``. Detection here: on collision, the run whose
+        ``result_dir`` basename is lex-earlier is the warmup — its basename
+        is recorded in ``self.warmup_result_dirs`` and the later run wins
+        the dict slot (matching prior dict-overwrite semantics, which are
+        preserved so aggregate counts are unchanged). The workload printer
+        looks up ``warmup_result_dirs`` to render the warmup with a
+        ``[WARMUP, not aggregated]`` label instead of a category badge.
+
         Args:
             benchmark_run: The benchmark run to process.
 
@@ -276,6 +288,29 @@ class ReportGenerator:
             category=category,
             metrics=benchmark_run.metrics or {}
         )
+
+        existing = self.run_results.get(benchmark_run.run_id)
+        if existing is not None:
+            incoming_dir = benchmark_run.result_dir or ""
+            existing_dir = existing.benchmark_run.result_dir or ""
+            incoming_base = os.path.basename(incoming_dir)
+            existing_base = os.path.basename(existing_dir)
+            if incoming_base < existing_base:
+                self.warmup_result_dirs.add(incoming_base)
+                # Keep the existing (later-basename, real) run in run_results.
+                self.logger.debug(
+                    f"Detected warmup run (collision on {benchmark_run.run_id}): "
+                    f"{incoming_base} (excluded from aggregate)"
+                )
+                return
+            else:
+                self.warmup_result_dirs.add(existing_base)
+                self.logger.debug(
+                    f"Detected warmup run (collision on {benchmark_run.run_id}): "
+                    f"{existing_base} (excluded from aggregate)"
+                )
+                # Fall through to overwrite the existing (warmup) entry.
+
         self.run_results[benchmark_run.run_id] = result
 
         # Log category for the run
@@ -472,12 +507,24 @@ class ReportGenerator:
         if workload_result.benchmark_command:
             print(f"    Command: {workload_result.benchmark_command}")
 
-        # Print run summary
+        # Print run summary — sort by disk basename so warmup (always
+        # lex-earliest by design of the DLIO stamp mismatch) renders first.
         print("    Runs:")
-        for run in workload_result.benchmark_run:
-            run_category = self.run_results[run.run_id].category
-            run_badge = self.msg_formatter.format_category_badge(run_category)
-            print(f"      - {run.run_id} {run_badge}")
+        sorted_runs = sorted(
+            workload_result.benchmark_run,
+            key=lambda r: os.path.basename(r.result_dir or "")
+        )
+        for run in sorted_runs:
+            base = os.path.basename(run.result_dir or "")
+            if base in self.warmup_result_dirs:
+                # Warmup runs are excluded from the aggregate — render with
+                # a WARMUP label + disk basename (which is unique, unlike
+                # the mis-stamped run_id shared with the first real run).
+                print(f"      - {run.run_id} [WARMUP, not aggregated — dir: {base}]")
+            else:
+                run_category = self.run_results[run.run_id].category
+                run_badge = self.msg_formatter.format_category_badge(run_category)
+                print(f"      - {run.run_id} {run_badge}")
 
         # Print submission-level issues
         print(self.msg_formatter.format_issues_list(workload_result.issues, show_all=False))
@@ -491,13 +538,13 @@ class ReportGenerator:
 
 
     def write_json_file(self, results):
-        json_file = os.path.join(self.output_dir, 'results.json')
+        json_file = os.path.join(self.results_dir, 'results.json')
         self.logger.info(f'Writing results to {json_file}')
         with open(json_file, 'w') as f:
             json.dump(results, f, indent=2)
 
     def write_csv_file(self, results):
-        csv_file = os.path.join(self.output_dir, 'results.csv')
+        csv_file = os.path.join(self.results_dir, 'results.csv')
         self.logger.info(f'Writing results to {csv_file}')
         flattened_results = [flatten_nested_dict(r) for r in results]
         flattened_results = [remove_nan_values(r) for r in flattened_results]
