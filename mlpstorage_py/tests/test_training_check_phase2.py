@@ -180,13 +180,13 @@ class TestTrain02_MlpstorageFilesystemCheck:
             f"Expected 'same filesystem' in error; got {mock_logger.errors[0]!r}"
 
     def test_df_not_found_emits_3_4_2_missing(self, tmp_path, mock_logger):
-        """No df logfile → [3.4.2 trainingMlpstorageFilesystemCheck] 'df output not found'.
+        """No sidecar AND no df logfile → hard [3.4.2] violation (D-B8, #601).
 
-        TODO-001: runtime df capture in mlpstorage CLI is the long-term fix.
-        Until DLIO (or mlpstorage) emits the `df` block in *_run.stdout.log,
-        df-not-found is emitted as a warning (not an error) so conforming
-        submissions are not blocked on an upstream producer gap. The check
-        therefore returns True; the violation surfaces on mock_logger.warnings.
+        Post-#601 D-B8 contract: when neither the CAP-03 sidecar nor the
+        df block is present, the rule has no evidence of FS separation and
+        must fire a hard violation. The pre-#601 TODO-001 warn-only
+        downgrade is no longer in effect now that the producer side ships
+        the sidecar.
         """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(
@@ -197,15 +197,10 @@ class TestTrain02_MlpstorageFilesystemCheck:
         )
         check = _run_training_check(root, mock_logger)
         result = check.mlpstorage_filesystem_check()
-        assert result is True
-        assert mock_logger.errors == [], (
-            f"df-not-found is a warning (TODO-001); errors must stay empty. Got: {mock_logger.errors}"
-        )
-        assert len(mock_logger.warnings) >= 1
-        assert mock_logger.warnings[0].startswith("[3.4.2 trainingMlpstorageFilesystemCheck]"), \
-            f"Expected prefix [3.4.2 trainingMlpstorageFilesystemCheck]; got {mock_logger.warnings[0]!r}"
-        assert "df output not found" in mock_logger.warnings[0], \
-            f"Expected 'df output not found' in warning; got {mock_logger.warnings[0]!r}"
+        assert result is False
+        assert len(mock_logger.errors) >= 1
+        assert mock_logger.errors[0].startswith("[3.4.2 trainingMlpstorageFilesystemCheck]"), \
+            f"Expected prefix [3.4.2 trainingMlpstorageFilesystemCheck]; got {mock_logger.errors[0]!r}"
 
     def test_object_api_silent_passes(self, tmp_path, mock_logger):
         """benchmark_API='object' → silent-pass; no errors emitted (D-B7)."""
@@ -258,11 +253,12 @@ class TestTrain02_DfBlockNotFoundIsRuleIdTagged:
     """
 
     def test_df_not_found_violation_includes_logfile_path(self, tmp_path, mock_logger):
-        """df-not-found warning must include 'training_run.stdout.log' in the message.
+        """df-not-found violation must include 'training_run.stdout.log' in the message.
 
-        TODO-001: until DLIO/mlpstorage capture df, df-not-found is a warning
-        (not an error). The submitter-grep contract still applies — the
-        logfile path must appear in the warning message.
+        Post-#601 D-B8: df-not-found (with sidecar also absent) is a hard
+        violation on ``mock_logger.errors``. The submitter-grep contract
+        still applies — the logfile path must appear so submitters can
+        locate the failing run.
         """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(
@@ -272,12 +268,11 @@ class TestTrain02_DfBlockNotFoundIsRuleIdTagged:
         )
         check = _run_training_check(root, mock_logger)
         check.mlpstorage_filesystem_check()
-        assert len(mock_logger.warnings) >= 1
-        # The violation message must reference the logfile path
+        assert len(mock_logger.errors) >= 1
         assert any(
             "training_run.stdout.log" in m
-            for m in mock_logger.warnings
+            for m in mock_logger.errors
         ), (
-            f"Expected 'training_run.stdout.log' in at least one warning message; "
-            f"got {mock_logger.warnings}"
+            f"Expected 'training_run.stdout.log' in at least one error message; "
+            f"got {mock_logger.errors}"
         )

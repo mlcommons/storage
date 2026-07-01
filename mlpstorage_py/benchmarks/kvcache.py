@@ -301,6 +301,9 @@ class KVCacheBenchmark(Benchmark):
         if not getattr(self.args, 'what_if', False):
             self._probe_results_dir_shared(hosts)
 
+        # Global tuning knobs apply to all options identically; compute once.
+        global_kv_args = self._build_global_kvcache_args(is_closed)
+
         option_results = {}
         for option in [1, 2, 3]:
             option_kv_args = self._build_option_kvcache_args(option, is_closed)
@@ -312,6 +315,9 @@ class KVCacheBenchmark(Benchmark):
                 )
                 option_trial_dir.mkdir(parents=True, exist_ok=True)
 
+                # The wrapper's parse_known_args forwards anything after its own
+                # flags to kv-cache.py verbatim; both option_kv_args and
+                # global_kv_args land on kv-cache.py's argparse.
                 wrapper_cmd = (
                     f"{mpi_prefix} {sys.executable} {wrapper_path}"
                     f" --rank-output-base {option_trial_dir}"
@@ -319,6 +325,7 @@ class KVCacheBenchmark(Benchmark):
                     f" --seed-base {seed}"
                     f" --config {config_path}"
                     f" {' '.join(option_kv_args)}"
+                    f"{' ' + ' '.join(global_kv_args) if global_kv_args else ''}"
                 )
 
                 self.logger.status(f"Running option {option} trial {trial + 1}/{trials}...")
@@ -394,6 +401,13 @@ class KVCacheBenchmark(Benchmark):
         """
         return self.cache_dir if self.cache_dir else None
 
+    def _fs_separation_paths(self):
+        """Return ``None`` — kvcache has no separate dataset/results FS
+        invariant. The cache_dir IS the working set; rules 3.4.2 / 4.4.2 /
+        5.4.2 don't apply to the kvcache benchmark.
+        """
+        return None
+
     # ------------------------------------------------------------------
     # Per-option argv build + rank layout (from main)
     # ------------------------------------------------------------------
@@ -405,9 +419,9 @@ class KVCacheBenchmark(Benchmark):
         user input can reach kv-cache.py through this path because the CLOSED
         CLI does not expose the corresponding flags.
 
-        OPEN: user-set flags supersede WORKLOAD_PARAMS[option] one key at a
-        time. max-concurrent-allocs is not exposed by the OPEN CLI, so it
-        always comes from WORKLOAD_PARAMS.
+        OPEN/whatif: user-set flags supersede WORKLOAD_PARAMS[option] one key
+        at a time; unset keys fall back to the per-option WORKLOAD_PARAMS
+        default.
         """
         defaults = WORKLOAD_PARAMS[option]
         if is_closed:
@@ -435,7 +449,11 @@ class KVCacheBenchmark(Benchmark):
                     if getattr(self.args, 'cpu_mem_gb', None) is not None
                     else defaults['cpu-mem-gb']
                 ),
-                'max-concurrent-allocs': defaults['max-concurrent-allocs'],
+                'max-concurrent-allocs': (
+                    getattr(self.args, 'max_concurrent_allocs', None)
+                    if getattr(self.args, 'max_concurrent_allocs', None) is not None
+                    else defaults['max-concurrent-allocs']
+                ),
                 'generation-mode': (
                     getattr(self.args, 'generation_mode', None) or defaults['generation-mode']
                 ),
@@ -443,6 +461,45 @@ class KVCacheBenchmark(Benchmark):
         out = []
         for key, value in params.items():
             out.extend([f'--{key}', str(value)])
+        return out
+
+    def _build_global_kvcache_args(self, is_closed: bool) -> List[str]:
+        """Return the global (non-per-option) kv-cache.py CLI args.
+
+        These are tuning knobs that apply across all three options. They are
+        forwarded only in OPEN/whatif; CLOSED returns an empty list to preserve
+        the MLPerf-mandated invocation shape (per-option WORKLOAD_PARAMS only).
+
+        For `store_true` flags we emit the flag only when truthy. For value
+        flags we emit only when the user supplied something — that way the
+        kv-cache.py default applies if the user did not touch the knob, and
+        any value the user set propagates faithfully.
+        """
+        if is_closed:
+            return []
+
+        out: List[str] = []
+        # store_true flags — forward iff True.
+        for attr, flag in (
+            ('disable_multi_turn', '--disable-multi-turn'),
+            ('disable_prefix_caching', '--disable-prefix-caching'),
+            ('enable_rag', '--enable-rag'),
+            ('enable_autoscaling', '--enable-autoscaling'),
+            ('enable_latency_tracing', '--enable-latency-tracing'),
+        ):
+            if getattr(self.args, attr, False):
+                out.append(flag)
+
+        # Value flags — forward iff the user supplied a non-None value.
+        for attr, flag in (
+            ('rag_num_docs', '--rag-num-docs'),
+            ('autoscaler_mode', '--autoscaler-mode'),
+            ('performance_profile', '--performance-profile'),
+        ):
+            value = getattr(self.args, attr, None)
+            if value is not None:
+                out.extend([flag, str(value)])
+
         return out
 
     def _resolve_rank_layout(self, hosts):

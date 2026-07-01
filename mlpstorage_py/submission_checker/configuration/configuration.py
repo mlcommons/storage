@@ -35,17 +35,10 @@ class Config:
     def get_checkpoint_required_folders(self):
         return CHECKPOINT_REQUIRED_FOLDERS[self.version]
     
-    def get_num_train_files(self, model):
-        # .get returns None for unknown model names — the caller decides
-        # whether the per-model lookup is critical (skip with a diagnostic)
-        # or expected to always resolve. Non-conforming workload directory
-        # names (e.g. "unet3d_a100", "retinanet-20N-6PPN-A100") flagged by
-        # 2.1.11 trainingWorkloads would otherwise crash this dict lookup.
-        return NUM_DATASET_TRAIN_FILES.get(model)
-
-    def get_num_eval_files(self, model):
-        # See get_num_train_files: .get over [] for None-on-miss semantics.
-        return NUM_DATASET_EVAL_FILES.get(model)
+    # Issue #608: get_num_train_files / get_num_eval_files were deleted —
+    # they only ever returned values from the NUM_DATASET_*_FILES placeholder
+    # dicts (`# TODO: Ask for correct values`) that are also gone. Rule 3.3.1
+    # now reads per-submission datasize metadata instead.
 
     def get_checkpoint_file(self, model):
         # See get_num_train_files: .get over [] for None-on-miss semantics.

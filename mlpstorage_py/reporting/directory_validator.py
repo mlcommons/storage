@@ -12,6 +12,79 @@ from pathlib import Path
 from typing import List, Optional, Set
 
 
+# The canonical submission layout written by `mlpstorage init` + benchmark
+# runs (per Rules.md §2.1 / rules/utils.generate_output_location):
+#
+#     <results-dir>/<mode>/<orgname>/results/<systemname>/<benchmark>/<model>/<command>/<datetime>/
+#
+# Pre-fix, the validator only understood the flat `<results-dir>/<benchmark>/...`
+# shape — so `reportgen` rejected the same tree `mlpstorage init` / run /
+# validate produce (issue #599 bug 1).
+_CANONICAL_MODES = ("closed", "open")
+
+
+def discover_scan_roots(
+    results_dir: str,
+    orgname: Optional[str] = None,
+    systemname: Optional[str] = None,
+    logger=None,
+) -> List[str]:
+    """Return the list of effective results-root paths to scan.
+
+    When both ``orgname`` and ``systemname`` are supplied AND at least one of
+    ``<results_dir>/{closed,open}/<orgname>/results/<systemname>/`` exists,
+    the canonical layout is in use and the returned list contains those
+    per-mode slices (one or both). The walker and validator then operate on
+    each slice as if it were a flat results root — which it structurally is
+    (its children are `<benchmark>/<model>/<command>/<datetime>/`).
+
+    Otherwise (orgname/systemname missing, or no matching canonical slice
+    found on disk) the function returns ``[results_dir]`` so flat-layout
+    callers continue to work unchanged.
+
+    Args:
+        results_dir: Top-level path (a sentinel-bearing submission root in
+            canonical mode, or any directory in flat mode).
+        orgname: Resolved sentinel orgname. Defaults to None (no canonical
+            probing — pure flat-layout passthrough).
+        systemname: ``--systemname`` value used to narrow the scan to one
+            system's results subtree (issue #599 bug 3 — `--systemname` is
+            required by the reportgen CLI but was previously not propagated
+            to the run-walker, so a multi-system tree got aggregated into
+            one report).
+        logger: Optional logger for debug breadcrumbs.
+
+    Returns:
+        Non-empty list of absolute path strings to scan.
+    """
+    root = Path(results_dir)
+    if not orgname or not systemname:
+        return [str(root)]
+
+    canonical_roots: List[str] = []
+    for mode in _CANONICAL_MODES:
+        candidate = root / mode / orgname / "results" / systemname
+        if candidate.is_dir():
+            canonical_roots.append(str(candidate))
+            if logger:
+                logger.debug(
+                    f"discover_scan_roots: canonical {mode} slice found at "
+                    f"{candidate}"
+                )
+
+    if canonical_roots:
+        return canonical_roots
+
+    if logger:
+        logger.debug(
+            "discover_scan_roots: no canonical "
+            f"{_CANONICAL_MODES} slice for orgname={orgname!r} "
+            f"systemname={systemname!r} under {root}; falling back to flat "
+            "layout"
+        )
+    return [str(root)]
+
+
 @dataclass
 class DirectoryValidationError:
     """Represents an error in the results directory structure."""
@@ -381,7 +454,27 @@ class ResultsDirectoryValidator:
     def get_expected_structure_help(self) -> str:
         """Return a help message showing expected directory structure."""
         return """
-Expected results directory structure:
+Canonical submission layout (preferred — what `mlpstorage init` /
+`mlpstorage <bench> run` / `mlpstorage validate` produce):
+
+  results_dir/
+    mlperf-results.yaml                # Sentinel written by `mlpstorage init`
+    closed/                            # or open/
+      <orgname>/
+        results/
+          <systemname>/                # Filter target for `--systemname`
+            training/
+              unet3d/
+                run/
+                  20250115_143022/
+                    training_unet3d_metadata.json
+                    summary.json
+
+`reportgen` discovers the canonical slice via --systemname (and the
+sentinel-resolved orgname) and walks only that subtree. Flat layouts
+below this section are still accepted for backward compatibility.
+
+Flat layout (legacy / programmatic callers):
 
   results_dir/
     training/                          # Benchmark type
