@@ -237,21 +237,25 @@ After the first successful write, `mlpstorage` will never again modify `systemna
 
 ## DATA DIRECTORY (`--data-dir`)
 
-The data directory is the on-storage workspace for generated datasets and checkpoints. It is read by `run` and written by `datagen`. Its layout is determined by the underlying DLIO workload template plus any `--params` overrides, but the canonical structure produced by the bundled templates is:
+The data directory is the on-storage workspace for the generated **training** dataset. It is read by `run` and written by `datagen`. The internal layout follows the DLIO data-generator convention familiar to ML practitioners — a per-model root containing the standard `train` / `valid` / `test` split:
 
 ```
 <data-dir>/
-├── training/
-│   └── <model>/                    e.g. unet3d, retinanet
-│       └── <rank>/                 zero-padded process rank: 0000, 0001, ...
-│           └── <data files>        .npz / .hdf5 / .tfrecord depending on model
-└── checkpointing/
-    └── <model>/                    e.g. llama3-70b
-        └── <rank>/
-            └── <checkpoint shards> .safetensors / .pt
+└── <model>/                        e.g. unet3d, retinanet — auto-appended
+    ├── train/                      <data files> .npz / .npy / .jpeg /
+    │                               .hdf5 / .tfrecord depending on model
+    │                               and workload YAML
+    ├── valid/                      empty under v3.0 bundled workloads (see note)
+    └── test/                       empty under v3.0 bundled workloads (see note)
 ```
 
-The `data-dir` must live on the storage system under test. For closed training submissions, the generated dataset must total at least five times the client host memory (`--client-host-memory-in-gb`) to prevent the OS page cache from absorbing the workload; `datasize` exists specifically to compute and report this lower bound.
+The `<model>/` segment is appended by `datagen` if `--data-dir` does not already end in the model name; the `train/`, `valid/`, and `test/` subdirectories are created on the local filesystem before `datagen` runs. Each rank writes into the same `train/` directory using DLIO's `{prefix}_{idx:0N}_of_{total}.{format}` naming convention — no per-rank subdirectory. Object-storage modes (`object` positional) skip the local makedirs because the path is an S3 key prefix.
+
+> **Note on `valid/` and `test/`** — every bundled v3.0 training workload YAML sets `workflow.train: True` only, with no `evaluation` step and no `num_files_eval`. Both subdirectories are therefore created on disk but **not populated by `datagen` today**. They follow the conventional train/valid/test split used throughout the ML ecosystem (`valid/` for held-out evaluation files consumed during training, `test/` for a post-training generalization corpus) so the layout remains immediately recognizable and a future workload that enables `workflow.evaluation: True` writes into the path practitioners expect. Submitters can ignore the empty subdirectories; `mlpstorage validate` does not inspect `--data-dir` contents.
+
+Each `datagen` invocation should own its `--data-dir` — sharing a single `--data-dir` across multiple workloads or repeated runs is not supported. The `--data-dir` must live on the storage system under test. For closed training submissions, the generated dataset must total at least five times the client host memory (`--client-host-memory-in-gb`) to prevent the OS page cache from absorbing the workload; `datasize` exists specifically to compute and report this lower bound.
+
+Checkpointing benchmarks use a separate `--checkpoint-folder` (not `--data-dir`); its layout is `<checkpoint-folder>/<model>/…` where the contents under `<model>/` are managed by the DLIO checkpointing workload (shard counts, ranks, and shapes depend on the model and `--num-processes`).
 
 VectorDB does not use `--data-dir`; vectors are loaded directly into the database engine (Milvus) by `datagen`. KV-Cache does not use `--data-dir`; cache tiers reside in GPU/CPU memory and (optionally) `--cache-dir` on NVMe.
 
