@@ -484,6 +484,70 @@ class TestTrainingBenchmarkRequiredBytes:
             "Operator must be told CAP-01 was deferred — silent skip violates SC#6 intent."
         )
 
+    def test_deferral_message_is_datagen_aware_for_datagen_command(self):
+        """Issue #575 regression: --client-host-memory-in-gb is intentionally NOT
+        accepted by datagen (mlpstorage_py/cli/training_args.py — "Memory
+        argument — not for datagen"). The deferral notice must therefore NOT
+        tell a datagen user to "Re-run with --client-host-memory-in-gb" — the
+        parser would reject the re-run. Same confusion previously surfaced in
+        #578 and was only fixed for the gate itself, not the suggestion text.
+        """
+        from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
+
+        bm = MagicMock(spec=TrainingBenchmark)
+        bm.args = SimpleNamespace(data_dir="/data", command="datagen")
+        try:
+            del bm.cluster_information
+        except AttributeError:
+            pass
+        bm.combined_params = {"dataset": {}, "reader": {}}
+        bm.logger = MagicMock()
+        bm.accumulate_host_info = MagicMock(side_effect=AttributeError(
+            "'Namespace' object has no attribute 'client_host_memory_in_gb'"
+        ))
+
+        result = TrainingBenchmark.required_bytes_for_capacity_gate(bm)
+
+        assert result == 0
+        assert bm.logger.info.called
+        logged = " ".join(str(c.args[0]) for c in bm.logger.info.call_args_list)
+        assert "datagen" in logged, (
+            "datagen-path deferral message must mention datagen so the operator "
+            f"understands why the gate was skipped. Got: {logged!r}"
+        )
+        assert "Re-run with --client-host-memory-in-gb" not in logged, (
+            "Issue #575: the deferral notice must NOT instruct datagen users to "
+            "re-run with --client-host-memory-in-gb — that flag is not registered "
+            f"on the datagen subparser. Got: {logged!r}"
+        )
+
+    def test_deferral_message_keeps_rerun_suggestion_for_non_datagen_commands(self):
+        """Guardrail for #575: the rewrite must not silently drop the
+        actionable suggestion for the run / datasize commands where
+        --client-host-memory-in-gb IS accepted."""
+        from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
+
+        bm = MagicMock(spec=TrainingBenchmark)
+        bm.args = SimpleNamespace(data_dir="/data", command="run")
+        try:
+            del bm.cluster_information
+        except AttributeError:
+            pass
+        bm.combined_params = {"dataset": {}, "reader": {}}
+        bm.logger = MagicMock()
+        bm.accumulate_host_info = MagicMock(side_effect=AttributeError(
+            "'Namespace' object has no attribute 'client_host_memory_in_gb'"
+        ))
+
+        result = TrainingBenchmark.required_bytes_for_capacity_gate(bm)
+
+        assert result == 0
+        logged = " ".join(str(c.args[0]) for c in bm.logger.info.call_args_list)
+        assert "Re-run with --client-host-memory-in-gb" in logged, (
+            "run-path deferral message must retain the actionable re-run "
+            f"suggestion (the flag IS accepted by `run`). Got: {logged!r}"
+        )
+
 
 class TestCheckpointingBenchmarkRequiredBytes:
     """A7 destination join + sum(rank_gb) * GiB * num_checkpoints_write."""

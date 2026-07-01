@@ -822,11 +822,25 @@ class TrainingBenchmark(DLIOBenchmark):
                 cluster_info = self.accumulate_host_info(self.args)
                 self.cluster_information = cluster_info
             except AttributeError as exc:
-                self.logger.info(
-                    "CAP-01 deferred: unable to determine system memory "
-                    f"({exc}). Re-run with --client-host-memory-in-gb to "
-                    "enable the disk-capacity check."
-                )
+                # The --client-host-memory-in-gb flag is intentionally NOT
+                # registered for datagen (see cli/training_args.py around
+                # the "Memory argument — not for datagen" comment), so don't
+                # tell datagen users to "re-run with" a flag the parser will
+                # reject. See issue #575 (and the earlier confusion in #578).
+                command = getattr(self.args, 'command', None)
+                if command == 'datagen':
+                    self.logger.info(
+                        "CAP-01 skipped for datagen: the disk-capacity gate "
+                        "needs --client-host-memory-in-gb, which datagen does "
+                        "not accept by design. This notice is informational; "
+                        "the run will proceed."
+                    )
+                else:
+                    self.logger.info(
+                        "CAP-01 deferred: unable to determine system memory "
+                        f"({exc}). Re-run with --client-host-memory-in-gb to "
+                        "enable the disk-capacity check."
+                    )
                 return 0
         _, _, total_disk_bytes = calculate_training_data_size(
             self.args,

@@ -894,7 +894,7 @@ class VdbCheck(BaseCheck):
                     self.path, ts,
                 )
                 continue
-            params_dict = metadata.get("params_dict", {}) or {}
+            params_dict = metadata.get("override_parameters", {}) or {}
             for param_key in params_dict.keys():
                 if param_key not in _CLOSED_ALLOWED_PARAMS:
                     self.log_violation(
@@ -955,7 +955,7 @@ class VdbCheck(BaseCheck):
                     backend, self.path, ts,
                 )
                 continue
-            params_dict = metadata.get("params_dict", {}) or {}
+            params_dict = metadata.get("override_parameters", {}) or {}
             for param_key in params_dict.keys():
                 if param_key not in allowed_params:
                     self.log_violation(
