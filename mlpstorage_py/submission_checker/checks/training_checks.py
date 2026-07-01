@@ -104,7 +104,7 @@ class TrainingCheck(BaseCheck):
                 continue
             # Check if datasize-related parameters are in the metadata
             params = metadata.get("args", {})
-            combined_params = metadata.get("combined_params", {})
+            combined_params = metadata.get("parameters", {})
 
             if not params and not combined_params:
                 self.log_violation(
@@ -149,7 +149,7 @@ class TrainingCheck(BaseCheck):
                 continue
             try:
                 # Get parameters
-                combined_params = metadata.get("combined_params", {})
+                combined_params = metadata.get("parameters", {})
                 dataset_params = combined_params.get("dataset", {})
                 reader_params = combined_params.get("reader", {})
 
@@ -224,7 +224,7 @@ class TrainingCheck(BaseCheck):
         for summary, metadata, _ in self.submissions_logs.run_files:
             if metadata is None:
                 continue
-            dataset_params = metadata.get("combined_params", {}).get("dataset", {})
+            dataset_params = metadata.get("parameters", {}).get("dataset", {})
             num_files = int(dataset_params.get("num_files_train", 0))
             record_length = float(dataset_params.get("record_length_bytes", 0))
             num_samples_per_file = int(dataset_params.get("num_samples_per_file", 1))
@@ -235,7 +235,7 @@ class TrainingCheck(BaseCheck):
         for summary, metadata, _ in self.submissions_logs.datagen_files:
             if metadata is None:
                 continue
-            dataset_params = metadata.get("combined_params", {}).get("dataset", {})
+            dataset_params = metadata.get("parameters", {}).get("dataset", {})
             num_files = int(dataset_params.get("num_files_train", 0))
             record_length = float(dataset_params.get("record_length_bytes", 0))
             num_samples_per_file = int(dataset_params.get("num_samples_per_file", 1))
@@ -300,11 +300,22 @@ class TrainingCheck(BaseCheck):
                 )
                 valid = False
             elif num_files_train > expected_train:
-                self.log_violation(
+                # Downgraded to warning: expected_train comes from the
+                # NUM_DATASET_TRAIN_FILES placeholder in
+                # submission_checker/constants.py (e.g. unet3d=14000), which
+                # is still marked "# TODO: Ask for correct values" upstream.
+                # Real submissions can legitimately exceed it (host-memory
+                # multiplier inflates num_files_train well past 14000), so
+                # firing this as an error would block every otherwise-
+                # conforming run. Restore log_violation once the canonical
+                # dataset cardinalities ship upstream.
+                self.warn_violation(
                     "3.3.1", "trainingRunDataMatchesDatasize", self.path,
-                    "num_files_train should be lower than in dataset",
+                    f"num_files_train ({num_files_train}) exceeds expected "
+                    f"cardinality ({expected_train}); expected value is a "
+                    "known upstream placeholder — treat as informational "
+                    "until canonical dataset cardinalities are published",
                 )
-                valid = False
 
             if num_files_eval is None:
                 self.log_violation(
@@ -313,11 +324,16 @@ class TrainingCheck(BaseCheck):
                 )
                 valid = False
             elif num_files_eval > expected_eval:
-                self.log_violation(
+                # Same rationale as num_files_train above — placeholder
+                # expected value; downgrade to warning to avoid blocking
+                # otherwise-conforming submissions.
+                self.warn_violation(
                     "3.3.1", "trainingRunDataMatchesDatasize", self.path,
-                    "num_files_eval should be lower than in dataset",
+                    f"num_files_eval ({num_files_eval}) exceeds expected "
+                    f"cardinality ({expected_eval}); expected value is a "
+                    "known upstream placeholder — treat as informational "
+                    "until canonical dataset cardinalities are published",
                 )
-                valid = False
 
         return valid
     
@@ -576,7 +592,7 @@ class TrainingCheck(BaseCheck):
             verification = metadata.get("verification", "open")
 
             if verification == "closed":
-                params_dict = metadata.get("params_dict", {})
+                params_dict = metadata.get("override_parameters", {})
 
                 for param_key in params_dict.keys():
                     # Tool-injected params (skip_listing, data_folder derived
@@ -639,7 +655,7 @@ class TrainingCheck(BaseCheck):
             verification = metadata.get("verification", "open")
 
             if verification == "open":
-                params_dict = metadata.get("params_dict", {})
+                params_dict = metadata.get("override_parameters", {})
 
                 for param_key in params_dict.keys():
                     # Tool-injected params (skip_listing, data_folder derived
@@ -736,13 +752,20 @@ class TrainingCheck(BaseCheck):
             args = metadata.get("args", {})
             ok, df_found = _check_filesystem_separation(args, logfile_path)
             if not df_found:
-                self.log_violation(
+                # TODO-001: runtime df capture is missing in mlpstorage CLI
+                # (`Benchmark._execute_command` in benchmarks/base.py never invokes
+                # `df` before/after the DLIO subprocess). Emit a warning rather
+                # than an error so conforming submissions are not blocked on
+                # an upstream producer gap. Restore log_violation once the
+                # writer side ships the `df` block in *_run.stdout.log.
+                self.warn_violation(
                     "3.4.2", "trainingMlpstorageFilesystemCheck", logfile_path,
-                    "df output not found",
+                    "df output not found (mlpstorage CLI does not yet capture df; TODO-001)",
                 )
-                valid = False
                 continue
             if not ok:
+                # df WAS found (e.g. submitter manually injected it), so this
+                # is a real same-mount finding and remains an error.
                 self.log_violation(
                     "3.4.2", "trainingMlpstorageFilesystemCheck", logfile_path,
                     "data_dir and results_dir are on the same filesystem",

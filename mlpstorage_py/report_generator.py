@@ -76,6 +76,20 @@ class ReportGenerator:
             apply_logging_options(self.logger, args)
 
         self.results_dir = results_dir
+        # Detect the canonical mlpstorage submission tree (sentinel-bearing root
+        # with <division>/<orgname>/results/<system>/<benchmark-type>/...) and
+        # resolve --results-dir down to the per-system subtree that contains
+        # the benchmark-type directories the rest of ReportGenerator expects.
+        # No-op when --results-dir already points at a flat benchmark-type root.
+        self.results_dir = self._resolve_effective_results_dir(self.results_dir)
+
+        # Honor --output-dir for write_{json,csv}_file (falls back to results_dir).
+        output_dir = None
+        if self.args is not None:
+            output_dir = getattr(self.args, 'output_dir', None)
+        self.output_dir = output_dir or self.results_dir
+        if self.output_dir and self.output_dir != self.results_dir:
+            os.makedirs(self.output_dir, exist_ok=True)
 
         # Initialize formatters
         self.msg_formatter = ValidationMessageFormatter(use_colors=use_colors)
@@ -92,6 +106,63 @@ class ReportGenerator:
 
         self.accumulate_results()
         self.print_results()
+
+    def _resolve_effective_results_dir(self, results_dir: str) -> str:
+        """Resolve --results-dir to the directory that holds benchmark-type subdirs.
+
+        Accepts both shapes:
+
+        * Flat layout (legacy / what ResultsDirectoryValidator expected):
+          ``<results-dir>/<benchmark-type>/<model>/...`` — returned unchanged.
+        * Canonical mlpstorage submission tree (what ``mlpstorage init`` /
+          ``<bench> run`` / ``validate`` produce):
+          ``<sentinel-root>/<division>/<orgname>/results/<system>/<benchmark-type>/...``
+          — resolved down to the per-system subtree.
+
+        When ``--systemname`` is supplied, the canonical-tree resolution
+        scopes to ``results/<systemname>/`` so reportgen aggregates only
+        that system's runs (fixes the prior behavior of walking every
+        system's runs regardless of --systemname).
+        """
+        from pathlib import Path  # local import to avoid hoisting Path globally
+        root = Path(results_dir)
+        if not root.is_dir():
+            return results_dir
+        # Already flat?
+        expected = ResultsDirectoryValidator.EXPECTED_BENCHMARK_TYPES
+        if any((root / b).is_dir() for b in expected):
+            return results_dir
+        # Canonical tree probe.
+        systemname = None
+        if self.args is not None:
+            systemname = getattr(self.args, 'systemname', None)
+        for division in ('closed', 'open'):
+            division_dir = root / division
+            if not division_dir.is_dir():
+                continue
+            for org_dir in sorted(p for p in division_dir.iterdir() if p.is_dir()):
+                results_root = org_dir / 'results'
+                if not results_root.is_dir():
+                    continue
+                if systemname:
+                    system_dir = results_root / systemname
+                    if system_dir.is_dir():
+                        self.logger.info(
+                            "Detected canonical submission tree; scoping to "
+                            "%s/results/%s for --systemname=%s",
+                            org_dir, systemname, systemname,
+                        )
+                        return str(system_dir)
+                else:
+                    systems = [p for p in results_root.iterdir() if p.is_dir()]
+                    if len(systems) == 1:
+                        self.logger.info(
+                            "Detected canonical submission tree with single system; "
+                            "scoping to %s",
+                            systems[0],
+                        )
+                        return str(systems[0])
+        return results_dir
 
     def _validate_directory_structure(self) -> bool:
         """
@@ -125,11 +196,17 @@ class ReportGenerator:
     def generate_reports(self):
         # Verify the results directory exists:
         self.logger.info(f'Generating reports for {self.results_dir}')
-        run_result_dicts = [report.benchmark_run.as_dict() for report in self.run_results.values()]
 
+        # Always traverse the full directory and emit one rollup
+        # results.json / results.csv covering every discovered run, written
+        # to self.output_dir (which defaults to self.results_dir when
+        # --output-dir is not supplied).
+        run_result_dicts = [
+            report.benchmark_run.as_dict() for report in self.run_results.values()
+        ]
         self.write_csv_file(run_result_dicts)
         self.write_json_file(run_result_dicts)
-            
+
         return EXIT_CODE.SUCCESS
 
     def accumulate_results(self) -> None:
@@ -414,13 +491,13 @@ class ReportGenerator:
 
 
     def write_json_file(self, results):
-        json_file = os.path.join(self.results_dir,'results.json')
+        json_file = os.path.join(self.output_dir, 'results.json')
         self.logger.info(f'Writing results to {json_file}')
         with open(json_file, 'w') as f:
             json.dump(results, f, indent=2)
 
     def write_csv_file(self, results):
-        csv_file = os.path.join(self.results_dir,'results.csv')
+        csv_file = os.path.join(self.output_dir, 'results.csv')
         self.logger.info(f'Writing results to {csv_file}')
         flattened_results = [flatten_nested_dict(r) for r in results]
         flattened_results = [remove_nan_values(r) for r in flattened_results]
