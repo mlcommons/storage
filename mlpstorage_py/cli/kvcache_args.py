@@ -63,7 +63,19 @@ KVCACHE_HELP_MESSAGES = {
     'enable_autoscaling': "Enable autoscaling simulation for user load.",
     'autoscaler_mode': (
         "Autoscaler mode: 'qos' (quality of service based) or "
-        "'predictive' (load prediction based)."
+        "'capacity' (storage capacity based)."
+    ),
+    'max_concurrent_allocs': (
+        "Cap on concurrent in-flight cache allocations (semaphore size). "
+        "Bounds peak RAM: max_allocs * avg_context_tokens * bytes_per_token. "
+        "0 disables the cap. OPEN/whatif submissions only — per-option "
+        "values are MLPerf-mandated in CLOSED (16/16/4 for options 1/2/3)."
+    ),
+    'enable_latency_tracing': (
+        "Enable bpftrace block-layer device latency tracing during the run. "
+        "Requires sudo and bpftrace on every client host. Adds telemetry to "
+        "stdout/JSON/XLSX output without changing the benchmark result. "
+        "OPEN/whatif submissions only — disabled in CLOSED."
     ),
     'seed': (
         "Base random seed (default 42). Effective seed per rank = base + rank. "
@@ -180,7 +192,10 @@ def _add_kvcache_cache_arguments(parser, mode):
         help=KVCACHE_HELP_MESSAGES['cache_dir']
     )
     if mode == "closed":
-        # Set defaults for all open-gated attrs so namespace attrs always exist
+        # Set defaults for all open-gated attrs so namespace attrs always exist.
+        # The benchmark wrapper does NOT forward these to kv-cache.py in CLOSED
+        # (see KVCacheBenchmark._build_global_kvcache_args) — the values here
+        # only make hasattr(self.args, X) checks succeed inside the benchmark.
         cache_group.set_defaults(
             gpu_mem_gb=16.0,
             cpu_mem_gb=32.0,
@@ -199,6 +214,8 @@ def _add_kvcache_cache_arguments(parser, mode):
             inter_option_delay=20,
             allow_invalid_params=False,
             params='',
+            max_concurrent_allocs=None,
+            enable_latency_tracing=False,
         )
     else:
         # `--loops` is registered only on the run subparser (via
@@ -272,6 +289,12 @@ def _add_kvcache_open_args(parser):
         '--allow-invalid-params', '-aip',
         action='store_true',
         help="Allow parameters that would otherwise be flagged as invalid"
+    )
+    run_group.add_argument(
+        '--max-concurrent-allocs',
+        type=int,
+        default=None,
+        help=KVCACHE_HELP_MESSAGES['max_concurrent_allocs']
     )
 
 
@@ -369,9 +392,18 @@ def _add_kvcache_optional_features(parser, mode):
         )
         features_group.add_argument(
             '--autoscaler-mode',
-            choices=['qos', 'predictive'],
+            # Must mirror kv_cache.cli's --autoscaler-mode choices; the prior
+            # 'predictive' value did not exist in kv-cache.py and would have
+            # been rejected by its argparse if these flags were ever forwarded
+            # (which they were not — see the dead-flag fix in this same PR).
+            choices=['qos', 'capacity'],
             default='qos',
             help=KVCACHE_HELP_MESSAGES['autoscaler_mode']
+        )
+        features_group.add_argument(
+            '--enable-latency-tracing',
+            action='store_true',
+            help=KVCACHE_HELP_MESSAGES['enable_latency_tracing']
         )
 
 

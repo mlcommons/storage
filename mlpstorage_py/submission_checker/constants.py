@@ -65,8 +65,12 @@ PARSER_MAP = {
 # loop). `training_<ts>_metadata.json` is the mlpstorage-injected metadata
 # file written by `Benchmark.write_metadata` for every command.
 DATAGEN_REQUIRED_FILES = {
-    "v2.0":    [r"training_datagen\.stdout\.log$", r"training_datagen\.stderr\.log$", r"dlio\.log$", r"training_.*_metadata\.json$"],
-    "v3.0":    [r"training_datagen\.stdout\.log$", r"training_datagen\.stderr\.log$", r"dlio\.log$", r"training_.*_metadata\.json$"],
+    # DLIO datagen runs with workflow.generate_data=True, workflow.train=False, so it
+    # does NOT emit the *output.json / *per_epoch_stats.json / *summary.json files that
+    # the training loop produces. The required-files list reflects only what datagen
+    # actually writes plus the mlpstorage-injected per-datagen metadata.
+    "v2.0": [r"training_datagen\.stdout\.log$", r"training_datagen\.stderr\.log$", r"dlio\.log$", r"training_.*_metadata\.json$"],
+    "v3.0": [r"training_datagen\.stdout\.log$", r"training_datagen\.stderr\.log$", r"dlio\.log$", r"training_.*_metadata\.json$"],
     "default": [r"training_datagen\.stdout\.log$", r"training_datagen\.stderr\.log$", r"dlio\.log$", r"training_.*_metadata\.json$"],
 }
 
