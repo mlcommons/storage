@@ -401,7 +401,9 @@ class TestSystemname:
     Per CONTEXT.md D-10, --systemname is required on every emitting subcommand:
     training {datagen, run, configview, datasize}, checkpointing {datagen, run,
     configview, validate}, vectordb {datagen, run}, kvcache {run, datagen}, plus
-    reports reportgen and history (show, rerun).
+    history (show, rerun). ``reports reportgen`` accepts --systemname but does
+    NOT require it (omitting it aggregates a global summary across all systems
+    under the org's canonical ``results/`` folder).
 
     Pure utility commands (lockfile, version, init, rules-coverage) are exempt
     and continue to parse without --systemname.
@@ -483,7 +485,19 @@ class TestSystemname:
         parse validator checks that the resolved value is non-empty; with
         neither the CLI flag nor the env var supplied, ``DEFAULT_SYSTEMNAME``
         resolves to ``""`` and the validator errors out.
+
+        ``reports reportgen`` is intentionally excluded: reportgen makes
+        ``--systemname`` OPTIONAL because omitting it aggregates a global
+        summary across every system under the org's canonical ``results/``
+        folder (see ``add_reports_arguments``). That behavior is exercised
+        by ``test_reporting.TestGlobalSummaryLocation``.
         """
+        if label == 'reports-reportgen':
+            pytest.skip(
+                "reports reportgen makes --systemname optional; "
+                "see test_reporting.TestGlobalSummaryLocation for the "
+                "no-systemname aggregation contract."
+            )
         # Ensure env var is unset so the default falls back to '' (empty).
         monkeypatch.delenv('MLPERF_SYSTEMNAME', raising=False)
         full = ['mlpstorage'] + argv_tail  # no --systemname

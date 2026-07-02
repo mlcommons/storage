@@ -2346,44 +2346,233 @@ class TestSysctlAllowlistFile:
     """The shipped allowlist file at
     mlpstorage_py/system_description/sysctl_allowlist.txt is the load-bearing
     artifact for COLL-05: editing it adds keys to the next run's output with
-    no code change. These tests pin its existence, structure, and the four
-    initial patterns locked by D-27."""
+    no code change. These tests pin its existence and the canonical keys
+    reviewers expect to see in every submission's sysctl block."""
 
     def test_allowlist_file_exists(self):
-        """D-27: the package ships sysctl_allowlist.txt as a data file."""
+        """The package ships sysctl_allowlist.txt as a data file."""
         from pathlib import Path
         import mlpstorage_py.system_description as sd_pkg
         sd_dir = Path(sd_pkg.__file__).parent
         path = sd_dir / "sysctl_allowlist.txt"
         assert path.exists(), (
-            f"D-27: package must ship sysctl_allowlist.txt at {path}"
+            f"package must ship sysctl_allowlist.txt at {path}"
         )
 
-    def test_allowlist_file_parses_to_four_patterns(self):
-        """D-27: the shipped file contains exactly four glob lines
-        (vm.dirty_*, net.core.*, net.ipv4.tcp_*, kernel.numa_balancing)."""
+    def test_allowlist_file_is_nonempty(self):
+        """The shipped file parses to at least one glob (the file being
+        stripped to nothing would silently disable sysctl collection on
+        every rank; catch that at test time)."""
         from mlpstorage_py.cluster_collector import _load_sysctl_allowlist
         patterns = _load_sysctl_allowlist()
-        assert len(patterns) == 4, (
-            f"D-27: expected 4 initial globs, got {len(patterns)}: {patterns!r}"
+        assert len(patterns) > 0, (
+            "shipped sysctl_allowlist.txt must contain at least one glob; "
+            "an empty file silently disables sysctl collection cluster-wide."
         )
 
     def test_shipped_globs_match_canonical_keys(self):
-        """D-27: the four globs round-trip to regex objects matching
-        vm.dirty_ratio, net.core.rmem_max, net.ipv4.tcp_rmem, kernel.numa_balancing."""
+        """The shipped allowlist must cover the storage-relevant keys
+        reviewers look at first: page-cache dirty tuning, socket buffers,
+        TCP tuning, and NUMA balancing."""
         from mlpstorage_py.cluster_collector import _load_sysctl_allowlist
         patterns = _load_sysctl_allowlist()
-        # For each canonical key, at least one pattern must match it.
         canonical_keys = [
             "vm.dirty_ratio",
+            "vm.dirty_background_ratio",
+            "vm.swappiness",
             "net.core.rmem_max",
+            "net.core.wmem_max",
+            "net.core.somaxconn",
             "net.ipv4.tcp_rmem",
+            "net.ipv4.tcp_congestion_control",
             "kernel.numa_balancing",
+            "fs.file-max",
         ]
         for key in canonical_keys:
             assert any(p.match(key) for p in patterns), (
-                f"D-27: no shipped glob matches canonical key {key!r}"
+                f"shipped allowlist must cover canonical key {key!r}"
             )
+
+    def test_shipped_globs_exclude_per_boot_random_keys(self):
+        """Regression guard: keys whose value is regenerated per boot (or
+        varies with CPU topology across identical hardware) must NOT be
+        allowlisted, or dedup via auto_generator._sysctl_signature breaks
+        and every client emits as its own node_description stanza."""
+        from mlpstorage_py.cluster_collector import _load_sysctl_allowlist
+        patterns = _load_sysctl_allowlist()
+        dedup_hostile_keys = [
+            "net.core.netdev_rss_key",       # 52-byte random per boot
+            "net.core.rps_default_mask",     # CPU-topology-dependent bitmap
+            "net.core.flow_limit_cpu_bitmap",
+        ]
+        for key in dedup_hostile_keys:
+            assert not any(p.match(key) for p in patterns), (
+                f"key {key!r} varies per host/boot and must NOT be "
+                "allowlisted; it breaks client-stanza dedup."
+            )
+
+
+class TestLoadSysctlAllowlistLines:
+    """`_load_sysctl_allowlist_lines` returns raw glob strings from the same
+    file `_load_sysctl_allowlist` compiles into regexes. It's the injection
+    source for the MPI script rendering path — every rank walks /proc/sys
+    with the same globs the head node uses."""
+
+    def test_returns_tuple_of_strings(self, tmp_path):
+        from mlpstorage_py.cluster_collector import (
+            _load_sysctl_allowlist_lines,
+        )
+        p = tmp_path / "allowlist.txt"
+        p.write_text("vm.dirty_ratio\nnet.core.rmem_max\n")
+        lines = _load_sysctl_allowlist_lines(str(p))
+        assert lines == ("vm.dirty_ratio", "net.core.rmem_max")
+
+    def test_skips_blanks_and_comments(self, tmp_path):
+        from mlpstorage_py.cluster_collector import (
+            _load_sysctl_allowlist_lines,
+        )
+        p = tmp_path / "allowlist.txt"
+        p.write_text(
+            "# header\n"
+            "\n"
+            "vm.dirty_ratio\n"
+            "   # indented comment\n"
+            "net.core.rmem_max\n"
+        )
+        lines = _load_sysctl_allowlist_lines(str(p))
+        assert lines == ("vm.dirty_ratio", "net.core.rmem_max")
+
+    def test_missing_file_returns_empty_tuple(self, tmp_path):
+        """D-2 rule: read failure yields ``()`` so the render step falls
+        back to the empty-tuple placeholder and ranks emit ``[]``."""
+        from mlpstorage_py.cluster_collector import (
+            _load_sysctl_allowlist_lines,
+        )
+        assert _load_sysctl_allowlist_lines(
+            str(tmp_path / "no_such_file.txt")
+        ) == ()
+
+    def test_shipped_file_lines_and_patterns_are_paired(self):
+        """The two loaders must operate on the same file and produce the
+        same number of entries — one regex per glob line. If these ever
+        diverge the head-node walk and the MPI-script rendering would
+        silently see different key sets."""
+        from mlpstorage_py.cluster_collector import (
+            _load_sysctl_allowlist,
+            _load_sysctl_allowlist_lines,
+        )
+        assert len(_load_sysctl_allowlist_lines()) == len(
+            _load_sysctl_allowlist()
+        )
+
+
+class TestRenderMPICollectorScript:
+    """`_render_mpi_collector_script` substitutes the head-node allowlist
+    into `MPI_COLLECTOR_SCRIPT`'s empty-tuple placeholder so every rank
+    walks /proc/sys with the same globs the head node uses. Single source
+    of truth: `sysctl_allowlist.txt`."""
+
+    def test_raw_script_contains_empty_tuple_placeholder(self):
+        """Invariant that keeps existing parity tests working: the raw
+        `MPI_COLLECTOR_SCRIPT` string must still be valid Python that
+        exec's cleanly, which means the placeholder is an empty tuple
+        assignment, not an undefined-name sentinel."""
+        from mlpstorage_py.cluster_collector import MPI_COLLECTOR_SCRIPT
+        assert "_SYSCTL_ALLOWLIST_LINES = ()" in MPI_COLLECTOR_SCRIPT
+
+    def test_render_substitutes_globs(self):
+        from mlpstorage_py.cluster_collector import (
+            MPI_COLLECTOR_SCRIPT, _render_mpi_collector_script,
+        )
+        rendered = _render_mpi_collector_script(
+            MPI_COLLECTOR_SCRIPT,
+            ("vm.dirty_ratio", "net.core.rmem_max"),
+        )
+        assert "_SYSCTL_ALLOWLIST_LINES = ()" not in rendered
+        assert "_SYSCTL_ALLOWLIST_LINES = ('vm.dirty_ratio', 'net.core.rmem_max', )" in rendered
+
+    def test_rendered_script_execs_with_correct_tuple(self):
+        """End-to-end: exec the rendered script and confirm the module-level
+        tuple matches the input. This is the "would-catch-drift" test that
+        the manual-sync discipline in the old comment couldn't offer."""
+        from mlpstorage_py.cluster_collector import (
+            MPI_COLLECTOR_SCRIPT, _render_mpi_collector_script,
+        )
+        rendered = _render_mpi_collector_script(
+            MPI_COLLECTOR_SCRIPT,
+            ("vm.dirty_ratio", "kernel.numa_balancing"),
+        )
+        ns = {}
+        try:
+            exec(rendered, ns)
+        except BaseException:
+            pass  # SystemExit from top-level MPI init; defs land first
+        assert ns.get("_SYSCTL_ALLOWLIST_LINES") == (
+            "vm.dirty_ratio", "kernel.numa_balancing",
+        )
+
+    def test_render_is_idempotent(self):
+        """Double-render is a no-op: after the first pass the placeholder
+        is gone, so a second call finds nothing to replace."""
+        from mlpstorage_py.cluster_collector import (
+            MPI_COLLECTOR_SCRIPT, _render_mpi_collector_script,
+        )
+        once = _render_mpi_collector_script(
+            MPI_COLLECTOR_SCRIPT, ("vm.dirty_ratio",),
+        )
+        twice = _render_mpi_collector_script(once, ("net.core.rmem_max",))
+        assert once == twice
+
+    def test_render_with_empty_allowlist_leaves_empty_tuple(self):
+        """D-2 fallback path: an empty allowlist (e.g. head-node file
+        read failed) substitutes to an empty tuple — same shape as the
+        raw placeholder — so the rendered script still exec's cleanly
+        and ranks emit ``[]``."""
+        from mlpstorage_py.cluster_collector import (
+            MPI_COLLECTOR_SCRIPT, _render_mpi_collector_script,
+        )
+        rendered = _render_mpi_collector_script(MPI_COLLECTOR_SCRIPT, ())
+        assert "_SYSCTL_ALLOWLIST_LINES = ()" in rendered
+
+
+class TestWriteCollectorScriptRenders:
+    """`MPIClusterCollector._write_collector_script` must render the head
+    node's sysctl_allowlist.txt into each rank's SCP'd script copy — the
+    replacement for the old "keep this tuple in sync" discipline."""
+
+    def test_written_script_carries_head_node_globs(self, tmp_path, monkeypatch):
+        """The file on disk (what SCP fans out) must have the head node's
+        globs baked into `_SYSCTL_ALLOWLIST_LINES`."""
+        from mlpstorage_py import cluster_collector as cc
+        # Stub the loader to return a fixed tuple so this test doesn't
+        # depend on the shipped file's evolving contents.
+        fixture = ("vm.dirty_ratio", "net.core.rmem_max", "kernel.numa_balancing")
+        monkeypatch.setattr(
+            cc, "_load_sysctl_allowlist_lines", lambda: fixture,
+        )
+        # Instantiate a bare MPIClusterCollector; `_write_collector_script`
+        # only uses `self` as a namespace hop.
+        collector = cc.MPIClusterCollector.__new__(cc.MPIClusterCollector)
+        script_path = tmp_path / "mlps_collector.py"
+        collector._write_collector_script(str(script_path))
+
+        contents = script_path.read_text()
+        assert "_SYSCTL_ALLOWLIST_LINES = ()" not in contents
+        for glob in fixture:
+            assert repr(glob) in contents, (
+                f"rendered rank script missing head-node glob {glob!r}"
+            )
+
+    def test_written_script_still_valid_python(self, tmp_path):
+        """The rendered file must exec cleanly (definitions land before
+        the top-level MPI init raises); the rank interpreter would
+        otherwise fail with a SyntaxError long before /proc/sys is read."""
+        from mlpstorage_py import cluster_collector as cc
+        collector = cc.MPIClusterCollector.__new__(cc.MPIClusterCollector)
+        script_path = tmp_path / "mlps_collector.py"
+        collector._write_collector_script(str(script_path))
+        # Compile-only; running would trigger the MPI top-level.
+        compile(script_path.read_text(), str(script_path), "exec")
 
 
 class TestLoadSysctlAllowlist:

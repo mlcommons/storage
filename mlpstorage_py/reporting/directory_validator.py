@@ -31,16 +31,25 @@ def discover_scan_roots(
 ) -> List[str]:
     """Return the list of effective results-root paths to scan.
 
-    When both ``orgname`` and ``systemname`` are supplied AND at least one of
-    ``<results_dir>/{closed,open}/<orgname>/results/<systemname>/`` exists,
-    the canonical layout is in use and the returned list contains those
-    per-mode slices (one or both). The walker and validator then operate on
-    each slice as if it were a flat results root — which it structurally is
-    (its children are `<benchmark>/<model>/<command>/<datetime>/`).
+    When ``orgname`` is supplied AND at least one of
+    ``<results_dir>/{closed,open}/<orgname>/results/`` exists, the canonical
+    layout is in use:
 
-    Otherwise (orgname/systemname missing, or no matching canonical slice
-    found on disk) the function returns ``[results_dir]`` so flat-layout
-    callers continue to work unchanged.
+    * With ``systemname`` also supplied, the returned list contains the
+      per-mode ``results/<systemname>/`` slices (one or both).
+    * Without ``systemname`` (optional for reportgen aggregation), the
+      returned list contains every ``results/<system>/`` slice found under
+      each canonical mode — one entry per system, per mode. This lets a
+      submitter aggregate a global summary across all systems without
+      naming any single one.
+
+    The walker and validator then operate on each slice as if it were a
+    flat results root — which it structurally is (its children are
+    ``<benchmark>/<model>/<command>/<datetime>/``).
+
+    Otherwise (orgname missing, or no matching canonical slice found on
+    disk) the function returns ``[results_dir]`` so flat-layout callers
+    continue to work unchanged.
 
     Args:
         results_dir: Top-level path (a sentinel-bearing submission root in
@@ -48,29 +57,47 @@ def discover_scan_roots(
         orgname: Resolved sentinel orgname. Defaults to None (no canonical
             probing — pure flat-layout passthrough).
         systemname: ``--systemname`` value used to narrow the scan to one
-            system's results subtree (issue #599 bug 3 — `--systemname` is
-            required by the reportgen CLI but was previously not propagated
-            to the run-walker, so a multi-system tree got aggregated into
-            one report).
+            system's results subtree. Optional; when None and the canonical
+            tree exists, every system slice under the org's ``results/`` is
+            walked (issue #599 bug 3 — `--systemname` used to be required
+            and was previously not propagated to the run-walker anyway, so
+            a multi-system tree got aggregated into one report; now the
+            aggregation is explicit and correct).
         logger: Optional logger for debug breadcrumbs.
 
     Returns:
         Non-empty list of absolute path strings to scan.
     """
     root = Path(results_dir)
-    if not orgname or not systemname:
+    if not orgname:
         return [str(root)]
 
     canonical_roots: List[str] = []
     for mode in _CANONICAL_MODES:
-        candidate = root / mode / orgname / "results" / systemname
-        if candidate.is_dir():
-            canonical_roots.append(str(candidate))
-            if logger:
-                logger.debug(
-                    f"discover_scan_roots: canonical {mode} slice found at "
-                    f"{candidate}"
-                )
+        results_parent = root / mode / orgname / "results"
+        if not results_parent.is_dir():
+            continue
+        if systemname:
+            candidate = results_parent / systemname
+            if candidate.is_dir():
+                canonical_roots.append(str(candidate))
+                if logger:
+                    logger.debug(
+                        f"discover_scan_roots: canonical {mode} slice found at "
+                        f"{candidate}"
+                    )
+        else:
+            # No --systemname: aggregate across every system present under
+            # this org's canonical results/ directory.
+            for sys_dir in sorted(
+                p for p in results_parent.iterdir() if p.is_dir()
+            ):
+                canonical_roots.append(str(sys_dir))
+                if logger:
+                    logger.debug(
+                        f"discover_scan_roots: canonical {mode} multi-system "
+                        f"slice found at {sys_dir}"
+                    )
 
     if canonical_roots:
         return canonical_roots
