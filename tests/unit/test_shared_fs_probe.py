@@ -855,3 +855,557 @@ class TestLauncherFlags:
         assert "--map-by node" in cmd
         assert "--tag-output" in cmd
         assert "--ppn" not in cmd
+
+
+# =============================================================================
+# TestContentVerify — Issue #628 regression tests
+#
+# Contract change: the probe used to compare st_ino across ranks. That is
+# not a valid universal "shared FS" test — per-mount-inode FUSE filesystems
+# (s3fs, goofys, JuiceFS, many object-storage gateways) legitimately number
+# inodes per mount even when every rank is looking at the same shared file.
+# The new probe writes a 64-byte payload (run_uuid + urandom) on rank 0,
+# fsyncs, sleeps 5s for FS-visibility, then every rank reads back and reports
+# a SHA-256 of what it saw. If every rank's hash matches rank 0's expected
+# hash, the destination is genuinely shared.
+# =============================================================================
+
+
+class TestContentVerify:
+    """Issue #628: probe verifies content bytes, not st_ino."""
+
+    def test_probe_writes_payload_to_sentinel(self):
+        """Rank 0 must os.write() the payload — a zero-byte sentinel cannot
+        prove content accessibility across ranks."""
+        src = SHARED_FS_PROBE_SCRIPT
+        assert "os.write(fd" in src, (
+            "probe must write a payload to the sentinel; zero-byte sentinel "
+            "cannot verify content accessibility (issue #628)"
+        )
+
+    def test_probe_fsyncs_before_close(self):
+        """fsync before close so the payload is durable before FS-visibility
+        quiesce and the readback barrier."""
+        src = SHARED_FS_PROBE_SCRIPT
+        assert "os.fsync(fd)" in src, (
+            "probe must fsync the sentinel before close to survive the "
+            "visibility quiesce and reach every reader"
+        )
+
+    def test_probe_hashes_content_with_sha256(self):
+        """Fingerprint the readback with sha256 — full bytes over the wire
+        would push the gather past PIPE_BUF at high rank counts (#573)."""
+        src = SHARED_FS_PROBE_SCRIPT
+        assert "hashlib.sha256" in src
+
+    def test_gather_payload_has_content_fields_not_st_ino(self):
+        """Wire payload advertises content_sha256 + content_length; st_ino
+        (the old, per-mount-inode-broken signal) is no longer used in the
+        equality check."""
+        src = SHARED_FS_PROBE_SCRIPT
+        assert '"content_sha256"' in src
+        assert '"content_length"' in src
+
+    def test_rank0_visibility_sleep_between_close_and_readback(self):
+        """A visibility sleep is needed BETWEEN rank 0's sentinel close and
+        the readback Barrier, in addition to the pre-existing D-49 sleep
+        before the final Barrier. Detect the two-sleep contract via count."""
+        src = SHARED_FS_PROBE_SCRIPT
+        occurrences = src.count("time.sleep(5.0)")
+        assert occurrences >= 2, (
+            "expected at least TWO time.sleep(5.0) calls in the probe: one "
+            "for per-mount FS-visibility quiesce between rank-0 write-close "
+            "and the readback Barrier (issue #628), plus the pre-existing "
+            "D-49 quiesce before the final Barrier. Found {0}.".format(occurrences)
+        )
+
+    # ---- In-process execution of the heredoc against a fake mpi4py ---------
+    #
+    # These tests exercise the actual probe body under three scenarios:
+    #   1. every rank reads the same content → status='ok'
+    #   2. one rank reads mismatched content → status='fail' kind='content_mismatch'
+    #   3. one rank reads short/empty content → status='fail' kind='content_empty_or_short'
+
+    def _exec_probe(self, tmp_path, gather_return, *, capture_stdout=True):
+        """Exec the probe heredoc against a mocked mpi4py.
+
+        Rank 0 is the process running this test. The fake COMM_WORLD gathers
+        `gather_return` (already-crafted per-rank payload dicts) to rank 0
+        and passes bcast through verbatim. Returns the rank-0 JSON payload
+        parsed from the marker-framed stdout.
+        """
+        import io
+        from contextlib import redirect_stdout
+
+        class _FakeComm:
+            def Get_rank(self_inner):
+                return 0
+
+            def Get_size(self_inner):
+                return len(gather_return)
+
+            def Barrier(self_inner):
+                return None
+
+            def gather(self_inner, payload, root=0):
+                # Splice rank 0's real payload into the gather so the probe
+                # verifies its own hash against itself.
+                merged = list(gather_return)
+                merged[0] = payload
+                return merged
+
+            def bcast(self_inner, status, root=0):
+                return status
+
+        class _FakeMPI:
+            COMM_WORLD = _FakeComm()
+
+        fake_mpi4py = MagicMock()
+        fake_mpi4py.MPI = _FakeMPI()
+
+        saved_argv = sys.argv
+        saved_mpi4py = sys.modules.get("mpi4py")
+        saved_mpi = sys.modules.get("mpi4py.MPI")
+        import time as _time
+        saved_sleep = _time.sleep
+        try:
+            sys.modules["mpi4py"] = fake_mpi4py
+            sys.modules["mpi4py.MPI"] = _FakeMPI()
+            _time.sleep = lambda *_a, **_kw: None
+            sys.argv = ["<probe>", str(tmp_path), "test-uuid-content-verify"]
+            namespace = {"__name__": "__main__"}
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                with pytest.raises(SystemExit):
+                    exec(SHARED_FS_PROBE_SCRIPT, namespace)
+            out = buf.getvalue()
+        finally:
+            _time.sleep = saved_sleep
+            sys.argv = saved_argv
+            if saved_mpi4py is not None:
+                sys.modules["mpi4py"] = saved_mpi4py
+            else:
+                sys.modules.pop("mpi4py", None)
+            if saved_mpi is not None:
+                sys.modules["mpi4py.MPI"] = saved_mpi
+            else:
+                sys.modules.pop("mpi4py.MPI", None)
+
+        # Parse the rank-0 JSON between markers.
+        import re as _re
+        m = _re.search(
+            r"__CAP02_RESULT_BEGIN__\s*\n(?P<p>.*?)\n__CAP02_RESULT_END__",
+            out, _re.DOTALL,
+        )
+        assert m is not None, (
+            "probe did not emit marker-framed JSON on stdout; got:\n" + out
+        )
+        return json.loads(m.group("p"))
+
+    def _matching_payload_for_rank(self, hostname, rank, expected_sha):
+        return {
+            "hostname": hostname,
+            "rank": rank,
+            "failure": None,
+            "content_sha256": expected_sha,
+            "content_length": 64,
+        }
+
+    def _mismatched_payload_for_rank(self, hostname, rank):
+        return {
+            "hostname": hostname,
+            "rank": rank,
+            "failure": None,
+            # Different bytes than rank 0's payload → different hash.
+            "content_sha256": "deadbeef" * 8,
+            "content_length": 64,
+        }
+
+    def _short_payload_for_rank(self, hostname, rank):
+        return {
+            "hostname": hostname,
+            "rank": rank,
+            "failure": None,
+            "content_sha256": None,
+            "content_length": 0,
+        }
+
+    def test_matching_content_across_ranks_yields_ok(self, tmp_path):
+        """Every rank read the same 64-byte payload → status='ok'."""
+        # Rank 0 payload is spliced in by _exec_probe.gather; here we craft
+        # the OTHER ranks with rank 0's expected sha (which the probe
+        # computed from run_uuid + urandom).
+        # The probe writes run_uuid.encode() + os.urandom(32); test-uuid is
+        # short so we know rank 0's payload deterministically only up to its
+        # own read. Just use "same hash as whatever rank 0 read" — which is
+        # done by splicing rank 0's real gather.
+        # For non-rank-0 payloads we don't know the hash a priori; simulate
+        # by first executing with a placeholder and letting the probe verify
+        # against itself. Simpler: run once with two ranks, both slots filled
+        # with the rank-0 sentinel — the splice puts rank 0's real read into
+        # slot 0, and slot 1 we set to match rank 0's real read as well.
+        # Trick: pre-read rank 0's sentinel after exec by looking at what
+        # the payload gathered. Instead, use a two-pass gather where slot 1
+        # is a placeholder and the fake comm.gather replaces BOTH with rank 0.
+        class _AllRankZeroGather:
+            """Every gathered slot is the rank-0 payload itself."""
+            def __call__(self, payload, root=0):
+                return [payload, payload]
+
+        # Build a FakeComm that gathers rank 0's real payload into every slot.
+        import io
+        from contextlib import redirect_stdout
+
+        class _FakeComm:
+            def Get_rank(self_inner):
+                return 0
+
+            def Get_size(self_inner):
+                return 2
+
+            def Barrier(self_inner):
+                return None
+
+            def gather(self_inner, payload, root=0):
+                return [payload, payload]
+
+            def bcast(self_inner, status, root=0):
+                return status
+
+        class _FakeMPI:
+            COMM_WORLD = _FakeComm()
+
+        fake_mpi4py = MagicMock()
+        fake_mpi4py.MPI = _FakeMPI()
+
+        saved_argv = sys.argv
+        saved_mpi4py = sys.modules.get("mpi4py")
+        saved_mpi = sys.modules.get("mpi4py.MPI")
+        import time as _time
+        saved_sleep = _time.sleep
+        try:
+            sys.modules["mpi4py"] = fake_mpi4py
+            sys.modules["mpi4py.MPI"] = _FakeMPI()
+            _time.sleep = lambda *_a, **_kw: None
+            sys.argv = ["<probe>", str(tmp_path), "test-uuid-content-verify-ok"]
+            namespace = {"__name__": "__main__"}
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                with pytest.raises(SystemExit):
+                    exec(SHARED_FS_PROBE_SCRIPT, namespace)
+            out = buf.getvalue()
+        finally:
+            _time.sleep = saved_sleep
+            sys.argv = saved_argv
+            if saved_mpi4py is not None:
+                sys.modules["mpi4py"] = saved_mpi4py
+            else:
+                sys.modules.pop("mpi4py", None)
+            if saved_mpi is not None:
+                sys.modules["mpi4py.MPI"] = saved_mpi
+            else:
+                sys.modules.pop("mpi4py.MPI", None)
+
+        import re as _re
+        m = _re.search(
+            r"__CAP02_RESULT_BEGIN__\s*\n(?P<p>.*?)\n__CAP02_RESULT_END__",
+            out, _re.DOTALL,
+        )
+        assert m is not None, "no marker-framed JSON in stdout"
+        result = json.loads(m.group("p"))
+        assert result.get("status") == "ok", (
+            "matching content across all ranks must yield status='ok'; got: "
+            + repr(result)
+        )
+
+    def test_mismatched_content_yields_content_mismatch_fail(self, tmp_path):
+        """One rank reports a different content hash → kind='content_mismatch'."""
+        import io
+        from contextlib import redirect_stdout
+
+        class _FakeComm:
+            def Get_rank(self_inner):
+                return 0
+
+            def Get_size(self_inner):
+                return 2
+
+            def Barrier(self_inner):
+                return None
+
+            def gather(self_inner, payload, root=0):
+                # Slot 0: rank 0's real read (matches the file it just wrote).
+                # Slot 1: a fake reader that saw different bytes.
+                return [
+                    payload,
+                    {
+                        "hostname": "h2",
+                        "rank": 1,
+                        "failure": None,
+                        "content_sha256": "deadbeef" * 8,
+                        "content_length": 64,
+                    },
+                ]
+
+            def bcast(self_inner, status, root=0):
+                return status
+
+        class _FakeMPI:
+            COMM_WORLD = _FakeComm()
+
+        fake_mpi4py = MagicMock()
+        fake_mpi4py.MPI = _FakeMPI()
+
+        saved_argv = sys.argv
+        saved_mpi4py = sys.modules.get("mpi4py")
+        saved_mpi = sys.modules.get("mpi4py.MPI")
+        import time as _time
+        saved_sleep = _time.sleep
+        try:
+            sys.modules["mpi4py"] = fake_mpi4py
+            sys.modules["mpi4py.MPI"] = _FakeMPI()
+            _time.sleep = lambda *_a, **_kw: None
+            sys.argv = ["<probe>", str(tmp_path), "test-uuid-content-verify-mm"]
+            namespace = {"__name__": "__main__"}
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                with pytest.raises(SystemExit):
+                    exec(SHARED_FS_PROBE_SCRIPT, namespace)
+            out = buf.getvalue()
+        finally:
+            _time.sleep = saved_sleep
+            sys.argv = saved_argv
+            if saved_mpi4py is not None:
+                sys.modules["mpi4py"] = saved_mpi4py
+            else:
+                sys.modules.pop("mpi4py", None)
+            if saved_mpi is not None:
+                sys.modules["mpi4py.MPI"] = saved_mpi
+            else:
+                sys.modules.pop("mpi4py.MPI", None)
+
+        import re as _re
+        m = _re.search(
+            r"__CAP02_RESULT_BEGIN__\s*\n(?P<p>.*?)\n__CAP02_RESULT_END__",
+            out, _re.DOTALL,
+        )
+        assert m is not None, "no marker-framed JSON in stdout"
+        result = json.loads(m.group("p"))
+        assert result.get("status") == "fail"
+        assert result["failure_summary"]["kind"] == "content_mismatch", (
+            "mismatched content-sha across ranks must yield "
+            "kind='content_mismatch'; got: " + repr(result["failure_summary"])
+        )
+
+    def test_short_content_yields_content_empty_or_short_fail(self, tmp_path):
+        """One rank reports content_length < payload → kind='content_empty_or_short'."""
+        import io
+        from contextlib import redirect_stdout
+
+        class _FakeComm:
+            def Get_rank(self_inner):
+                return 0
+
+            def Get_size(self_inner):
+                return 2
+
+            def Barrier(self_inner):
+                return None
+
+            def gather(self_inner, payload, root=0):
+                return [
+                    payload,
+                    {
+                        "hostname": "h2",
+                        "rank": 1,
+                        "failure": None,
+                        "content_sha256": None,
+                        "content_length": 0,
+                    },
+                ]
+
+            def bcast(self_inner, status, root=0):
+                return status
+
+        class _FakeMPI:
+            COMM_WORLD = _FakeComm()
+
+        fake_mpi4py = MagicMock()
+        fake_mpi4py.MPI = _FakeMPI()
+
+        saved_argv = sys.argv
+        saved_mpi4py = sys.modules.get("mpi4py")
+        saved_mpi = sys.modules.get("mpi4py.MPI")
+        import time as _time
+        saved_sleep = _time.sleep
+        try:
+            sys.modules["mpi4py"] = fake_mpi4py
+            sys.modules["mpi4py.MPI"] = _FakeMPI()
+            _time.sleep = lambda *_a, **_kw: None
+            sys.argv = ["<probe>", str(tmp_path), "test-uuid-content-verify-empty"]
+            namespace = {"__name__": "__main__"}
+            buf = io.StringIO()
+            with redirect_stdout(buf):
+                with pytest.raises(SystemExit):
+                    exec(SHARED_FS_PROBE_SCRIPT, namespace)
+            out = buf.getvalue()
+        finally:
+            _time.sleep = saved_sleep
+            sys.argv = saved_argv
+            if saved_mpi4py is not None:
+                sys.modules["mpi4py"] = saved_mpi4py
+            else:
+                sys.modules.pop("mpi4py", None)
+            if saved_mpi is not None:
+                sys.modules["mpi4py.MPI"] = saved_mpi
+            else:
+                sys.modules.pop("mpi4py.MPI", None)
+
+        import re as _re
+        m = _re.search(
+            r"__CAP02_RESULT_BEGIN__\s*\n(?P<p>.*?)\n__CAP02_RESULT_END__",
+            out, _re.DOTALL,
+        )
+        assert m is not None, "no marker-framed JSON in stdout"
+        result = json.loads(m.group("p"))
+        assert result.get("status") == "fail"
+        assert result["failure_summary"]["kind"] == "content_empty_or_short", (
+            "empty/short readback must yield kind='content_empty_or_short'; "
+            "got: " + repr(result["failure_summary"])
+        )
+
+    def test_launcher_raises_on_content_mismatch_summary(self, tmp_path):
+        """Wire-level: kind='content_mismatch' → FileSystemError with content
+        fingerprints in the message."""
+        logger = MagicMock()
+        payload = {
+            "status": "fail",
+            "failure_summary": {
+                "kind": "content_mismatch",
+                "message": (
+                    "CAP-02: shared-FS probe detected the data-dir is NOT "
+                    "the same filesystem on every participating host.\n"
+                    "  host=h1 rank=0 content_sha256=abcd1234... length=64 (expected)\n"
+                    "  host=h2 rank=1 content_sha256=deadbeef... length=64 (MISMATCH)\n"
+                    "this typically means one or more hosts have a "
+                    "local-disk path where a shared mount was expected."
+                ),
+            },
+            "unlink_warning": None,
+        }
+        with patch(
+            "mlpstorage_py.cluster_collector.subprocess.run",
+            side_effect=_mock_subprocess_writes(payload, returncode=1),
+        ), patch(
+            "mlpstorage_py.cluster_collector.MPIClusterCollector"
+        ) as mock_coll_cls:
+            mock_coll_cls.return_value._stage_script_on_remote_hosts.return_value = {
+                "h1": None, "h2": None
+            }
+            with pytest.raises(FileSystemError) as exc_info:
+                run_shared_fs_probe(
+                    destination=str(tmp_path),
+                    hosts=["h1", "h2"],
+                    run_uuid="test-uuid",
+                    logger=logger,
+                )
+        msg = str(exc_info.value)
+        assert "content_sha256=" in msg
+        assert "MISMATCH" in msg
+        assert exc_info.value.code == ErrorCode.FS_INVALID_STRUCTURE
+
+
+# =============================================================================
+# TestSkipValidationBypassesCap02 — issue #628 escape hatch
+#
+# Submitters on per-mount-inode FUSE filesystems can bypass the CAP-02 probe
+# with --skip-validation. The bypass is deliberately awkward (a CLI flag) so
+# the choice is visible in the operator's command line and the run log.
+# CAP-01 (capacity gate) remains armed either way — skip-validation only
+# affects CAP-02.
+# =============================================================================
+
+
+class TestSkipValidationBypassesCap02:
+    """--skip-validation must skip run_shared_fs_probe but keep CAP-01."""
+
+    def _make_bench(self, tmp_path, *, skip_validation):
+        """Minimal Benchmark shim exposing just _pre_execution_gate.
+
+        The gate reads self.args, self.logger, self._capacity_gate_destination,
+        self.required_bytes_for_capacity_gate, and self._run_uuid — build
+        that surface directly rather than instantiating a concrete subclass
+        (which would pull in DLIO/psutil and a full CLI parse).
+        """
+        from mlpstorage_py.benchmarks.base import Benchmark
+
+        # Concrete _run stub to satisfy the ABC check without triggering
+        # subclass __init__ chains.
+        class _StubBench(Benchmark):
+            def _run(self):
+                return 0
+
+        bench = _StubBench.__new__(_StubBench)
+        bench.logger = MagicMock()
+        bench.args = SimpleNamespace(
+            hosts=["h1", "h2"],
+            skip_validation=skip_validation,
+            mpi_bin=None,
+            allow_run_as_root=False,
+            ssh_username=None,
+        )
+        bench._capacity_gate_destination = lambda: str(tmp_path)
+        bench.required_bytes_for_capacity_gate = lambda: 1
+        bench._run_uuid = "test-uuid"
+        return bench
+
+    def test_skip_validation_true_skips_cap02(self, tmp_path):
+        """--skip-validation set → run_shared_fs_probe NOT called."""
+        bench = self._make_bench(tmp_path, skip_validation=True)
+        with patch(
+            "mlpstorage_py.benchmarks.base.check_capacity_4field"
+        ), patch(
+            "mlpstorage_py.benchmarks.base.run_shared_fs_probe"
+        ) as mock_probe:
+            bench._pre_execution_gate()
+        mock_probe.assert_not_called()
+
+    def test_skip_validation_true_still_runs_cap01(self, tmp_path):
+        """--skip-validation must NOT skip CAP-01 — capacity gate stays armed."""
+        bench = self._make_bench(tmp_path, skip_validation=True)
+        with patch(
+            "mlpstorage_py.benchmarks.base.check_capacity_4field"
+        ) as mock_cap01, patch(
+            "mlpstorage_py.benchmarks.base.run_shared_fs_probe"
+        ):
+            bench._pre_execution_gate()
+        mock_cap01.assert_called_once()
+
+    def test_skip_validation_false_calls_cap02(self, tmp_path):
+        """Default: --skip-validation absent → probe fires normally."""
+        bench = self._make_bench(tmp_path, skip_validation=False)
+        with patch(
+            "mlpstorage_py.benchmarks.base.check_capacity_4field"
+        ), patch(
+            "mlpstorage_py.benchmarks.base.run_shared_fs_probe"
+        ) as mock_probe:
+            bench._pre_execution_gate()
+        mock_probe.assert_called_once()
+
+    def test_skip_validation_logs_warning(self, tmp_path):
+        """Bypass must be visible: emit a WARNING (not info) with 'CAP-02'
+        and 'skip-validation' in the message so it stands out in the log."""
+        bench = self._make_bench(tmp_path, skip_validation=True)
+        with patch(
+            "mlpstorage_py.benchmarks.base.check_capacity_4field"
+        ), patch(
+            "mlpstorage_py.benchmarks.base.run_shared_fs_probe"
+        ):
+            bench._pre_execution_gate()
+        assert bench.logger.warning.called, (
+            "bypassing CAP-02 must log a warning so the operator sees they "
+            "used the escape hatch"
+        )
+        msg = str(bench.logger.warning.call_args)
+        assert "CAP-02" in msg
+        assert "skip" in msg.lower()
