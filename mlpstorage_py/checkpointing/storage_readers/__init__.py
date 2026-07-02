@@ -38,6 +38,13 @@ class StorageReaderFactory:
         Returns:
             StorageReader configured for the requested backend.
         """
+        # Issue #641: reconstruct the URI scheme mlpstorage stripped to
+        # work around the DLIO preflight double-prefix bug. Symmetric with
+        # StorageWriterFactory.create (issue #583); no-op when the URI
+        # already has a scheme or the env hint isn't set.
+        from ..storage_writers import _normalize_checkpoint_uri
+        uri = _normalize_checkpoint_uri(uri)
+
         if backend:
             if backend == 'file':
                 from .file_reader import FileStorageReader
