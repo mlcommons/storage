@@ -1030,16 +1030,30 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         # once in __init__ and passed through to mpirun argv verbatim
         # (W-5 launcher pass-through contract). The destination reused
         # here is the same path CAP-01 just statvfs'd.
-        hosts = getattr(self.args, 'hosts', None) or []
-        run_shared_fs_probe(
-            destination=destination,
-            hosts=hosts,
-            run_uuid=self._run_uuid,
-            logger=self.logger,
-            mpi_bin=getattr(self.args, 'mpi_bin', None),
-            allow_run_as_root=getattr(self.args, 'allow_run_as_root', False),
-            ssh_username=getattr(self.args, 'ssh_username', None),
-        )
+        #
+        # Issue #628 escape hatch: --skip-validation bypasses CAP-02 so a
+        # submitter on a filesystem the probe cannot verify (e.g., a
+        # per-mount-inode FUSE mount that briefly lags on file-visibility)
+        # can proceed. CAP-01 stays armed regardless. Log a WARNING (not
+        # info) so the bypass shows up prominently in the run log.
+        if getattr(self.args, 'skip_validation', False):
+            self.logger.warning(
+                "CAP-02 shared-FS probe SKIPPED via --skip-validation. "
+                "The dataset destination has NOT been verified as accessible "
+                "from every participating host; multi-host runs may silently "
+                "produce invalid results if the path is not genuinely shared."
+            )
+        else:
+            hosts = getattr(self.args, 'hosts', None) or []
+            run_shared_fs_probe(
+                destination=destination,
+                hosts=hosts,
+                run_uuid=self._run_uuid,
+                logger=self.logger,
+                mpi_bin=getattr(self.args, 'mpi_bin', None),
+                allow_run_as_root=getattr(self.args, 'allow_run_as_root', False),
+                ssh_username=getattr(self.args, 'ssh_username', None),
+            )
         # ------------------------------------------------------------------
         # Slice 5 / CAP-03: FS-separation probe (issue #601).
         # ------------------------------------------------------------------

@@ -2515,16 +2515,30 @@ if __name__ == '__main__':
 # Pattern B): different lifecycle stage (pre-execution gate vs. start-of-run
 # cluster snapshot) so the two scripts are NOT merged. The probe runs once
 # per benchmark instance from `_pre_execution_gate`, after the CAP-01
-# capacity check; rank 0 creates a per-run-uuid-suffixed sentinel file in the
-# dataset destination, every rank `os.stat`s it, the MPI gather collects
-# (st_dev, st_ino) tuples to rank 0, rank 0 enforces st_ino cardinality
-# exactly 1 (or fails fast with each hostname's reported tuple — st_dev is
-# still reported in the diagnostic since it can help operators triage
-# mismatched mounts, but it is NOT used in the equality check because
-# FUSE / distributed FS mount device ids legitimately differ per node),
-# unlinks in a finally
-# block, sleeps 5.0s for storage quiesce (D-49), and all ranks reach a final
-# MPI_Barrier so the measured workload starts simultaneously.
+# capacity check. Content-verify protocol (issue #628):
+#
+#   1. Rank 0 creates a per-run-uuid-suffixed sentinel in the dataset
+#      destination, writes 64 bytes (run_uuid prefix + urandom padding),
+#      fsyncs, and closes.
+#   2. Rank 0 sleeps 5.0s (visibility quiesce) so per-mount FUSE / overlay
+#      filesystems have time to propagate the new file to sibling mounts.
+#   3. A Barrier releases every rank to read the sentinel.
+#   4. Each rank reads the sentinel, computes sha256(bytes), and gathers
+#      {content_sha256, content_length} to rank 0.
+#   5. Rank 0's verdict: every rank must report content_sha256 equal to
+#      rank 0's expected hash AND content_length == 64. Any mismatch or
+#      short read fails the probe.
+#   6. Rank 0 unlinks the sentinel (D-44 cosmetic; warns, not raises),
+#      sleeps 5.0s (D-49 quiesce), and all ranks reach a final Barrier so
+#      the measured workload starts simultaneously.
+#
+# Previous protocols compared st_dev then st_ino across ranks (issues #566,
+# #628). Both are per-mount kernel implementation details that legitimately
+# differ across sibling mounts of the same shared namespace on FUSE / overlay
+# filesystems (s3fs, goofys, JuiceFS, DAOS DFuse, ...). Content-verify is
+# a strict superset of "shared filesystem": if every rank reads back rank
+# 0's exact bytes, the destination is genuinely shared regardless of how
+# each mount numbers inodes.
 #
 # References:
 #   - D-36 Pattern B: script-side helpers are inlined in untyped form (no
@@ -2537,10 +2551,13 @@ if __name__ == '__main__':
 #   - D-44: unlink failure in the finally block is a logger.warning, NOT a
 #     raise — leftover sentinels are cosmetic.
 #   - D-45: any per-rank failure (EACCES / ENOSPC / ENOENT / NFS-stale) or
-#     cardinality > 1 raises FileSystemError BEFORE the workload begins.
+#     content mismatch / short read raises FileSystemError BEFORE the
+#     workload begins.
 #   - D-49: rank 0 sleeps 5.0s INSIDE the finally block, BEFORE the final
 #     comm.Barrier(); the sleep is rank-0-only so non-rank-0 ranks don't
-#     block the whole fleet for 5s.
+#     block the whole fleet for 5s. Issue #628 adds a second rank-0
+#     5.0s sleep BEFORE the readback Barrier for FS visibility quiesce;
+#     both sleeps are rank-0-only.
 #   - Pitfall 4 / A5 (LOAD-BEARING): rank 0 broadcasts status='fail' via
 #     comm.bcast(status, root=0) BEFORE the final barrier when it is about
 #     to raise; non-rank-0 ranks read the broadcast and raise FileSystemError
@@ -2574,7 +2591,7 @@ if __name__ == '__main__':
 #   {
 #     "status": "ok" | "fail",
 #     "failure_summary": None | {
-#       "kind": "cardinality" | "per_rank",
+#       "kind": "content_mismatch" | "content_empty_or_short" | "per_rank",
 #       "message": str   # human-readable, used by the launcher verbatim;
 #                        # built from per-rank payloads in Step E so the
 #                        # detail survives without shipping the array.
@@ -2601,10 +2618,10 @@ generics, no `from typing import`). Runs once per benchmark instance from
 for the full argv / JSON / D-43 / D-44 / D-45 / D-49 / Pitfall 4 contract.
 """
 
+import hashlib
 import json
 import os
 import socket
-import stat as stat_mod
 import sys
 import time
 
@@ -2612,24 +2629,30 @@ import time
 _PER_HOST_LINE_CAP = 16  # Issue #573: sample-plus-summary cap so the
                          # wire JSON stays under PIPE_BUF at any scale.
 
+# Sentinel payload size: 32 bytes of run_uuid (hex) + 32 random bytes.
+# Rank 0 writes exactly this many bytes; every rank must read exactly this
+# many bytes for the shared-FS check to pass.
+_PAYLOAD_LEN = 64
 
-def _build_cardinality_message(payloads):
-    """Build the verbatim multi-line error body for a cardinality > 1 fault.
+
+def _build_content_mismatch_message(payloads, expected_sha, expected_len):
+    """Build the verbatim multi-line error body for a content-mismatch fault.
+
+    Issue #628: the probe now verifies that every rank reads back the same
+    bytes rank 0 wrote to the sentinel. A cross-host content mismatch means
+    the ranks are looking at different files (or the FS is not shared).
 
     Format (D-45 + REQUIREMENTS.md CAP-02):
 
       CAP-02: shared-FS probe detected the data-dir is NOT the same filesystem
       on every participating host.
-        host=<h1> rank=<r1> st_dev=<d1> st_ino=<i1>
-        host=<h2> rank=<r2> st_dev=<d2> st_ino=<i2>
+        host=<h1> rank=<r1> content_sha256=<s1> length=<n1> (expected|MISMATCH|MISSING)
+        host=<h2> rank=<r2> content_sha256=<s2> length=<n2> (...)
         ...
       This typically means one or more hosts have a local-disk path where a
       shared mount was expected.
 
-    Issue #573: per-host lines are capped at _PER_HOST_LINE_CAP. Above
-    the cap, a "... and N more ranks omitted" tail line tells the
-    operator the true scale of the failure without pushing the wire
-    JSON over PIPE_BUF.
+    Issue #573: per-host lines are capped at _PER_HOST_LINE_CAP.
     """
     lines = []
     lines.append(
@@ -2638,12 +2661,23 @@ def _build_cardinality_message(payloads):
     )
     shown = payloads[:_PER_HOST_LINE_CAP]
     for p in shown:
+        got_sha = p.get("content_sha256")
+        got_len = p.get("content_length")
+        if got_sha == expected_sha and got_len == expected_len:
+            tag = "expected"
+        elif got_sha is None or (got_len or 0) < expected_len:
+            tag = "MISSING"
+        else:
+            tag = "MISMATCH"
+        # Short-prefix the hash so the wire line stays compact.
+        short = (got_sha[:12] + "...") if got_sha else "None"
         lines.append(
-            "  host={h} rank={r} st_dev={d} st_ino={i}".format(
+            "  host={h} rank={r} content_sha256={s} length={n} ({t})".format(
                 h=p.get("hostname", "?"),
                 r=p.get("rank", "?"),
-                d=p.get("st_dev"),
-                i=p.get("st_ino"),
+                s=short,
+                n=got_len,
+                t=tag,
             )
         )
     omitted = len(payloads) - len(shown)
@@ -2748,22 +2782,42 @@ def main():
 
     # Per-rank failure tracker. None = healthy; dict = failure to report.
     failure = None
-    st_dev = None
-    st_ino = None
+    content_sha256 = None
+    content_length = None
     unlink_warning = None
     status = None  # rank 0 sets to 'ok' or 'fail'; non-rank-0 reads via bcast.
     rank0_failure_summary = None
+    expected_sha = None  # rank 0 only: sha256 of the bytes it wrote.
 
     try:
-        # ---- Step A: rank 0 atomically creates the sentinel (O_CREAT|O_EXCL).
+        # ---- Step A: rank 0 atomically creates the sentinel, writes a
+        # unique payload, and fsyncs before close. Content verification
+        # (issue #628) — the previous st_ino-based check falsely rejected
+        # per-mount-inode FUSE filesystems (s3fs, goofys, JuiceFS, ...) that
+        # number inodes per mount even when every rank stats the same
+        # shared file. The bytes rank 0 writes here are what every rank
+        # must read back in Step C for the check to pass.
         if rank == 0:
+            # run_uuid prefix + urandom padding, sliced to _PAYLOAD_LEN.
+            # The run_uuid already guarantees uniqueness per benchmark
+            # instance (Pitfall 7); the random bytes are defense in depth
+            # against a pathological filesystem returning zeros for
+            # O_EXCL-created files without an actual read. Pad with a full
+            # _PAYLOAD_LEN of urandom so the concatenation is always
+            # long enough to slice regardless of run_uuid length.
+            payload_bytes = (run_uuid.encode("ascii") + os.urandom(_PAYLOAD_LEN))[:_PAYLOAD_LEN]
+            expected_sha = hashlib.sha256(payload_bytes).hexdigest()
             try:
                 fd = os.open(
                     sentinel,
                     os.O_CREAT | os.O_EXCL | os.O_WRONLY,
                     0o644,
                 )
-                os.close(fd)
+                try:
+                    os.write(fd, payload_bytes)
+                    os.fsync(fd)
+                finally:
+                    os.close(fd)
             except OSError as e:
                 failure = {
                     "mode": "sentinel_create",
@@ -2772,18 +2826,30 @@ def main():
                     "message": str(e),
                 }
 
-        # ---- Step B: synchronize so non-rank-0 ranks don't stat too early.
+        # ---- Step A': rank-0 visibility quiesce (issue #628). Per-mount
+        # FUSE / overlay filesystems can lag briefly before a new file is
+        # visible to sibling mounts. Sleep BEFORE the readback barrier so
+        # non-rank-0 ranks aren't released until the write has had time to
+        # propagate. rank-0-only so non-rank-0 ranks don't idle for 5s.
+        if rank == 0:
+            time.sleep(5.0)
+
+        # ---- Step B: synchronize so non-rank-0 ranks don't read too early.
         comm.Barrier()
 
-        # ---- Step C: every rank stats the sentinel; report per-rank failure.
+        # ---- Step C: every rank reads the sentinel and hashes its content.
+        # A short read (< _PAYLOAD_LEN) or ENOENT means the FS didn't
+        # propagate rank 0's write; a mismatched hash means the rank is
+        # reading a different file.
         if failure is None:
             try:
-                st = os.stat(sentinel)
-                st_dev = st.st_dev
-                st_ino = st.st_ino
+                with open(sentinel, "rb") as _fh:
+                    data = _fh.read(_PAYLOAD_LEN + 1)
+                content_length = len(data)
+                content_sha256 = hashlib.sha256(data).hexdigest() if data else None
             except OSError as e:
                 failure = {
-                    "mode": "sentinel_stat",
+                    "mode": "sentinel_read",
                     "host": socket.gethostname(),
                     "errno": e.errno,
                     "message": str(e),
@@ -2794,12 +2860,17 @@ def main():
             "hostname": socket.gethostname(),
             "rank": rank,
             "failure": failure,
-            "st_dev": st_dev,
-            "st_ino": st_ino,
+            "content_sha256": content_sha256,
+            "content_length": content_length,
         }
         all_payloads = comm.gather(local_payload, root=0)
 
-        # ---- Step E: rank 0 analyzes the gather.
+        # ---- Step E: rank 0 analyzes the gather. Content-based verdict
+        # (issue #628): every rank's sha256 must equal rank 0's expected
+        # sha256, and every rank's read length must equal _PAYLOAD_LEN.
+        # Distinguish "content_empty_or_short" (readback failed / FS
+        # visibility didn't propagate) from "content_mismatch" (rank is
+        # reading a different file).
         if rank == 0:
             any_failure = any(p.get("failure") is not None for p in all_payloads)
             if any_failure:
@@ -2809,22 +2880,26 @@ def main():
                     "message": _build_per_rank_message(all_payloads),
                 }
             else:
-                # NOTE: st_dev is intentionally excluded. It is the kernel's
-                # per-mount device id, assigned per-node, and legitimately
-                # differs across hosts on FUSE / distributed filesystems
-                # (DAOS DFuse, NFS, Lustre, GPFS, BeeGFS, ...) even when
-                # every rank stats the same shared sentinel. st_ino is the
-                # cross-host identity signal: if all ranks see the same
-                # inode for rank 0's unique sentinel, the data-dir is
-                # genuinely shared. See issue #566.
-                ids = set()
-                for p in all_payloads:
-                    ids.add(p.get("st_ino"))
-                if len(ids) != 1:
+                bad = [
+                    p for p in all_payloads
+                    if p.get("content_sha256") != expected_sha
+                    or p.get("content_length") != _PAYLOAD_LEN
+                ]
+                if bad:
+                    # If every bad rank is short/empty, it's a visibility
+                    # failure. Otherwise at least one rank read a different
+                    # file — call it a mismatch.
+                    all_short = all(
+                        (p.get("content_length") or 0) < _PAYLOAD_LEN
+                        for p in bad
+                    )
+                    kind = "content_empty_or_short" if all_short else "content_mismatch"
                     status = "fail"
                     rank0_failure_summary = {
-                        "kind": "cardinality",
-                        "message": _build_cardinality_message(all_payloads),
+                        "kind": kind,
+                        "message": _build_content_mismatch_message(
+                            all_payloads, expected_sha, _PAYLOAD_LEN,
+                        ),
                     }
                 else:
                     status = "ok"
