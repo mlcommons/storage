@@ -98,7 +98,7 @@ drive_instance:
     unit_count:                 int( min=1 )        # Number of drives that look like this
     vendor_name:                str( min=1 )        # The name of the vendor who supplies this drive
     model_name:                 str( min=1 )        # The vendor's model name for this drive
-    interface:                  enum( 'nvme', 'SAS', 'SATA', 'other' )
+    interface:                  enum( 'nvme', 'sas', 'sata', 'other' )
     media_type:                 enum( 'HDD', 'TLC', 'QLC', 'other' )    # Spinning disk or NAND cell type
     capacity_in_GB:             int( min=1 )        # in base 10 GB, not in GiB
     performance:                include( 'drive_performance', required=False )

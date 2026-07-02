@@ -3260,6 +3260,36 @@ class TestDrivesCollector:
         out = cc.collect_drives()
         assert out == []
 
+    @pytest.mark.parametrize("tran", ["nvme", "sata", "sas"])
+    def test_collector_interface_passes_drive_instance_schema(
+        self, monkeypatch, tran
+    ):
+        """Issue #637 regression: every TRAN the collector accepts must round-trip
+        through the DriveInstance pydantic schema without a case-mismatch error.
+
+        Prior behavior: DriveInterface enum required 'SAS'/'SATA' uppercase while
+        the collector emitted lowercase 'sas'/'sata', so every SAS/SATA client
+        drive failed [2.1.7 systemsDirectoryFiles] validation.
+        """
+        from mlpstorage_py import cluster_collector as cc
+        from mlpstorage_py.system_description.schema_validator import DriveInstance
+
+        payload = {
+            "blockdevices": [
+                {"name": "sda", "model": "X", "vendor": "Y",
+                 "size": "500000000000", "rota": "1", "tran": tran,
+                 "rm": "0"},
+            ]
+        }
+        monkeypatch.setattr(cc.subprocess, "run",
+                            lambda *a, **k: _lsblk_cp(payload))
+        out = cc.collect_drives()
+        assert len(out) == 1
+        # `media_type` is an SER-02 submitter-fills blank; supply a valid
+        # value so the schema check exercises `interface` in isolation.
+        drive = {**out[0], "unit_count": 1, "media_type": "TLC"}
+        DriveInstance.model_validate(drive)
+
     def test_size_decimal_gb_floor(self, monkeypatch):
         """RESEARCH Q1 — capacity_in_GB = int(size) // 10**9 (decimal GB,
         nameplate convention). A 1 TB drive (1_000_204_886_016 bytes) emits
