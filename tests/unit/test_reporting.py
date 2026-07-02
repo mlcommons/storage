@@ -797,3 +797,119 @@ class TestGlobalSummaryLocation:
                                   validate_structure=True)
 
         assert gen.global_summary_dir == gen.results_dir == str(tmp_path)
+
+
+class TestOptionalSystemnameForReportgen:
+    """Systemname is OPTIONAL for reports reportgen. Omitting it aggregates
+    a global summary across every system present under the org's canonical
+    ``<sentinel>/<div>/<orgname>/results/`` folder, with the aggregate
+    written into that ``results/`` folder itself (per-model rollups still
+    land in each system's own subtree, unchanged)."""
+
+    def test_no_systemname_multi_system_walks_all_systems(self, tmp_path):
+        """discover_scan_roots must return every system slice under the
+        canonical results/ folder when --systemname is omitted."""
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysA")
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysB")
+
+        args = Namespace(
+            debug=False, output_dir=None,
+            orgname="Acme", systemname="",  # empty = not supplied
+        )
+
+        seen_scan_roots = []
+        def fake_get_runs(path, logger=None):
+            seen_scan_roots.append(path)
+            return []
+
+        with patch('mlpstorage_py.report_generator.get_runs_files',
+                   side_effect=fake_get_runs), \
+             patch.object(ReportGenerator, 'print_results'):
+            gen = ReportGenerator(str(tmp_path), args=args,
+                                  validate_structure=True)
+
+        # Both systems must be walked — this is the aggregation contract.
+        assert sorted(seen_scan_roots) == sorted([
+            str(tmp_path / "closed" / "Acme" / "results" / "sysA"),
+            str(tmp_path / "closed" / "Acme" / "results" / "sysB"),
+        ])
+        assert sorted(gen.scan_roots) == sorted(seen_scan_roots)
+
+    def test_no_systemname_global_summary_dir_is_org_results_folder(
+        self, tmp_path
+    ):
+        """Without --systemname, the global summary lands in the org's
+        canonical results/ folder itself (not inside any system slice)."""
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysA")
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysB")
+
+        args = Namespace(
+            debug=False, output_dir=None,
+            orgname="Acme", systemname="",
+        )
+
+        with patch('mlpstorage_py.report_generator.get_runs_files',
+                   return_value=[]), \
+             patch.object(ReportGenerator, 'print_results'):
+            gen = ReportGenerator(str(tmp_path), args=args,
+                                  validate_structure=True)
+
+        expected_results_folder = str(
+            tmp_path / "closed" / "Acme" / "results"
+        )
+        # results_dir is rebound to the org's results/ folder itself…
+        assert gen.results_dir == expected_results_folder
+        # …and the global summary target is that same folder.
+        assert gen.global_summary_dir == expected_results_folder
+        # Sanity: never lands inside any system slice.
+        assert "sysA" not in gen.global_summary_dir
+        assert "sysB" not in gen.global_summary_dir
+
+    def test_no_systemname_both_modes_walked(self, tmp_path):
+        """When both closed/ and open/ trees exist, every system in both
+        modes is walked."""
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysA")
+        _write_canonical_run(tmp_path, "open", "Acme", "sysB")
+
+        args = Namespace(
+            debug=False, output_dir=None,
+            orgname="Acme", systemname="",
+        )
+
+        seen = []
+        with patch('mlpstorage_py.report_generator.get_runs_files',
+                   side_effect=lambda p, logger=None: seen.append(p) or []), \
+             patch.object(ReportGenerator, 'print_results'):
+            ReportGenerator(str(tmp_path), args=args,
+                            validate_structure=True)
+
+        assert sorted(seen) == sorted([
+            str(tmp_path / "closed" / "Acme" / "results" / "sysA"),
+            str(tmp_path / "open" / "Acme" / "results" / "sysB"),
+        ])
+
+    def test_systemname_still_narrows_to_single_system(self, tmp_path):
+        """Regression: supplying --systemname must still narrow the scan
+        to that one system, ignoring the other system's runs."""
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysA")
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysB")
+
+        args = Namespace(
+            debug=False, output_dir=None,
+            orgname="Acme", systemname="sysA",
+        )
+
+        seen = []
+        with patch('mlpstorage_py.report_generator.get_runs_files',
+                   side_effect=lambda p, logger=None: seen.append(p) or []), \
+             patch.object(ReportGenerator, 'print_results'):
+            gen = ReportGenerator(str(tmp_path), args=args,
+                                  validate_structure=True)
+
+        assert seen == [
+            str(tmp_path / "closed" / "Acme" / "results" / "sysA")
+        ]
+        # And the global summary still lands at the results/ parent.
+        assert gen.global_summary_dir == str(
+            tmp_path / "closed" / "Acme" / "results"
+        )

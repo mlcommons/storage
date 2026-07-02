@@ -166,6 +166,12 @@ class ReportGenerator:
         scopes to ``results/<systemname>/`` so reportgen aggregates only
         that system's runs (fixes the prior behavior of walking every
         system's runs regardless of --systemname).
+
+        When ``--systemname`` is NOT supplied (optional for reportgen), the
+        canonical-tree resolution rebinds to the org's ``results/`` folder
+        itself so the global summary lands there (next to each system's
+        subdirectory). The per-system walk is still handled correctly by
+        ``discover_scan_roots``, which enumerates every system slice.
         """
         from pathlib import Path  # local import to avoid hoisting Path globally
         root = Path(results_dir)
@@ -197,30 +203,50 @@ class ReportGenerator:
                         )
                         return str(system_dir)
                 else:
-                    systems = [p for p in results_root.iterdir() if p.is_dir()]
-                    if len(systems) == 1:
-                        self.logger.info(
-                            "Detected canonical submission tree with single system; "
-                            "scoping to %s",
-                            systems[0],
-                        )
-                        return str(systems[0])
+                    # No --systemname: rebind to the org's results/ folder
+                    # itself. The global summary lands here (see
+                    # _global_summary_dir_for), and discover_scan_roots
+                    # walks each system slice under it.
+                    self.logger.info(
+                        "Detected canonical submission tree without "
+                        "--systemname; aggregating across every system "
+                        "under %s",
+                        results_root,
+                    )
+                    return str(results_root)
         return results_dir
 
     def _global_summary_dir_for(self, effective_results_dir: str) -> str:
         """Return the directory where the GLOBAL rollup should be written.
 
-        When ``effective_results_dir`` is a per-system slice under a
-        canonical submission tree (i.e. its parent directory is literally
-        named ``results``, as produced by
-        ``<sentinel>/<div>/<org>/results/<system>/``), return that parent
-        ``results/`` directory so the global summary sits next to each
-        per-system subdirectory rather than inside one of them.
+        Two canonical-tree shapes trigger a redirect to the org's
+        ``results/`` folder:
+
+        * ``<sentinel>/<div>/<org>/results/<system>/`` — a per-system slice
+          (parent basename == ``results``): return that parent.
+        * ``<sentinel>/<div>/<org>/results/`` — the org's ``results/``
+          folder itself (used in the no-``--systemname`` aggregation
+          mode): return it directly.
+
+        In either case the global summary sits next to each per-system
+        subdirectory rather than inside one of them, so a submitter sees
+        a single aggregate at the org's ``results/`` level.
 
         Otherwise (flat layout, or the resolver did not rebind), return
         ``effective_results_dir`` unchanged.
         """
-        parent = os.path.dirname(os.path.abspath(effective_results_dir))
+        abs_dir = os.path.abspath(effective_results_dir)
+        # Case: results_dir IS the org's results/ folder (no --systemname
+        # canonical-tree rebind).
+        if os.path.basename(abs_dir) == "results" and os.path.isdir(abs_dir):
+            self.logger.debug(
+                "Global summary directory resolved to canonical results/ "
+                "folder itself: %s",
+                abs_dir,
+            )
+            return abs_dir
+        # Case: results_dir is a per-system slice under a results/ parent.
+        parent = os.path.dirname(abs_dir)
         if os.path.basename(parent) == "results" and os.path.isdir(parent):
             self.logger.debug(
                 "Global summary directory resolved to canonical results/ "
