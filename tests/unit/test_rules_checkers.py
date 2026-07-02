@@ -955,3 +955,72 @@ class TestTrainingParquetFormat:
             assert len(issues) == 1
             assert issues[0].validation == PARAM_VALIDATION.OPEN, \
                 f"dataset.format={format_value} should be OPEN category"
+
+
+class TestOpenStorageOptionsPrefetchWindowIssue629:
+    """Issue #629: `storage.storage_options.prefetch_window` is an s3dlio
+    client-side prefetch-depth knob (docs/RetinaNet_NP_Scaling_Results.md
+    documents it as a tunable, default 256). Tuning it changes I/O
+    concurrency, not the workload spec — so it belongs in OPEN's
+    allow-list. Before this fix it was absent from every allow-list and
+    was rejected as INVALID, aborting the reporter's OPEN run.
+    """
+
+    @pytest.fixture
+    def mock_logger(self):
+        return MagicMock()
+
+    def test_prefetch_window_override_is_open_category_issue_629(self, mock_logger):
+        """OPEN override of storage.storage_options.prefetch_window must
+        classify as OPEN, not INVALID.
+
+        Repro from issue #629:
+          mlpstorage open training unet3d run object \\
+            --params storage.storage_options.prefetch_window=8 ...
+          -> ERROR: INVALID: Disallowed parameter override:
+             storage.storage_options.prefetch_window = 8
+        """
+        data = BenchmarkRunData(
+            benchmark_type=BENCHMARK_TYPES.training,
+            model="unet3d",
+            command="run",
+            run_datetime="20260701_195014",
+            num_processes=1,
+            parameters={
+                "dataset": {"num_files_train": 28271},
+                "reader": {"read_threads": 1},
+            },
+            override_parameters={
+                "storage.storage_options.prefetch_window": 8,
+            },
+        )
+        run = BenchmarkRun.from_data(data, mock_logger)
+        checker = TrainingRunRulesChecker(run, logger=mock_logger)
+        issues = checker.check_allowed_params()
+
+        assert len(issues) == 1
+        assert issues[0].validation == PARAM_VALIDATION.OPEN, (
+            f"Issue #629: storage.storage_options.prefetch_window must be "
+            f"OPEN-allowed, got {issues[0].validation!r}. Message: "
+            f"{issues[0].message!r}"
+        )
+
+    def test_prefetch_window_in_open_allowed_params_issue_629(self):
+        """Set-membership assertion: locks the allow-list entry."""
+        assert (
+            'storage.storage_options.prefetch_window'
+            in TrainingRunRulesChecker.OPEN_ALLOWED_PARAMS
+        )
+
+    def test_prefetch_window_not_in_closed_allowed_params_issue_629(self):
+        """Scope guard: prefetch_window must NOT be CLOSED-allowed.
+
+        On CLOSED, all client tuning knobs affecting AU stay at their
+        defaults so submissions are comparable. Adding this to
+        CLOSED_ALLOWED_PARAMS would let closed submitters game AU by
+        cranking prefetch depth. This is an OPEN-only knob.
+        """
+        assert (
+            'storage.storage_options.prefetch_window'
+            not in TrainingRunRulesChecker.CLOSED_ALLOWED_PARAMS
+        )
