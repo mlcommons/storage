@@ -799,7 +799,19 @@ class TrainingBenchmark(DLIOBenchmark):
         nothing user-visible (the size calc's own .result/.warning calls
         are deliberately suppressed at the gate site; the user-facing
         path in ``datasize`` still gets the real logger).
+
+        Issue #627: on ``args.command == 'run'`` the dataset is a read
+        source, not a write destination — a prior ``datagen`` populated
+        it. Requiring an additional full-dataset worth of free space on
+        top of the already-occupied capacity is a false positive that
+        blocks valid runs on filesystems provisioned to just fit the
+        dataset. Return 0 in that case so ``check_capacity_4field``
+        trivially passes. CAP-02 shared-FS verification still fires
+        from ``_pre_execution_gate`` — the skip is scoped to the byte
+        budget, not the entire gate.
         """
+        if getattr(self.args, 'command', None) == 'run':
+            return 0
         import logging as _logging
         _silent = _logging.getLogger("mlpstorage_py.capacity_gate.silent")
         if not _silent.handlers:

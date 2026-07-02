@@ -36,6 +36,11 @@ class TrainingRunRulesChecker(RunRulesChecker):
         'dataset.format',
         'dataset.num_samples_per_file',
         'reader.data_loader',
+        # Issue #629: s3dlio client-side prefetch depth for object-storage
+        # runs. Documented as a tunable in docs/RetinaNet_NP_Scaling_Results.md
+        # (default 256). Tunes I/O concurrency, not the workload spec —
+        # OPEN-only so closed submissions stay comparable.
+        'storage.storage_options.prefetch_window',
     ]
 
     # Parameters that the mlpstorage tool injects into the DLIO config without

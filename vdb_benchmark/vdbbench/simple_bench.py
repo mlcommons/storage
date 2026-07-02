@@ -833,6 +833,43 @@ def connect_to_milvus(host: str, port: str):
         return False
 
 
+
+
+def build_search_params(
+    index_type: Optional[str],
+    metric_type: str,
+    search_ef: int,
+    search_limit: int,
+) -> Dict[str, Any]:
+    """Build Milvus search params with the correct index-specific effort key.
+
+    The CLI keeps the historical --search-ef name. At query time, Milvus
+    expects different parameter names by index type:
+      * HNSW: ef
+      * DISKANN/AISAQ: search_list
+
+    Milvus requires both HNSW ef and DISKANN/AISAQ search_list to be at least
+    top_k/limit, so clamp the effective value to search_limit.
+    """
+    normalized_index_type = (index_type or "").upper()
+    effective_search_effort = max(search_ef, search_limit)
+
+    if normalized_index_type == "HNSW":
+        index_params = {"ef": effective_search_effort}
+    elif normalized_index_type in {"DISKANN", "AISAQ"}:
+        index_params = {"search_list": effective_search_effort}
+    elif normalized_index_type in {"", "UNKNOWN"}:
+        # Preserve legacy behavior if collection metadata did not expose an
+        # index type. Known non-HNSW indexes fall through to empty params.
+        index_params = {"ef": effective_search_effort}
+    else:
+        index_params = {}
+
+    return {
+        "metric_type": metric_type,
+        "params": index_params,
+    }
+
 # ===========================================================================
 # Benchmark worker
 # ===========================================================================
@@ -856,6 +893,7 @@ def execute_batch_queries(
     search_ef: int = 200,
     anns_field: str = "vector",
     metric_type: str = "COSINE",
+    index_type: Optional[str] = None,
 ) -> None:
     """
     Execute batches of vector queries and log results to disk.
@@ -928,10 +966,12 @@ def execute_batch_queries(
                 batch_start = time.time()
 
                 try:
-                    search_params = {
-                        "metric_type": metric_type,
-                        "params": {"ef": search_ef},
-                    }
+                    search_params = build_search_params(
+                        index_type=index_type,
+                        metric_type=metric_type,
+                        search_ef=search_ef,
+                        search_limit=search_limit,
+                    )
 
                     results = collection.search(
                         data=batch_vectors,
@@ -1310,7 +1350,10 @@ def main():
         "--search-ef",
         type=int,
         default=200,
-        help="Search ef parameter",
+        help=(
+            "Search effort parameter. Mapped to ef for HNSW and "
+            "search_list for DISKANN/AISAQ."
+        ),
     )
 
     termination_group = parser.add_argument_group("termination conditions")
@@ -1484,7 +1527,26 @@ def main():
         print("ERROR: recall_k must be > 0 after capping.")
         sys.exit(1)
 
+    metric_type = "COSINE"
+    source_index_type = None
+    if collection_info and collection_info.get("index_info"):
+        first_index_info = collection_info["index_info"][0]
+        detected_metric = first_index_info.get("metric_type")
+        if detected_metric:
+            metric_type = detected_metric
+        detected_index_type = first_index_info.get("index_type")
+        if detected_index_type:
+            source_index_type = str(detected_index_type).upper()
+
     config["recall_k"] = recall_k
+    config["metric_type"] = metric_type
+    config["index_type"] = source_index_type
+    config["search_params"] = build_search_params(
+        index_type=source_index_type,
+        metric_type=metric_type,
+        search_ef=args.search_ef,
+        search_limit=args.search_limit,
+    )
 
     print(f"Writing configuration to {output_dir}/config.json")
     with open(os.path.join(output_dir, "config.json"), "w", encoding="utf-8") as f:
@@ -1497,13 +1559,10 @@ def main():
     print("Ground truth is pre-computed using a FLAT/brute-force index.")
     print("This does NOT affect performance measurements.\n")
 
-    metric_type = "COSINE"
-    if collection_info and collection_info.get("index_info"):
-        detected_metric = collection_info["index_info"][0].get("metric_type")
-        if detected_metric:
-            metric_type = detected_metric
 
     print(f"Using metric type: {metric_type}")
+    print(f"Using index type: {source_index_type or 'UNKNOWN'}")
+    print(f"Using search params: {config['search_params']}")
 
     source_vec_field = "vector"
 
@@ -1653,6 +1712,7 @@ def main():
                         args.search_ef,
                         source_vec_field,
                         metric_type,
+                        source_index_type,
                     ),
                 )
 
@@ -1684,6 +1744,7 @@ def main():
                 args.search_ef,
                 source_vec_field,
                 metric_type,
+                source_index_type,
             )
 
     except Exception as exc:

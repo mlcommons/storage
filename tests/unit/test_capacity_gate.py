@@ -523,12 +523,19 @@ class TestTrainingBenchmarkRequiredBytes:
 
     def test_deferral_message_keeps_rerun_suggestion_for_non_datagen_commands(self):
         """Guardrail for #575: the rewrite must not silently drop the
-        actionable suggestion for the run / datasize commands where
-        --client-host-memory-in-gb IS accepted."""
+        actionable suggestion for the datasize / configview commands
+        where --client-host-memory-in-gb IS accepted.
+
+        Uses ``command="datasize"`` (not ``"run"``) after issue #627:
+        the run path now short-circuits with ``return 0`` before
+        reaching the lazy-collect branch, so it can no longer exercise
+        the deferral-message code path. ``datasize`` still hits it and
+        the #575 regression risk is identical there.
+        """
         from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
 
         bm = MagicMock(spec=TrainingBenchmark)
-        bm.args = SimpleNamespace(data_dir="/data", command="run")
+        bm.args = SimpleNamespace(data_dir="/data", command="datasize")
         try:
             del bm.cluster_information
         except AttributeError:
@@ -544,9 +551,108 @@ class TestTrainingBenchmarkRequiredBytes:
         assert result == 0
         logged = " ".join(str(c.args[0]) for c in bm.logger.info.call_args_list)
         assert "Re-run with --client-host-memory-in-gb" in logged, (
-            "run-path deferral message must retain the actionable re-run "
-            f"suggestion (the flag IS accepted by `run`). Got: {logged!r}"
+            "datasize-path deferral message must retain the actionable re-run "
+            f"suggestion (the flag IS accepted by `datasize`). Got: {logged!r}"
         )
+
+    # ------------------------------------------------------------------
+    # Issue #627: CAP-01 must skip the free-space check on `training run`.
+    # ------------------------------------------------------------------
+    # `training run` reads a pre-generated dataset — it does NOT write a
+    # fresh copy to data-dir. The current gate compares f_bavail against
+    # the full dataset size, which effectively requires two copies worth
+    # of free space (one already-populated + one for the phantom write).
+    # See issue #627 for the 80T/75T-used PFS repro. Fix: return 0 on
+    # `run` so check_capacity_4field trivially passes. datagen / datasize
+    # still compute and enforce the real byte budget.
+
+    def test_returns_zero_when_command_is_run_issue_627(self):
+        """Issue #627: `training run` must skip the free-space check.
+
+        Rationale: the dataset already exists on disk (produced by a prior
+        `datagen`). Requiring an additional full-dataset worth of
+        f_bavail on top of the already-consumed capacity blocks valid
+        runs on filesystems provisioned to just fit the dataset.
+
+        Contract: when args.command == 'run', the gate returns 0 WITHOUT
+        invoking calculate_training_data_size or accumulate_host_info.
+        The 0 return causes check_capacity_4field to trivially pass in
+        _pre_execution_gate (available_bytes >= 0 is always true).
+        CAP-02 shared-FS probe still runs — the fix is scoped to the
+        byte budget, not the whole pre-execution gate.
+        """
+        from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
+
+        bm = MagicMock(spec=TrainingBenchmark)
+        bm.args = SimpleNamespace(data_dir="/mnt/pfs", command="run")
+        # Pre-populate cluster_information so we can prove the early-return
+        # doesn't need it (and thereby prove it didn't fall through to the
+        # calculate_training_data_size code path).
+        bm.cluster_information = MagicMock()
+        bm.combined_params = {"dataset": {}, "reader": {}}
+        bm.logger = MagicMock()
+        bm.accumulate_host_info = MagicMock()
+
+        with patch(
+            "mlpstorage_py.benchmarks.dlio.calculate_training_data_size",
+            return_value=(364_000, 100, 50_797_117_602_000),
+        ) as mock_calc:
+            result = TrainingBenchmark.required_bytes_for_capacity_gate(bm)
+
+        assert result == 0, (
+            f"Issue #627: training run must return 0 required_bytes so "
+            f"CAP-01 skips the free-space check. Got {result!r}."
+        )
+        mock_calc.assert_not_called()
+        bm.accumulate_host_info.assert_not_called()
+
+    def test_still_computes_full_size_when_command_is_datagen_issue_627(self):
+        """Issue #627 scope guard: datagen path must be unchanged.
+
+        The fix targets `run` only. `datagen` still needs to verify the
+        filesystem has room for a fresh full-size dataset before it
+        starts writing. Regression guard for accidental over-scoping.
+        """
+        from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
+
+        bm = MagicMock(spec=TrainingBenchmark)
+        bm.args = SimpleNamespace(data_dir="/mnt/pfs", command="datagen")
+        bm.cluster_information = MagicMock()
+        bm.combined_params = {"dataset": {}, "reader": {}}
+        bm.logger = MagicMock()
+
+        with patch(
+            "mlpstorage_py.benchmarks.dlio.calculate_training_data_size",
+            return_value=(364_000, 100, 50_797_117_602_000),
+        ) as mock_calc:
+            result = TrainingBenchmark.required_bytes_for_capacity_gate(bm)
+
+        assert result == 50_797_117_602_000
+        mock_calc.assert_called_once()
+
+    def test_still_computes_full_size_when_command_is_datasize_issue_627(self):
+        """Issue #627 scope guard: datasize path must be unchanged.
+
+        `datasize` is a planning command — its whole purpose is to tell
+        the operator how much space a datagen would need. Skipping the
+        gate here would defeat that purpose.
+        """
+        from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
+
+        bm = MagicMock(spec=TrainingBenchmark)
+        bm.args = SimpleNamespace(data_dir="/mnt/pfs", command="datasize")
+        bm.cluster_information = MagicMock()
+        bm.combined_params = {"dataset": {}, "reader": {}}
+        bm.logger = MagicMock()
+
+        with patch(
+            "mlpstorage_py.benchmarks.dlio.calculate_training_data_size",
+            return_value=(364_000, 100, 50_797_117_602_000),
+        ) as mock_calc:
+            result = TrainingBenchmark.required_bytes_for_capacity_gate(bm)
+
+        assert result == 50_797_117_602_000
+        mock_calc.assert_called_once()
 
 
 class TestCheckpointingBenchmarkRequiredBytes:
