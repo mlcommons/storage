@@ -1357,6 +1357,10 @@ class TestSkipValidationBypassesCap02:
         bench._capacity_gate_destination = lambda: str(tmp_path)
         bench.required_bytes_for_capacity_gate = lambda: 1
         bench._run_uuid = "test-uuid"
+        # CAP-03 (issue #601) also fires from _pre_execution_gate. These
+        # tests target CAP-02 only; return None from _fs_separation_paths
+        # to take the A8 skip branch (no local FS to probe).
+        bench._fs_separation_paths = lambda: None
         return bench
 
     def test_skip_validation_true_skips_cap02(self, tmp_path):
