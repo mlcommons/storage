@@ -662,8 +662,35 @@ class TestWriteRunSummary:
         option_results = {1: self._option_result()}
         bm._write_run_summary(option_results, npernode=2, host_count=1, total_ranks=2, trials=3)
 
-        expected = Path(output_dir) / 'kvcache_run_summary_20260523_120000.json'
+        expected = Path(output_dir) / 'summary.json'
         assert expected.exists(), f"Expected summary at {expected}"
+
+    def test_summary_filename_matches_submission_loader(self, tmp_path):
+        """Issue #638 regression: the emitted filename must match the literal
+        string the submission checker's loader looks for. Prior behavior wrote
+        `kvcache_run_summary_<datetime>.json`; loader.py:102 hardcodes
+        `summary.json`, so kvcache summaries were never loaded and STRUCT-09
+        cross-checks silently degraded.
+        """
+        import inspect
+        from mlpstorage_py.submission_checker.loader import Loader
+        # Loader._collect_timestamped_logs joins timestamp_path with the literal
+        # basename. Assert that literal is present in the loader source so a
+        # future rename in either place fails this test.
+        loader_src = inspect.getsource(Loader._collect_timestamped_logs)
+        assert '"summary.json"' in loader_src, (
+            "loader._collect_timestamped_logs no longer joins 'summary.json'; "
+            "kvcache._write_run_summary must be updated in lockstep."
+        )
+        bm = _make_run_benchmark(tmp_path)
+        output_dir = str(tmp_path / 'summary_out')
+        os.makedirs(output_dir, exist_ok=True)
+        bm.run_result_output = output_dir
+        bm._write_run_summary(
+            {1: self._option_result()},
+            npernode=2, host_count=1, total_ranks=2, trials=3,
+        )
+        assert (Path(output_dir) / 'summary.json').exists()
 
     def test_schema_version_is_1_0(self, tmp_path):
         """Written JSON must have schema_version='1.0'."""
@@ -674,7 +701,7 @@ class TestWriteRunSummary:
 
         bm._write_run_summary({1: self._option_result()}, npernode=2, host_count=1, total_ranks=2, trials=3)
 
-        with open(Path(output_dir) / 'kvcache_run_summary_20260523_120000.json') as f:
+        with open(Path(output_dir) / 'summary.json') as f:
             data = json.load(f)
         assert data['schema_version'] == '1.0'
 
@@ -687,7 +714,7 @@ class TestWriteRunSummary:
 
         bm._write_run_summary({1: self._option_result()}, npernode=2, host_count=1, total_ranks=2, trials=3)
 
-        with open(Path(output_dir) / 'kvcache_run_summary_20260523_120000.json') as f:
+        with open(Path(output_dir) / 'summary.json') as f:
             data = json.load(f)
 
         required = {'schema_version', 'run_datetime', 'npernode', 'host_count',
@@ -708,7 +735,7 @@ class TestWriteRunSummary:
         }
         bm._write_run_summary(option_results, npernode=2, host_count=1, total_ranks=2, trials=3)
 
-        with open(Path(output_dir) / 'kvcache_run_summary_20260523_120000.json') as f:
+        with open(Path(output_dir) / 'summary.json') as f:
             data = json.load(f)
         assert data['partial_failure'] is True
 
@@ -722,7 +749,7 @@ class TestWriteRunSummary:
         option_results = {1: self._option_result(partial=False)}
         bm._write_run_summary(option_results, npernode=2, host_count=1, total_ranks=2, trials=3)
 
-        with open(Path(output_dir) / 'kvcache_run_summary_20260523_120000.json') as f:
+        with open(Path(output_dir) / 'summary.json') as f:
             data = json.load(f)
         assert data['partial_failure'] is False
 
@@ -736,7 +763,7 @@ class TestWriteRunSummary:
         option_results = {1: self._option_result(bw=5.0)}
         bm._write_run_summary(option_results, npernode=2, host_count=1, total_ranks=2, trials=3)
 
-        with open(Path(output_dir) / 'kvcache_run_summary_20260523_120000.json') as f:
+        with open(Path(output_dir) / 'summary.json') as f:
             data = json.load(f)
         # JSON keys are strings after serialization
         options = data['options']
@@ -763,7 +790,7 @@ class TestWriteRunSummary:
             'cpu_tier_ranks': [],
         }
         bm._write_run_summary({1: option_result}, npernode=2, host_count=1, total_ranks=2, trials=3)
-        summary_files = list(Path(output_dir).glob('kvcache_run_summary_*.json'))
+        summary_files = list(Path(output_dir).glob('summary.json'))
         assert len(summary_files) == 1
 
 
