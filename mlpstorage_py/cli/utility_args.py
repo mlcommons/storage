@@ -33,8 +33,13 @@ def add_reports_arguments(parser):
     # results.{csv,json} must live inside the submission tree so submitters
     # cannot accidentally exclude them from what MLCommons reviews.
     # D-10 / LAY-04: `reports reportgen` emits aggregated report output under
-    # the canonical layout; require --systemname.
-    add_universal_arguments(reportgen, req_results=True, req_systemname=True)
+    # the canonical layout. --systemname is OPTIONAL for reportgen: when
+    # omitted, the global summary is aggregated across every system present
+    # under `<sentinel>/<div>/<orgname>/results/` and written into that
+    # `results/` folder itself (per-model rollups still land in each
+    # system's own subtree, unchanged). When supplied, reportgen narrows
+    # to that single system's slice.
+    add_universal_arguments(reportgen, req_results=True, req_systemname=False)
 
 
 def add_history_arguments(parser):
