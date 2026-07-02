@@ -3665,27 +3665,30 @@ class TestStageScriptPreservesBasename:
         )
 
 
-class TestSharedFsProbeIgnoresStDevAcrossHosts:
-    """Regression for issue #566: the CAP-02 probe must NOT include st_dev
-    in the cross-host identity check.
+class TestSharedFsProbeSucceedsOnMatchingContent:
+    """Regression for issues #566 and #628: the CAP-02 probe must NOT reject
+    a run because st_dev or st_ino differ across nodes.
 
-    st_dev is the kernel's per-mount device id. On FUSE / distributed
-    filesystems (DAOS DFuse, NFS, Lustre, GPFS, BeeGFS, ...) the same
-    shared mount gets a different st_dev on every node because each node
-    runs its own mount instance. st_ino IS identical cluster-wide because
-    it is derived from the underlying object/inode identity.
+    History:
+      #566 — the old probe compared (st_dev, st_ino) tuples; on FUSE /
+        distributed filesystems (DAOS DFuse, NFS, Lustre, GPFS, BeeGFS)
+        st_dev legitimately differs per node. The #566 fix dropped st_dev
+        from the check and compared st_ino only.
+      #628 — st_ino equality is still not a valid universal shared-FS test.
+        Per-mount-inode FUSE filesystems (s3fs, goofys, JuiceFS, many
+        object-storage gateways) assign inodes per-mount even when the
+        underlying namespace is shared. The current probe verifies content
+        instead: rank 0 writes a 64-byte payload, every rank reads it back
+        and reports content_sha256. Only the bytes matter — st_dev and
+        st_ino are no longer collected or checked.
 
-    Pre-fix behavior (the bug): rank 0 gathered (st_dev, st_ino) tuples
-    from every rank and rejected the run unless all tuples were identical,
-    which made CAP-02 unsatisfiable on FUSE — blocking every multi-host
-    DAOS / NFS / Lustre run.
-
-    Post-fix behavior (locked by this test): rank 0 must succeed (status
-    "ok", no failure_summary) when every rank reports the same st_ino,
-    even with mismatched st_dev values.
+    Post-fix behavior (locked by this test): with a fake mpi4py that
+    gathers rank 0's own payload into every slot (i.e., every rank read
+    the same bytes), the probe emits status='ok' regardless of any
+    st_dev/st_ino values that might appear in a real deployment.
     """
 
-    def test_same_st_ino_different_st_dev_succeeds(self, tmp_path, monkeypatch):
+    def test_matching_content_across_ranks_succeeds(self, tmp_path, monkeypatch):
         import contextlib
         import io
         import json
@@ -3693,18 +3696,16 @@ class TestSharedFsProbeIgnoresStDevAcrossHosts:
         import sys
         from unittest.mock import MagicMock
 
-        # Build the exact bad-tuple-good-inode shape from the issue:
-        #   host=R2-06 rank=0 st_dev=46 st_ino=281482956119445
-        #   host=R2-05 rank=1 st_dev=47 st_ino=281482956119445  (different st_dev)
+        # Gather returns [rank_0_payload, rank_0_payload] — simulating a
+        # genuinely shared FS where every rank reads back the same bytes
+        # rank 0 wrote. Under a per-mount-inode FUSE mount the underlying
+        # st_ino values would differ, but the probe no longer looks at
+        # them (issue #628). Only content_sha256/content_length are
+        # consulted, and they match by construction.
         fake_comm = MagicMock()
         fake_comm.Get_rank.return_value = 0
         fake_comm.Get_size.return_value = 2
-        fake_comm.gather.return_value = [
-            {"hostname": "R2-06", "rank": 0, "failure": None,
-             "st_dev": 46, "st_ino": 281482956119445},
-            {"hostname": "R2-05", "rank": 1, "failure": None,
-             "st_dev": 47, "st_ino": 281482956119445},
-        ]
+        fake_comm.gather.side_effect = lambda payload, root=0: [payload, payload]
         fake_comm.bcast.side_effect = lambda v, root=0: v
         fake_comm.Barrier.return_value = None
 
@@ -3717,7 +3718,7 @@ class TestSharedFsProbeIgnoresStDevAcrossHosts:
 
         monkeypatch.setattr(
             sys, "argv",
-            ["probe", str(tmp_path), "fuse-st-dev-mismatch-uuid"],
+            ["probe", str(tmp_path), "content-verify-shared-fs-uuid"],
         )
 
         import time as _time
@@ -3746,8 +3747,8 @@ class TestSharedFsProbeIgnoresStDevAcrossHosts:
         payload = json.loads(m.group(1).strip())
 
         assert payload["status"] == "ok", (
-            "Issue #566: same st_ino with different st_dev must be treated as "
-            "shared FS (FUSE / DAOS / NFS / Lustre all assign st_dev per-node). "
+            "Every rank read back rank 0's bytes → shared FS. Any status "
+            "other than 'ok' means the content-verify check regressed. "
             f"Got payload: {payload!r}"
         )
         assert payload["failure_summary"] is None, (
