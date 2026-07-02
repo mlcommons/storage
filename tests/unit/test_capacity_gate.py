@@ -523,12 +523,19 @@ class TestTrainingBenchmarkRequiredBytes:
 
     def test_deferral_message_keeps_rerun_suggestion_for_non_datagen_commands(self):
         """Guardrail for #575: the rewrite must not silently drop the
-        actionable suggestion for the run / datasize commands where
-        --client-host-memory-in-gb IS accepted."""
+        actionable suggestion for the datasize / configview commands
+        where --client-host-memory-in-gb IS accepted.
+
+        Uses ``command="datasize"`` (not ``"run"``) after issue #627:
+        the run path now short-circuits with ``return 0`` before
+        reaching the lazy-collect branch, so it can no longer exercise
+        the deferral-message code path. ``datasize`` still hits it and
+        the #575 regression risk is identical there.
+        """
         from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
 
         bm = MagicMock(spec=TrainingBenchmark)
-        bm.args = SimpleNamespace(data_dir="/data", command="run")
+        bm.args = SimpleNamespace(data_dir="/data", command="datasize")
         try:
             del bm.cluster_information
         except AttributeError:
@@ -544,8 +551,8 @@ class TestTrainingBenchmarkRequiredBytes:
         assert result == 0
         logged = " ".join(str(c.args[0]) for c in bm.logger.info.call_args_list)
         assert "Re-run with --client-host-memory-in-gb" in logged, (
-            "run-path deferral message must retain the actionable re-run "
-            f"suggestion (the flag IS accepted by `run`). Got: {logged!r}"
+            "datasize-path deferral message must retain the actionable re-run "
+            f"suggestion (the flag IS accepted by `datasize`). Got: {logged!r}"
         )
 
     # ------------------------------------------------------------------
