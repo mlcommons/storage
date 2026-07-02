@@ -1,8 +1,97 @@
-# Phase 4 (COLL-05): sysctl key allowlist. One shell-style glob per line.
+# sysctl key allowlist. One shell-style glob per line.
 # Lines starting with '#' are comments; blank lines are ignored.
 # Edit this file to add patterns; no code change required.
+#
+# NOTE on cross-host dedup (auto_generator._sysctl_signature):
+# Every leaf listed here participates in the client-stanza fingerprint.
+# Keys whose value varies per-boot or per-host (e.g. net.core.netdev_rss_key,
+# net.core.rps_default_mask, net.core.flow_limit_cpu_bitmap) MUST NOT be
+# allowlisted or identically-configured clients will fail to collapse into
+# one node_description with quantity: N.
+#
+# NOTE on fnmatch depth (RESEARCH Q3 in cluster_collector.py):
+# `fnmatch` is not path-separator aware. `net.core.*` matches
+# `net.core.rmem_max` AND `net.core.netdev_rss_key` AND any future deeper
+# leaf. Prefer explicit literal keys over broad globs so a new noisy leaf
+# added in a future kernel doesn't silently break dedup.
 
-vm.dirty_*
-net.core.*
-net.ipv4.tcp_*
+# ---------------------------------------------------------------------
+# Page cache / writeback (buffered-I/O behavior; primary storage impact)
+# ---------------------------------------------------------------------
+vm.dirty_background_bytes
+vm.dirty_background_ratio
+vm.dirty_bytes
+vm.dirty_ratio
+vm.dirty_expire_centisecs
+vm.dirty_writeback_centisecs
+
+# ---------------------------------------------------------------------
+# Virtual memory tuning (reclaim / NUMA / mmap)
+# ---------------------------------------------------------------------
+vm.swappiness
+vm.min_free_kbytes
+vm.vfs_cache_pressure
+vm.zone_reclaim_mode
+vm.overcommit_memory
+vm.overcommit_ratio
+vm.max_map_count
+vm.nr_hugepages
+vm.nr_overcommit_hugepages
+vm.watermark_scale_factor
+vm.page-cluster
+
+# ---------------------------------------------------------------------
+# Socket buffers (critical for NFS / S3 / any network storage)
+# ---------------------------------------------------------------------
+net.core.rmem_default
+net.core.rmem_max
+net.core.wmem_default
+net.core.wmem_max
+net.core.optmem_max
+
+# ---------------------------------------------------------------------
+# Network stack throughput & latency knobs commonly tuned for storage
+# ---------------------------------------------------------------------
+net.core.netdev_max_backlog
+net.core.netdev_budget
+net.core.netdev_budget_usecs
+net.core.somaxconn
+net.core.busy_poll
+net.core.busy_read
+net.core.default_qdisc
+
+# ---------------------------------------------------------------------
+# TCP tuning (per-socket buffers, congestion control, mid-flow behavior)
+# ---------------------------------------------------------------------
+net.ipv4.tcp_rmem
+net.ipv4.tcp_wmem
+net.ipv4.tcp_congestion_control
+net.ipv4.tcp_slow_start_after_idle
+net.ipv4.tcp_mtu_probing
+net.ipv4.tcp_notsent_lowat
+net.ipv4.tcp_sack
+net.ipv4.tcp_window_scaling
+net.ipv4.tcp_timestamps
+net.ipv4.tcp_low_latency
+net.ipv4.tcp_no_metrics_save
+net.ipv4.ip_local_port_range
+
+# ---------------------------------------------------------------------
+# Filesystem limits (FD ceilings, libaio slots, inotify)
+# ---------------------------------------------------------------------
+fs.file-max
+fs.nr_open
+fs.aio-max-nr
+fs.inotify.max_user_watches
+
+# ---------------------------------------------------------------------
+# Kernel / scheduler / IPC
+# ---------------------------------------------------------------------
 kernel.numa_balancing
+kernel.io_uring_disabled
+kernel.sched_migration_cost_ns
+kernel.sched_autogroup_enabled
+kernel.pid_max
+kernel.threads-max
+kernel.shmmax
+kernel.shmall
