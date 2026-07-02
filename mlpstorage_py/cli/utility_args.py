@@ -29,12 +29,9 @@ def add_reports_arguments(parser):
         help=HELP_MESSAGES['reportgen']
     )
 
-    reportgen.add_argument(
-        '--output-dir',
-        type=str,
-        help=HELP_MESSAGES['output_dir']
-    )
-
+    # --output-dir intentionally not exposed (GH#616): the summary
+    # results.{csv,json} must live inside the submission tree so submitters
+    # cannot accidentally exclude them from what MLCommons reviews.
     # D-10 / LAY-04: `reports reportgen` emits aggregated report output under
     # the canonical layout; require --systemname.
     add_universal_arguments(reportgen, req_results=True, req_systemname=True)

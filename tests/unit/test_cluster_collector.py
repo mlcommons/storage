@@ -4190,3 +4190,286 @@ class TestFailureMessagesCappedAtScale:
                 'elided' in lower or 'omitted' in lower), (
             f'cardinality message must announce elision; got: {msg!r}'
         )
+
+
+class TestIssue594VenvPythonInMpiCommands:
+    """Regression for issue #594: production MPI command-builders must use
+    `sys.executable` rather than the bare token `python3`.
+
+    The reporter observed that `mpirun` resolves `python3` from the remote
+    node's default PATH (typically /usr/bin/python3), which does not have
+    `mpi4py` installed in the launcher's venv. The collector script then
+    hits `ImportError: mpi4py` on every rank, writes `_mpi_import_error`
+    to its staging file, exits 1, and the launcher reports a generic
+    60-second timeout — hiding the real diagnosis.
+
+    Two call sites carry the same bug; both are pinned here:
+      - mlpstorage_py/cluster_collector.py:3040  (_generate_mpi_command)
+      - mlpstorage_py/cluster_collector.py:3559  (run_shared_fs_probe)
+    """
+
+    def test_generate_mpi_command_uses_sys_executable(self, tmp_path):
+        """_generate_mpi_command must embed sys.executable, never bare
+        'python3', so the per-rank interpreter inherits the launcher's
+        venv when the venv lives on a shared FS."""
+        import sys as _sys
+        from mlpstorage_py.cluster_collector import MPIClusterCollector
+
+        coll = MPIClusterCollector(
+            hosts=["host-a", "host-b"],
+            mpi_bin="mpirun",
+            logger=MagicMock(),
+            results_dir=str(tmp_path),
+            allow_run_as_root=True,
+        )
+        cmd = coll._generate_mpi_command(
+            script_path="/tmp/staging/mlps_collector.py",
+            output_path="/tmp/staging/cluster_info.json",
+        )
+
+        assert _sys.executable in cmd, (
+            "issue #594: _generate_mpi_command must invoke sys.executable, "
+            f"not bare 'python3'. Got: {cmd!r}"
+        )
+        # Be specific: the python3 token must not appear as a bare
+        # whitespace-delimited word in the command. (sys.executable itself
+        # may legitimately contain the substring 'python3' as part of a
+        # path, so we check the bare word.)
+        assert " python3 " not in f" {cmd} ", (
+            "issue #594: command contains bare 'python3' token, which "
+            "mpirun will resolve to the remote /usr/bin/python3 (no venv "
+            f"mpi4py). Got: {cmd!r}"
+        )
+
+    def test_run_shared_fs_probe_uses_sys_executable(self, tmp_path, monkeypatch):
+        """run_shared_fs_probe must invoke sys.executable on each rank
+        (same root cause; the reporter's follow-up comment on #594).
+
+        run_shared_fs_probe builds a single shell command string and calls
+        subprocess.run(cmd_str, shell=True, ...). We intercept that call
+        and assert the cmd_str contains sys.executable and not the bare
+        token `python3`. Using ["localhost","localhost"] skips remote SCP
+        staging (remote_hosts list is empty) so we only need to mock
+        subprocess.run.
+        """
+        import sys as _sys
+        from mlpstorage_py import cluster_collector as cc
+
+        captured_cmds = []
+
+        def fake_run(cmd, *args, **kwargs):
+            captured_cmds.append(cmd)
+            result = MagicMock()
+            # Return a non-zero rc with no stdout markers so the launcher
+            # raises rather than blocks trying to parse a real result.
+            result.returncode = 124
+            result.stdout = ""
+            result.stderr = "stub"
+            return result
+
+        monkeypatch.setattr(cc.subprocess, "run", fake_run)
+
+        # Two localhost entries clears the SC#8 single-host short-circuit
+        # (len(hosts) > 1) while ensuring _is_localhost dedup yields an
+        # empty remote_hosts list — no SCP staging path is taken.
+        try:
+            cc.run_shared_fs_probe(
+                destination=str(tmp_path),
+                hosts=["localhost", "localhost"],
+                run_uuid="test-uuid-594",
+                logger=MagicMock(),
+                mpi_bin="mpirun",
+                allow_run_as_root=True,
+                timeout_seconds=5,
+            )
+        except Exception:
+            # Launcher will raise on rc=124; we only care about the cmd_str
+            # it built before invoking subprocess.run.
+            pass
+
+        # captured_cmds entries are shell strings (shell=True call site).
+        mpirun_strs = [c for c in captured_cmds if isinstance(c, str) and "mpirun" in c]
+        assert mpirun_strs, (
+            f"expected at least one mpirun shell string; got {captured_cmds!r}"
+        )
+        cmd_str = mpirun_strs[0]
+        assert _sys.executable in cmd_str, (
+            "issue #594: run_shared_fs_probe must invoke sys.executable, "
+            f"not bare 'python3'. Got cmd_str: {cmd_str!r}"
+        )
+        # Bare-token check: sys.executable may legitimately contain
+        # 'python3' as part of a path (e.g. /usr/bin/python3.12), but the
+        # standalone shell token 'python3' must not appear.
+        assert " python3 " not in f" {cmd_str} ", (
+            "issue #594: cmd_str contains bare 'python3' token. "
+            f"Got: {cmd_str!r}"
+        )
+
+
+class TestIssue594LoudFailureOnMpiTimeout:
+    """Regression for issue #594 loud-failure follow-up: when mpi4py is
+    missing on some ranks, the failing rank writes _mpi_import_error to
+    the staged cluster_info.json before exiting; the surviving ranks
+    deadlock in comm.gather() and the launcher hits TimeoutExpired.
+
+    Pre-fix behaviour: the launcher raised the generic
+    "MPI collection timed out after N seconds" message, hiding the
+    actionable "mpi4py not available on host X" diagnosis sitting in the
+    staging file.
+
+    Post-fix behaviour (locked by these tests): the launcher inspects
+    the staging file in the TimeoutExpired handler and, if it carries
+    a _mpi_import_error payload, raises a RuntimeError mentioning both
+    the timeout AND the underlying mpi4py-missing diagnosis."""
+
+    def _build_collector_with_staged_error(self, tmp_path, error_payload):
+        """Build an MPIClusterCollector pointed at tmp_path with a
+        pre-staged cluster_info.json containing the given payload."""
+        from mlpstorage_py.cluster_collector import MPIClusterCollector
+
+        staging_dir = tmp_path / "collector-staging"
+        staging_dir.mkdir()
+        (staging_dir / "cluster_info.json").write_text(
+            json.dumps(error_payload)
+        )
+        # The script will be (re)written by collect(); we just need the
+        # path to exist so makedirs is a no-op.
+
+        coll = MPIClusterCollector(
+            hosts=["host-a", "host-b"],
+            mpi_bin="mpirun",
+            logger=MagicMock(),
+            results_dir=str(tmp_path),
+            timeout_seconds=2,
+            allow_run_as_root=True,
+        )
+        return coll
+
+    def test_timeout_with_staged_mpi_import_error_surfaces_diagnosis(
+        self, tmp_path, monkeypatch,
+    ):
+        """The TimeoutExpired handler must read the staged
+        cluster_info.json and, if _mpi_import_error is present, surface
+        the original error message and hostname in the RuntimeError."""
+        from mlpstorage_py import cluster_collector as cc
+
+        coll = self._build_collector_with_staged_error(
+            tmp_path,
+            {
+                "_mpi_import_error": True,
+                "_error_message": "mpi4py not available: No module named 'mpi4py'",
+                "_hostname": "cn025",
+            },
+        )
+
+        # Stub out remote staging so collect() doesn't actually SSH.
+        monkeypatch.setattr(
+            coll, "_remote_hosts_needing_staging",
+            lambda: [],
+        )
+
+        def raise_timeout(*args, **kwargs):
+            raise subprocess.TimeoutExpired(cmd="mpirun ...", timeout=2)
+
+        monkeypatch.setattr(cc.subprocess, "run", raise_timeout)
+
+        with pytest.raises(RuntimeError) as excinfo:
+            coll.collect()
+
+        msg = str(excinfo.value)
+        # Must still mention the timeout (operator context) ...
+        assert "timed out" in msg, (
+            f"timeout context must remain in the error; got: {msg!r}"
+        )
+        # ... AND must surface the underlying mpi4py diagnosis from the
+        # staged file (the whole point of the fix).
+        assert "mpi4py" in msg, (
+            "issue #594 loud-failure: error must surface the staged "
+            f"_mpi_import_error message. Got: {msg!r}"
+        )
+        assert "cn025" in msg, (
+            "issue #594 loud-failure: error must name the host that "
+            f"reported the failure. Got: {msg!r}"
+        )
+
+    def test_timeout_without_staged_error_keeps_generic_message(
+        self, tmp_path, monkeypatch,
+    ):
+        """When no staged file (or no _mpi_import_error in it), the
+        launcher must continue raising the generic timeout message —
+        the loud-failure fix MUST NOT swallow real network-level
+        hangs as if they were import errors."""
+        from mlpstorage_py.cluster_collector import MPIClusterCollector
+        from mlpstorage_py import cluster_collector as cc
+
+        coll = MPIClusterCollector(
+            hosts=["host-a", "host-b"],
+            mpi_bin="mpirun",
+            logger=MagicMock(),
+            results_dir=str(tmp_path),
+            timeout_seconds=2,
+            allow_run_as_root=True,
+        )
+        monkeypatch.setattr(
+            coll, "_remote_hosts_needing_staging",
+            lambda: [],
+        )
+
+        def raise_timeout(*args, **kwargs):
+            raise subprocess.TimeoutExpired(cmd="mpirun ...", timeout=2)
+
+        monkeypatch.setattr(cc.subprocess, "run", raise_timeout)
+
+        with pytest.raises(RuntimeError) as excinfo:
+            coll.collect()
+
+        msg = str(excinfo.value)
+        assert "timed out" in msg, (
+            f"generic timeout path must mention timeout; got: {msg!r}"
+        )
+        assert "mpi4py" not in msg, (
+            "no staged error → must not invent an mpi4py diagnosis; "
+            f"got: {msg!r}"
+        )
+
+    def test_read_staged_mpi_import_error_helper(self, tmp_path):
+        """Direct unit-test of the staging-file inspection helper that
+        both the success path and the timeout path rely on."""
+        from mlpstorage_py.cluster_collector import (
+            _read_staged_mpi_import_error,
+        )
+
+        # Missing file → None.
+        missing = tmp_path / "nope.json"
+        assert _read_staged_mpi_import_error(str(missing)) is None
+
+        # File exists but is not JSON → None (no crash).
+        garbage = tmp_path / "garbage.json"
+        garbage.write_text("not json at all")
+        assert _read_staged_mpi_import_error(str(garbage)) is None
+
+        # Valid JSON but no _mpi_import_error key → None.
+        normal = tmp_path / "normal.json"
+        normal.write_text(json.dumps({"hostname": "x", "mpi_rank": 0}))
+        assert _read_staged_mpi_import_error(str(normal)) is None
+
+        # Valid JSON with _mpi_import_error → dict with message + hostname.
+        error = tmp_path / "error.json"
+        error.write_text(json.dumps({
+            "_mpi_import_error": True,
+            "_error_message": "mpi4py not available: No module named 'mpi4py'",
+            "_hostname": "cn025",
+        }))
+        got = _read_staged_mpi_import_error(str(error))
+        assert got == {
+            "message": "mpi4py not available: No module named 'mpi4py'",
+            "hostname": "cn025",
+        }
+
+        # _mpi_import_error: True but no _error_message → fallback default.
+        minimal = tmp_path / "minimal.json"
+        minimal.write_text(json.dumps({"_mpi_import_error": True}))
+        got = _read_staged_mpi_import_error(str(minimal))
+        assert got is not None
+        assert got["message"] == "mpi4py not available"
+        assert got["hostname"] == "unknown"

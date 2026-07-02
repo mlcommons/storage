@@ -734,6 +734,17 @@ class VectorDBBenchmark(Benchmark):
         """
         return None
 
+    def _fs_separation_paths(self):
+        """Return ``None`` — VectorDB has no local data path to probe.
+
+        For the same A8 reason as ``_capacity_gate_destination``: VDB
+        data lives inside a remote (or out-of-process) engine; there is
+        no submitter-owned local path that maps to the dataset for
+        rule 5.4.2's purposes. CAP-03 is skipped via the
+        ``_run_fs_separation_probe`` None-paths branch.
+        """
+        return None
+
     def execute_datagen(self) -> int:
         """Execute VectorDB data generation / load."""
         # CAP-01 (A8 escape hatch — destination is always None for VDB).

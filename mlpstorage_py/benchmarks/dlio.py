@@ -822,11 +822,25 @@ class TrainingBenchmark(DLIOBenchmark):
                 cluster_info = self.accumulate_host_info(self.args)
                 self.cluster_information = cluster_info
             except AttributeError as exc:
-                self.logger.info(
-                    "CAP-01 deferred: unable to determine system memory "
-                    f"({exc}). Re-run with --client-host-memory-in-gb to "
-                    "enable the disk-capacity check."
-                )
+                # The --client-host-memory-in-gb flag is intentionally NOT
+                # registered for datagen (see cli/training_args.py around
+                # the "Memory argument — not for datagen" comment), so don't
+                # tell datagen users to "re-run with" a flag the parser will
+                # reject. See issue #575 (and the earlier confusion in #578).
+                command = getattr(self.args, 'command', None)
+                if command == 'datagen':
+                    self.logger.info(
+                        "CAP-01 skipped for datagen: the disk-capacity gate "
+                        "needs --client-host-memory-in-gb, which datagen does "
+                        "not accept by design. This notice is informational; "
+                        "the run will proceed."
+                    )
+                else:
+                    self.logger.info(
+                        "CAP-01 deferred: unable to determine system memory "
+                        f"({exc}). Re-run with --client-host-memory-in-gb to "
+                        "enable the disk-capacity check."
+                    )
                 return 0
         _, _, total_disk_bytes = calculate_training_data_size(
             self.args,
@@ -850,6 +864,21 @@ class TrainingBenchmark(DLIOBenchmark):
         if self._is_object_storage():
             return None
         return self.args.data_dir
+
+    def _fs_separation_paths(self) -> Optional[tuple]:
+        """Return ``(data_dir, results_dir)`` for CAP-03 (issue #601).
+
+        Object-storage runs skip the probe via the same A8 escape hatch
+        as CAP-01 — the dataset side is an s3:// URI with no local FS
+        identity to probe against the local results_dir.
+        """
+        if self._is_object_storage():
+            return None
+        data_dir = getattr(self.args, "data_dir", None)
+        results_dir = getattr(self.args, "results_dir", None)
+        if not data_dir or not results_dir:
+            return None
+        return (data_dir, results_dir)
 
     def datasize(self):
         # CAP-01: fail fast BEFORE the size calc prints its results so a
@@ -1025,6 +1054,21 @@ class CheckpointingBenchmark(DLIOBenchmark):
         if not cf:
             return None
         return os.path.join(cf, self.args.model)
+
+    def _fs_separation_paths(self) -> Optional[tuple]:
+        """Return ``(checkpoint_folder, results_dir)`` for CAP-03 (issue #601).
+
+        For checkpointing the dataset analog is the checkpoint_folder —
+        rule 4.4.2 verifies checkpoint_folder vs results_dir live on
+        different filesystems. Object-storage runs skip via A8.
+        """
+        if self._is_object_storage():
+            return None
+        cf = getattr(self.args, "checkpoint_folder", None)
+        results_dir = getattr(self.args, "results_dir", None)
+        if not cf or not results_dir:
+            return None
+        return (cf, results_dir)
 
     def datasize(self):
         # CAP-01: fail fast BEFORE the rank-by-rank size table prints.

@@ -604,12 +604,14 @@ class TestAddReportsArguments:
                                   '--systemname', 'sys-v1'])
         assert args.command == 'reportgen'
 
-    def test_output_dir_argument(self, parser):
-        """Reportgen should accept --output-dir argument."""
-        args = parser.parse_args(['reportgen', '--results-dir', '/tmp',
-                                  '--systemname', 'sys-v1',
-                                  '--output-dir', '/output'])
-        assert args.output_dir == '/output'
+    def test_output_dir_argument_rejected(self, parser):
+        """Reportgen must reject --output-dir. Removed in #616 so summary
+        files always land inside the submission tree at
+        <results-dir>/results.{csv,json}."""
+        with pytest.raises(SystemExit):
+            parser.parse_args(['reportgen', '--results-dir', '/tmp',
+                               '--systemname', 'sys-v1',
+                               '--output-dir', '/output'])
 
 
 class TestAddHistoryArguments:

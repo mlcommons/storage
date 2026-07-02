@@ -58,10 +58,20 @@ PARSER_MAP = {
     "default": JSONParser
 }
 
+# Issue #600: prior versions copied this list from RUN_REQUIRED_FILES, which
+# wrongly demanded `*output.json` / `*per_epoch_stats.json` / `*summary.json`
+# in datagen directories — those are training-loop outputs, never written by
+# DLIO datagen (`workflow.generate_data=True, workflow.train=False` skips the
+# loop). `training_<ts>_metadata.json` is the mlpstorage-injected metadata
+# file written by `Benchmark.write_metadata` for every command.
 DATAGEN_REQUIRED_FILES = {
-    "v2.0": [r"training_datagen\.stdout.log", r"training_datagen.stderr\.log", r".*output\.json$", r".*per_epoch_stats\.json$", r".*summary\.json$", r"dlio\.log"],
-    "v3.0": [r"training_datagen\.stdout.log", r"training_datagen.stderr\.log", r".*output\.json$", r".*per_epoch_stats\.json$", r",*summary\.json$", r"dlio\.log"],
-    "default": [r"training_datagen\.stdout.log", r"training_datagen.stderr\.log", r".*output\.json$", r".*per_epoch_stats\.json$", r".*summary\.json$", r"dlio\.log"],
+    # DLIO datagen runs with workflow.generate_data=True, workflow.train=False, so it
+    # does NOT emit the *output.json / *per_epoch_stats.json / *summary.json files that
+    # the training loop produces. The required-files list reflects only what datagen
+    # actually writes plus the mlpstorage-injected per-datagen metadata.
+    "v2.0": [r"training_datagen\.stdout\.log$", r"training_datagen\.stderr\.log$", r"dlio\.log$", r"training_.*_metadata\.json$"],
+    "v3.0": [r"training_datagen\.stdout\.log$", r"training_datagen\.stderr\.log$", r"dlio\.log$", r"training_.*_metadata\.json$"],
+    "default": [r"training_datagen\.stdout\.log$", r"training_datagen\.stderr\.log$", r"dlio\.log$", r"training_.*_metadata\.json$"],
 }
 
 DATAGEN_REQUIRED_FOLDERS = {
@@ -97,26 +107,12 @@ CHECKPOINT_REQUIRED_FOLDERS = {
     "default": ["dlio_config"],
 }
 
-# TODO: Ask for correct values
-NUM_DATASET_TRAIN_FILES = {
-    "unet3d": 14000,
-    "retinanet": 0
-}
-
-NUM_DATASET_EVAL_FILES = {
-    "unet3d": 0,
-    "retinanet": 0
-}
-
-NUM_DATASET_TRAIN_FOLDERS = {
-    "unet3d": 0,
-    "retinanet": 0
-}
-
-NUM_DATASET_EVAL_FOLDERS = {
-    "unet3d": 0,
-    "retinanet": 0
-}
+# Issue #608: NUM_DATASET_TRAIN_FILES / NUM_DATASET_EVAL_FILES /
+# NUM_DATASET_TRAIN_FOLDERS / NUM_DATASET_EVAL_FOLDERS placeholder dicts
+# (`# TODO: Ask for correct values`) were deleted here. Rule 3.3.1 now
+# reads the per-submission `datasize/<ts>/training_<ts>_metadata.json`
+# instead, which is the value the datasize phase actually wrote and is
+# guaranteed to match the configuration the submitter ran.
 
 CHECKPOINT_FILE_MAP = {
     "llama3-1t": "llama3_1t.yaml",

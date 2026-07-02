@@ -26,6 +26,7 @@ from mlpstorage_py.reporting import (
     ValidationMessageFormatter,
     ClosedRequirementsFormatter,
     ReportSummaryFormatter,
+    discover_scan_roots,
 )
 
 
@@ -76,6 +77,37 @@ class ReportGenerator:
             apply_logging_options(self.logger, args)
 
         self.results_dir = results_dir
+        # Detect the canonical mlpstorage submission tree (sentinel-bearing root
+        # with <division>/<orgname>/results/<system>/<benchmark-type>/...) and
+        # resolve --results-dir down to the per-system subtree that contains
+        # the benchmark-type directories the rest of ReportGenerator expects.
+        # No-op when --results-dir already points at a flat benchmark-type root.
+        self.results_dir = self._resolve_effective_results_dir(self.results_dir)
+
+        # Issue #599: resolve the effective scan roots up-front.
+        #
+        # When --results-dir is a sentinel-bearing submission root (the
+        # canonical layout that `mlpstorage init` / `<bench> run` / `validate`
+        # all produce), the runs live at
+        # `<results-dir>/<closed|open>/<orgname>/results/<systemname>/...`
+        # — five levels below the directory the user passed in. Pre-fix,
+        # ResultsDirectoryValidator looked for benchmark-type dirs at the
+        # top level only and `get_runs_files` would walk every system's
+        # subtree, mashing them into one report tagged with the requested
+        # systemname.
+        #
+        # discover_scan_roots probes both modes against args.orgname (pinned
+        # by the LAY-03 sentinel gate in main.py) and args.systemname (the
+        # required CLI flag), returning per-mode slices when found and
+        # falling back to [results_dir] for legacy flat layouts.
+        orgname = getattr(self.args, 'orgname', None) if self.args else None
+        systemname = (
+            getattr(self.args, 'systemname', None) if self.args else None
+        )
+        self.scan_roots: List[str] = discover_scan_roots(
+            results_dir, orgname=orgname, systemname=systemname,
+            logger=self.logger,
+        )
 
         # Initialize formatters
         self.msg_formatter = ValidationMessageFormatter(use_colors=use_colors)
@@ -88,48 +120,140 @@ class ReportGenerator:
 
         self.run_results: Dict[RunID, Result] = {}
         self.workload_results: Dict[tuple, Result] = {}
+        # Basenames of result_dir directories detected as warmup runs.
+        # See _process_single_run for the collision-detection logic.
+        self.warmup_result_dirs: set = set()
         self.processing_errors: List[str] = []
 
         self.accumulate_results()
         self.print_results()
 
+    def _resolve_effective_results_dir(self, results_dir: str) -> str:
+        """Resolve --results-dir to the directory that holds benchmark-type subdirs.
+
+        Accepts both shapes:
+
+        * Flat layout (legacy / what ResultsDirectoryValidator expected):
+          ``<results-dir>/<benchmark-type>/<model>/...`` — returned unchanged.
+        * Canonical mlpstorage submission tree (what ``mlpstorage init`` /
+          ``<bench> run`` / ``validate`` produce):
+          ``<sentinel-root>/<division>/<orgname>/results/<system>/<benchmark-type>/...``
+          — resolved down to the per-system subtree.
+
+        When ``--systemname`` is supplied, the canonical-tree resolution
+        scopes to ``results/<systemname>/`` so reportgen aggregates only
+        that system's runs (fixes the prior behavior of walking every
+        system's runs regardless of --systemname).
+        """
+        from pathlib import Path  # local import to avoid hoisting Path globally
+        root = Path(results_dir)
+        if not root.is_dir():
+            return results_dir
+        # Already flat?
+        expected = ResultsDirectoryValidator.EXPECTED_BENCHMARK_TYPES
+        if any((root / b).is_dir() for b in expected):
+            return results_dir
+        # Canonical tree probe.
+        systemname = None
+        if self.args is not None:
+            systemname = getattr(self.args, 'systemname', None)
+        for division in ('closed', 'open'):
+            division_dir = root / division
+            if not division_dir.is_dir():
+                continue
+            for org_dir in sorted(p for p in division_dir.iterdir() if p.is_dir()):
+                results_root = org_dir / 'results'
+                if not results_root.is_dir():
+                    continue
+                if systemname:
+                    system_dir = results_root / systemname
+                    if system_dir.is_dir():
+                        self.logger.info(
+                            "Detected canonical submission tree; scoping to "
+                            "%s/results/%s for --systemname=%s",
+                            org_dir, systemname, systemname,
+                        )
+                        return str(system_dir)
+                else:
+                    systems = [p for p in results_root.iterdir() if p.is_dir()]
+                    if len(systems) == 1:
+                        self.logger.info(
+                            "Detected canonical submission tree with single system; "
+                            "scoping to %s",
+                            systems[0],
+                        )
+                        return str(systems[0])
+        return results_dir
+
     def _validate_directory_structure(self) -> bool:
         """
         Validate the results directory structure before processing.
 
+        When the canonical submission layout is detected (one or both of
+        ``<results-dir>/{closed,open}/<orgname>/results/<systemname>/``),
+        the validator runs against each canonical slice independently —
+        each slice is itself a flat-layout root structurally
+        (``<benchmark>/<model>/<command>/<datetime>/`` immediately below).
+
         Returns:
             True if structure is valid, False otherwise.
         """
-        validator = ResultsDirectoryValidator(self.results_dir, logger=self.logger)
-        result = validator.validate()
+        total_runs = 0
+        total_benchmark_types: set = set()
+        all_warnings: List[str] = []
+        any_failed = False
+        last_validator: Optional[ResultsDirectoryValidator] = None
 
-        if not result.is_valid:
-            self.logger.error("Results directory structure validation failed:")
-            self.logger.error(validator.get_error_report())
+        for scan_root in self.scan_roots:
+            validator = ResultsDirectoryValidator(scan_root, logger=self.logger)
+            last_validator = validator
+            result = validator.validate()
+
+            if not result.is_valid:
+                self.logger.error(
+                    f"Results directory structure validation failed for "
+                    f"{scan_root}:"
+                )
+                self.logger.error(validator.get_error_report())
+                any_failed = True
+                continue
+
+            total_runs += result.found_runs
+            total_benchmark_types.update(result.found_benchmark_types)
+            all_warnings.extend(result.warnings)
+
+        if any_failed:
             self.logger.error("")
             self.logger.error("Expected structure:")
-            self.logger.error(validator.get_expected_structure_help())
+            if last_validator is not None:
+                self.logger.error(last_validator.get_expected_structure_help())
             return False
 
-        # Log warnings if any
-        if result.warnings:
-            for warning in result.warnings:
-                self.logger.warning(warning)
+        for warning in all_warnings:
+            self.logger.warning(warning)
 
         self.logger.info(
-            f"Directory validation passed: found {result.found_runs} runs "
-            f"in {len(result.found_benchmark_types)} benchmark types"
+            f"Directory validation passed: found {total_runs} runs "
+            f"in {len(total_benchmark_types)} benchmark types "
+            f"across {len(self.scan_roots)} scan root(s)"
         )
         return True
 
     def generate_reports(self):
         # Verify the results directory exists:
         self.logger.info(f'Generating reports for {self.results_dir}')
-        run_result_dicts = [report.benchmark_run.as_dict() for report in self.run_results.values()]
 
+        # Always traverse the full directory and emit one rollup
+        # results.json / results.csv covering every discovered run, written
+        # inside the submission tree at <results_dir>/results.{csv,json}.
+        # --output-dir was removed in #616 to prevent submitters from
+        # accidentally excluding the summary from their submission.
+        run_result_dicts = [
+            report.benchmark_run.as_dict() for report in self.run_results.values()
+        ]
         self.write_csv_file(run_result_dicts)
         self.write_json_file(run_result_dicts)
-            
+
         return EXIT_CODE.SUCCESS
 
     def accumulate_results(self) -> None:
@@ -144,16 +268,28 @@ class ReportGenerator:
 
         Errors in individual runs are logged but do not stop processing.
         """
-        try:
-            benchmark_runs = get_runs_files(self.results_dir, logger=self.logger)
-        except Exception as e:
-            self.logger.error(f"Failed to scan results directory: {e}")
-            self.processing_errors.append(f"Directory scan failed: {e}")
-            return
+        # Walk each effective scan root and accumulate runs. In canonical
+        # mode, this naturally narrows to the requested system's subtree
+        # (issue #599 bug 3); in flat mode, it's a single pass over the
+        # original results_dir.
+        benchmark_runs: List = []
+        for scan_root in self.scan_roots:
+            try:
+                benchmark_runs.extend(
+                    get_runs_files(scan_root, logger=self.logger)
+                )
+            except Exception as e:
+                self.logger.error(
+                    f"Failed to scan results directory {scan_root}: {e}"
+                )
+                self.processing_errors.append(
+                    f"Directory scan failed for {scan_root}: {e}"
+                )
 
         if not benchmark_runs:
+            scan_paths = ', '.join(self.scan_roots)
             self.logger.warning(
-                f"No valid benchmark runs found in {self.results_dir}. "
+                f"No valid benchmark runs found in {scan_paths}. "
                 "Ensure runs have completed and contain metadata files."
             )
             return
@@ -177,6 +313,22 @@ class ReportGenerator:
         """
         Process and validate a single benchmark run.
 
+        Training workloads have 6 disk directories per (model, accelerator):
+        1 throwaway warmup run + 5 submission runs. Only the 5 real runs
+        should be aggregated into results.{csv,json}. Checkpointing has
+        1 disk dir = 1 run (write-then-read self-warms), no warmup.
+
+        DLIO writes the warmup's ``summary.start`` value to match the FIRST
+        real run's start time (not the warmup's own directory timestamp), so
+        the two runs produce equal ``run_id`` values and collide in
+        ``self.run_results``. Detection here: on collision, the run whose
+        ``result_dir`` basename is lex-earlier is the warmup — its basename
+        is recorded in ``self.warmup_result_dirs`` and the later run wins
+        the dict slot (matching prior dict-overwrite semantics, which are
+        preserved so aggregate counts are unchanged). The workload printer
+        looks up ``warmup_result_dirs`` to render the warmup with a
+        ``[WARMUP, not aggregated]`` label instead of a category badge.
+
         Args:
             benchmark_run: The benchmark run to process.
 
@@ -199,6 +351,29 @@ class ReportGenerator:
             category=category,
             metrics=benchmark_run.metrics or {}
         )
+
+        existing = self.run_results.get(benchmark_run.run_id)
+        if existing is not None:
+            incoming_dir = benchmark_run.result_dir or ""
+            existing_dir = existing.benchmark_run.result_dir or ""
+            incoming_base = os.path.basename(incoming_dir)
+            existing_base = os.path.basename(existing_dir)
+            if incoming_base < existing_base:
+                self.warmup_result_dirs.add(incoming_base)
+                # Keep the existing (later-basename, real) run in run_results.
+                self.logger.debug(
+                    f"Detected warmup run (collision on {benchmark_run.run_id}): "
+                    f"{incoming_base} (excluded from aggregate)"
+                )
+                return
+            else:
+                self.warmup_result_dirs.add(existing_base)
+                self.logger.debug(
+                    f"Detected warmup run (collision on {benchmark_run.run_id}): "
+                    f"{existing_base} (excluded from aggregate)"
+                )
+                # Fall through to overwrite the existing (warmup) entry.
+
         self.run_results[benchmark_run.run_id] = result
 
         # Log category for the run
@@ -395,12 +570,24 @@ class ReportGenerator:
         if workload_result.benchmark_command:
             print(f"    Command: {workload_result.benchmark_command}")
 
-        # Print run summary
+        # Print run summary — sort by disk basename so warmup (always
+        # lex-earliest by design of the DLIO stamp mismatch) renders first.
         print("    Runs:")
-        for run in workload_result.benchmark_run:
-            run_category = self.run_results[run.run_id].category
-            run_badge = self.msg_formatter.format_category_badge(run_category)
-            print(f"      - {run.run_id} {run_badge}")
+        sorted_runs = sorted(
+            workload_result.benchmark_run,
+            key=lambda r: os.path.basename(r.result_dir or "")
+        )
+        for run in sorted_runs:
+            base = os.path.basename(run.result_dir or "")
+            if base in self.warmup_result_dirs:
+                # Warmup runs are excluded from the aggregate — render with
+                # a WARMUP label + disk basename (which is unique, unlike
+                # the mis-stamped run_id shared with the first real run).
+                print(f"      - {run.run_id} [WARMUP, not aggregated — dir: {base}]")
+            else:
+                run_category = self.run_results[run.run_id].category
+                run_badge = self.msg_formatter.format_category_badge(run_category)
+                print(f"      - {run.run_id} {run_badge}")
 
         # Print submission-level issues
         print(self.msg_formatter.format_issues_list(workload_result.issues, show_all=False))
@@ -414,13 +601,13 @@ class ReportGenerator:
 
 
     def write_json_file(self, results):
-        json_file = os.path.join(self.results_dir,'results.json')
+        json_file = os.path.join(self.results_dir, 'results.json')
         self.logger.info(f'Writing results to {json_file}')
         with open(json_file, 'w') as f:
             json.dump(results, f, indent=2)
 
     def write_csv_file(self, results):
-        csv_file = os.path.join(self.results_dir,'results.csv')
+        csv_file = os.path.join(self.results_dir, 'results.csv')
         self.logger.info(f'Writing results to {csv_file}')
         flattened_results = [flatten_nested_dict(r) for r in results]
         flattened_results = [remove_nan_values(r) for r in flattened_results]

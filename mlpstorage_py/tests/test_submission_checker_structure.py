@@ -1329,6 +1329,136 @@ class TestStruct10_WorkloadCategories:
         assert any("[2.1.10 workloadCategories]" in m for m in mock_logger.errors)
 
 
+class TestIssue612WorkloadCategoriesAcceptsAllFour:
+    """Issue #612: _VALID_WORKLOAD_CATEGORIES must include the on-disk
+    directory names produced by ``BENCHMARK_TYPES.name`` —
+    ``vector_database`` and ``kv_cache`` with underscores, not the short
+    forms ``vectordb`` / ``kvcache``. Pre-fix every vdb / kvcache
+    submission tripped a [2.1.10 workloadCategories] error."""
+
+    @staticmethod
+    def _add_workload_category_dir(root, sys_name, category):
+        """Drop a bare <category>/ dir into the system's results subtree."""
+        from pathlib import Path
+        path = (
+            Path(root) / "closed" / "Acme" / "results"
+            / sys_name / category
+        )
+        path.mkdir(parents=True, exist_ok=True)
+        return path
+
+    def test_vector_database_category_accepted(self, tmp_path, mock_logger):
+        from mlpstorage_py.tests.conftest import build_submission
+        root = build_submission(tmp_path)
+        # Determine the default systemname from the fixture.
+        from pathlib import Path
+        sys_name = next(
+            (Path(root) / "closed" / "Acme" / "results").iterdir()
+        ).name
+        self._add_workload_category_dir(root, sys_name, "vector_database")
+        check = _make_check(root, mock_logger)
+        result = run_one_check(check, "workload_categories_check", mock_logger)
+        assert result is True, (
+            "vector_database must be a recognized workload category; "
+            f"errors: {mock_logger.errors!r}"
+        )
+        assert mock_logger.errors == []
+
+    def test_kv_cache_category_accepted(self, tmp_path, mock_logger):
+        from mlpstorage_py.tests.conftest import build_submission
+        root = build_submission(tmp_path)
+        from pathlib import Path
+        sys_name = next(
+            (Path(root) / "closed" / "Acme" / "results").iterdir()
+        ).name
+        self._add_workload_category_dir(root, sys_name, "kv_cache")
+        check = _make_check(root, mock_logger)
+        result = run_one_check(check, "workload_categories_check", mock_logger)
+        assert result is True, (
+            "kv_cache must be a recognized workload category; "
+            f"errors: {mock_logger.errors!r}"
+        )
+        assert mock_logger.errors == []
+
+    def test_short_form_vectordb_still_flagged(self, tmp_path, mock_logger):
+        """Defense in depth: the SHORT form ``vectordb`` (without
+        underscore) is NOT the canonical on-disk name and must be flagged
+        as unexpected — submissions that get this name on disk indicate
+        a writer-side regression, not a tolerable variant."""
+        from mlpstorage_py.tests.conftest import build_submission
+        root = build_submission(tmp_path, extra_workload_category="vectordb")
+        check = _make_check(root, mock_logger)
+        result = run_one_check(check, "workload_categories_check", mock_logger)
+        assert result is False
+        assert any("[2.1.10 workloadCategories]" in m for m in mock_logger.errors)
+
+    def test_short_form_kvcache_still_flagged(self, tmp_path, mock_logger):
+        from mlpstorage_py.tests.conftest import build_submission
+        root = build_submission(tmp_path, extra_workload_category="kvcache")
+        check = _make_check(root, mock_logger)
+        result = run_one_check(check, "workload_categories_check", mock_logger)
+        assert result is False
+        assert any("[2.1.10 workloadCategories]" in m for m in mock_logger.errors)
+
+    def test_error_message_enumerates_all_four_categories(self, tmp_path, mock_logger):
+        """When a truly bogus category lands on disk, the violation
+        message must enumerate all four allowed names so the user sees
+        the canonical set — pre-fix it hardcoded 'only training and
+        checkpointing allowed', misleading vdb / kvcache submitters."""
+        from mlpstorage_py.tests.conftest import build_submission
+        root = build_submission(tmp_path, extra_workload_category="foo")
+        check = _make_check(root, mock_logger)
+        run_one_check(check, "workload_categories_check", mock_logger)
+        joined = " ".join(mock_logger.errors)
+        for category in ("training", "checkpointing", "vector_database", "kv_cache"):
+            assert category in joined, (
+                f"violation message must enumerate {category!r}; "
+                f"got: {joined!r}"
+            )
+
+
+class TestIssue612ModeToCheckersKeys:
+    """The MODE_TO_CHECKERS keys must match the on-disk directory names —
+    ``vector_database`` and ``kv_cache``, NOT the short forms. Pre-fix
+    the dict was keyed on the short forms so every vdb / kvcache
+    submission flowed into the unrecognized-mode error branch at
+    main.py:174."""
+
+    def test_keys_are_disk_canonical(self):
+        from mlpstorage_py.submission_checker.main import MODE_TO_CHECKERS
+        assert "vector_database" in MODE_TO_CHECKERS, (
+            f"MODE_TO_CHECKERS must key vdb under the disk name "
+            f"'vector_database'; got keys {sorted(MODE_TO_CHECKERS.keys())!r}"
+        )
+        assert "kv_cache" in MODE_TO_CHECKERS, (
+            f"MODE_TO_CHECKERS must key kvcache under the disk name "
+            f"'kv_cache'; got keys {sorted(MODE_TO_CHECKERS.keys())!r}"
+        )
+
+    def test_short_form_keys_are_absent(self):
+        """The short forms 'vectordb' / 'kvcache' would never match the
+        loader's mode (the disk-canonical name). Their absence keeps the
+        unrecognized-mode error branch firing for genuinely misnamed
+        submissions instead of silently routing to a non-matching checker."""
+        from mlpstorage_py.submission_checker.main import MODE_TO_CHECKERS
+        assert "vectordb" not in MODE_TO_CHECKERS
+        assert "kvcache" not in MODE_TO_CHECKERS
+
+    def test_keys_align_with_benchmark_types_enum(self):
+        """Round-trip: every BENCHMARK_TYPES.name must be a MODE_TO_CHECKERS
+        key. This pins the writer↔consumer contract — if either side ever
+        drifts (e.g. a future rename of the enum), this test fires."""
+        from mlpstorage_py.config import BENCHMARK_TYPES
+        from mlpstorage_py.submission_checker.main import MODE_TO_CHECKERS
+        for member in BENCHMARK_TYPES:
+            assert member.name in MODE_TO_CHECKERS, (
+                f"BENCHMARK_TYPES.{member.name} produces directories "
+                f"named {member.name!r} on disk but MODE_TO_CHECKERS has "
+                f"no entry for it; keys are "
+                f"{sorted(MODE_TO_CHECKERS.keys())!r}"
+            )
+
+
 # ---------------------------------------------------------------------------
 # TestStruct11_TrainingWorkloads  (STRUCT-11, rule 2.1.11)
 # ---------------------------------------------------------------------------

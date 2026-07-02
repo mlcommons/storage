@@ -4,7 +4,12 @@ from ..constants import *
 from ..configuration.configuration import Config
 from ..loader import SubmissionLogs
 from ..rule_registry import rule
-from .helpers import _check_filesystem_separation, _pair_checkpoint_runs, _parse_iso_gap
+from .helpers import (
+    _check_filesystem_separation,
+    _pair_checkpoint_runs,
+    _parse_iso_gap,
+    read_fs_separation_sidecar,
+)
 
 import os
 import re
@@ -157,7 +162,7 @@ class CheckpointingCheck(BaseCheck):
             return valid
 
         for summary, metadata, _ in self._iter_valid_files():
-            combined_params = metadata.get("combined_params", {})
+            combined_params = metadata.get("parameters", {})
             checkpoint_params = combined_params.get("checkpoint", {})
             fsync_enabled = checkpoint_params.get("fsync", False)
 
@@ -220,7 +225,7 @@ class CheckpointingCheck(BaseCheck):
             verification = metadata.get("verification", "closed")
 
             if verification == "closed":
-                checkpoint_mode = metadata.get("params_dict", {}).get("checkpoint.mode", "").lower()
+                checkpoint_mode = metadata.get("override_parameters", {}).get("checkpoint.mode", "").lower()
                 model_name = metadata.get("args", {}).get("model", "").lower()
                 num_processes = metadata.get("args", {}).get("num_processes", 0)
 
@@ -501,7 +506,7 @@ class CheckpointingCheck(BaseCheck):
             return valid
 
         for summary, metadata, _ in self._iter_valid_files():
-            params_dict = metadata.get("params_dict", {})
+            params_dict = metadata.get("override_parameters", {})
             checkpoint_mode = params_dict.get("checkpoint.mode", "")
 
             if checkpoint_mode == "subset":
@@ -882,7 +887,19 @@ class CheckpointingCheck(BaseCheck):
         if self._get_benchmark_api() == "object":
             return valid
         for summary, metadata, timestamp in self._iter_valid_files():
-            logfile_path = os.path.join(self.checkpointing_path, timestamp, "checkpointing_run.stdout.log")
+            run_dir = os.path.join(self.checkpointing_path, timestamp)
+            logfile_path = os.path.join(run_dir, "checkpointing_run.stdout.log")
+            # CAP-03 sidecar is authoritative (#601). Pre-cutover df-block
+            # fallback retained for one release (D-601-3).
+            sidecar = read_fs_separation_sidecar(run_dir)
+            if sidecar is not None:
+                if sidecar.get("same_filesystem"):
+                    self.log_violation(
+                        "4.4.2", "checkpointFilesystemCheck", logfile_path,
+                        "checkpoint_folder and results_dir are on the same filesystem",
+                    )
+                    valid = False
+                continue
             args = metadata.get("args", {})
             # For checkpointing, checkpoint_folder is the "data path" analog (RESEARCH.md).
             chkpt_args = {
@@ -891,13 +908,19 @@ class CheckpointingCheck(BaseCheck):
             }
             ok, df_found = _check_filesystem_separation(chkpt_args, logfile_path)
             if not df_found:
+                # D-B8: no CAP-03 sidecar AND no df block → no evidence of
+                # FS separation at all. Fire a hard violation so producers
+                # that predate #601 and never captured df cannot silently
+                # pass 4.4.2.
                 self.log_violation(
                     "4.4.2", "checkpointFilesystemCheck", logfile_path,
-                    "df output not found",
+                    "fs_separation.json sidecar not found; df block also absent",
                 )
                 valid = False
                 continue
             if not ok:
+                # df WAS found (e.g. submitter manually injected it), so this
+                # is a real same-mount finding and remains an error.
                 self.log_violation(
                     "4.4.2", "checkpointFilesystemCheck", logfile_path,
                     "checkpoint_folder and results_dir are on the same filesystem",

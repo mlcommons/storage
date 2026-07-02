@@ -520,6 +520,67 @@ class TestKVCacheSection:
         output = _joined_status_calls(mock_logger)
         assert 'target_usage_ratio: 0.42' in output
 
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_max_concurrent_allocs_row_present(self, mock_logger):
+        """max_concurrent_allocs (newly user-settable in OPEN/whatif) must
+        appear in the KVCache section so users see what value will reach
+        kv-cache.py."""
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(benchmark='kvcache', command='run',
+                          data_access_protocol='file',
+                          max_concurrent_allocs=8)
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert 'max_concurrent_allocs:' in output
+        assert ' 8' in output
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_max_concurrent_allocs_row_handles_unset(self, mock_logger):
+        """When the user does not pass --max-concurrent-allocs, the namespace
+        attribute is None and the summary must show '[not set]' — the
+        per-option WORKLOAD_PARAMS fallback in kvcache.py kicks in at run
+        time, but the summary fairly shows that the user did not pin it."""
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(benchmark='kvcache', command='run',
+                          data_access_protocol='file',
+                          max_concurrent_allocs=None)
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert 'max_concurrent_allocs:' in output
+        assert '[not set]' in output
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_enable_latency_tracing_row_present(self, mock_logger):
+        """--enable-latency-tracing must surface in the Optional Features
+        block so users can confirm their bpftrace toggle reached the run."""
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(benchmark='kvcache', command='run',
+                          data_access_protocol='file',
+                          enable_latency_tracing=True)
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert 'enable_latency_tracing:' in output
+        assert 'True' in output
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_enable_latency_tracing_row_handles_false(self, mock_logger):
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(benchmark='kvcache', command='run',
+                          data_access_protocol='file',
+                          enable_latency_tracing=False)
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        assert 'enable_latency_tracing:' in output
+        assert 'False' in output
+
 
 class TestTier1AcceleratorFiltering:
     """Training-only Tier 1 fields are suppressed for vectordb/kvcache."""

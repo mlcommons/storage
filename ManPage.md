@@ -1,6 +1,6 @@
 # mlpstorage(1) — MLPerf Storage Benchmark Suite
 
-## CURRRENT STATUS
+## CURRENT STATUS
 
 **This version is not the final version** - there will be at least a few more changes, but it is accurate for the current version of the `mlpstorage` command and repo contents.  Please execute a `git pull` periodically to get the latest updates.
 
@@ -83,7 +83,7 @@ Mechanisms used:
 - **Pinned defaults in closed.** Closed kvcache pins `--gpu-mem-gb`, `--cpu-mem-gb`, `--duration`, `--trials`, `--seed`, `--rag-num-docs`, and several boolean knobs to their rules-mandated values, with no flag exposed to change them. Closed training/checkpointing/vectordb pin `--loops=1`, an empty `--params`, and `--allow-invalid-params=False` as internal defaults (the flags themselves are not registered on the closed parsers).
 - **Post-parse validators.** What argparse cannot express (for example, "`--num-checkpoints-write` must be 10 or 0 in closed per Rules §4.7.1") is enforced by `validate_<benchmark>_arguments()` functions called immediately after parsing.
 - **Environment validation.** Before a benchmark starts, `validate_benchmark_environment()` verifies SSH connectivity to client hosts, MPI availability, DLIO accessibility, and results-directory writability. `--skip-validation` disables this for debugging only.
-- **Pre-execution capacity gates.** Before a benchmark spawns DLIO or any other workload, `_pre_execution_gate()` runs the CAP-01 disk-space check and (on multi-host runs) the CAP-02 shared-filesystem probe. Failures raise `FileSystemError` with a four-field message; there is no flag to bypass.
+- **Pre-execution capacity gates.** Before a benchmark spawns DLIO or any other workload, `_pre_execution_gate()` runs the CAP-01 disk-space check, (on multi-host runs) the CAP-02 shared-filesystem probe, and the CAP-03 filesystem-separation probe that verifies `--data-dir` / `--checkpoint-folder` and `--results-dir` live on different filesystems. Failures raise `FileSystemError` with a four-field message. CAP-01 and CAP-02 are unbypassable; CAP-03 can be bypassed for dev-only runs via `--skip-fs-separation-gate` (the probe still runs and writes its sidecar so the validator has telemetry, but no exception is raised).
 
 The result is that a closed-mode command line is exactly the command line a closed-mode submission requires, and an attempt to deviate is rejected at the earliest possible moment.
 
@@ -237,21 +237,25 @@ After the first successful write, `mlpstorage` will never again modify `systemna
 
 ## DATA DIRECTORY (`--data-dir`)
 
-The data directory is the on-storage workspace for generated datasets and checkpoints. It is read by `run` and written by `datagen`. Its layout is determined by the underlying DLIO workload template plus any `--params` overrides, but the canonical structure produced by the bundled templates is:
+The data directory is the on-storage workspace for the generated **training** dataset. It is read by `run` and written by `datagen`. The internal layout follows the DLIO data-generator convention familiar to ML practitioners — a per-model root containing the standard `train` / `valid` / `test` split:
 
 ```
 <data-dir>/
-├── training/
-│   └── <model>/                    e.g. unet3d, retinanet
-│       └── <rank>/                 zero-padded process rank: 0000, 0001, ...
-│           └── <data files>        .npz / .hdf5 / .tfrecord depending on model
-└── checkpointing/
-    └── <model>/                    e.g. llama3-70b
-        └── <rank>/
-            └── <checkpoint shards> .safetensors / .pt
+└── <model>/                        e.g. unet3d, retinanet — auto-appended
+    ├── train/                      <data files> .npz / .npy / .jpeg /
+    │                               .hdf5 / .tfrecord depending on model
+    │                               and workload YAML
+    ├── valid/                      empty under v3.0 bundled workloads (see note)
+    └── test/                       empty under v3.0 bundled workloads (see note)
 ```
 
-The `data-dir` must live on the storage system under test. For closed training submissions, the generated dataset must total at least five times the client host memory (`--client-host-memory-in-gb`) to prevent the OS page cache from absorbing the workload; `datasize` exists specifically to compute and report this lower bound.
+The `<model>/` segment is appended by `datagen` if `--data-dir` does not already end in the model name; the `train/`, `valid/`, and `test/` subdirectories are created on the local filesystem before `datagen` runs. Each rank writes into the same `train/` directory using DLIO's `{prefix}_{idx:0N}_of_{total}.{format}` naming convention — no per-rank subdirectory. Object-storage modes (`object` positional) skip the local makedirs because the path is an S3 key prefix.
+
+> **Note on `valid/` and `test/`** — every bundled v3.0 training workload YAML sets `workflow.train: True` only, with no `evaluation` step and no `num_files_eval`. Both subdirectories are therefore created on disk but **not populated by `datagen` today**. They follow the conventional train/valid/test split used throughout the ML ecosystem (`valid/` for held-out evaluation files consumed during training, `test/` for a post-training generalization corpus) so the layout remains immediately recognizable and a future workload that enables `workflow.evaluation: True` writes into the path practitioners expect. Submitters can ignore the empty subdirectories; `mlpstorage validate` does not inspect `--data-dir` contents.
+
+Each `datagen` invocation should own its `--data-dir` — sharing a single `--data-dir` across multiple workloads or repeated runs is not supported. The `--data-dir` must live on the storage system under test. For closed training submissions, the generated dataset must total at least five times the client host memory (`--client-host-memory-in-gb`) to prevent the OS page cache from absorbing the workload; `datasize` exists specifically to compute and report this lower bound.
+
+Checkpointing benchmarks use a separate `--checkpoint-folder` (not `--data-dir`); its layout is `<checkpoint-folder>/<model>/…` where the contents under `<model>/` are managed by the DLIO checkpointing workload (shard counts, ranks, and shapes depend on the model and `--num-processes`).
 
 VectorDB does not use `--data-dir`; vectors are loaded directly into the database engine (Milvus) by `datagen`. KV-Cache does not use `--data-dir`; cache tiers reside in GPU/CPU memory and (optionally) `--cache-dir` on NVMe.
 
@@ -277,13 +281,15 @@ Every `run` adds a timestamped directory under its benchmark-specific tail; unwa
 
 ```
 <results-dir>/<mode>/<orgname>/results/<systemname>/training/<model>/
+├── datasize/
+│   └── <YYYYMMDD_HHMMSS>/                metadata-only; no DLIO subprocess ran
+│       └── training_<ts>_metadata.json   authoritative num_files_train the
+│                                         representative-benchmark floor
+│                                         datagen must meet
 ├── datagen/
 │   └── <YYYYMMDD_HHMMSS>/                directory bumps on collision
 │       ├── training_datagen.stdout.log
 │       ├── training_datagen.stderr.log
-│       ├── *output.json
-│       ├── *per_epoch_stats.json
-│       ├── *summary.json
 │       ├── dlio.log
 │       └── dlio_config/{config,hydra,overrides}.yaml
 └── run/
@@ -296,9 +302,12 @@ Every `run` adds a timestamped directory under its benchmark-specific tail; unwa
         ├── *summary.json
         ├── dlio.log
         ├── dlio_config/{config,hydra,overrides}.yaml
+        ├── fs_separation.json            CAP-03 sidecar; see Common artifacts
         ├── training_<ts>_timeseries.json metrics; absent if --skip-timeseries
         └── training_<ts>_metadata.json   args, env, cluster info, status
 ```
+
+Rule 3.3.1 (`trainingRunDataMatchesDatasize`) reads the `datasize/` metadata to enforce `datasize.num_files_train ≤ run.num_files_train ≤ datagen.num_files_train`. Note that `datagen/` no longer carries `*output.json` / `*per_epoch_stats.json` / `*summary.json` — those are training-loop artifacts that DLIO does not produce when `workflow.generate_data=True, workflow.train=False`.
 
 ### Checkpointing results
 
@@ -359,6 +368,7 @@ Every benchmark run writes:
 - **`*_metadata.json`** — run timestamp, benchmark type, model, full command line, all CLI argument values, cluster information (collected by `cluster_collector.py` over MPI), MPI configuration, environment variables (credentials redacted), final status.
 - **`*_timeseries.json`** — sampled host metrics (CPU, memory, disk I/O, network) collected at `--timeseries-interval` (default 10s) up to `--max-timeseries-samples` (default 3600). Single-host runs use a local collector; multi-host runs use SSH fan-out.
 - **`stdout.log` / `stderr.log`** — streamed subprocess output captured by `CommandExecutor`.
+- **`fs_separation.json`** — CAP-03 filesystem-separation sidecar written before workload launch. Rank-0 probes the data/checkpoint path against the results path with `os.link()` and records the `EXDEV`/same-fs result plus real-paths, ISO-8601 timestamp, and probing host. The submission checker's rules 3.4.2 / 4.4.2 / 5.4.2 read this file as their authoritative "different filesystems" input. Absent under `--skip-fs-separation-gate`.
 - **`results.json`** — aggregated summary across all timestamped run directories, used by `reportgen`.
 - **Command history** is appended to `<results-dir>/.history/` (consumed by `mlpstorage history`).
 
@@ -375,7 +385,7 @@ Every benchmark run writes:
    `validate_benchmark_environment()` is called before any benchmark instantiates. It checks DLIO binary availability, MPI launcher availability, SSH connectivity to every `--hosts` entry, and the writability of `--results-dir`. Bypass with `--skip-validation` for offline debugging.
 
 3. **Pre-execution capacity gates** (`mlpstorage_py/benchmarks/base.py::_pre_execution_gate`).
-   After cluster collection and before the workload subprocess is spawned, every benchmark runs two checks. There is no flag to bypass either gate.
+   After cluster collection and before the workload subprocess is spawned, every benchmark runs three checks. CAP-01 and CAP-02 have no bypass flag; CAP-03 has `--skip-fs-separation-gate` for dev-only runs.
 
    - **CAP-01 — Disk-space gate.** Reads the destination filesystem via `os.statvfs(...)`, compares `available_bytes` against the benchmark's `required_bytes_for_capacity_gate` (computed per-subclass: training and checkpointing project the workload size from CLI arguments; vectordb returns `None` for the remote-engine escape hatch; kvcache projects from cache-tier sizes). On shortfall, raises `FileSystemError(code=FS_DISK_FULL)` with a four-field message:
      ```
@@ -384,9 +394,11 @@ Every benchmark run writes:
        required_bytes:  <int>
        deficit:         <int>
      ```
-     Training's datagen path degrades gracefully (HARDEN-01): if `cluster_information` is unavailable (e.g. on a single-host dev machine without `mpi4py`/`psutil`), the gate logs a deferral notice and becomes a no-op. Checkpointing, vectordb, and kvcache use pure arg-derived math and never degrade.
+     Training's datagen path degrades gracefully (HARDEN-01): if `cluster_information` is unavailable (e.g. on a single-host dev machine without `mpi4py`/`psutil`), the gate logs a deferral notice and becomes a no-op. The deferral message is command-aware: datagen users are told "skipped for datagen — informational" rather than being pointed at `--client-host-memory-in-gb` (which is not registered on the datagen parser). Checkpointing, vectordb, and kvcache use pure arg-derived math and never degrade.
 
    - **CAP-02 — Shared-filesystem probe.** On multi-host runs, launches `SHARED_FS_PROBE_SCRIPT` under `mpirun --tag-output` and stat's the run-uuid sentinel file from every rank. If the set of `(st_dev, st_ino)` pairs has cardinality > 1, the destination is not a shared filesystem and the probe raises `FileSystemError(code=FS_INVALID_STRUCTURE)` with a per-host/per-rank breakdown and the hint *"typically means one or more hosts have a local-disk path where a shared mount was expected."* The rank-0 result transports back via `__CAP02_RESULT_BEGIN__`/`__CAP02_RESULT_END__` stdout markers (HARDEN-02), and the `[rank,jobid]<channel>:` prefix emitted by OpenMPI 4.x is stripped via `_strip_tag_output_prefix` before JSON decode (HARDEN-04). Single-host runs skip the probe silently.
+
+   - **CAP-03 — Filesystem-separation probe.** Rank 0 calls `os.link()` between a sentinel in the data (or checkpoint) directory and a sentinel in the results directory. `EXDEV` is the unambiguous "different filesystem" signal, so the probe never has to parse `df` output. If the two paths share a filesystem, raises `FileSystemError` with `data_or_chkpt_path`, `results_path`, both real-paths, and the probing host. Regardless of outcome, the structured result is written to `<run_dir>/fs_separation.json` (see Common artifacts) so the submission checker's rules 3.4.2 / 4.4.2 / 5.4.2 read a producer-side authoritative signal instead of trying to parse `df` output from the run log. Object-storage submissions (vectordb, kvcache, training with `object`) skip the probe. `--skip-fs-separation-gate` still runs the probe and writes the sidecar but suppresses the raise, so validation-time rules still fire against the recorded telemetry.
 
 4. **Run-rule checkers** (`mlpstorage_py/rules/run_checkers/`).
    Per-benchmark `RunRulesChecker` classes inspect the merged DLIO configuration before execution. They enforce rules such as:
@@ -482,6 +494,9 @@ The `init` subcommand takes no flags — universal flags such as `--results-dir`
 
 - **`--skip-validation`**
   Skip environment checks (MPI, SSH, DLIO). For debugging only; should never be used for a real submission.
+
+- **`--skip-fs-separation-gate`**
+  Bypass the CAP-03 hard gate that raises when data/checkpoint and results directories live on the same filesystem. The probe still runs and writes `fs_separation.json` so the validator has telemetry — rules 3.4.2 / 4.4.2 / 5.4.2 will still fire at validation time. For dev-only runs that are not intended for submission.
 
 ### MPI options (training, checkpointing, kvcache)
 
@@ -809,20 +824,36 @@ Run (open/whatif only):
 - **`--config <path>`**
   Path to a `kv-cache` YAML config. Not valid in closed.
 
+- **`--max-concurrent-allocs <N>`**
+  Cap on concurrent in-flight cache allocations (semaphore size). Bounds peak RAM: `max_allocs × avg_context_tokens × bytes_per_token`. `0` disables the cap. Per-option value; passed through to `kv-cache.py`.
+
+- **`--enable-latency-tracing`**
+  Enable `bpftrace` block-layer device latency tracing during the run. Requires `sudo` and `bpftrace` on every client host. Adds telemetry to the run's stdout / JSON / XLSX output without changing the benchmark result. Any client that cannot start `bpftrace` fails the run — the whole run, not per-host — so a partially-degraded fleet does not silently produce results with mixed telemetry.
+
 - **`--loops`, `--allow-invalid-params`, `--params`, `--timeseries-interval`, `--skip-timeseries`, `--max-timeseries-samples`**
   As for training.
 
 ### Reports
 
 ```
-mlpstorage reports reportgen [--output-dir <path>] --results-dir <path>
+mlpstorage reports reportgen --results-dir <path> --systemname <name>
 ```
 
-- **`--output-dir <path>`**
-  Destination for the generated submission report. Defaults to `--results-dir`.
-
 - **`--results-dir <path>`, `-rd <path>`** (required)
-  Results tree to summarize.
+  Results tree to summarize. Accepts either a flat benchmark-type root (legacy) or a canonical sentinel-bearing submission root; when the sentinel is detected, `reportgen` scopes to `<results-dir>/<mode>/<orgname>/results/<systemname>/` and walks only that slice, so a single results-dir hosting runs from multiple systems does not have its runs mashed into one report.
+
+- **`--systemname <name>`, `-sn <name>`** (required)
+  System-under-test identifier. Under the canonical tree this pins reportgen to a single `results/<systemname>/` slice; under a flat tree it tags the emitted report. Defaults to `$MLPERF_SYSTEMNAME` as everywhere else.
+
+`--output-dir` was removed in PR #617. The rollup outputs must land inside the submission tree so submitters cannot accidentally exclude the summary from what MLCommons reviews.
+
+#### Rollup output layout
+
+`reportgen` emits one `results.json` and one `results.csv` per model folder, at the canonical `<benchmark>/<model>/` group boundary. Grouping is the parent of `<command>/` (or, for checkpointing which omits the `<command>` segment, the parent of `<ts>/` — which is `<model>/` itself). A single reportgen invocation therefore produces multiple sibling rollup files, one per benchmark model discovered under the results-dir slice.
+
+#### Warmup labeling and per-system collision scoping
+
+Training's closed cadence is 1 warmup run + 5 measured runs. When two runs share the same `RunID` (RunID is `program+command+model+run_datetime` and does NOT include a system field), the earlier one is treated as a warmup and its result_dir is recorded so downstream aggregators can skip it. Collision detection is scoped per system — the run-results dictionary is keyed by `(system_scope, run_id)` so two systems producing the same `RunID` do NOT cross-mark each other's real runs as warmups. Warmup result dirs are tracked as absolute paths for the same reason: two systems can produce the same `<ts>` basename without colliding.
 
 ### History
 
@@ -917,6 +948,7 @@ A subset of the structured error codes a submitter may encounter at the CLI:
 | E404  | `SystemDriftError`             | The recomputed system description does not match the on-disk YAML; the error renders a unified-diff with remediation hints. |
 | `FS_DISK_FULL`         | `FileSystemError` | CAP-01: destination filesystem free bytes < `required_bytes_for_capacity_gate`.                                  |
 | `FS_INVALID_STRUCTURE` | `FileSystemError` | CAP-02: shared-FS probe found per-host `(st_dev, st_ino)` cardinality > 1, or per-rank stat failures.            |
+| CAP-03 (no code)       | `FileSystemError` | CAP-03: `os.link()` between data/checkpoint path and results path did NOT raise `EXDEV` — same filesystem. Suppressible with `--skip-fs-separation-gate` (probe still records to `fs_separation.json`). |
 | `DoubleInitError`      | `ConfigurationError` | `mlpstorage init` invoked against a results-dir already initialized under a different orgname.                |
 
 ## EXAMPLES
