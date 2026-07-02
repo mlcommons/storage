@@ -888,12 +888,23 @@ class ResultFilesExtractor:
         if 'system_info' in metadata and metadata['system_info']:
             pass  # TODO: Reconstruct system_info
 
+        # DLIO's summary.json is the source of truth for phase end timestamps
+        # (Rules.md §4.7.1 cache-flush gap check). The run tool doesn't populate
+        # metadata['end_datetime'] for checkpointing, so fall back to summary
+        # to keep the metadata- and summary-based extraction paths agreeing
+        # on that field. Issue #618.
+        end_datetime = metadata.get('end_datetime', '')
+        if not end_datetime:
+            summary = self._load_summary(result_dir)
+            if summary:
+                end_datetime = summary.get('end_time') or summary.get('end', '')
+
         return BenchmarkRunData(
             benchmark_type=benchmark_type,
             model=metadata.get('model'),
             command=metadata.get('command'),
             run_datetime=metadata.get('run_datetime', ''),
-            end_datetime=metadata.get('end_datetime', ''),
+            end_datetime=end_datetime,
             num_processes=metadata.get('num_processes', 0),
             parameters=metadata.get('parameters', {}),
             override_parameters=metadata.get('override_parameters', {}),
@@ -902,6 +913,17 @@ class ResultFilesExtractor:
             result_dir=result_dir,
             accelerator=metadata.get('accelerator'),
         )
+
+    def _load_summary(self, result_dir: str) -> Optional[Dict]:
+        """Load summary.json from result directory, or None if unreadable."""
+        summary_path = os.path.join(result_dir, 'summary.json')
+        if not os.path.exists(summary_path):
+            return None
+        try:
+            with open(summary_path, 'r') as f:
+                return json.load(f)
+        except Exception:
+            return None
 
 
 class BenchmarkRun:

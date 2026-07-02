@@ -117,6 +117,104 @@ class TestBenchmarkRunConstruction:
         assert run.model == "cosmoflow"
         assert run.num_processes == 32
 
+    def test_from_result_dir_end_datetime_falls_back_to_summary(self, mock_logger, tmp_path):
+        """When metadata omits end_datetime, fall back to summary.json's `end`.
+
+        Regression test for #618: the checkpoint run tool writes phase-end to
+        summary.json (`end`) but not to metadata (`end_datetime`), causing the
+        two-invocation gap check to falsely mark CLOSED submissions INVALID.
+        """
+        result_dir = tmp_path / "result"
+        result_dir.mkdir()
+
+        metadata = {
+            "benchmark_type": "checkpointing",
+            "model": "llama3-8b",
+            "command": "run",
+            "run_datetime": "20260630_172934",
+            "num_processes": 8,
+            "parameters": {"checkpoint": {"num_checkpoints_write": 10,
+                                          "num_checkpoints_read": 0}},
+            "override_parameters": {},
+        }
+        with open(result_dir / "checkpointing_20260630_172934_metadata.json", 'w') as f:
+            json.dump(metadata, f)
+
+        summary = {
+            "start": "2026-06-30T17:29:34.47",
+            "end": "2026-06-30T17:34:10.81",
+        }
+        with open(result_dir / "summary.json", 'w') as f:
+            json.dump(summary, f)
+
+        run = BenchmarkRun.from_result_dir(str(result_dir), logger=mock_logger)
+
+        assert run.end_datetime == "2026-06-30T17:34:10.81"
+
+    def test_from_result_dir_end_datetime_prefers_summary_end_time(self, mock_logger, tmp_path):
+        """When summary.json provides `end_time`, prefer it over `end`.
+
+        Matches the defensive pattern in
+        mlpstorage_py/submission_checker/checks/checkpointing_checks.py:591.
+        """
+        result_dir = tmp_path / "result"
+        result_dir.mkdir()
+
+        metadata = {
+            "benchmark_type": "checkpointing",
+            "model": "llama3-8b",
+            "command": "run",
+            "run_datetime": "20260630_172934",
+            "num_processes": 8,
+            "parameters": {"checkpoint": {"num_checkpoints_write": 10,
+                                          "num_checkpoints_read": 0}},
+            "override_parameters": {},
+        }
+        with open(result_dir / "checkpointing_20260630_172934_metadata.json", 'w') as f:
+            json.dump(metadata, f)
+
+        summary = {
+            "start_time": "2026-06-30T17:29:34.47",
+            "start": "ignored",
+            "end_time": "2026-06-30T17:34:10.81",
+            "end": "ignored",
+        }
+        with open(result_dir / "summary.json", 'w') as f:
+            json.dump(summary, f)
+
+        run = BenchmarkRun.from_result_dir(str(result_dir), logger=mock_logger)
+
+        assert run.end_datetime == "2026-06-30T17:34:10.81"
+
+    def test_from_result_dir_metadata_end_datetime_wins_when_present(
+        self, mock_logger, tmp_path
+    ):
+        """If metadata already carries end_datetime, don't override with summary."""
+        result_dir = tmp_path / "result"
+        result_dir.mkdir()
+
+        metadata = {
+            "benchmark_type": "checkpointing",
+            "model": "llama3-8b",
+            "command": "run",
+            "run_datetime": "20260630_172934",
+            "end_datetime": "2026-06-30T17:34:10.81",
+            "num_processes": 8,
+            "parameters": {"checkpoint": {"num_checkpoints_write": 10,
+                                          "num_checkpoints_read": 0}},
+            "override_parameters": {},
+        }
+        with open(result_dir / "checkpointing_20260630_172934_metadata.json", 'w') as f:
+            json.dump(metadata, f)
+
+        summary = {"end": "2099-01-01T00:00:00"}
+        with open(result_dir / "summary.json", 'w') as f:
+            json.dump(summary, f)
+
+        run = BenchmarkRun.from_result_dir(str(result_dir), logger=mock_logger)
+
+        assert run.end_datetime == "2026-06-30T17:34:10.81"
+
     def test_constructor_requires_data_or_legacy(self, mock_logger):
         """Constructor raises error without data or legacy parameters."""
         with pytest.raises(ValueError, match="Either data, benchmark_result, or benchmark_instance"):
