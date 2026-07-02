@@ -351,6 +351,7 @@ Checkpointing intentionally omits the `<command>` segment under `<systemname>/ch
 
 ```
 <results-dir>/<mode>/<orgname>/results/<systemname>/kv_cache/<model>/run/<YYYYMMDD_HHMMSS>/
+├── summary.json                          aggregated per-run summary read by the submission checker
 ├── results.json
 ├── option_1_results.json                 one per autoscaler option
 ├── option_2_results.json
