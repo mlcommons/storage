@@ -28,6 +28,10 @@ from pathlib import Path
 
 import pytest
 
+from mlpstorage_py.submission_checker.coverage_mapping import (
+    OUT_OF_SCOPE_RULES,
+    STUB_COVERAGE,
+)
 from mlpstorage_py.submission_checker.tools.rules_coverage import reconcile
 
 
@@ -253,9 +257,14 @@ class TestRulesCoverageReconciliation:
         Exit code (driven by ``unmapped``) is unchanged because every live
         Rules.md ID is still mapped; the drift signal is informational.
         """
+        # Extend the real OUT_OF_SCOPE_RULES with one synthetic stale entry
+        # rather than replacing the dict. A bare replacement would drop the
+        # real §6 OOS mappings (6.4.2, 6.6.3), leaving them unmapped once
+        # PR #602 lands them in Rules.md and breaking the "unmapped set
+        # unaffected by drift" assertion below.
         monkeypatch.setattr(
             "mlpstorage_py.submission_checker.coverage_mapping.OUT_OF_SCOPE_RULES",
-            {"9.9.9": "deleted from spec"},
+            {**OUT_OF_SCOPE_RULES, "9.9.9": "deleted from spec"},
         )
         with caplog.at_level(logging.WARNING, logger="rules_coverage"):
             result = reconcile()
@@ -288,9 +297,14 @@ class TestRulesCoverageReconciliation:
         """Gemini upgrade #1: stale STUB_COVERAGE entry fires a warning naming
         the stub class so contributors know where to delete from.
         """
+        # Extend the real STUB_COVERAGE with a synthetic stale VdbCheck
+        # entry rather than replacing the dict. A bare replacement would
+        # empty KVCacheCheck's advertised §6 IDs, which — once PR #602
+        # lands §6 in Rules.md — would leave every §6 ID unmapped and
+        # break the "unmapped set unaffected by drift" assertion below.
         monkeypatch.setattr(
             "mlpstorage_py.submission_checker.coverage_mapping.STUB_COVERAGE",
-            {"VdbCheck": ["9.9.8"], "KVCacheCheck": []},
+            {**STUB_COVERAGE, "VdbCheck": ["9.9.8"]},
         )
         with caplog.at_level(logging.WARNING, logger="rules_coverage"):
             result = reconcile()
