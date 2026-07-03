@@ -202,21 +202,47 @@ class TestRulesCoverageReconciliation:
             )
         )
 
-    def test_baseline_no_stale_entries(self):
-        """At Phase 3 land time both registries are empty → no stale entries.
+    def test_baseline_no_unexpected_stale_entries(self):
+        """Drift guard: no stale entries beyond the PR #602 anticipation window.
 
-        Locks the Phase-3 invariant: a future contributor who adds an entry
-        to either registry that doesn't appear in Rules.md will fail this
-        test (and the drift warning will fire in CI).
+        Storage#658 populates ``STUB_COVERAGE['KVCacheCheck']`` and
+        ``OUT_OF_SCOPE_RULES`` with §6 IDs *before* PR #602 lands, so the
+        two registries carry IDs that do not yet appear in live Rules.md.
+        Those anticipated IDs are allow-listed here; the drift warnings
+        for them fire in CI (log.warning, non-fatal) as an intentional
+        signal until PR #602 merges, at which point this allow-list
+        collapses to the empty set automatically.
+
+        Any *other* stale entry (a contributor adds an ID that never
+        appears in Rules.md) still fails this test.
         """
+        # PR #602 §6 anticipation window (storage#658). These entries are
+        # correct-in-advance and stop being flagged as stale the moment
+        # PR #602 lands in Rules.md.
+        pr602_pending_oos = {"6.4.2", "6.6.3"}
+        pr602_pending_stub = {
+            "6.3.1.1", "6.3.2.1", "6.3.2.2",
+            "6.3.3.1", "6.3.3.2", "6.3.3.3", "6.3.3.4",
+            "6.3.4.1", "6.3.4.2", "6.3.4.3", "6.3.4.4", "6.3.4.5",
+            "6.4.1",
+            "6.5.1", "6.5.2",
+            "6.6.1", "6.6.2",
+        }
+
         result = reconcile()
-        assert result["stale_oos"] == set(), (
-            "Expected no stale OUT_OF_SCOPE_RULES entries at Phase 3 land "
-            "time, got {}".format(sorted(result["stale_oos"]))
+        unexpected_oos = result["stale_oos"] - pr602_pending_oos
+        assert unexpected_oos == set(), (
+            "Unexpected stale OUT_OF_SCOPE_RULES entries (not part of the "
+            "PR #602 anticipation window): {}".format(sorted(unexpected_oos))
         )
-        assert result["stale_stubs"] == {}, (
-            "Expected no stale STUB_COVERAGE entries at Phase 3 land time, "
-            "got {}".format(result["stale_stubs"])
+        unexpected_stubs = {
+            cls: sorted(set(rids) - pr602_pending_stub)
+            for cls, rids in result["stale_stubs"].items()
+            if set(rids) - pr602_pending_stub
+        }
+        assert unexpected_stubs == {}, (
+            "Unexpected stale STUB_COVERAGE entries (not part of the PR "
+            "#602 anticipation window): {}".format(unexpected_stubs)
         )
 
     def test_drift_stale_oos_emits_warning_and_keeps_exit_0(
