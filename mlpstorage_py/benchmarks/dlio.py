@@ -1020,37 +1020,68 @@ class CheckpointingBenchmark(DLIOBenchmark):
     # CAP-01 capacity-gate hooks (Phase 5 / Plan 05-03)
     # ------------------------------------------------------------------
 
-    def required_bytes_for_capacity_gate(self) -> int:
-        """Return total bytes needed for the checkpoint dataset (CAP-01).
+    def _checkpoint_gb_per_rank(self) -> list:
+        """Return per-rank checkpoint size in GiB for one checkpoint.
 
-        Mirrors the per-rank GiB math at ``CheckpointingBenchmark.datasize``
-        (dlio.py:593-625) WITHOUT the logger.debug/verbose calls so the
-        happy path stays silent per SC#6. The total is multiplied by
-        ``self.args.num_checkpoints_write`` because each checkpoint is
-        written in full to the destination.
+        Single source of truth for CAP-01's ``required_bytes_for_capacity_gate``
+        AND ``datasize``'s per-rank printout. Both callers previously
+        duplicated this math (the retired "A7 lock" discipline), and
+        both were subtly wrong for subset mode:
 
-        A7 lock: same math as datasize at dlio.py:593.
+        Issue #644 — the denominator must be the FULL-run rank count
+        (``ClosedGPUs`` for zero_level=3; ``ClosedGPUs`` for the
+        optimizer term and ``GPUpDP`` for the model term in
+        zero_level=1), not ``self.args.num_processes``. In subset mode
+        each rank owns the same slice it would own in the full run —
+        the total scales linearly with ``num_processes`` because fewer
+        representative ranks are writing, not because the per-rank
+        share shrinks. The old ``/ num_processes`` formula collapsed
+        for zero_level=3 to ``model + optimizer`` regardless of
+        ``num_processes``, blocking legitimate subset runs at CAP-01
+        with the full-mode required-bytes total.
+
+        Full CLOSED runs (``num_processes == ClosedGPUs``) are
+        unchanged because the two denominators are equal there.
         """
         min_procs, zero_level, GPUpDP, ClosedGPUs = LLM_ALLOWED_VALUES.get(self.args.model)
         model_gb, optimizer_gb = LLM_SIZE_BY_RANK.get(self.args.model)
         rank_gb = []
         for rank in range(self.args.num_processes):
-            rank_gb.append(0)
             if zero_level == 1:
-                rank_gb[rank] = optimizer_gb / self.args.num_processes
+                # Optimizer sharded across all ClosedGPUs ranks; each
+                # subset rank writes its own 1/ClosedGPUs share.
+                share = optimizer_gb / ClosedGPUs
+                # Model written only by the first DP instance (first
+                # GPUpDP ranks). In subset mode num_processes < GPUpDP
+                # so every subset rank is a first-DP rank.
                 if rank < GPUpDP:
-                    rank_gb[rank] += model_gb / GPUpDP
+                    share += model_gb / GPUpDP
+                rank_gb.append(share)
             elif zero_level == 3:
-                rank_gb[rank] = (model_gb + optimizer_gb) / self.args.num_processes
+                # Model + optimizer fully sharded across all ClosedGPUs
+                # ranks; each subset rank writes its own share.
+                rank_gb.append((model_gb + optimizer_gb) / ClosedGPUs)
             else:
-                raise ValueError("Invalid zero_level")
-        total_bytes = int(sum(rank_gb) * 1024**3 * self.args.num_checkpoints_write)
-        return total_bytes
+                raise ValueError(f"Invalid zero_level: {zero_level}")
+        return rank_gb
+
+    def required_bytes_for_capacity_gate(self) -> int:
+        """Return total bytes needed for the checkpoint dataset (CAP-01).
+
+        Sums ``_checkpoint_gb_per_rank`` and multiplies by
+        ``num_checkpoints_write`` because each checkpoint is written in
+        full to the destination. Silent on the happy path per SC#6 —
+        the shared helper does no logging.
+        """
+        rank_gb = self._checkpoint_gb_per_rank()
+        return int(sum(rank_gb) * 1024**3 * self.args.num_checkpoints_write)
 
     def _capacity_gate_destination(self):
         """Return the checkpoint destination as
-        ``os.path.join(args.checkpoint_folder, args.model)`` — mirrors the
-        join at dlio.py:562 in ``add_checkpoint_params`` (A7 lock).
+        ``os.path.join(args.checkpoint_folder, args.model)`` — mirrors
+        the join in ``add_checkpoint_params`` where DLIO is told to
+        write. Kept in step by convention; a future refactor could
+        share a helper if a third caller appears.
 
         If ``args.checkpoint_folder`` is None or empty, returns ``None`` so
         the ``_pre_execution_gate`` A8 escape hatch fires cleanly. The
@@ -1086,32 +1117,22 @@ class CheckpointingBenchmark(DLIOBenchmark):
         # CAP-01: fail fast BEFORE the rank-by-rank size table prints.
         self._pre_execution_gate()
         self.logger.verbose(f'Running datasize for {self.args.model}...')
-        # Calculate the total writes per rank which equates to memory required per rank
-        # If zero_level is 1, then rank 0 writes the entire model,
-        # If zero_level is 3, then the model is sharded across all ranks
-        min_procs, zero_level, GPUpDP, ClosedGPUs = LLM_ALLOWED_VALUES.get(self.args.model)
         model_gb, optimizer_gb = LLM_SIZE_BY_RANK.get(self.args.model)
-        rank_gb = []
+        self.logger.verbose(
+            f'Model & optimizer size: {model_gb:.2f}GiB, {optimizer_gb:.2f}GiB'
+        )
+        # Per-rank size math lives in _checkpoint_gb_per_rank (single
+        # source of truth shared with required_bytes_for_capacity_gate;
+        # subset-mode fix is in #644).
+        rank_gb = self._checkpoint_gb_per_rank()
 
-        self.logger.verbose(f'Model & optimizer size: {model_gb:.2f}GiB, {optimizer_gb:.2f}GiB')
-        for rank in range(self.args.num_processes):
-            rank_gb.append(0)
-            if zero_level == 1:
-                self.logger.debug("Optimizer is written by all ranks, but only the ranks on the first DP instance write the model")
-                rank_gb[rank] = optimizer_gb / self.args.num_processes
-                if rank < GPUpDP:
-                    rank_gb[rank] += model_gb / GPUpDP
-                    self.logger.debug(f'First DP: rank-{rank} write model: {rank_gb[rank]:.2f}GiB')
-            elif zero_level == 3:
-                rank_gb[rank] = (model_gb + optimizer_gb) / self.args.num_processes
-                self.logger.debug(f'Rank {rank} writes portion of model and optimizer: {rank_gb[rank]:.2f}GiB')
-            else:
-                self.logger.error(f'Invalid zero_level: {zero_level}')
-                raise ValueError("Invalid zero_level")
-
-        rank_string = "\n\t".join(f"Rank {rank}: {rank_gb[rank]:.2f}GiB" for rank in range(self.args.num_processes))
-
+        rank_string = "\n\t".join(
+            f"Rank {rank}: {rank_gb[rank]:.2f}GiB"
+            for rank in range(self.args.num_processes)
+        )
         self.logger.result(f'Total GiB required per rank:\n\t{rank_string}')
-        self.logger.result(f'Total GiB required for all ranks: {sum(rank_gb):.2f}GiB')
+        self.logger.result(
+            f'Total GiB required for all ranks: {sum(rank_gb):.2f}GiB'
+        )
 
 
