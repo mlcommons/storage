@@ -422,7 +422,7 @@ class TestKVCacheClosedMode:
         args = parser.parse_args(['run', '--results-dir', '/tmp', '--systemname', 'sys-v1'])
         assert args.seed == 42
         assert args.trials == 3
-        assert args.inter_option_delay == 20
+        assert args.inter_option_delay == 90
 
     def test_closed_mode_rejects_gpu_mem_gb(self, parser):
         """Closed kvcache must reject --gpu-mem-gb (open/whatif only)."""
