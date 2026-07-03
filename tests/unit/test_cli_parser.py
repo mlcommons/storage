@@ -392,11 +392,11 @@ class TestModeAndBenchmarkAttributes:
 
 
 # =====================================================================
-# 6. --systemname / MLPERF_SYSTEMNAME plumbing (LAY-04, D-10)
+# 6. --systemname / MLPSTORAGE_SYSTEMNAME plumbing (LAY-04, D-10)
 # =====================================================================
 
 class TestSystemname:
-    """Tests for the --systemname flag and MLPERF_SYSTEMNAME env-var plumbing.
+    """Tests for the --systemname flag and MLPSTORAGE_SYSTEMNAME env-var plumbing.
 
     Per CONTEXT.md D-10, --systemname is required on every emitting subcommand:
     training {datagen, run, configview, datasize}, checkpointing {datagen, run,
@@ -462,7 +462,7 @@ class TestSystemname:
     )
     def test_systemname_on_emitting_commands(self, label, argv_tail, monkeypatch):
         """Every emitting subcommand accepts --systemname and binds it to args.systemname."""
-        monkeypatch.delenv('MLPERF_SYSTEMNAME', raising=False)
+        monkeypatch.delenv('MLPSTORAGE_SYSTEMNAME', raising=False)
         full = ['mlpstorage'] + argv_tail + ['--systemname', 'sys-v1']
         with patch('sys.argv', full):
             args = parse_arguments()
@@ -481,10 +481,11 @@ class TestSystemname:
 
         Post CR-02 fix: ``--systemname`` is no longer ``required=True`` at
         the argparse layer (that would silently neuter the
-        ``MLPERF_SYSTEMNAME`` env-var fallback per D-10). Instead, the post-
-        parse validator checks that the resolved value is non-empty; with
-        neither the CLI flag nor the env var supplied, ``DEFAULT_SYSTEMNAME``
-        resolves to ``""`` and the validator errors out.
+        ``MLPSTORAGE_SYSTEMNAME`` env-var fallback per D-10). Instead, the
+        post-parse validator checks that the resolved value is non-empty;
+        with neither the CLI flag nor the env var supplied,
+        ``ENV_FALLBACK_SYSTEMNAME`` resolves to ``""`` and the validator
+        errors out.
 
         ``reports reportgen`` is intentionally excluded: reportgen makes
         ``--systemname`` OPTIONAL because omitting it aggregates a global
@@ -499,20 +500,20 @@ class TestSystemname:
                 "no-systemname aggregation contract."
             )
         # Ensure env var is unset so the default falls back to '' (empty).
-        monkeypatch.delenv('MLPERF_SYSTEMNAME', raising=False)
+        monkeypatch.delenv('MLPSTORAGE_SYSTEMNAME', raising=False)
         full = ['mlpstorage'] + argv_tail  # no --systemname
         with patch('sys.argv', full):
             with pytest.raises(SystemExit):
                 parse_arguments()
 
-    # ---- CR-02: MLPERF_SYSTEMNAME / MLPERF_RESULTS_DIR env-var fallback ----
+    # ---- CR-02: MLPSTORAGE_SYSTEMNAME / MLPSTORAGE_RESULTS_DIR env-var fallback ----
     #
     # The reviewer flagged that ``required=True`` + ``default=`` is
     # contradictory in argparse — ``required=True`` checks the CLI tokens,
     # not the resolved value, so the env-var defaults were dead on every
     # emitting subcommand. These tests pin the post-fix behavior: when
-    # ``MLPERF_SYSTEMNAME`` / ``MLPERF_RESULTS_DIR`` is set, the CLI flag
-    # is no longer mandatory.
+    # ``MLPSTORAGE_SYSTEMNAME`` / ``MLPSTORAGE_RESULTS_DIR`` is set, the CLI
+    # flag is no longer mandatory.
 
     @pytest.mark.parametrize(
         "label,argv_tail",
@@ -522,25 +523,26 @@ class TestSystemname:
     def test_systemname_env_var_satisfies_requirement(
         self, label, argv_tail, monkeypatch,
     ):
-        """If MLPERF_SYSTEMNAME is set, ``--systemname`` may be omitted on the CLI.
+        """If MLPSTORAGE_SYSTEMNAME is set, ``--systemname`` may be omitted on the CLI.
 
         Pre-fix this raised SystemExit because argparse's ``required=True``
         ignored the env-var-sourced default. Post-fix, the resolved
-        ``DEFAULT_SYSTEMNAME`` (sourced from the env var) satisfies the
-        requirement and the parsed namespace carries that value.
+        ``ENV_FALLBACK_SYSTEMNAME`` (sourced from the env var) satisfies
+        the requirement and the parsed namespace carries that value.
         """
-        monkeypatch.setenv('MLPERF_SYSTEMNAME', 'env-sys-v1')
-        # Patch DEFAULT_SYSTEMNAME in place — do NOT reload mlpstorage_py.config.
-        # Reloading config re-mints PARAM_VALIDATION (and other enums), breaking
-        # `enum_instance in [enum_class.MEMBER, ...]` checks in any module that
-        # already imported them (notably mlpstorage_py.rules.*). Downstream CLI
-        # builders captured DEFAULT_SYSTEMNAME by name at import time, so reload
-        # them so they pick up the patched value.
+        monkeypatch.setenv('MLPSTORAGE_SYSTEMNAME', 'env-sys-v1')
+        # Patch ENV_FALLBACK_SYSTEMNAME in place — do NOT reload
+        # mlpstorage_py.config. Reloading config re-mints PARAM_VALIDATION
+        # (and other enums), breaking `enum_instance in [enum_class.MEMBER,
+        # ...]` checks in any module that already imported them (notably
+        # mlpstorage_py.rules.*). Downstream CLI builders captured
+        # ENV_FALLBACK_SYSTEMNAME by name at import time, so reload them so
+        # they pick up the patched value.
         import importlib
         import mlpstorage_py.config as cfg_mod
         import mlpstorage_py.cli.common_args as common_args_mod
-        saved_systemname = cfg_mod.DEFAULT_SYSTEMNAME
-        cfg_mod.DEFAULT_SYSTEMNAME = 'env-sys-v1'
+        saved_systemname = cfg_mod.ENV_FALLBACK_SYSTEMNAME
+        cfg_mod.ENV_FALLBACK_SYSTEMNAME = 'env-sys-v1'
         importlib.reload(common_args_mod)
         import mlpstorage_py.cli as cli_mod
         importlib.reload(cli_mod)
@@ -551,37 +553,37 @@ class TestSystemname:
             with patch('sys.argv', full):
                 args = cli_parser_mod.parse_arguments()
             assert getattr(args, 'systemname', None) == 'env-sys-v1', (
-                f"{label}: MLPERF_SYSTEMNAME env var must satisfy --systemname "
+                f"{label}: MLPSTORAGE_SYSTEMNAME env var must satisfy --systemname "
                 f"requirement; got {getattr(args, 'systemname', None)!r}"
             )
         finally:
-            monkeypatch.delenv('MLPERF_SYSTEMNAME', raising=False)
-            cfg_mod.DEFAULT_SYSTEMNAME = saved_systemname
+            monkeypatch.delenv('MLPSTORAGE_SYSTEMNAME', raising=False)
+            cfg_mod.ENV_FALLBACK_SYSTEMNAME = saved_systemname
             importlib.reload(common_args_mod)
             importlib.reload(cli_mod)
             importlib.reload(cli_parser_mod)
 
     def test_results_dir_env_var_satisfies_requirement(self, monkeypatch):
-        """If MLPERF_RESULTS_DIR is set, ``--results-dir`` may be omitted on the CLI.
+        """If MLPSTORAGE_RESULTS_DIR is set, ``--results-dir`` may be omitted on the CLI.
 
-        DEFAULT_RESULTS_DIR has a non-empty tempdir fallback even without
-        the env var, but the contractual D-10 promise is that
-        MLPERF_RESULTS_DIR is honored as a default on every emitting
-        subcommand. Pre-fix, ``required=True`` ignored the env var entirely.
+        Post D-13, ``ENV_FALLBACK_RESULTS_DIR`` returns ``""`` when the env
+        var is unset (the tempdir fallback was retired). The contractual
+        D-10 promise remains: ``MLPSTORAGE_RESULTS_DIR`` is honored as a
+        default on every emitting subcommand.
         """
-        monkeypatch.setenv('MLPERF_RESULTS_DIR', '/env/results')
-        monkeypatch.setenv('MLPERF_SYSTEMNAME', 'env-sys')  # so systemname check passes
-        # Patch DEFAULT_RESULTS_DIR + DEFAULT_SYSTEMNAME in place — do NOT
-        # reload mlpstorage_py.config (see sibling test for the enum-identity
-        # rationale). Reload the downstream CLI builders so the patched values
-        # propagate into argparse defaults.
+        monkeypatch.setenv('MLPSTORAGE_RESULTS_DIR', '/env/results')
+        monkeypatch.setenv('MLPSTORAGE_SYSTEMNAME', 'env-sys')  # so systemname check passes
+        # Patch ENV_FALLBACK_RESULTS_DIR + ENV_FALLBACK_SYSTEMNAME in place
+        # — do NOT reload mlpstorage_py.config (see sibling test for the
+        # enum-identity rationale). Reload the downstream CLI builders so
+        # the patched values propagate into argparse defaults.
         import importlib
         import mlpstorage_py.config as cfg_mod
         import mlpstorage_py.cli.common_args as common_args_mod
-        saved_results_dir = cfg_mod.DEFAULT_RESULTS_DIR
-        saved_systemname = cfg_mod.DEFAULT_SYSTEMNAME
-        cfg_mod.DEFAULT_RESULTS_DIR = '/env/results'
-        cfg_mod.DEFAULT_SYSTEMNAME = 'env-sys'
+        saved_results_dir = cfg_mod.ENV_FALLBACK_RESULTS_DIR
+        saved_systemname = cfg_mod.ENV_FALLBACK_SYSTEMNAME
+        cfg_mod.ENV_FALLBACK_RESULTS_DIR = '/env/results'
+        cfg_mod.ENV_FALLBACK_SYSTEMNAME = 'env-sys'
         importlib.reload(common_args_mod)
         import mlpstorage_py.cli as cli_mod
         importlib.reload(cli_mod)
@@ -598,21 +600,21 @@ class TestSystemname:
             with patch('sys.argv', argv):
                 args = cli_parser_mod.parse_arguments()
             assert args.results_dir == '/env/results', (
-                f"MLPERF_RESULTS_DIR env var must satisfy --results-dir "
+                f"MLPSTORAGE_RESULTS_DIR env var must satisfy --results-dir "
                 f"requirement; got {args.results_dir!r}"
             )
         finally:
-            monkeypatch.delenv('MLPERF_RESULTS_DIR', raising=False)
-            monkeypatch.delenv('MLPERF_SYSTEMNAME', raising=False)
-            cfg_mod.DEFAULT_RESULTS_DIR = saved_results_dir
-            cfg_mod.DEFAULT_SYSTEMNAME = saved_systemname
+            monkeypatch.delenv('MLPSTORAGE_RESULTS_DIR', raising=False)
+            monkeypatch.delenv('MLPSTORAGE_SYSTEMNAME', raising=False)
+            cfg_mod.ENV_FALLBACK_RESULTS_DIR = saved_results_dir
+            cfg_mod.ENV_FALLBACK_SYSTEMNAME = saved_systemname
             importlib.reload(common_args_mod)
             importlib.reload(cli_mod)
             importlib.reload(cli_parser_mod)
 
     def test_lockfile_does_not_require_systemname(self, monkeypatch):
         """Pure utility subcommands (lockfile) parse without --systemname."""
-        monkeypatch.delenv('MLPERF_SYSTEMNAME', raising=False)
+        monkeypatch.delenv('MLPSTORAGE_SYSTEMNAME', raising=False)
         with patch('sys.argv', ['mlpstorage', 'lockfile', 'generate',
                                 '-o', '/tmp/x', '--results-dir', '/r']):
             args = parse_arguments()
@@ -620,13 +622,13 @@ class TestSystemname:
 
     def test_init_does_not_require_systemname(self, monkeypatch):
         """`mlpstorage init` parses without --systemname (init is bootstrap, not emitting)."""
-        monkeypatch.delenv('MLPERF_SYSTEMNAME', raising=False)
+        monkeypatch.delenv('MLPSTORAGE_SYSTEMNAME', raising=False)
         with patch('sys.argv', ['mlpstorage', 'init', 'Acme', '/tmp/r']):
             args = parse_arguments()
         assert args.mode == 'init'
 
     def test_systemname_flag_default_reflects_env_var(self, monkeypatch):
-        """The argparse default for --systemname reflects DEFAULT_SYSTEMNAME (which reads MLPERF_SYSTEMNAME).
+        """The argparse default for --systemname reflects ENV_FALLBACK_SYSTEMNAME (which reads MLPSTORAGE_SYSTEMNAME).
 
         Per CONTEXT.md D-10 / plan Task 1, --systemname is `required=True` on
         emitting commands — argparse demands the flag on CLI even when the
@@ -635,9 +637,9 @@ class TestSystemname:
         config-module constant; tests of the empty-systemname raise live in
         the slice-3 / slice-4 generate_output_location path, not the parser.
         """
-        monkeypatch.setenv('MLPERF_SYSTEMNAME', 'env-sys')
+        monkeypatch.setenv('MLPSTORAGE_SYSTEMNAME', 'env-sys')
         # Call the env-resolver helper directly — reloading mlpstorage_py.config
         # re-mints PARAM_VALIDATION and corrupts enum-identity in downstream
-        # tests (see _resolve_default_systemname docstring in config.py).
+        # tests (see _resolve_env_fallback_systemname docstring in config.py).
         import mlpstorage_py.config as cfg_mod
-        assert cfg_mod._resolve_default_systemname() == 'env-sys'
+        assert cfg_mod._resolve_env_fallback_systemname() == 'env-sys'

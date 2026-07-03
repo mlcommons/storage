@@ -266,27 +266,53 @@ class TestOrgnameSystemnameBanner:
         )
 
     @patch('mlpstorage_py.run_summary.logger')
-    def test_banner_environment_includes_mlperf_systemname(self, mock_logger,
-                                                           monkeypatch):
-        """Environment section lists the MLPERF_SYSTEMNAME env var alongside
-        the existing MLPERF_RESULTS_DIR row.
+    def test_banner_environment_includes_mlpstorage_systemname(self, mock_logger,
+                                                               monkeypatch):
+        """Environment section lists the MLPSTORAGE_SYSTEMNAME env var alongside
+        the existing MLPSTORAGE_RESULTS_DIR row.
         """
         from mlpstorage_py.run_summary import print_run_summary
 
-        monkeypatch.setenv('MLPERF_SYSTEMNAME', 'env-sys-v1')
+        monkeypatch.setenv('MLPSTORAGE_SYSTEMNAME', 'env-sys-v1')
 
         args = _make_args(orgname='Acme', systemname='env-sys-v1',
                           mode='closed', results_dir='/r')
         print_run_summary(args)
 
         output = _joined_status_calls(mock_logger)
-        assert 'MLPERF_SYSTEMNAME' in output, (
-            f"Expected MLPERF_SYSTEMNAME env-var row in Environment section; "
+        assert 'MLPSTORAGE_SYSTEMNAME' in output, (
+            f"Expected MLPSTORAGE_SYSTEMNAME env-var row in Environment section; "
             f"got: {output!r}"
         )
         assert 'env-sys-v1' in output, (
             f"Expected env-var value 'env-sys-v1' in output; got: {output!r}"
         )
+
+    @patch('mlpstorage_py.run_summary.logger')
+    def test_banner_environment_includes_all_mlpstorage_rows(self, mock_logger,
+                                                             monkeypatch):
+        """Environment section contains all five MLPSTORAGE_* env-var rows
+        added by Plan 05-04 (RESULTS_DIR, SYSTEMNAME, ORGNAME, DATA_DIR,
+        CHECKPOINT_FOLDER).
+        """
+        from mlpstorage_py.run_summary import print_run_summary
+
+        args = _make_args(orgname='Acme', systemname='sys-v1',
+                          mode='closed', results_dir='/r')
+        print_run_summary(args)
+
+        output = _joined_status_calls(mock_logger)
+        for row_label in (
+            'MLPSTORAGE_RESULTS_DIR',
+            'MLPSTORAGE_SYSTEMNAME',
+            'MLPSTORAGE_ORGNAME',
+            'MLPSTORAGE_DATA_DIR',
+            'MLPSTORAGE_CHECKPOINT_FOLDER',
+        ):
+            assert row_label in output, (
+                f"Expected {row_label} row in Environment section; "
+                f"got: {output!r}"
+            )
 
 
 class TestOutputOnlyDenylist:
