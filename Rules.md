@@ -16,7 +16,6 @@
     * [3.6. Training OPEN versus CLOSED Options](#36-training-open-versus-closed-options)
 * [4. Validating the Checkpointing Workloads](#4-validating-the-checkpointing-workloads)
     * [4.1. Checkpointing Sizing Options](#41-checkpointing-sizing-options)
-    * 
     * [4.2. Checkpointing Generation Options](#42-checkpointing-generation-options)
     * [4.3. Checkpointing Run Options](#43-checkpointing-run-options)
     * [4.4. Checkpointing Access Via POSIX API Options](#44-checkpointing-access-via-posix-api-options)
@@ -37,7 +36,7 @@
     * [6.4. KVCache Access Via POSIX API Options](#64-kvcache-access-via-posix-api-options)
     * [6.5. KVCache Access Via Object API Options](#65-kvcache-access-via-object-api-options)
     * [6.6. KVCache OPEN versus CLOSED Options](#66-kvcache-open-versus-closed-options)
-# 1. Introduction
+# 1.  Introduction
 
 These are the requirements for the *submission validation checker* for version 2.0 of the MLPerf™ Storage benchmark,
 but since the `mlpstorage` tool will be responsible for generating the vast majority (if not all) of the contents of a submission, it is also a spec for what `mlpstorage` should generate.
@@ -54,9 +53,9 @@ The `mlpstorage` tool must be used to run the benchmarks, submitters are not all
 
 1.1. **mlpstorageGeneratesHierarchy** -- The `mlpstorage` command must obtain (somehow) the pathname of the output file directory hierarchy and directly create and/or append to the files within that hierarchy to successively build out the submission folder.  We don't want the submitter to manually create anything in that hierarchy except for the SystemDescription.* files (if we can help it).
 
-# 2. Core/Common Rules for All Submissions
+# 2.  Core/Common Rules for All Submissions
 
-## 2.1. Core/Common POSIX API Rules
+## 2.1.  Core/Common POSIX API Rules
 
 2.1.1. **submitterRootDirectory** --  The submission structure must start from a single directory whose name is the name of the submitter.  This can be any string, but a blank or any other character in that string that cannot be part of a POSIX filename should be replaced 1-for-1 with a dash character.
 
@@ -72,7 +71,7 @@ The `mlpstorage` tool must be used to run the benchmarks, submitters are not all
 
 2.1.5.b. **requiredSubdirectoriesOpen** -- Within an OPEN submitter directory, there must be exactly two directories: "results" and "systems".  These names are case-sensitive.  The "code" directory does NOT appear at the OPEN submitter level; instead, a "code" directory is captured at each leaf inside `results/`.  The leaf shape is per-benchmark-type:
 - For "training" and "checkpointing" the leaf is `results/<systemname>/<type>/<model>/` (one capture per model).
-- For "vector_database" the leaf is `results/<systemname>/vector_database/<index_type>/` where `<index_type>` is the UPPERCASE token (`DISKANN`, `HNSW`, or `AISAQ`) (one capture per index type, because results across index types — e.g. AISAQ vs DISKANN vs HNSW — are not comparable and must live in separate trees).
+- For "vector_database" the leaf is `results/<systemname>/vector_database/<vdb_engine>/<vdb_index>/` where `<vdb_engine>` is the engine token (`milvus` today) and `<vdb_index>` is the UPPERCASE index token (`DISKANN`, `HNSW`, or `AISAQ`) (one capture per engine/index pair, because results across engines or index families are not comparable and must live in separate trees).
 - For "kv_cache" the leaf is currently `results/<systemname>/<type>/` (one capture per type).  This is transitional pending finalization of the kv_cache directory structure below the type prefix.
 
 See §2.1.6 and §2.1.27.
@@ -119,8 +118,6 @@ configuration of storage system and to link together those results with the .pdf
 
 2.1.18. **runTimestampGap** --  The timestamp (the day and time) represented by the name of each *timestamp directory* must be separated by less than the duration of a single *timestamp directory* from it's neighboring *timestamp directories*.  Ie: the gap between a consecutive pair of *timestamp directories* must be short enough that we can be sure that there was no benchmark activity between them.
 
-2.1.18a.  **runPickingSubsets** -- It is permissible to execute a large number of runs (all consecutive) and then delete the *timestamp directories* for all but 6 consecutive runs in the middle.  This differs from "cherry picking" in that these runs must be consecutive, see **runTimestampGap**.
-
 2.1.19. **runFiles** --  Within each *timestamp directory* within the "run" *phase*, there must exist the following files: "training_run.stdout.log", "training_run.stderr.log" file, "*output.json, "*per_epoch_stats.json", "*summary.json", and "dlio.log", plus a subdirectory named "dlio_config".  These names are case-sensitive.
 
 2.1.20. **runDlioConfig** --  The "dlio_config" subdirectory in each *timestamp directory* must contain the following list of files, and nothing else: "config.yaml", "hydra.yaml", and "overrides.yaml".  These names are case-sensitive.
@@ -132,8 +129,6 @@ configuration of storage system and to link together those results with the .pdf
 2.1.23. **checkpointingTimestamps** --  Within the *workload directories* within the "checkpointing" directory hierarchy, there must be either one or two *timestamp directories* named *YYYYMMDD_HHmmss" that represent a *timestamp* of when that part of the test run was completed (one timestamp directory per invocation, per §4.7.1: a single combined invocation OR a write-phase invocation followed by a read-phase invocation).  Where Y's are replaced with the year the run was performed, M's are replaced with the month, D's with the day, H's with the hour (in 24-hour format), m's with the minute, and s's with the second.  The timestamps should be relative to the local timezone where the test was actually run.
 
 2.1.24. **checkpointingTimestampGap** --  The timestamp (the day and time) represented by the name of each *timestamp directory* must be separated by less than the duration of a single *timestamp directory* from it's neighboring *timestamp directories*.  Ie: the gap between a consecutive pair of *timestamp directories* must be short enough that we can be sure that there was no benchmark activity between them.
-
-2.1.24a.  **checkpointingPickingSubsets** -- It is permissible to execute a large set of runs (all consecutive) and then delete all but one run (with 10 checkpoint files in it) in the middle.
 
 2.1.25. **checkpointingFiles** --  Within the *timestamp directories* within the "checkpointing" directory hierarchy, there must exist the following files: "checkpointing_run.stdout.log", "checkpointing_run.stderr.log" file, "*output.json, "*per_epoch_stats.json", "*summary.json", and "dlio.log", plus a subdirectory named "dlio_config".  These names are case-sensitive.
 
@@ -200,36 +195,37 @@ root_folder (or any name you prefer)
 │	  	│		│		└── YYYYMMDD_HHmmss
 │	  	│		│	 		└── dlio_config
 │	  	│	 	└── vector_database
-|		|			├── AISAQ
-│	  	│	 		|	├── datagen
-│	  	│			|	│	└── YYYYMMDD_HHmmss
-│	  	│			|	│		└── summary.json
-│	  	│			|	└── run
-│	  	│			|		├── YYYYMMDD_HHmmss
-│	  	│			|		│	└── summary.json
-│	  	│			|		... (5x Runs total)
-│	  	│			|		└── YYYYMMDD_HHmmss
-│	  	│			|			└── summary.json
-|		|			├── DISKANN
-│	  	│	 		|	├── datagen
-│	  	│			|	│	└── YYYYMMDD_HHmmss
-│	  	│			|	│		└── summary.json
-│	  	│			|	└── run
-│	  	│			|		├── YYYYMMDD_HHmmss
-│	  	│			|		│	└── summary.json
-│	  	│			|		... (5x Runs total)
-│	  	│			|		└── YYYYMMDD_HHmmss
-│	  	│			|			└── summary.json
-|		|			└── HNSW
-│	  	│	 			├── datagen
-│	  	│				│	└── YYYYMMDD_HHmmss
-│	  	│				│		└── summary.json
-│	  	│				└── run
-│	  	│					├── YYYYMMDD_HHmmss
-│	  	│					│	└── summary.json
-│	  	│					... (5x Runs total)
-│	  	│					└── YYYYMMDD_HHmmss
-│	  	│						└── summary.json
+│	  	│	 		└── milvus
+│	  	│	 			├── AISAQ
+│	  	│	 			│	├── datagen
+│	  	│	 			│	│	└── YYYYMMDD_HHmmss
+│	  	│	 			│	│		└── summary.json
+│	  	│	 			│	└── run
+│	  	│	 			│		├── YYYYMMDD_HHmmss
+│	  	│	 			│		│	└── summary.json
+│	  	│	 			│		... (5x Runs total)
+│	  	│	 			│		└── YYYYMMDD_HHmmss
+│	  	│	 			│			└── summary.json
+│	  	│	 			├── DISKANN
+│	  	│	 			│	├── datagen
+│	  	│	 			│	│	└── YYYYMMDD_HHmmss
+│	  	│	 			│	│		└── summary.json
+│	  	│	 			│	└── run
+│	  	│	 			│		├── YYYYMMDD_HHmmss
+│	  	│	 			│		│	└── summary.json
+│	  	│	 			│		... (5x Runs total)
+│	  	│	 			│		└── YYYYMMDD_HHmmss
+│	  	│	 			│			└── summary.json
+│	  	│	 			└── HNSW
+│	  	│	 				├── datagen
+│	  	│	 				│	└── YYYYMMDD_HHmmss
+│	  	│	 				│		└── summary.json
+│	  	│	 				└── run
+│	  	│	 					├── YYYYMMDD_HHmmss
+│	  	│	 					│	└── summary.json
+│	  	│	 					... (5x Runs total)
+│	  	│	 					└── YYYYMMDD_HHmmss
+│	  	│	 						└── summary.json
 │	  	└── systems
 │	  		├──system-name-1.yaml
 │	  		├──system-name-1.pdf
@@ -298,39 +294,40 @@ root_folder (or any name you prefer)
 	  	│		│		└── YYYYMMDD_HHmmss
 	  	│		│	 		└── dlio_config
 	  	│	 	└── vector_database
-		|			├── AISAQ
-	  	│	 		|	├── code  # captured per-leaf
-	  	│	 		|	├── datagen
-	  	│			|	│	└── YYYYMMDD_HHmmss
-	  	│			|	│		└── summary.json
-	  	│			|	└── run
-	  	│			|		├── YYYYMMDD_HHmmss
-	  	│			|		│	└── summary.json
-	  	│			|		... (5x Runs total)
-	  	│			|		└── YYYYMMDD_HHmmss
-	  	│			|			└── summary.json
-		|			├── DISKANN
-	  	│	 		|	├── code  # captured per-leaf
-	  	│	 		|	├── datagen
-	  	│			|	│	└── YYYYMMDD_HHmmss
-	  	│			|	│		└── summary.json
-	  	│			|	└── run
-	  	│			|		├── YYYYMMDD_HHmmss
-	  	│			|		│	└── summary.json
-	  	│			|		... (5x Runs total)
-	  	│			|		└── YYYYMMDD_HHmmss
-	  	│			|			└── summary.json
-		|			└── HNSW
-	  	│	 			├── code  # captured per-leaf
-	  	│	 			├── datagen
-	  	│				│	└── YYYYMMDD_HHmmss
-	  	│				│		└── summary.json
-	  	│				└── run
-	  	│					├── YYYYMMDD_HHmmss
-	  	│					│	└── summary.json
-	  	│					... (5x Runs total)
-	  	│					└── YYYYMMDD_HHmmss
-	  	│						└── summary.json
+	  	│	 		└── milvus
+	  	│	 			├── AISAQ
+	  	│	 			│	├── code  # captured per-leaf
+	  	│	 			│	├── datagen
+	  	│	 			│	│	└── YYYYMMDD_HHmmss
+	  	│	 			│	│		└── summary.json
+	  	│	 			│	└── run
+	  	│	 			│		├── YYYYMMDD_HHmmss
+	  	│	 			│		│	└── summary.json
+	  	│	 			│		... (5x Runs total)
+	  	│	 			│		└── YYYYMMDD_HHmmss
+	  	│	 			│			└── summary.json
+	  	│	 			├── DISKANN
+	  	│	 			│	├── code  # captured per-leaf
+	  	│	 			│	├── datagen
+	  	│	 			│	│	└── YYYYMMDD_HHmmss
+	  	│	 			│	│		└── summary.json
+	  	│	 			│	└── run
+	  	│	 			│		├── YYYYMMDD_HHmmss
+	  	│	 			│		│	└── summary.json
+	  	│	 			│		... (5x Runs total)
+	  	│	 			│		└── YYYYMMDD_HHmmss
+	  	│	 			│			└── summary.json
+	  	│	 			└── HNSW
+	  	│	 				├── code  # captured per-leaf
+	  	│	 				├── datagen
+	  	│	 				│	└── YYYYMMDD_HHmmss
+	  	│	 				│		└── summary.json
+	  	│	 				└── run
+	  	│	 					├── YYYYMMDD_HHmmss
+	  	│	 					│	└── summary.json
+	  	│	 					... (5x Runs total)
+	  	│	 					└── YYYYMMDD_HHmmss
+	  	│	 						└── summary.json
 		└── systems
 			├──system-name-1.yaml
 			├──system-name-1.pdf
@@ -350,11 +347,11 @@ root_folder (or any name you prefer)
         └── overrides.yaml
 ```
 
-## 2.2. Core/Common Object API Rules
+## 2.2.  Core/Common Object API Rules
 
-# 3. Validating the Training Workloads
+# 3.  Validating the Training Workloads
 
-## 3.1. Training Sizing Options
+## 3.1.  Training Sizing Options
 
 3.1.1. **trainingVerifyDatasizeUsage** -- The *submission validator* must verify that the *datasize* option was used by finding the entry(s) in the log file showing its use.
 
@@ -370,11 +367,11 @@ root_folder (or any name you prefer)
      * `min_files_size = min_samples * record_length / 1024 / 1024 / 1024`
   * A minimum of `min_total_files` files are required which will consume `min_files_size` GB of storage.
 
-## 3.2. Training Generation Options
+## 3.2.  Training Generation Options
 
 3.2.1. **trainingDatagenMinimumSize** --  The amount of data generated during the *datagen* phase must be equal **or larger** -- than the amount of data calculated during the *datasize* phase or the run must be failed.
 
-## 3.3. Training Run Options
+## 3.3.  Training Run Options
 
 3.3.1. **trainingRunDataMatchesDatasize** -- The amount of data the *run* phase is told to use must be exactly equal to the *datasize* value calculated earlier, but can be less than the value used in the *datagen* phase.  To express that, you can run the benchmark on a subset of that dataset by setting `num_files_train` or `num_files_eval` smaller than the number of files available in the dataset folder, but `num_subfolders_train` and `num_subfolders_eval` must be to be equal to the actual number of subfolders inside the dataset folder in order to generate valid results.
 
@@ -393,15 +390,15 @@ root_folder (or any name you prefer)
 
 3.3.7. **trainingNodeCapabilityConsistency** -- For distributed Training submissions, the *submission validation checker* should emit a warning (not fail the validation) if the physical nodes that run the benchmark code are widely enough different in their capability.  **_(not clear we should do this, so maybe remove?)_**
 
-## 3.4. Training Access Via POSIX API Options
+## 3.4.  Training Access Via POSIX API Options
 
 3.4.1. **trainingMlpstoragePathArgs** --  The arguments to `mlpstorage` that set the directory pathname where the dataset is stored and the directory where the output logfiles are stored must both be set and must be set to different values.
 
 3.4.2. **trainingMlpstorageFilesystemCheck** --  The `mlpstorage` command should do a "df" command on the directory pathname where the dataset is stored and another one on the directory pathname where the output logfiles are stored and record those values in the logfile.  The *submission validator* should find those entries in the run's logfile and verify that they are different filesystems.  We don't want the submitter to, by acccident, place the logfiles onto the storage system under test since that would skew the results.
 
-## 3.5. Training Access Via Object API Options
+## 3.5.  Training Access Via Object API Options
 
-## 3.6. Training OPEN versus CLOSED Options
+## 3.6.  Training OPEN versus CLOSED Options
 
 3.6.1. **trainingClosedSubmissionChecksum** -- For CLOSED submissions of this benchmark, the MLPerf Storage codebase must not be changed.  The *submission validation checker* enforces this with a layered check:
 
@@ -446,13 +443,13 @@ root_folder (or any name you prefer)
 | *Reader parameters*          |                                            |                                                                                       |
 | reader.data_loader           | Supported options: Tensorflow or PyTorch.  | 3D U-Net: PyTorch<br>ResNet-50: Tensorflow<br>Cosmoflow: Tensorflow                   |
 
-# 4. Validating the Checkpointing Workloads
+# 4.  Validating the Checkpointing Workloads
 
-## 4.1. Checkpointing Sizing Options
+## 4.1.  Checkpointing Sizing Options
 
-## 4.2. Checkpointing Generation Options
+## 4.2.  Checkpointing Generation Options
 
-## 4.3. Checkpointing Run Options
+## 4.3.  Checkpointing Run Options
 
 4.3.1. **checkpointDataSizeRatio** -- The checkpoint data written per client node must be more than 3x the client node's memory capacity, otherwise the filesystem cache needs to be cleared between the write and read phases.
 
@@ -487,7 +484,7 @@ root_folder (or any name you prefer)
 
 ## 4.5. Checkpointing Access Via Object API Options
 
-## 4.6. Checkpointing OPEN versus CLOSED Options
+## 4.6.  Checkpointing OPEN versus CLOSED Options
 
 4.6.1. **checkpointClosedMpiProcesses** -- For CLOSED submissions, the number of MPI processes must be set to 8, 64, 512, and 1024 for the respective models.  (see table 2)
 
@@ -517,7 +514,7 @@ root_folder (or any name you prefer)
 
 **\*\* NOTE: In CLOSED submissions, ``--num-checkpoints-write`` and ``--num-checkpoints-read`` may be set to ``0`` only as part of the two-invocation cache-flush workflow described in §4.7.1: one invocation runs the write phase with ``--num-checkpoints-read=0`` and the next runs the read phase with ``--num-checkpoints-write=0``. The default for both flags is 10 and the total work performed across both invocations must still be 10 writes followed by 10 reads.**
 
-## 4.7. Storage System Must Be Simultaneously R/W or _Remappable_
+## 4.7.  Storage System Must Be Simultaneously R/W or _Remappable_
 
 4.7.1. **checkpointCacheFlushValidation** -- A cache flush between the write and read phases is only required when the client node has enough memory to cache all of the checkpoints written by that client during the run. The benchmark writes 10 sequential checkpoints specifically to overfill typical filesystem caches; on most submission configurations the early checkpoints have already been evicted by the time the read phase begins, so no flush is required. As a rule of thumb (see `checkpointing/README.md`), a flush is required when the total checkpoint size written per client is less than 3× the client node's memory capacity. When a flush is required, the submitter must execute the run in two invocations: the write phase with ``--num-checkpoints-read=0``, followed by the cache flush during a pause of no more than 30 seconds, then the read phase with ``--num-checkpoints-write=0``. The validator must confirm this split occurred and that the inter-phase gap did not exceed 30 seconds.
 
@@ -534,23 +531,23 @@ System:
     simultaneous_read__support: True    # Are simultaneous reads by multiple hosts supported in the submitted configuration
 ```
 
-# 5. Validating the VDB Workloads
+# 5.  Validating the VDB Workloads
 
-## 5.1. VDB Sizing Options
+## 5.1.  VDB Sizing Options
 
 5.1.1. **vdbDatasetScale** -- The benchmark must be run against one of the defined dataset scales (collection vector counts) listed in the VDB scale table. The *submission validator* must read `num_vectors` and `dimension` from the run's `config.json`/`summary.json` and verify they match a defined scale; any other scale must generate a message and fail validation.
 
 5.1.2. **vdbDimensionConsistency** -- The vector `dimension` recorded at `datagen` (load) time must equal the `dimension` used at `run` (query) time. The *submission validator* must compare the dimension in the load summary against the dimension in each run's `summary.json` and fail validation if they differ.
 
-## 5.2. VDB Generation Options
+## 5.2.  VDB Generation Options
 
 5.2.1. **vdbCollectionPopulated** -- The number of vectors actually inserted (`inserted_vectors`) during load must equal the declared `num_vectors` for the chosen scale. The *submission validator* must read the load summary and fail validation on a shortfall.
 
 5.2.2. **vdbIndexBuildCompleted** -- The collection must be fully indexed and (when configured) compacted before the query phase. The *submission validator* must confirm an index-build / compaction record is present in the load output and that the index type recorded at load time matches the index type used at run time.
 
-## 5.3. VDB Run Options
+## 5.3.  VDB Run Options
 
-5.3.1. **vdbRunCount** -- Within each `vector_database/<index_type>/run/` directory (where `<index_type>` is one of the UPPERCASE tokens `DISKANN`, `HNSW`, or `AISAQ`), there must be exactly five `<datetime>` timestamp directories, each containing a `summary.json`. The count rule applies to query runs only — `datagen` is governed by §5.2. (see §2.1.27 directory diagram.)
+5.3.1. **vdbRunCount** -- Within each `vector_database/<vdb_engine>/<vdb_index>/run/` directory (where `<vdb_engine>` is `milvus` today and `<vdb_index>` is one of the UPPERCASE tokens `DISKANN`, `HNSW`, or `AISAQ`), there must be exactly five `<datetime>` timestamp directories, each containing a `summary.json`. The count rule applies to query runs only — `datagen` is governed by §5.2. (see §2.1.27 directory diagram.)
 
 5.3.2. **vdbRecallReported** -- Each run's `summary.json` (or its rank-local `recall_stats.json`) must report a recall value computed outside the timed query loop. The *submission validator* must verify a recall field is present and that recall meets or exceeds the minimum recall target defined for the chosen scale/metric.
 
@@ -558,105 +555,107 @@ System:
 
 5.3.4. **vdbMetricsReported** -- Each run's `summary.json` must report `throughput_qps` and the latency percentile set (`mean_latency_ms`, `p95_latency_ms`, `p99_latency_ms`, `p999_latency_ms`). The *submission validator* must verify these fields exist and are populated.
 
-## 5.4. VDB Access Via POSIX API Options
+## 5.4.  VDB Access Via POSIX API Options
 
 5.4.1. **vdbPathArgs** -- The arguments to `mlpstorage` that set the storage path for the vector database data and the directory where output logfiles/results are stored must both be set and must be set to different values.
 
 5.4.2. **vdbFilesystemCheck** -- The `mlpstorage` command should do a "df" command on the directory pathname where the vector database stores its data and another on the directory pathname where the output logfiles are stored, and record those values in the logfile. The *submission validator* must find those entries in the run's logfile and verify that they are different filesystems, so that logfiles are not accidentally placed on the storage system under test.
 
-## 5.5. VDB Access Via Object API Options
+## 5.5.  VDB Access Via Object API Options
 
 5.5.1. **vdbObjectStorageBackend** -- For object-API submissions, the vector database must be backed by S3-compatible object storage and the submission must record the storage backend in the system description. The *submission validator* must confirm the recorded backend is consistent with the declared API.
 
-## 5.6. VDB OPEN versus CLOSED Options
+## 5.6.  VDB OPEN versus CLOSED Options
 
-> **Index type token convention.** The index type is recorded, validated, and
-> stored on disk using the uppercase token (`DISKANN`, `HNSW`, `AISAQ`) defined
-> by `VDB_INDEX_TYPES_CLOSED` in `mlpstorage_py/config.py`. The same token is
-> used by the CLI (`--index-type`), in `summary.json.index_type`, and as the
-> index directory name in the §2.1 directory diagram.
+> **Index and engine token convention.** `--vdb-engine` identifies the vector
+> database implementation and `--vdb-index` identifies the benchmark/index
+> family used in metadata, reporting, and the outer result path (`vector_database/<vdb_engine>/<vdb_index>/`). For
+> `datasize` and `datagen`, `--index-type` is the concrete Milvus build
+> argument; it defaults to `--vdb-index`, and the two values must match when
+> both are supplied. Index tokens are stored in uppercase (`DISKANN`, `HNSW`,
+> `AISAQ`) as defined by `VDB_INDEX_TYPES_CLOSED`.
 
 5.6.1. **vdbClosedSubmissionChecksum** -- For CLOSED VDB submissions, the *submission validator* enforces the same layered code-image check defined in §3.6.1: self-consistency against `.code-hash.json` always, plus upstream-identity against `REFERENCE_CHECKSUMS` (or `--reference-checksum`) for CLOSED. See §2.1.6 for the `.code-hash.json` schema and exclusion set.
 
-5.6.2. **vdbClosedDatabaseBackend** -- For CLOSED submissions, the vector database backend must be Milvus. The *submission validator* must read the `database.database` field from the run's `config.json`/`summary.json` and fail validation if any backend other than `milvus` is recorded.
+5.6.2. **vdbClosedDatabaseBackend** -- For CLOSED submissions, the vector database backend must be Milvus. The *submission validator* must read the recorded engine/database field from the run metadata and fail validation if any backend other than `milvus` is recorded. The integrated CLI selects this field with `--vdb-engine`, and current result paths place it between `vector_database` and the index token.
 
-5.6.3. **vdbClosedIndexTypes** -- For CLOSED submissions, the index type must be one of exactly three supported types: `DISKANN`, `HNSW`, or `AISAQ` (matching `VDB_INDEX_TYPES_CLOSED`). The *submission validator* must read the `index_type` field and the index directory name under "vector_database" and fail validation if any other index type (e.g. `IVF_FLAT`, `IVF_SQ8`, or `FLAT`) is recorded. Within these three index types, the submitter is free to choose the metric type and any index-specific build and search parameters (see 5.6.4).
+5.6.3. **vdbClosedIndexTypes** -- For CLOSED submissions, the index type must be one of exactly three supported types: `DISKANN`, `HNSW`, or `AISAQ` (matching `VDB_INDEX_TYPES_CLOSED`). The *submission validator* must read the recorded engine/index fields and the engine/index directory names under `vector_database` and fail validation if any other index type (for example `IVF_FLAT`, `IVF_SQ8`, or `FLAT`) is recorded. Each index family is a distinct result category. Within these three index types, the parameters permitted by 5.6.4 must be recorded with their effective values.
 
-5.6.4. **vdbClosedSubmissionParameters** -- For CLOSED submissions of this benchmark, the database backend is fixed to Milvus (see 5.6.2) and the index type is restricted to `DISKANN`, `HNSW`, or `AISAQ` (see 5.6.3), but the submitter may freely choose the metric type and all index-specific build/search parameters for those three index types, plus the load and run parameters listed in the table below. Any other parameter being modified, any unsupported index type, or any attempt to substitute a different database backend must generate a message and fail the validation.
+5.6.4. **vdbClosedSubmissionParameters** -- For CLOSED submissions, the database backend is fixed to Milvus (5.6.2) and the index family is restricted to `DISKANN`, `HNSW`, or `AISAQ` (5.6.3). Unless a row is explicitly marked fixed or restricted, this rule currently permits the parameter to vary and requires the effective value to be recorded. Any unsupported index type, substituted database backend, or modification of a parameter outside the permitted rule surface must generate a message and fail validation.
 
-**Table: VectorDB Tunable Parameters for CLOSED (Milvus backend; DISKANN / HNSW / AISAQ only)**
+The final column below is an **implementation fallback**, not a mandatory CLOSED profile value. It describes the current effective value when neither a command-line argument nor a selected configuration supplies another value. Named YAML profiles may override fallbacks. A future versioned CLOSED profile must state fixed values separately and must be enforced by the CLI and submission validator.
 
-| Parameter                  | CLI flag             | Description                                                      | Default      |
-|----------------------------|----------------------|------------------------------------------------------------------|--------------|
-| *Database parameters*      |                      |                                                                  |              |
-| database.database          | --                   | Backend database engine — **fixed to `milvus` for CLOSED**       | milvus       |
-|                            |                      |                                                                  |              |
-| *Index selection*          |                      | *(restricted to the three CLOSED index types)*                   |              |
-| index.index_type           | `--index-type`       | Index family — **one of: `DISKANN`, `HNSW`, `AISAQ`**            | DISKANN      |
-| index.metric_type          | `--metric-type`      | Distance metric (e.g. COSINE, L2, IP)                            | COSINE       |
-|                            |                      |                                                                  |              |
-| *DISKANN index parameters* |                      |                                                                  |              |
-| index.max_degree           | `--max-degree`       | Max graph degree (DiskANN build)                                 | 64           |
-| index.search_list_size     | `--search-list-size` | Search list size (DiskANN build)                                 | 200          |
-| search.search_ef           | `--search-ef`        | DiskANN search-time list size (recall/throughput trade-off)      | --           |
-|                            |                      |                                                                  |              |
-| *HNSW index parameters*    |                      |                                                                  |              |
-| index.M                    | `--max-degree`       | Max neighbors per node (HNSW build; shares the degree flag)      | 64           |
-| index.ef_construction      | `--ef-construction`  | Construction-time candidate list size (HNSW build)               | 200          |
-| search.search_ef           | `--search-ef`        | HNSW search-time `ef` (recall/throughput trade-off)              | --           |
-|                            |                      |                                                                  |              |
-| *AISAQ index parameters*   |                      |                                                                  |              |
-| index.max_degree           | `--max-degree`       | Max graph degree (AISAQ build)                                   | 64           |
-| index.search_list_size     | `--search-list-size` | Search list size (AISAQ build)                                   | 200          |
-| index.inline_pq            | `--inline-pq`        | AISAQ inline product-quantization parameter (perf vs scale)      | 16           |
-| search.search_ef           | `--search-ef`        | AISAQ search-time list size (recall/throughput trade-off)        | --           |
-|                            |                      |                                                                  |              |
-| *Search / run parameters*  |                      |                                                                  |              |
-| run.mode                   | `--mode`             | Benchmark mode: `timed` or `query_count`                         | timed        |
-| run.num_query_processes    | `--num-query-processes` | Local Python query workers inside each rank                   | --           |
-| run.batch_size             | `--batch-size`       | Query batch size                                                 | --           |
-| run.report_count           | `--report-count`     | Reporting interval (queries between reports)                     | --           |
-|                            |                      |                                                                  |              |
-| *Dataset / load parameters*|                      |                                                                  |              |
-| dataset.collection_name    | `--collection`       | Name of the collection populated and queried                     | --           |
-| dataset.num_shards         | `--num-shards`       | Number of collection shards                                      | --           |
-| dataset.chunk_size         | `--chunk-size`       | Vectors per load chunk                                           | --           |
-| dataset.batch_size         | `--batch-size`       | Vectors per insert batch at load time                            | 1000         |
-| dataset.vector_dtype       | `--vector-dtype`     | Vector data type (e.g. FLOAT_VECTOR)                             | FLOAT_VECTOR |
-|                            |                      |                                                                  |              |
-| *Storage parameters*       |                      |                                                                  |              |
-| storage.storage_root       | --                   | The storage root directory for VDB data                          | --           |
-| storage.storage_type       | --                   | The storage type (e.g. local_fs, s3)                            | local_fs     |
+**Table: VectorDB parameter surface for CLOSED (Milvus; DISKANN / HNSW / AISAQ only)**
 
-5.6.5. **vdbOpenSubmissionParameters** -- For OPEN submissions of this benchmark, the submitter may additionally run against vector database backends other than Milvus — including **Elasticsearch** and **pgvector** — in addition to everything already permitted in CLOSED. The *submission validator* must verify that the recorded `database.database` is one of the supported backends. OPEN submissions may use any index types, metrics, and parameters native to the chosen backend (including the full `VDB_INDEX_TYPES` set such as `IVF_FLAT`, `IVF_SQ8`, and `FLAT` on Milvus), but must still meet the recall target (5.3.2) and report the required metrics (5.3.4). Any parameter not listed here or in the CLOSED table, when modified, must generate a message and fail the validation.
+| Parameter | Current CLI representation | CLOSED status under this rule | Implementation fallback |
+|---|---|---|---:|
+| *Database and index identity* | | | |
+| database.database | `--vdb-engine` | **Fixed to `milvus`** | `milvus` |
+| index.index_type | `--vdb-index` | **Restricted to `DISKANN`, `HNSW`, `AISAQ`** | `DISKANN` |
+| index.implementation_type | `--index-type` on `datasize`/`datagen` | Derived from, or required to match, `--vdb-index` | `DISKANN` |
+| index.metric_type | `--metric-type` | Permitted by this rule; the direct flag is currently OPEN/WHATIF-only | `COSINE` |
+| *DISKANN build/search* | | | |
+| index.max_degree | `--max-degree` | Permitted; direct build flag is currently OPEN/WHATIF-only | 16 |
+| index.search_list_size | `--search-list-size` | Permitted; direct build flag is currently OPEN/WHATIF-only | 200 |
+| search.search_ef | `--search-ef` | Permitted | 200 |
+| *HNSW build/search* | | | |
+| index.M | `--M` | Permitted; direct build flag is currently OPEN/WHATIF-only | 16 |
+| index.ef_construction | `--ef-construction` | Permitted; direct build flag is currently OPEN/WHATIF-only | 200 |
+| search.search_ef | `--search-ef` | Permitted | 200 |
+| *AISAQ build/search* | | | |
+| index.max_degree | `--max-degree` | Permitted; direct build flag is currently OPEN/WHATIF-only | 16 |
+| index.search_list_size | `--search-list-size` | Permitted; direct build flag is currently OPEN/WHATIF-only | 200 |
+| index.inline_pq | `--inline-pq` | Permitted; direct build flag is currently OPEN/WHATIF-only | 16 |
+| search.search_ef | `--search-ef` | Permitted | 200 |
+| *Search and run* | | | |
+| run.benchmark_mode | `--benchmark-mode` | `timed` or `query_count` for a simple CLOSED result | `timed` |
+| run.num_query_processes | `--num-query-processes` | Permitted and recorded | 1 |
+| run.batch_size | `--batch-size` on `run` | Permitted and recorded | 1 |
+| run.report_count | `--report-count` | Permitted and recorded | 100 |
+| *Dataset and load* | | | |
+| dataset.collection_name | `--collection` | Required and recorded | none |
+| dataset.num_shards | `--num-shards` | Permitted and recorded | 1 |
+| dataset.chunk_size | `--chunk-size` | Permitted and recorded | 10,000 through `mlpstorage` |
+| dataset.batch_size | `--batch-size` on `datagen` | Permitted and recorded | 1,000 through `mlpstorage` |
+| dataset.vector_dtype | `--vector-dtype` | Permitted and recorded | `FLOAT_VECTOR` |
+| *Storage* | | | |
+| storage.storage_root | deployment and system-description fields | Required by the applicable POSIX/object rules | none |
+| storage.storage_type | positional `file` or `object` | Required on `datagen` and `run` | none |
 
-**Table: VectorDB Additional Tunable Parameters for OPEN**
+The direct `load_vdb.py` script has different load batch/chunk fallbacks
+(10,000 and 1,000,000). Those direct-script values do not replace the effective
+values passed by the integrated wrapper. All submitted results must record the
+effective values that actually reached the workload.
 
-| Parameter                  | Description                                                                                                          | Default |
-|----------------------------|---------------------------------------------------------------------------------------------------------------------|---------|
-| *Database parameters*      |                                                                                                                     |         |
-| database.database          | Backend database engine — OPEN permits alternative backends including `milvus`, `elasticsearch`, and `pgvector`     | milvus  |
-| database.host              | Database endpoint host for the selected backend                                                                     | --      |
-| database.port              | Database endpoint port for the selected backend                                                                     | --      |
-|                            |                                                                                                                     |         |
-| *Extended Milvus indexes*  | *(index types available on Milvus in OPEN beyond the three CLOSED types)*                                            |         |
-| index.index_type           | Adds `IVF_FLAT`, `IVF_SQ8`, `FLAT` to the CLOSED `DISKANN` / `HNSW` / `AISAQ` set                                   | --      |
-|                            |                                                                                                                     |         |
-| *Backend-specific options* | *(any index types, metrics, and parameters native to a non-Milvus backend)*                                          |         |
-| index.index_type           | Any index family supported by the chosen backend (e.g. HNSW on Elasticsearch; HNSW / IVFFlat on pgvector)           | --      |
-| index.metric_type          | Any distance metric supported by the chosen backend                                                                 | --      |
-| index.* (backend-native)   | Any backend-native build/search parameters (e.g. pgvector `lists` / `probes`; Elasticsearch `m` / `ef_construction` / `num_candidates`) | -- |
+5.6.5. **vdbOpenSubmissionParameters** -- OPEN submissions may use the full index set registered by `VDB_INDEX_TYPES`, including `IVF_FLAT`, `IVF_SQ8`, and `FLAT`, and may tune the build/search controls exposed by the OPEN CLI. A database engine is valid only when it is implemented and registered in `VDB_ENGINES`; the current integrated registry contains only `milvus`. OPEN does not by itself make an unimplemented backend valid. The *submission validator* must verify the recorded engine and index against the implemented registry and must require disclosure of all effective parameters. OPEN results must still meet the applicable recall and reporting rules.
 
-# 6. Validating the KVCache Options
+**Table: Additional VectorDB parameter surface for OPEN**
 
-## 6.1. KVCache Sizing Options
+| Parameter | Current CLI representation | OPEN treatment | Current fallback |
+|---|---|---|---:|
+| database.database | `--vdb-engine` | Any implemented/registered engine; currently `milvus` | `milvus` |
+| database.host | `--host` | Permitted and disclosed | `127.0.0.1` |
+| database.port | `--port` | Permitted and disclosed | 19530 |
+| index.index_type | `--vdb-index` / matching `--index-type` | Full registered index set | `DISKANN` |
+| index.metric_type | `--metric-type` | Permitted and disclosed | `COSINE` |
+| index.max_degree | `--max-degree` | DiskANN/AISAQ build tuning | 16 |
+| index.search_list_size | `--search-list-size` | DiskANN/AISAQ build tuning | 200 |
+| index.M | `--M` | HNSW build tuning | 16 |
+| index.ef_construction | `--ef-construction` | HNSW build tuning | 200 |
+| index.inline_pq | `--inline-pq` | AISAQ build tuning | 16 |
+| search.search_ef | `--search-ef` | Search tuning | 200 |
 
-## 6.2. KVCache Generation Options
+# 6.  Validating the KVCache Options
 
-## 6.3. KVCache Run Options
+## 6.1.  KVCache Sizing Options
 
-## 6.4. KVCache Access Via POSIX API Options
+## 6.2.  KVCache Generation Options
 
-## 6.5. KVCache Access Via Object API Options
+## 6.3.  KVCache Run Options
 
-## 6.6. KVCache OPEN versus CLOSED Options
+## 6.4.  KVCache Access Via POSIX API Options
+
+## 6.5.  KVCache Access Via Object API Options
+
+## 6.6.  KVCache OPEN versus CLOSED Options
+
