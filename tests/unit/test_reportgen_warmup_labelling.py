@@ -72,8 +72,8 @@ class TestWarmupDetection:
             gen._process_single_run(warmup)
             gen._process_single_run(real)
 
-        assert '20250710_141219' in gen.warmup_result_dirs
-        assert '20250710_142219' not in gen.warmup_result_dirs
+        assert '/results/training/resnet50/20250710_141219' in gen.warmup_result_dirs
+        assert '/results/training/resnet50/20250710_142219' not in gen.warmup_result_dirs
 
     def test_collision_walk_order_independent(self, tmp_path):
         """Warmup detection must be independent of get_runs_files() iteration
@@ -96,8 +96,8 @@ class TestWarmupDetection:
             gen._process_single_run(real)
             gen._process_single_run(warmup)
 
-        assert '20250710_141219' in gen.warmup_result_dirs
-        assert '20250710_142219' not in gen.warmup_result_dirs
+        assert '/results/training/resnet50/20250710_141219' in gen.warmup_result_dirs
+        assert '/results/training/resnet50/20250710_142219' not in gen.warmup_result_dirs
 
     def test_no_collision_no_warmup(self, tmp_path):
         """Non-colliding runs must not be flagged as warmups (checkpointing
@@ -121,6 +121,90 @@ class TestWarmupDetection:
             gen._process_single_run(run)
 
         assert gen.warmup_result_dirs == set()
+
+    def test_same_run_id_different_systems_no_collision(self, tmp_path):
+        """Warmup collision detection must be scoped per-system.
+
+        Two systems can produce identical RunIDs (RunID is
+        program+command+model+run_datetime — no system field) when their
+        DLIO summary.json files happen to share a start timestamp. Those
+        are two independent real runs, not a warmup/real pair. Prior to
+        the (system_scope, run_id) collision key, one of them would be
+        mislabelled as a warmup and dropped from the aggregate.
+        """
+        gen = _make_bare_generator(tmp_path)
+        shared_id = RunID('training', 'run', 'resnet50',
+                          '2025-07-10T14:22:24.203210')
+
+        # Same run_id, same timestamp basename, DIFFERENT <system>/ parent.
+        # System scope for training walks up 4 dirs from the leaf; these
+        # two paths resolve to different <system>/ folders.
+        run_sysA = _make_run(
+            shared_id,
+            '/mount/results/sysA/training/resnet50/run/20250710_142224',
+        )
+        run_sysB = _make_run(
+            shared_id,
+            '/mount/results/sysB/training/resnet50/run/20250710_142224',
+        )
+
+        with patch(
+            'mlpstorage_py.report_generator.BenchmarkVerifier'
+        ) as mv:
+            mv.return_value.verify.return_value = PARAM_VALIDATION.CLOSED
+            mv.return_value.issues = []
+            gen._process_single_run(run_sysA)
+            gen._process_single_run(run_sysB)
+
+        # Neither run is flagged as a warmup: they belong to different
+        # systems, so the (system_scope, run_id) keys don't collide.
+        assert gen.warmup_result_dirs == set()
+        # Both runs are retained in the aggregate.
+        assert len(gen.run_results) == 2
+        scopes = {scope for scope, _rid in gen.run_results.keys()}
+        assert scopes == {
+            '/mount/results/sysA',
+            '/mount/results/sysB',
+        }, f"Expected one entry per system scope; got {scopes}"
+
+    def test_same_run_id_same_system_still_collides(self, tmp_path):
+        """Collision detection must still fire when two runs share a system.
+
+        Companion to test_same_run_id_different_systems_no_collision: same
+        run_id under the SAME <system>/ folder is the real DLIO-stamp
+        warmup pattern and MUST be caught.
+        """
+        gen = _make_bare_generator(tmp_path)
+        shared_id = RunID('training', 'run', 'resnet50',
+                          '2025-07-10T14:22:24.203210')
+
+        warmup = _make_run(
+            shared_id,
+            '/mount/results/sysA/training/resnet50/run/20250710_141219',
+        )
+        real = _make_run(
+            shared_id,
+            '/mount/results/sysA/training/resnet50/run/20250710_142224',
+        )
+
+        with patch(
+            'mlpstorage_py.report_generator.BenchmarkVerifier'
+        ) as mv:
+            mv.return_value.verify.return_value = PARAM_VALIDATION.CLOSED
+            mv.return_value.issues = []
+            gen._process_single_run(warmup)
+            gen._process_single_run(real)
+
+        assert (
+            '/mount/results/sysA/training/resnet50/run/20250710_141219'
+            in gen.warmup_result_dirs
+        )
+        assert (
+            '/mount/results/sysA/training/resnet50/run/20250710_142224'
+            not in gen.warmup_result_dirs
+        )
+        # Only the real run wins the run_results slot.
+        assert len(gen.run_results) == 1
 
 
 class TestWarmupPrintLabel:
@@ -146,9 +230,15 @@ class TestWarmupPrintLabel:
             '/results/training/resnet50/20250710_143012',
         )
 
-        gen.warmup_result_dirs = {'20250710_141219'}
+        gen.warmup_result_dirs = {'/results/training/resnet50/20250710_141219'}
         gen.run_results = {
-            shared_id: Result(
+            # Post-collision-scoping (GH#616 follow-up): run_results is
+            # keyed by (system_scope, run_id). For these short mock paths
+            # (/results/training/<model>/<ts>/), _system_scope_key walks
+            # up 4 dirs from the leaf and lands at '/' (safe: all runs
+            # in this test share that scope, so the collision key still
+            # groups them together).
+            ('/', shared_id): Result(
                 multi=False,
                 benchmark_type=BENCHMARK_TYPES.training,
                 benchmark_command='run',
@@ -158,7 +248,7 @@ class TestWarmupPrintLabel:
                 category=PARAM_VALIDATION.CLOSED,
                 metrics={},
             ),
-            second_id: Result(
+            ('/', second_id): Result(
                 multi=False,
                 benchmark_type=BENCHMARK_TYPES.training,
                 benchmark_command='run',
@@ -218,9 +308,11 @@ class TestWarmupPrintLabel:
         run_c = _make_run(
             id_c, '/results/training/resnet50/20250710_143805')
 
-        gen.warmup_result_dirs = {'20250710_141219'}
+        gen.warmup_result_dirs = {'/results/training/resnet50/20250710_141219'}
         gen.run_results = {
-            rid: Result(
+            # See note in test_workload_print_labels_warmup: scope is '/'
+            # because these mock paths are shorter than the canonical tree.
+            ('/', rid): Result(
                 multi=False,
                 benchmark_type=BENCHMARK_TYPES.training,
                 benchmark_command='run',
@@ -277,7 +369,9 @@ class TestWarmupPrintLabel:
 
         gen.warmup_result_dirs = set()
         gen.run_results = {
-            rid: Result(
+            # Checkpointing scope walks up 3 from '/results/checkpointing/
+            # llama3-8b/20250710_142224' → '/results'.
+            ('/results', rid): Result(
                 multi=False,
                 benchmark_type=BENCHMARK_TYPES.checkpointing,
                 benchmark_command='run',
