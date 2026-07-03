@@ -763,7 +763,7 @@ Open/whatif VectorDB extras:
 
 KV-cache has no model positional; the model is selected with `--model` (open/whatif only — closed pins it internally).
 
-Closed pins the following at fixed values and does not expose flags to change them: `--gpu-mem-gb=16.0`, `--cpu-mem-gb=32.0`, `--duration=60`, `--generation-mode=realistic`, `--performance-profile=throughput`, `--disable-multi-turn=False`, `--disable-prefix-caching=False`, `--enable-rag=True`, `--rag-num-docs=10`, `--enable-autoscaling=True`, `--autoscaler-mode=qos`, `--seed=42`, `--trials=3`, `--inter-option-delay=20`.
+Closed pins the following at fixed values and does not expose flags to change them: `--gpu-mem-gb=16.0`, `--cpu-mem-gb=32.0`, `--duration=60`, `--generation-mode=realistic`, `--performance-profile=throughput`, `--disable-multi-turn=False`, `--disable-prefix-caching=False`, `--enable-rag=True`, `--rag-num-docs=10`, `--enable-autoscaling=True`, `--autoscaler-mode=qos`, `--seed=42`, `--trials=3`, `--inter-option-delay=90`.
 
 Common:
 

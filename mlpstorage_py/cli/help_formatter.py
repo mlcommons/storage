@@ -458,7 +458,7 @@ KV_RUN_CLOSED
   + CORE_STD
   Note: the following are fixed in closed and not shown:
     duration=60s, generation-mode=realistic, performance-profile=throughput,
-    seed=42, trials=3, inter-option-delay=20s,
+    seed=42, trials=3, inter-option-delay=90s,
     disable-multi-turn=False, disable-prefix-caching=False,
     enable-rag=True, rag-num-docs=10,
     enable-autoscaling=True, autoscaler-mode=qos
