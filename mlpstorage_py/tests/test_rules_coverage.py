@@ -114,7 +114,7 @@ class TestRulesCoverageReconciliation:
         """
         fake_md = tmp_path / "fake.md"
         original = RULES_MD_PATH.read_text(encoding="utf-8")
-        # Locked regex: ^([23456]\.\d+\.\d+)\.\s+\*\*([a-zA-Z][a-zA-Z0-9]+)\*\*
+        # Locked regex: ^([23456]\.\d+(?:\.\d+)+)\.\s+\*\*([a-zA-Z][a-zA-Z0-9]+)\*\*
         fake_md.write_text(
             original + "\n2.1.99. **fakeRule** -- placeholder for testing\n",
             encoding="utf-8",
