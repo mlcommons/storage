@@ -2700,7 +2700,12 @@ class TestEnvAllowlistMatch:
             ("AWS_REGION", True),
             ("STORAGE_BACKEND", True),
             ("STORAGE_URI_SCHEME", True),
-            ("OMPI_COMM_WORLD_RANK", True),
+            # OMPI_COMM_WORLD_SIZE is the stable rank-count var (a legitimate
+            # part of the fingerprint). OMPI_COMM_WORLD_RANK — the pre-#643
+            # representative here — is now denylisted because it's per-rank
+            # volatile; the #643 denylist coverage lives in
+            # TestEnvironmentRuntimeDenylistExpanded643.
+            ("OMPI_COMM_WORLD_SIZE", True),
             ("UCX_NET_DEVICES", True),
             ("NCCL_DEBUG", True),
             ("PATH", False),
@@ -2801,12 +2806,14 @@ class TestEnvironmentCollector:
 
         _clear_env_allowlist_vars(monkeypatch)
         monkeypatch.setenv("STORAGE_BACKEND", "s3dlio")
-        monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+        # OMPI_COMM_WORLD_SIZE (stable rank count) is the post-#643
+        # representative; OMPI_COMM_WORLD_RANK is now denylisted.
+        monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "8")
         monkeypatch.setenv("UCX_NET_DEVICES", "mlx5_0:1")
         monkeypatch.setenv("NCCL_DEBUG", "INFO")
         out = collect_environment()
         assert {"name": "STORAGE_BACKEND", "value": "s3dlio"} in out
-        assert {"name": "OMPI_COMM_WORLD_RANK", "value": "0"} in out
+        assert {"name": "OMPI_COMM_WORLD_SIZE", "value": "8"} in out
         assert {"name": "UCX_NET_DEVICES", "value": "mlx5_0:1"} in out
         assert {"name": "NCCL_DEBUG", "value": "INFO"} in out
 
@@ -3050,7 +3057,10 @@ class TestEnvironmentMPIScriptParity:
         )
         monkeypatch.setenv("AWS_REGION", "us-east-1")
         monkeypatch.setenv("STORAGE_BACKEND", "s3dlio")
-        monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+        # Post-#643: OMPI_COMM_WORLD_RANK is denylisted. Use the stable
+        # OMPI_COMM_WORLD_SIZE as the OMPI-prefix representative so the
+        # parity test still exercises a non-denylisted OMPI dispatch.
+        monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "8")
         monkeypatch.setenv("UCX_NET_DEVICES", "mlx5_0:1")
         monkeypatch.setenv("NCCL_DEBUG", "INFO")
 
