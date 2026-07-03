@@ -1,10 +1,16 @@
 """KVCacheCheck — Rules.md §6 (KVCache) extension stub.
 
-Rules.md §6 is empty at Phase 3 land time. STUB-02 establishes the
+Rules.md §6 was empty at Phase 3 land time. STUB-02 established the
 extension point so ``main.py`` can instantiate the class identically to
 ``DirectoryCheck`` / ``TrainingCheck`` / ``CheckpointingCheck`` (D-S4),
 and so a future phase can fill in real checks without touching the
 ``main.py`` wiring shape.
+
+PR #602 lands the §6 rules; the companion coverage-mapping change
+(mlcommons/storage#658) advertises the seventeen enforceable IDs via
+``STUB_COVERAGE['KVCacheCheck']`` in ``coverage_mapping.py`` while this
+class is still a stub. Real ``@rule``-decorated methods are a follow-up
+phase.
 
 Design constraints (Phase 3 CONTEXT.md):
 
@@ -31,9 +37,10 @@ class KVCacheCheck(BaseCheck):
     ``for checker in checkers:`` loop in ``main.py`` (Plan 03-04) can
     instantiate ``KVCacheCheck`` without any special-casing.
 
-    Emits zero violations. Future phase populates
-    ``STUB_COVERAGE['KVCacheCheck']`` in ``coverage_mapping.py`` when
-    Rules.md §6 gains IDs.
+    Emits zero violations. ``STUB_COVERAGE['KVCacheCheck']`` in
+    ``coverage_mapping.py`` advertises the seventeen §6 IDs added by
+    PR #602 so the coverage gate does not flag them as unmapped; a
+    follow-up phase replaces this stub with real ``@rule`` methods.
     """
 
     def __init__(self, log, config: Config, submissions_logs: SubmissionLogs):
@@ -56,10 +63,11 @@ class KVCacheCheck(BaseCheck):
     def init_checks(self):
         """Register the placeholder no-op (D-S2).
 
-        Rules.md §6 (KVCache) is empty at Phase 3 land time. When that
-        section gains IDs, a future phase fills in real ``@rule``-decorated
-        check methods here and populates ``STUB_COVERAGE['KVCacheCheck']``
-        in ``coverage_mapping.py``.
+        Rules.md §6 (KVCache) gained IDs via PR #602;
+        ``STUB_COVERAGE['KVCacheCheck']`` in ``coverage_mapping.py``
+        advertises them so the coverage gate stays clean. A follow-up
+        phase replaces the placeholder with real ``@rule``-decorated
+        check methods.
         """
         self.checks = [self._section_unimplemented]
 

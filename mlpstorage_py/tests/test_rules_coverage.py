@@ -147,21 +147,102 @@ class TestRulesCoverageReconciliation:
             "discoverable), got {}".format(sorted(result["unmapped"]))
         )
 
-    def test_baseline_no_stale_entries(self):
-        """At Phase 3 land time both registries are empty → no stale entries.
+    def test_pr602_section_6_ids_are_all_mapped(self, tmp_path):
+        """Companion-PR guard for storage#658 (unblocks PR #602 merge).
 
-        Locks the Phase-3 invariant: a future contributor who adds an entry
-        to either registry that doesn't appear in Rules.md will fail this
-        test (and the drift warning will fire in CI).
+        Simulates PR #602's ``Rules.md`` state by appending the 19 §6
+        rule-ID lines the PR adds, then asserts none of them surface in
+        ``reconcile()['unmapped']``. RED against an unpopulated
+        ``coverage_mapping.py`` (both registries empty for §6), GREEN once
+        ``STUB_COVERAGE['KVCacheCheck']`` and ``OUT_OF_SCOPE_RULES`` are
+        populated for the seventeen enforceable and two descriptive rules.
+
+        The synthetic lines are minimal (``ID. **name** -- placeholder``)
+        because the enumerator only reads ``id`` and ``name``; the fixture
+        is not sensitive to PR #602's prose or table content.
         """
-        result = reconcile()
-        assert result["stale_oos"] == set(), (
-            "Expected no stale OUT_OF_SCOPE_RULES entries at Phase 3 land "
-            "time, got {}".format(sorted(result["stale_oos"]))
+        pr602_section_6_ids = [
+            ("6.3.1.1", "kvcacheFixedWorkloadPerOption"),
+            ("6.3.2.1", "kvcacheClosedSequenceLocks"),
+            ("6.3.2.2", "kvcacheAutoscalingProhibited"),
+            ("6.3.3.1", "kvcacheClientDefinition"),
+            ("6.3.3.2", "kvcacheScaleUpModel"),
+            ("6.3.3.3", "kvcachePerClientIsolation"),
+            ("6.3.3.4", "kvcacheSharedResultsDir"),
+            ("6.3.4.1", "kvcacheAggregateBandwidth"),
+            ("6.3.4.2", "kvcacheAggregateThroughput"),
+            ("6.3.4.3", "kvcacheAggregateDeviceLatency"),
+            ("6.3.4.4", "kvcacheLatencyValidity"),
+            ("6.3.4.5", "kvcacheHeadlineResult"),
+            ("6.4.1", "kvcachePosixCacheDir"),
+            ("6.4.2", "kvcachePosixIoModel"),
+            ("6.5.1", "kvcacheObjectViaGateway"),
+            ("6.5.2", "kvcacheObjectLatencyScope"),
+            ("6.6.1", "kvcacheClosedImmutable"),
+            ("6.6.2", "kvcacheOpenAllowances"),
+            ("6.6.3", "kvcacheOpenInvocationNote"),
+        ]
+        appended = "\n" + "\n".join(
+            "{}. **{}** -- placeholder for testing".format(rid, name)
+            for rid, name in pr602_section_6_ids
+        ) + "\n"
+        fake_md = tmp_path / "fake_rules_with_pr602_section6.md"
+        original = RULES_MD_PATH.read_text(encoding="utf-8")
+        fake_md.write_text(original + appended, encoding="utf-8")
+
+        result = reconcile(rules_md_path=str(fake_md))
+
+        pr602_ids = {rid for rid, _ in pr602_section_6_ids}
+        unmapped_from_pr602 = pr602_ids & result["unmapped"]
+        assert unmapped_from_pr602 == set(), (
+            "PR #602 §6 IDs must all be mapped (via STUB_COVERAGE or "
+            "OUT_OF_SCOPE_RULES) so the coverage gate does not fail when "
+            "PR #602 merges. Unmapped IDs: {}".format(
+                sorted(unmapped_from_pr602)
+            )
         )
-        assert result["stale_stubs"] == {}, (
-            "Expected no stale STUB_COVERAGE entries at Phase 3 land time, "
-            "got {}".format(result["stale_stubs"])
+
+    def test_baseline_no_unexpected_stale_entries(self):
+        """Drift guard: no stale entries beyond the PR #602 anticipation window.
+
+        Storage#658 populates ``STUB_COVERAGE['KVCacheCheck']`` and
+        ``OUT_OF_SCOPE_RULES`` with §6 IDs *before* PR #602 lands, so the
+        two registries carry IDs that do not yet appear in live Rules.md.
+        Those anticipated IDs are allow-listed here; the drift warnings
+        for them fire in CI (log.warning, non-fatal) as an intentional
+        signal until PR #602 merges, at which point this allow-list
+        collapses to the empty set automatically.
+
+        Any *other* stale entry (a contributor adds an ID that never
+        appears in Rules.md) still fails this test.
+        """
+        # PR #602 §6 anticipation window (storage#658). These entries are
+        # correct-in-advance and stop being flagged as stale the moment
+        # PR #602 lands in Rules.md.
+        pr602_pending_oos = {"6.4.2", "6.6.3"}
+        pr602_pending_stub = {
+            "6.3.1.1", "6.3.2.1", "6.3.2.2",
+            "6.3.3.1", "6.3.3.2", "6.3.3.3", "6.3.3.4",
+            "6.3.4.1", "6.3.4.2", "6.3.4.3", "6.3.4.4", "6.3.4.5",
+            "6.4.1",
+            "6.5.1", "6.5.2",
+            "6.6.1", "6.6.2",
+        }
+
+        result = reconcile()
+        unexpected_oos = result["stale_oos"] - pr602_pending_oos
+        assert unexpected_oos == set(), (
+            "Unexpected stale OUT_OF_SCOPE_RULES entries (not part of the "
+            "PR #602 anticipation window): {}".format(sorted(unexpected_oos))
+        )
+        unexpected_stubs = {
+            cls: sorted(set(rids) - pr602_pending_stub)
+            for cls, rids in result["stale_stubs"].items()
+            if set(rids) - pr602_pending_stub
+        }
+        assert unexpected_stubs == {}, (
+            "Unexpected stale STUB_COVERAGE entries (not part of the PR "
+            "#602 anticipation window): {}".format(unexpected_stubs)
         )
 
     def test_drift_stale_oos_emits_warning_and_keeps_exit_0(
