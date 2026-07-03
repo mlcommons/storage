@@ -696,7 +696,7 @@ locks (6.3.2.1) and by manual review until the checker is implemented.*
 
 ### 6.3.2. CLOSED sequence locks
 
-6.3.2.1. **kvcacheClosedSequenceLocks** -- For CLOSED submissions the sequence parameters are fixed and the benchmark hard-fails on any override: `--seed` = 42, `--trials` = 3 (scored repeats per Option), `--inter-option-delay` = 20 s, and `--config` is not permitted. The *submission validator* must confirm these values in the run metadata.
+6.3.2.1. **kvcacheClosedSequenceLocks** -- For CLOSED submissions the sequence parameters are fixed and the benchmark hard-fails on any override: `--seed` = 42, `--trials` = 3 (scored repeats per Option), `--inter-option-delay` = 90 s, and `--config` is not permitted. The *submission validator* must confirm these values in the run metadata.
 
 6.3.2.2. **kvcacheAutoscalingProhibited** -- For CLOSED submissions, `--enable-autoscaling` must not be set. (Rationale: the runtime autoscaler does not add or remove worker threads — the worker pool is fixed at run start — so it cannot serve as a fair scaling mechanism.)
 
@@ -785,7 +785,7 @@ mlpstorage closed kvcache run --systemname <name> --hosts node1 node2 node3 node
 
 ## 6.6. KVCache OPEN versus CLOSED Options
 
-6.6.1. **kvcacheClosedImmutable** -- In CLOSED (`mlpstorage closed kvcache run`), only the following may vary: `--systemname`, `--cache-dir`, `--results-dir`, and the client topology (`--hosts`, `--npernode`, `--num-processes`, `--mpi-params`). Everything else is fixed: the three Options of Table KVCache-1 with their immutable per-Option parameters and the sequence locks of 6.3.2.1 (seed 42, trials 3, inter-option-delay 20 s, no `--config`). The *submission validator* must fail a CLOSED run that sets any other parameter.
+6.6.1. **kvcacheClosedImmutable** -- In CLOSED (`mlpstorage closed kvcache run`), only the following may vary: `--systemname`, `--cache-dir`, `--results-dir`, and the client topology (`--hosts`, `--npernode`, `--num-processes`, `--mpi-params`). Everything else is fixed: the three Options of Table KVCache-1 with their immutable per-Option parameters and the sequence locks of 6.3.2.1 (seed 42, trials 3, inter-option-delay 90 s, no `--config`). The *submission validator* must fail a CLOSED run that sets any other parameter.
 
 6.6.2. **kvcacheOpenAllowances** -- OPEN submissions (`mlpstorage open kvcache run`) may, in addition, modify the workload to characterise it more broadly. In OPEN, user CLI flags supersede `WORKLOAD_PARAMS[option]` one key at a time (`max-concurrent-allocs` is not exposed and always comes from `WORKLOAD_PARAMS`). **Caveat:** the supersede cannot tell a user-set value from an argparse default, so a CLI default (`--gpu-mem-gb 16`, `--cpu-mem-gb 32`, `--model tiny-1b`) overrides the Option's value even when the submitter did not set it. An OPEN run that does not explicitly pass `--gpu-mem-gb 0 --cpu-mem-gb 0` (and a model) may keep the whole working set in the GPU/CPU tiers and never touch storage, producing zero storage bandwidth and device latency. OPEN submissions intended to stress storage must set the memory-tier sizes explicitly. OPEN allowances include:
   * a custom `--config <config.yaml>` (e.g. different `user_templates`, `qos_profiles`, `eviction`, or RAG settings);
