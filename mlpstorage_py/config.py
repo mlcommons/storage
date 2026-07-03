@@ -2,7 +2,6 @@ import datetime
 import enum
 import os
 import pathlib
-import tempfile
 
 
 def check_env(setting, default_value=None):
@@ -144,40 +143,74 @@ ALLOW_RUN_AS_ROOT = True
 
 MAX_NUM_FILES_TRAIN = 128*1024
 
-def _resolve_default_results_dir() -> str:
-    """Resolve DEFAULT_RESULTS_DIR from MLPERF_RESULTS_DIR or tempdir.
+# -----------------------------------------------------------------------------
+# MLPSTORAGE_* env-var-name string constants — SINGLE SOURCE OF TRUTH (D-10).
+#
+# Every mlpstorage-owned environment-variable NAME lives here as a string
+# constant. Downstream modules (rules/utils.py, cli_parser.py, etc.) MUST
+# import these names from this module rather than redefining them locally.
+# Import direction is one-way (D-11): config.py MUST NOT import from
+# mlpstorage_py.rules.*; doing so would create a cycle at interpreter
+# startup. tests/unit/test_no_import_cycles.py locks this invariant.
+# -----------------------------------------------------------------------------
+MLPSTORAGE_ORGNAME_ENVVAR = "MLPSTORAGE_ORGNAME"
+MLPSTORAGE_SYSTEMNAME_ENVVAR = "MLPSTORAGE_SYSTEMNAME"
+MLPSTORAGE_RESULTS_DIR_ENVVAR = "MLPSTORAGE_RESULTS_DIR"
+MLPSTORAGE_DATA_DIR_ENVVAR = "MLPSTORAGE_DATA_DIR"
+MLPSTORAGE_CHECKPOINT_FOLDER_ENVVAR = "MLPSTORAGE_CHECKPOINT_FOLDER"
 
-    Extracted so tests can exercise the env-driven branch without
-    reloading this module — reload re-creates the PARAM_VALIDATION enum
-    class, which then fails `in`-checks against any pre-imported copy
-    held by other modules (notably the rules verifier).
-    """
-    return os.environ.get(
-        "MLPERF_RESULTS_DIR",
-        os.path.join(tempfile.gettempdir(), "mlperf_storage_results"),
-    )
-
-
-DEFAULT_RESULTS_DIR = _resolve_default_results_dir()
-
-# DEFAULT_SYSTEMNAME mirrors DEFAULT_RESULTS_DIR (LAY-04): honor the
-# MLPERF_SYSTEMNAME env var if set, fall back to an empty string. The
-# universal-args layer (add_universal_arguments) decides required-vs-optional
-# per subcommand; an empty default plus required=True on emitting commands
-# makes "no --systemname and no env var" fail at parse time rather than
-# silently producing `<results-dir>/<mode>/<orgname>/results//...` (T-1-02).
-def _resolve_default_systemname() -> str:
-    """Resolve DEFAULT_SYSTEMNAME from MLPERF_SYSTEMNAME.
-
-    Extracted so tests can exercise the env-driven branch without
-    reloading this module — reload re-creates the PARAM_VALIDATION enum
-    class, which then fails `in`-checks against any pre-imported copy
-    held by other modules (notably the rules verifier).
-    """
-    return os.environ.get("MLPERF_SYSTEMNAME", "")
+# _LEGACY_ENVVAR_MAP: new MLPSTORAGE_* env-var-name -> legacy MLPERF_*
+# predecessor. Consumed by the parse-time migration-hint emitter (Plan 05-02
+# D-04/D-05). MLPSTORAGE_CHECKPOINT_FOLDER_ENVVAR is intentionally absent —
+# per D-08 no MLPERF_CHECKPOINT_FOLDER ever existed, so the migration hint
+# never fires for that pair.
+_LEGACY_ENVVAR_MAP = {
+    MLPSTORAGE_SYSTEMNAME_ENVVAR: "MLPERF_SYSTEMNAME",
+    MLPSTORAGE_RESULTS_DIR_ENVVAR: "MLPERF_RESULTS_DIR",
+    MLPSTORAGE_DATA_DIR_ENVVAR: "MLPERF_DATA_DIR",
+    MLPSTORAGE_ORGNAME_ENVVAR: "MLPERF_ORGNAME",
+}
 
 
-DEFAULT_SYSTEMNAME = _resolve_default_systemname()
+# -----------------------------------------------------------------------------
+# ENV_FALLBACK_* module-level constants — resolved-at-import-time env-var
+# reads for the four universal path/name arguments. Every resolver returns
+# the empty string when its env var is unset (SC-3): never None, never a
+# tempdir path. The universal-args layer (add_universal_arguments) decides
+# required-vs-optional per subcommand; an empty fallback plus the parse-time
+# loud-error gate (Plan 05-02) makes "no --flag and no env var" fail at
+# parse time rather than silently producing malformed output paths (T-1-02).
+#
+# Resolvers are extracted from the module-level assignments so tests can
+# exercise the env-driven branch without reloading this module — reload
+# re-creates the PARAM_VALIDATION enum class, which then fails `in`-checks
+# against any pre-imported copy held by other modules (notably the rules
+# verifier). See LAY-04 for the same shape mirrored across all four.
+# -----------------------------------------------------------------------------
+def _resolve_env_fallback_results_dir() -> str:
+    """Return MLPSTORAGE_RESULTS_DIR or empty string (never a tempdir path)."""
+    return os.environ.get(MLPSTORAGE_RESULTS_DIR_ENVVAR, "")
+
+
+def _resolve_env_fallback_systemname() -> str:
+    """Return MLPSTORAGE_SYSTEMNAME or empty string."""
+    return os.environ.get(MLPSTORAGE_SYSTEMNAME_ENVVAR, "")
+
+
+def _resolve_env_fallback_data_dir() -> str:
+    """Return MLPSTORAGE_DATA_DIR or empty string."""
+    return os.environ.get(MLPSTORAGE_DATA_DIR_ENVVAR, "")
+
+
+def _resolve_env_fallback_checkpoint_folder() -> str:
+    """Return MLPSTORAGE_CHECKPOINT_FOLDER or empty string."""
+    return os.environ.get(MLPSTORAGE_CHECKPOINT_FOLDER_ENVVAR, "")
+
+
+ENV_FALLBACK_RESULTS_DIR = _resolve_env_fallback_results_dir()
+ENV_FALLBACK_SYSTEMNAME = _resolve_env_fallback_systemname()
+ENV_FALLBACK_DATA_DIR = _resolve_env_fallback_data_dir()
+ENV_FALLBACK_CHECKPOINT_FOLDER = _resolve_env_fallback_checkpoint_folder()
 
 import enum
 
