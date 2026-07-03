@@ -12,7 +12,7 @@ import argparse
 
 from mlpstorage_py.config import (
     CHECKPOINT_RANKS_STRINGS, MODELS, ACCELERATORS, ACCELERATORS_CLOSED, DEFAULT_HOSTS,
-    LLM_MODELS_STRINGS, MPI_CMDS, EXEC_TYPE, DEFAULT_RESULTS_DIR, DEFAULT_SYSTEMNAME,
+    LLM_MODELS_STRINGS, MPI_CMDS, EXEC_TYPE, ENV_FALLBACK_RESULTS_DIR, ENV_FALLBACK_SYSTEMNAME,
     VECTOR_DTYPES, DISTRIBUTIONS
 )
 
@@ -249,7 +249,7 @@ def add_universal_arguments(parser, req_results, req_systemname=False):
     standard_args.add_argument(
         '--results-dir', '-rd',
         type=str,
-        default=DEFAULT_RESULTS_DIR,
+        default=ENV_FALLBACK_RESULTS_DIR,
         help=HELP_MESSAGES['results_dir']
     )
     if req_results:
@@ -260,14 +260,14 @@ def add_universal_arguments(parser, req_results, req_systemname=False):
         parser.set_defaults(_mlps_req_results=True)
 
     # --systemname: required on emitting commands (Rules.md §2.1.8 systemname
-    # subdir), optional elsewhere. Default = DEFAULT_SYSTEMNAME = "" unless
-    # MLPERF_SYSTEMNAME env var is set. Same env-var-fallback bug as above:
+    # subdir), optional elsewhere. Default = ENV_FALLBACK_SYSTEMNAME = "" unless
+    # MLPSTORAGE_SYSTEMNAME env var is set. Same env-var-fallback bug as above:
     # we keep argparse's ``required=False`` and gate emptiness post-parse.
     standard_args.add_argument(
         '--systemname', '-sn',
         type=str,
         required=False,
-        default=DEFAULT_SYSTEMNAME,
+        default=ENV_FALLBACK_SYSTEMNAME,
         help=HELP_MESSAGES['systemname']
     )
     if req_systemname:
