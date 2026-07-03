@@ -1263,6 +1263,7 @@ _ENV_PREFIXES: Final[Tuple[str, ...]] = (
 # LIFE-04). Phase 5.1 will broaden this to other launchers
 # (.planning/todos/pending/phase-5.1-env-sysctl-fingerprint-audit.md).
 _ENV_RUNTIME_DENYLIST: Final[frozenset] = frozenset({
+    # Phase 5 UAT (LIFE-04) — original 7 entries.
     "OMPI_ARGV",
     "OMPI_FILE_LOCATION",
     "OMPI_MCA_ess_base_jobid",
@@ -1270,6 +1271,22 @@ _ENV_RUNTIME_DENYLIST: Final[frozenset] = frozenset({
     "OMPI_MCA_orte_jobfam_session_dir",
     "OMPI_MCA_orte_local_daemon_uri",
     "OMPI_MCA_orte_precondition_transports",
+    # Issue #643 — per-rank / per-invocation vars surfaced during
+    # multi-phase checkpointing bring-up. Without these, the
+    # environment fingerprint differs across separate mpirun
+    # invocations (e.g. checkpointing write phase → read phase) and
+    # SystemDriftError fires on legitimate re-runs. They also leak into
+    # the auto_generator client-stanza fingerprint, defeating
+    # `quantity: N` dedup across identically-configured clients.
+    "NCCL_DEBUG_FILE",
+    "OMPI_COMM_WORLD_RANK",
+    "OMPI_COMM_WORLD_LOCAL_RANK",
+    "OMPI_COMM_WORLD_NODE_RANK",
+    "OMPI_MCA_ess_base_vpid",
+    "OMPI_MCA_initial_wdir",
+    "OMPI_MCA_orte_ess_node_rank",
+    "OMPI_MCA_orte_node_regex",
+    "OMPI_MCA_orte_top_session_dir",
 })
 
 
@@ -2236,6 +2253,7 @@ _ENV_PREFIXES = ("AWS_", "STORAGE_", "OMPI_", "UCX_", "NCCL_")
 # / LIFE-04). Must match the module-level _ENV_RUNTIME_DENYLIST byte-for-byte
 # or TestEnvironmentMPIScriptParity will trip.
 _ENV_RUNTIME_DENYLIST = (
+    # Phase 5 UAT (LIFE-04) — original 7 entries.
     "OMPI_ARGV",
     "OMPI_FILE_LOCATION",
     "OMPI_MCA_ess_base_jobid",
@@ -2243,6 +2261,16 @@ _ENV_RUNTIME_DENYLIST = (
     "OMPI_MCA_orte_jobfam_session_dir",
     "OMPI_MCA_orte_local_daemon_uri",
     "OMPI_MCA_orte_precondition_transports",
+    # Issue #643 — per-rank / per-invocation launcher metadata.
+    "NCCL_DEBUG_FILE",
+    "OMPI_COMM_WORLD_RANK",
+    "OMPI_COMM_WORLD_LOCAL_RANK",
+    "OMPI_COMM_WORLD_NODE_RANK",
+    "OMPI_MCA_ess_base_vpid",
+    "OMPI_MCA_initial_wdir",
+    "OMPI_MCA_orte_ess_node_rank",
+    "OMPI_MCA_orte_node_regex",
+    "OMPI_MCA_orte_top_session_dir",
 )
 
 

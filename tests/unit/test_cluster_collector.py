@@ -2889,7 +2889,12 @@ class TestEnvAllowlistMatch:
             ("AWS_REGION", True),
             ("STORAGE_BACKEND", True),
             ("STORAGE_URI_SCHEME", True),
-            ("OMPI_COMM_WORLD_RANK", True),
+            # OMPI_COMM_WORLD_SIZE is the stable rank-count var (a legitimate
+            # part of the fingerprint). OMPI_COMM_WORLD_RANK — the pre-#643
+            # representative here — is now denylisted because it's per-rank
+            # volatile; the #643 denylist coverage lives in
+            # TestEnvironmentRuntimeDenylistExpanded643.
+            ("OMPI_COMM_WORLD_SIZE", True),
             ("UCX_NET_DEVICES", True),
             ("NCCL_DEBUG", True),
             ("PATH", False),
@@ -2990,12 +2995,14 @@ class TestEnvironmentCollector:
 
         _clear_env_allowlist_vars(monkeypatch)
         monkeypatch.setenv("STORAGE_BACKEND", "s3dlio")
-        monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+        # OMPI_COMM_WORLD_SIZE (stable rank count) is the post-#643
+        # representative; OMPI_COMM_WORLD_RANK is now denylisted.
+        monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "8")
         monkeypatch.setenv("UCX_NET_DEVICES", "mlx5_0:1")
         monkeypatch.setenv("NCCL_DEBUG", "INFO")
         out = collect_environment()
         assert {"name": "STORAGE_BACKEND", "value": "s3dlio"} in out
-        assert {"name": "OMPI_COMM_WORLD_RANK", "value": "0"} in out
+        assert {"name": "OMPI_COMM_WORLD_SIZE", "value": "8"} in out
         assert {"name": "UCX_NET_DEVICES", "value": "mlx5_0:1"} in out
         assert {"name": "NCCL_DEBUG", "value": "INFO"} in out
 
@@ -3116,6 +3123,85 @@ class TestEnvironmentRuntimeDenylist:
         assert "OMPI_MCA_hwloc_base_binding_policy" in names
 
 
+class TestEnvironmentRuntimeDenylistExpanded643:
+    """Issue #643: extension of the runtime-volatile launcher denylist.
+
+    Between the checkpointing write and read phases (two separate
+    ``mpirun`` invocations) mpirun injects per-rank / per-invocation
+    metadata that leaks into the environment fingerprint and trips
+    ``SystemDriftError`` even on a legitimate identical re-run. The
+    original Phase-5 denylist (see ``TestEnvironmentRuntimeDenylist``)
+    caught 7 vars; these tests pin the 9 additional vars that customer
+    bring-up runs surfaced.
+
+    Notably one is NCCL, not OMPI: ``NCCL_DEBUG_FILE`` is commonly set
+    to a per-rank template like ``/logs/nccl_$RANK.log`` and defeats
+    fingerprint stability the same way per-rank OMPI vars do.
+
+    Kept in a separate class from ``TestEnvironmentRuntimeDenylist`` so
+    the #643 expansion is documented and grepable; the underlying
+    exclusion mechanism (``_env_allowlist_match`` subtracting
+    ``_ENV_RUNTIME_DENYLIST``) is identical.
+    """
+
+    _RUNTIME_VOLATILE_VARS_ADDED_IN_643 = [
+        "NCCL_DEBUG_FILE",
+        "OMPI_COMM_WORLD_RANK",
+        "OMPI_COMM_WORLD_LOCAL_RANK",
+        "OMPI_COMM_WORLD_NODE_RANK",
+        "OMPI_MCA_ess_base_vpid",
+        "OMPI_MCA_initial_wdir",
+        "OMPI_MCA_orte_ess_node_rank",
+        "OMPI_MCA_orte_node_regex",
+        "OMPI_MCA_orte_top_session_dir",
+    ]
+
+    @pytest.mark.parametrize("varname", _RUNTIME_VOLATILE_VARS_ADDED_IN_643)
+    def test_var_excluded_from_collect_environment(self, monkeypatch, varname):
+        """Each newly-denylisted var must NOT appear in collect_environment
+        output even when live in ``os.environ`` (which is the state every
+        rank sees under ``mpirun``)."""
+        from mlpstorage_py.cluster_collector import collect_environment
+
+        _clear_env_allowlist_vars(monkeypatch)
+        monkeypatch.setenv(varname, "some-per-rank-value-12345")
+        out = collect_environment()
+        names = {e["name"] for e in out}
+        assert varname not in names, (
+            f"{varname} is a per-rank / per-invocation launcher variable "
+            "and must be excluded from the fingerprint to prevent spurious "
+            "SystemDriftError on legitimate re-runs (#643)."
+        )
+
+    @pytest.mark.parametrize("varname", _RUNTIME_VOLATILE_VARS_ADDED_IN_643)
+    def test_var_denied_by_env_allowlist_match(self, monkeypatch, varname):
+        """Name-level assertion at the allowlist boundary — decoupled from
+        the collect_environment machinery so a refactor that reshapes the
+        outer collector still surfaces a regression here."""
+        from mlpstorage_py.cluster_collector import _env_allowlist_match
+        assert _env_allowlist_match(varname) is False, (
+            f"{varname} must be denied by _env_allowlist_match (#643)."
+        )
+
+    def test_stable_ompi_vars_still_pass(self, monkeypatch):
+        """Guardrail: the expansion must not swallow the STABLE OMPI vars
+        that legitimately describe MPI configuration (rank count, binding
+        policy). Companion to ``TestEnvironmentRuntimeDenylist``'s
+        equivalent test but re-asserted here so this class is a
+        self-contained contract for the #643 expansion."""
+        from mlpstorage_py.cluster_collector import _env_allowlist_match
+        for stable in (
+            "OMPI_COMM_WORLD_SIZE",
+            "OMPI_COMM_WORLD_LOCAL_SIZE",
+            "OMPI_MCA_mpi_oversubscribe",
+            "OMPI_MCA_hwloc_base_binding_policy",
+        ):
+            assert _env_allowlist_match(stable) is True, (
+                f"{stable} is stable configuration and must survive the "
+                "#643 denylist expansion."
+            )
+
+
 class TestEnvironmentMPIScriptParity:
     """Pattern B (D-36): collect_environment + _env_allowlist_match +
     _mask_credential_id + _redact_secret live inline in MPI_COLLECTOR_SCRIPT.
@@ -3160,7 +3246,10 @@ class TestEnvironmentMPIScriptParity:
         )
         monkeypatch.setenv("AWS_REGION", "us-east-1")
         monkeypatch.setenv("STORAGE_BACKEND", "s3dlio")
-        monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+        # Post-#643: OMPI_COMM_WORLD_RANK is denylisted. Use the stable
+        # OMPI_COMM_WORLD_SIZE as the OMPI-prefix representative so the
+        # parity test still exercises a non-denylisted OMPI dispatch.
+        monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "8")
         monkeypatch.setenv("UCX_NET_DEVICES", "mlx5_0:1")
         monkeypatch.setenv("NCCL_DEBUG", "INFO")
 
