@@ -696,7 +696,7 @@ locks (6.3.2.1) and by manual review until the checker is implemented.*
 
 ### 6.3.2. CLOSED sequence locks
 
-6.3.2.1. **kvcacheClosedSequenceLocks** -- For CLOSED submissions the sequence parameters are fixed and the benchmark hard-fails on any override: `--seed` = 42, `--trials` = 3 (scored repeats per Option), `--inter-option-delay` = 90 s, and `--config` is not permitted. The *submission validator* must confirm these values in the run metadata.
+6.3.2.1. **kvcacheClosedSequenceLocks** -- For CLOSED submissions the sequence parameters are fixed and the benchmark hard-fails on any override: `--seed` = 42, `--trials` = 3 (scored repeats per Option), `--inter-option-delay` = 20 s, and `--config` is not permitted. The *submission validator* must confirm these values in the run metadata.
 
 6.3.2.2. **kvcacheAutoscalingProhibited** -- For CLOSED submissions, `--enable-autoscaling` must not be set. (Rationale: the runtime autoscaler does not add or remove worker threads — the worker pool is fixed at run start — so it cannot serve as a fair scaling mechanism.)
 
