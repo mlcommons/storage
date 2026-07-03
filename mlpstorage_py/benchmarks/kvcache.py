@@ -244,10 +244,10 @@ class KVCacheBenchmark(Benchmark):
             return 1
 
         inter_option_delay_arg = getattr(self.args, 'inter_option_delay', None)
-        if is_closed and inter_option_delay_arg is not None and inter_option_delay_arg != 20:
+        if is_closed and inter_option_delay_arg is not None and inter_option_delay_arg != 90:
             self.logger.error(
                 f"--inter-option-delay cannot be changed in a CLOSED submission "
-                f"(must be 20, got {inter_option_delay_arg})"
+                f"(must be 90, got {inter_option_delay_arg})"
             )
             return 1
 
@@ -259,7 +259,7 @@ class KVCacheBenchmark(Benchmark):
         # Resolve effective values, applying mandated defaults
         seed = seed_arg if seed_arg is not None else 42
         trials = trials_arg if trials_arg is not None else 3
-        inter_option_delay = inter_option_delay_arg if inter_option_delay_arg is not None else 20
+        inter_option_delay = inter_option_delay_arg if inter_option_delay_arg is not None else 90
         config = config_arg
 
         hosts = getattr(self.args, 'hosts', None) or ['localhost']
