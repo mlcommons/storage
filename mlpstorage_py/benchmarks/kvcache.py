@@ -823,8 +823,13 @@ class KVCacheBenchmark(Benchmark):
                 r.get('partial_failure', False) for r in option_results.values()
             ),
         }
-        summary_filename = f"kvcache_run_summary_{self.run_datetime}.json"
-        summary_path = Path(self.run_result_output) / summary_filename
+        # `summary.json` matches the filename training/checkpointing DLIO
+        # writes and the name the submission checker's loader looks for
+        # (submission_checker/loader.py). `run_result_output` is already
+        # per-run-unique via _reserve_run_directory, so an unqualified
+        # `summary.json` inside it cannot collide with sibling runs. See
+        # storage #638.
+        summary_path = Path(self.run_result_output) / "summary.json"
         with open(summary_path, 'w+') as fd:
             json.dump(summary, fd, indent=2, cls=MLPSJsonEncoder)
         self.logger.status(f"Run summary written to: {summary_path}")

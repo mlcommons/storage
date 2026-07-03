@@ -13,6 +13,19 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ['3.12']
+        # Two parallel groups sized for GitHub's 2-vcpu runners:
+        #   - kvcache runs alone (its suite dominates wallclock)
+        #   - the other three run sequentially in the second group
+        group:
+          - name: kvcache
+            commands: |
+              uv run pytest kv_cache_benchmark/tests
+          - name: others
+            commands: |
+              uv run pytest tests
+              uv run pytest mlpstorage_py/tests
+              uv run pytest vdb_benchmark/tests
+    name: test (${{ matrix.python-version }}, ${{ matrix.group.name }})
 
     steps:
     - uses: actions/checkout@v4
@@ -54,20 +67,11 @@ jobs:
         uv pip install -e ./vdb_benchmark
         uv pip install -e ./kv_cache_benchmark
 
-    # 4. Run the four test suites separately.
-    # We can't collect them together: `tests/` and `vdb_benchmark/tests/`
+    # 4. Run this group's test suites.
+    # We can't collect all suites together: `tests/` and `vdb_benchmark/tests/`
     # both have a top-level package named `tests` whose conftest.py modules
     # collide under pytest's rootdir-relative import (ImportPathMismatchError).
     # Each suite's pyproject defines its own `slow` marker and `-m 'not slow'`
     # default, so subprocess-level invocation is correct.
-    - name: Run root test suite (tests/)
-      run: uv run pytest tests
-
-    - name: Run mlpstorage_py test suite
-      run: uv run pytest mlpstorage_py/tests
-
-    - name: Run vdb_benchmark test suite
-      run: uv run pytest vdb_benchmark/tests
-
-    - name: Run kv_cache_benchmark test suite
-      run: uv run pytest kv_cache_benchmark/tests
+    - name: Run ${{ matrix.group.name }} test suite(s)
+      run: ${{ matrix.group.commands }}

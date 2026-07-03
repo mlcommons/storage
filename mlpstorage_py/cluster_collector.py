@@ -20,7 +20,7 @@ import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
-from typing import Any, Dict, Final, List, Optional, Pattern, Tuple
+from typing import Any, Dict, Final, List, Optional, Pattern, Sequence, Tuple
 
 from mlpstorage_py.config import MPIRUN, MPIEXEC, MPI_RUN_BIN, MPI_EXEC_BIN
 from mlpstorage_py.errors import ErrorCode, FileSystemError
@@ -1065,17 +1065,48 @@ _SYSCTL_ALLOWLIST_PATH: str = str(
 )
 
 
+def _load_sysctl_allowlist_lines(
+    path: str = _SYSCTL_ALLOWLIST_PATH,
+) -> Tuple[str, ...]:
+    """Return the raw glob strings from the allowlist file.
+
+    Sister to :func:`_load_sysctl_allowlist` (which compiles the same
+    globs into regex objects for the head-node walk). This form returns
+    the strings themselves so they can be embedded into the MPI collector
+    script's ``_SYSCTL_ALLOWLIST_LINES`` placeholder at fan-out time —
+    single source of truth for both head-node and rank-node walks.
+
+    Blank lines and lines whose ``lstrip()`` starts with ``#`` are skipped;
+    each glob is ``.strip()``-ed. On any read failure (FileNotFoundError,
+    OSError, PermissionError) returns ``()`` per the universal D-2
+    collection-failure rule — ranks then emit ``[]`` for sysctl.
+    """
+    try:
+        with open(path, 'r') as f:
+            lines = f.readlines()
+    except OSError:
+        return tuple()
+    globs: List[str] = []
+    for raw in lines:
+        line = raw.strip()
+        if not line:
+            continue
+        if line.lstrip().startswith('#'):
+            continue
+        globs.append(line)
+    return tuple(globs)
+
+
 def _load_sysctl_allowlist(
     path: str = _SYSCTL_ALLOWLIST_PATH,
 ) -> Tuple[Pattern, ...]:
     """Load the on-disk allowlist and return a tuple of compiled regex objects.
 
-    One regex per glob line, via ``re.compile(fnmatch.translate(glob))``.
-    Blank lines and lines whose ``lstrip()`` starts with ``#`` are skipped;
-    each glob is ``.strip()``-ed before translation. On any read failure
-    (FileNotFoundError, OSError, PermissionError) returns ``tuple()`` per
-    the universal D-2 collection-failure rule — ``collect_sysctl`` then
-    matches nothing and emits ``[]``.
+    Reads the raw globs via :func:`_load_sysctl_allowlist_lines` and
+    compiles each via ``re.compile(fnmatch.translate(glob))``. On any
+    read failure returns ``tuple()`` per the universal D-2
+    collection-failure rule — ``collect_sysctl`` then matches nothing
+    and emits ``[]``.
 
     RESEARCH Q3 "deep-match" gotcha: ``fnmatch`` is NOT path-separator aware.
     A glob ``net.core.*`` matches ``net.core.rmem_max`` AND
@@ -1087,20 +1118,47 @@ def _load_sysctl_allowlist(
     RESEARCH Q2). If shallow-only matching is ever desired, use
     ``re.compile(r'^net\\.ipv4\\.[^.]+$')`` directly instead of fnmatch.
     """
-    try:
-        with open(path, 'r') as f:
-            lines = f.readlines()
-    except OSError:
-        return tuple()
-    patterns: List[Pattern] = []
-    for raw in lines:
-        line = raw.strip()
-        if not line:
-            continue
-        if line.lstrip().startswith('#'):
-            continue
-        patterns.append(re.compile(fnmatch.translate(line)))
-    return tuple(patterns)
+    return tuple(
+        re.compile(fnmatch.translate(g))
+        for g in _load_sysctl_allowlist_lines(path)
+    )
+
+
+# Sentinel line inside MPI_COLLECTOR_SCRIPT that gets rewritten by
+# `_render_mpi_collector_script` at fan-out time. The raw string keeps an
+# empty tuple so the script remains valid Python for the parity tests
+# that exec MPI_COLLECTOR_SCRIPT directly; the rendered form (written to
+# each rank's staged copy) carries the head-node's on-disk globs.
+_MPI_SYSCTL_PLACEHOLDER: Final[str] = "_SYSCTL_ALLOWLIST_LINES = ()"
+
+
+def _render_mpi_collector_script(
+    script: str,
+    allowlist_lines: Sequence[str],
+) -> str:
+    """Substitute the sysctl allowlist tuple into ``MPI_COLLECTOR_SCRIPT``.
+
+    The raw ``MPI_COLLECTOR_SCRIPT`` contains one empty-tuple placeholder
+    (``_MPI_SYSCTL_PLACEHOLDER``); this function replaces it with a
+    tuple literal built from ``allowlist_lines`` so every rank walks
+    /proc/sys with the same globs the head node uses. Single source of
+    truth is ``system_description/sysctl_allowlist.txt``; the two
+    duplicate code paths (module walker + MPI-script walker) both read
+    it via :func:`_load_sysctl_allowlist_lines`, so a submitter editing
+    the file need not touch code.
+
+    Uses ``str.replace(..., 1)`` to guard against the (near-impossible)
+    case of two placeholder-shaped lines drifting into the script; a
+    second match would be silently left in place with the old value
+    rather than doubly rewritten.
+
+    Idempotency: rendering an already-rendered script is a no-op —
+    the placeholder is gone after the first pass, so ``replace`` finds
+    nothing to change.
+    """
+    tuple_body = "".join(f"{g!r}, " for g in allowlist_lines)
+    rendered_line = f"_SYSCTL_ALLOWLIST_LINES = ({tuple_body})"
+    return script.replace(_MPI_SYSCTL_PLACEHOLDER, rendered_line, 1)
 
 
 def collect_sysctl(
@@ -1205,6 +1263,7 @@ _ENV_PREFIXES: Final[Tuple[str, ...]] = (
 # LIFE-04). Phase 5.1 will broaden this to other launchers
 # (.planning/todos/pending/phase-5.1-env-sysctl-fingerprint-audit.md).
 _ENV_RUNTIME_DENYLIST: Final[frozenset] = frozenset({
+    # Phase 5 UAT (LIFE-04) — original 7 entries.
     "OMPI_ARGV",
     "OMPI_FILE_LOCATION",
     "OMPI_MCA_ess_base_jobid",
@@ -1212,6 +1271,22 @@ _ENV_RUNTIME_DENYLIST: Final[frozenset] = frozenset({
     "OMPI_MCA_orte_jobfam_session_dir",
     "OMPI_MCA_orte_local_daemon_uri",
     "OMPI_MCA_orte_precondition_transports",
+    # Issue #643 — per-rank / per-invocation vars surfaced during
+    # multi-phase checkpointing bring-up. Without these, the
+    # environment fingerprint differs across separate mpirun
+    # invocations (e.g. checkpointing write phase → read phase) and
+    # SystemDriftError fires on legitimate re-runs. They also leak into
+    # the auto_generator client-stanza fingerprint, defeating
+    # `quantity: N` dedup across identically-configured clients.
+    "NCCL_DEBUG_FILE",
+    "OMPI_COMM_WORLD_RANK",
+    "OMPI_COMM_WORLD_LOCAL_RANK",
+    "OMPI_COMM_WORLD_NODE_RANK",
+    "OMPI_MCA_ess_base_vpid",
+    "OMPI_MCA_initial_wdir",
+    "OMPI_MCA_orte_ess_node_rank",
+    "OMPI_MCA_orte_node_regex",
+    "OMPI_MCA_orte_top_session_dir",
 })
 
 
@@ -2111,21 +2186,17 @@ def collect_networking(net_root=_SYSFS_NET_ROOT, ib_root=_SYSFS_INFINIBAND_ROOT)
 #
 # Pattern B forbids file I/O for package-data lookups inside the script (the
 # script ships as a string and is exec'd over SSH; there's no installed
-# package on every host). The allowlist is therefore baked in as a tuple
-# literal here. SOURCE OF TRUTH for the four globs is
-# mlpstorage_py/system_description/sysctl_allowlist.txt; keep this tuple in
-# sync with that file — the parity test asserts behavioral equivalence, not
-# allowlist-content equivalence, so a manual sync between the two copies is
-# the load-bearing discipline. (Future editor: if you add a glob to the
-# shipped file, also add it here.)
+# package on every host). SOURCE OF TRUTH for the allowlist is
+# mlpstorage_py/system_description/sysctl_allowlist.txt on the head node;
+# `_write_collector_script` calls `_render_mpi_collector_script` at
+# fan-out time to substitute the file's globs into this empty-tuple
+# placeholder so every rank walks /proc/sys with the same list the head
+# node uses — no manual code-vs-file sync required. The raw string kept
+# in `MPI_COLLECTOR_SCRIPT` retains `()` so it stays valid Python for the
+# parity tests that exec it directly.
 _PROC_SYS_ROOT = '/proc/sys'
 
-_SYSCTL_ALLOWLIST_LINES = (
-    'vm.dirty_*',
-    'net.core.*',
-    'net.ipv4.tcp_*',
-    'kernel.numa_balancing',
-)
+_SYSCTL_ALLOWLIST_LINES = ()
 
 
 def _load_sysctl_allowlist():
@@ -2182,6 +2253,7 @@ _ENV_PREFIXES = ("AWS_", "STORAGE_", "OMPI_", "UCX_", "NCCL_")
 # / LIFE-04). Must match the module-level _ENV_RUNTIME_DENYLIST byte-for-byte
 # or TestEnvironmentMPIScriptParity will trip.
 _ENV_RUNTIME_DENYLIST = (
+    # Phase 5 UAT (LIFE-04) — original 7 entries.
     "OMPI_ARGV",
     "OMPI_FILE_LOCATION",
     "OMPI_MCA_ess_base_jobid",
@@ -2189,6 +2261,16 @@ _ENV_RUNTIME_DENYLIST = (
     "OMPI_MCA_orte_jobfam_session_dir",
     "OMPI_MCA_orte_local_daemon_uri",
     "OMPI_MCA_orte_precondition_transports",
+    # Issue #643 — per-rank / per-invocation launcher metadata.
+    "NCCL_DEBUG_FILE",
+    "OMPI_COMM_WORLD_RANK",
+    "OMPI_COMM_WORLD_LOCAL_RANK",
+    "OMPI_COMM_WORLD_NODE_RANK",
+    "OMPI_MCA_ess_base_vpid",
+    "OMPI_MCA_initial_wdir",
+    "OMPI_MCA_orte_ess_node_rank",
+    "OMPI_MCA_orte_node_regex",
+    "OMPI_MCA_orte_top_session_dir",
 )
 
 
@@ -3146,9 +3228,21 @@ class MPIClusterCollector:
         return cmd
 
     def _write_collector_script(self, script_path: str) -> None:
-        """Write the collector script to the specified path."""
+        """Write the collector script to the specified path.
+
+        Renders the sysctl allowlist into ``MPI_COLLECTOR_SCRIPT``'s
+        ``_SYSCTL_ALLOWLIST_LINES`` placeholder from the head node's
+        on-disk ``sysctl_allowlist.txt`` so every SCP'd rank copy carries
+        the same globs the head-node walker uses. On file-read failure
+        the placeholder stays ``()`` and ranks emit ``[]`` for sysctl
+        (D-2 envelope) — the benchmark continues rather than aborting.
+        """
+        allowlist_lines = _load_sysctl_allowlist_lines()
+        rendered = _render_mpi_collector_script(
+            MPI_COLLECTOR_SCRIPT, allowlist_lines,
+        )
         with open(script_path, 'w') as f:
-            f.write(MPI_COLLECTOR_SCRIPT)
+            f.write(rendered)
         os.chmod(script_path, 0o755)
 
     def _ssh_target(self, host: str) -> str:
