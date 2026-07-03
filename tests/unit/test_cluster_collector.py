@@ -2346,44 +2346,233 @@ class TestSysctlAllowlistFile:
     """The shipped allowlist file at
     mlpstorage_py/system_description/sysctl_allowlist.txt is the load-bearing
     artifact for COLL-05: editing it adds keys to the next run's output with
-    no code change. These tests pin its existence, structure, and the four
-    initial patterns locked by D-27."""
+    no code change. These tests pin its existence and the canonical keys
+    reviewers expect to see in every submission's sysctl block."""
 
     def test_allowlist_file_exists(self):
-        """D-27: the package ships sysctl_allowlist.txt as a data file."""
+        """The package ships sysctl_allowlist.txt as a data file."""
         from pathlib import Path
         import mlpstorage_py.system_description as sd_pkg
         sd_dir = Path(sd_pkg.__file__).parent
         path = sd_dir / "sysctl_allowlist.txt"
         assert path.exists(), (
-            f"D-27: package must ship sysctl_allowlist.txt at {path}"
+            f"package must ship sysctl_allowlist.txt at {path}"
         )
 
-    def test_allowlist_file_parses_to_four_patterns(self):
-        """D-27: the shipped file contains exactly four glob lines
-        (vm.dirty_*, net.core.*, net.ipv4.tcp_*, kernel.numa_balancing)."""
+    def test_allowlist_file_is_nonempty(self):
+        """The shipped file parses to at least one glob (the file being
+        stripped to nothing would silently disable sysctl collection on
+        every rank; catch that at test time)."""
         from mlpstorage_py.cluster_collector import _load_sysctl_allowlist
         patterns = _load_sysctl_allowlist()
-        assert len(patterns) == 4, (
-            f"D-27: expected 4 initial globs, got {len(patterns)}: {patterns!r}"
+        assert len(patterns) > 0, (
+            "shipped sysctl_allowlist.txt must contain at least one glob; "
+            "an empty file silently disables sysctl collection cluster-wide."
         )
 
     def test_shipped_globs_match_canonical_keys(self):
-        """D-27: the four globs round-trip to regex objects matching
-        vm.dirty_ratio, net.core.rmem_max, net.ipv4.tcp_rmem, kernel.numa_balancing."""
+        """The shipped allowlist must cover the storage-relevant keys
+        reviewers look at first: page-cache dirty tuning, socket buffers,
+        TCP tuning, and NUMA balancing."""
         from mlpstorage_py.cluster_collector import _load_sysctl_allowlist
         patterns = _load_sysctl_allowlist()
-        # For each canonical key, at least one pattern must match it.
         canonical_keys = [
             "vm.dirty_ratio",
+            "vm.dirty_background_ratio",
+            "vm.swappiness",
             "net.core.rmem_max",
+            "net.core.wmem_max",
+            "net.core.somaxconn",
             "net.ipv4.tcp_rmem",
+            "net.ipv4.tcp_congestion_control",
             "kernel.numa_balancing",
+            "fs.file-max",
         ]
         for key in canonical_keys:
             assert any(p.match(key) for p in patterns), (
-                f"D-27: no shipped glob matches canonical key {key!r}"
+                f"shipped allowlist must cover canonical key {key!r}"
             )
+
+    def test_shipped_globs_exclude_per_boot_random_keys(self):
+        """Regression guard: keys whose value is regenerated per boot (or
+        varies with CPU topology across identical hardware) must NOT be
+        allowlisted, or dedup via auto_generator._sysctl_signature breaks
+        and every client emits as its own node_description stanza."""
+        from mlpstorage_py.cluster_collector import _load_sysctl_allowlist
+        patterns = _load_sysctl_allowlist()
+        dedup_hostile_keys = [
+            "net.core.netdev_rss_key",       # 52-byte random per boot
+            "net.core.rps_default_mask",     # CPU-topology-dependent bitmap
+            "net.core.flow_limit_cpu_bitmap",
+        ]
+        for key in dedup_hostile_keys:
+            assert not any(p.match(key) for p in patterns), (
+                f"key {key!r} varies per host/boot and must NOT be "
+                "allowlisted; it breaks client-stanza dedup."
+            )
+
+
+class TestLoadSysctlAllowlistLines:
+    """`_load_sysctl_allowlist_lines` returns raw glob strings from the same
+    file `_load_sysctl_allowlist` compiles into regexes. It's the injection
+    source for the MPI script rendering path — every rank walks /proc/sys
+    with the same globs the head node uses."""
+
+    def test_returns_tuple_of_strings(self, tmp_path):
+        from mlpstorage_py.cluster_collector import (
+            _load_sysctl_allowlist_lines,
+        )
+        p = tmp_path / "allowlist.txt"
+        p.write_text("vm.dirty_ratio\nnet.core.rmem_max\n")
+        lines = _load_sysctl_allowlist_lines(str(p))
+        assert lines == ("vm.dirty_ratio", "net.core.rmem_max")
+
+    def test_skips_blanks_and_comments(self, tmp_path):
+        from mlpstorage_py.cluster_collector import (
+            _load_sysctl_allowlist_lines,
+        )
+        p = tmp_path / "allowlist.txt"
+        p.write_text(
+            "# header\n"
+            "\n"
+            "vm.dirty_ratio\n"
+            "   # indented comment\n"
+            "net.core.rmem_max\n"
+        )
+        lines = _load_sysctl_allowlist_lines(str(p))
+        assert lines == ("vm.dirty_ratio", "net.core.rmem_max")
+
+    def test_missing_file_returns_empty_tuple(self, tmp_path):
+        """D-2 rule: read failure yields ``()`` so the render step falls
+        back to the empty-tuple placeholder and ranks emit ``[]``."""
+        from mlpstorage_py.cluster_collector import (
+            _load_sysctl_allowlist_lines,
+        )
+        assert _load_sysctl_allowlist_lines(
+            str(tmp_path / "no_such_file.txt")
+        ) == ()
+
+    def test_shipped_file_lines_and_patterns_are_paired(self):
+        """The two loaders must operate on the same file and produce the
+        same number of entries — one regex per glob line. If these ever
+        diverge the head-node walk and the MPI-script rendering would
+        silently see different key sets."""
+        from mlpstorage_py.cluster_collector import (
+            _load_sysctl_allowlist,
+            _load_sysctl_allowlist_lines,
+        )
+        assert len(_load_sysctl_allowlist_lines()) == len(
+            _load_sysctl_allowlist()
+        )
+
+
+class TestRenderMPICollectorScript:
+    """`_render_mpi_collector_script` substitutes the head-node allowlist
+    into `MPI_COLLECTOR_SCRIPT`'s empty-tuple placeholder so every rank
+    walks /proc/sys with the same globs the head node uses. Single source
+    of truth: `sysctl_allowlist.txt`."""
+
+    def test_raw_script_contains_empty_tuple_placeholder(self):
+        """Invariant that keeps existing parity tests working: the raw
+        `MPI_COLLECTOR_SCRIPT` string must still be valid Python that
+        exec's cleanly, which means the placeholder is an empty tuple
+        assignment, not an undefined-name sentinel."""
+        from mlpstorage_py.cluster_collector import MPI_COLLECTOR_SCRIPT
+        assert "_SYSCTL_ALLOWLIST_LINES = ()" in MPI_COLLECTOR_SCRIPT
+
+    def test_render_substitutes_globs(self):
+        from mlpstorage_py.cluster_collector import (
+            MPI_COLLECTOR_SCRIPT, _render_mpi_collector_script,
+        )
+        rendered = _render_mpi_collector_script(
+            MPI_COLLECTOR_SCRIPT,
+            ("vm.dirty_ratio", "net.core.rmem_max"),
+        )
+        assert "_SYSCTL_ALLOWLIST_LINES = ()" not in rendered
+        assert "_SYSCTL_ALLOWLIST_LINES = ('vm.dirty_ratio', 'net.core.rmem_max', )" in rendered
+
+    def test_rendered_script_execs_with_correct_tuple(self):
+        """End-to-end: exec the rendered script and confirm the module-level
+        tuple matches the input. This is the "would-catch-drift" test that
+        the manual-sync discipline in the old comment couldn't offer."""
+        from mlpstorage_py.cluster_collector import (
+            MPI_COLLECTOR_SCRIPT, _render_mpi_collector_script,
+        )
+        rendered = _render_mpi_collector_script(
+            MPI_COLLECTOR_SCRIPT,
+            ("vm.dirty_ratio", "kernel.numa_balancing"),
+        )
+        ns = {}
+        try:
+            exec(rendered, ns)
+        except BaseException:
+            pass  # SystemExit from top-level MPI init; defs land first
+        assert ns.get("_SYSCTL_ALLOWLIST_LINES") == (
+            "vm.dirty_ratio", "kernel.numa_balancing",
+        )
+
+    def test_render_is_idempotent(self):
+        """Double-render is a no-op: after the first pass the placeholder
+        is gone, so a second call finds nothing to replace."""
+        from mlpstorage_py.cluster_collector import (
+            MPI_COLLECTOR_SCRIPT, _render_mpi_collector_script,
+        )
+        once = _render_mpi_collector_script(
+            MPI_COLLECTOR_SCRIPT, ("vm.dirty_ratio",),
+        )
+        twice = _render_mpi_collector_script(once, ("net.core.rmem_max",))
+        assert once == twice
+
+    def test_render_with_empty_allowlist_leaves_empty_tuple(self):
+        """D-2 fallback path: an empty allowlist (e.g. head-node file
+        read failed) substitutes to an empty tuple — same shape as the
+        raw placeholder — so the rendered script still exec's cleanly
+        and ranks emit ``[]``."""
+        from mlpstorage_py.cluster_collector import (
+            MPI_COLLECTOR_SCRIPT, _render_mpi_collector_script,
+        )
+        rendered = _render_mpi_collector_script(MPI_COLLECTOR_SCRIPT, ())
+        assert "_SYSCTL_ALLOWLIST_LINES = ()" in rendered
+
+
+class TestWriteCollectorScriptRenders:
+    """`MPIClusterCollector._write_collector_script` must render the head
+    node's sysctl_allowlist.txt into each rank's SCP'd script copy — the
+    replacement for the old "keep this tuple in sync" discipline."""
+
+    def test_written_script_carries_head_node_globs(self, tmp_path, monkeypatch):
+        """The file on disk (what SCP fans out) must have the head node's
+        globs baked into `_SYSCTL_ALLOWLIST_LINES`."""
+        from mlpstorage_py import cluster_collector as cc
+        # Stub the loader to return a fixed tuple so this test doesn't
+        # depend on the shipped file's evolving contents.
+        fixture = ("vm.dirty_ratio", "net.core.rmem_max", "kernel.numa_balancing")
+        monkeypatch.setattr(
+            cc, "_load_sysctl_allowlist_lines", lambda: fixture,
+        )
+        # Instantiate a bare MPIClusterCollector; `_write_collector_script`
+        # only uses `self` as a namespace hop.
+        collector = cc.MPIClusterCollector.__new__(cc.MPIClusterCollector)
+        script_path = tmp_path / "mlps_collector.py"
+        collector._write_collector_script(str(script_path))
+
+        contents = script_path.read_text()
+        assert "_SYSCTL_ALLOWLIST_LINES = ()" not in contents
+        for glob in fixture:
+            assert repr(glob) in contents, (
+                f"rendered rank script missing head-node glob {glob!r}"
+            )
+
+    def test_written_script_still_valid_python(self, tmp_path):
+        """The rendered file must exec cleanly (definitions land before
+        the top-level MPI init raises); the rank interpreter would
+        otherwise fail with a SyntaxError long before /proc/sys is read."""
+        from mlpstorage_py import cluster_collector as cc
+        collector = cc.MPIClusterCollector.__new__(cc.MPIClusterCollector)
+        script_path = tmp_path / "mlps_collector.py"
+        collector._write_collector_script(str(script_path))
+        # Compile-only; running would trigger the MPI top-level.
+        compile(script_path.read_text(), str(script_path), "exec")
 
 
 class TestLoadSysctlAllowlist:
@@ -2700,7 +2889,12 @@ class TestEnvAllowlistMatch:
             ("AWS_REGION", True),
             ("STORAGE_BACKEND", True),
             ("STORAGE_URI_SCHEME", True),
-            ("OMPI_COMM_WORLD_RANK", True),
+            # OMPI_COMM_WORLD_SIZE is the stable rank-count var (a legitimate
+            # part of the fingerprint). OMPI_COMM_WORLD_RANK — the pre-#643
+            # representative here — is now denylisted because it's per-rank
+            # volatile; the #643 denylist coverage lives in
+            # TestEnvironmentRuntimeDenylistExpanded643.
+            ("OMPI_COMM_WORLD_SIZE", True),
             ("UCX_NET_DEVICES", True),
             ("NCCL_DEBUG", True),
             ("PATH", False),
@@ -2801,12 +2995,14 @@ class TestEnvironmentCollector:
 
         _clear_env_allowlist_vars(monkeypatch)
         monkeypatch.setenv("STORAGE_BACKEND", "s3dlio")
-        monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+        # OMPI_COMM_WORLD_SIZE (stable rank count) is the post-#643
+        # representative; OMPI_COMM_WORLD_RANK is now denylisted.
+        monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "8")
         monkeypatch.setenv("UCX_NET_DEVICES", "mlx5_0:1")
         monkeypatch.setenv("NCCL_DEBUG", "INFO")
         out = collect_environment()
         assert {"name": "STORAGE_BACKEND", "value": "s3dlio"} in out
-        assert {"name": "OMPI_COMM_WORLD_RANK", "value": "0"} in out
+        assert {"name": "OMPI_COMM_WORLD_SIZE", "value": "8"} in out
         assert {"name": "UCX_NET_DEVICES", "value": "mlx5_0:1"} in out
         assert {"name": "NCCL_DEBUG", "value": "INFO"} in out
 
@@ -2927,6 +3123,85 @@ class TestEnvironmentRuntimeDenylist:
         assert "OMPI_MCA_hwloc_base_binding_policy" in names
 
 
+class TestEnvironmentRuntimeDenylistExpanded643:
+    """Issue #643: extension of the runtime-volatile launcher denylist.
+
+    Between the checkpointing write and read phases (two separate
+    ``mpirun`` invocations) mpirun injects per-rank / per-invocation
+    metadata that leaks into the environment fingerprint and trips
+    ``SystemDriftError`` even on a legitimate identical re-run. The
+    original Phase-5 denylist (see ``TestEnvironmentRuntimeDenylist``)
+    caught 7 vars; these tests pin the 9 additional vars that customer
+    bring-up runs surfaced.
+
+    Notably one is NCCL, not OMPI: ``NCCL_DEBUG_FILE`` is commonly set
+    to a per-rank template like ``/logs/nccl_$RANK.log`` and defeats
+    fingerprint stability the same way per-rank OMPI vars do.
+
+    Kept in a separate class from ``TestEnvironmentRuntimeDenylist`` so
+    the #643 expansion is documented and grepable; the underlying
+    exclusion mechanism (``_env_allowlist_match`` subtracting
+    ``_ENV_RUNTIME_DENYLIST``) is identical.
+    """
+
+    _RUNTIME_VOLATILE_VARS_ADDED_IN_643 = [
+        "NCCL_DEBUG_FILE",
+        "OMPI_COMM_WORLD_RANK",
+        "OMPI_COMM_WORLD_LOCAL_RANK",
+        "OMPI_COMM_WORLD_NODE_RANK",
+        "OMPI_MCA_ess_base_vpid",
+        "OMPI_MCA_initial_wdir",
+        "OMPI_MCA_orte_ess_node_rank",
+        "OMPI_MCA_orte_node_regex",
+        "OMPI_MCA_orte_top_session_dir",
+    ]
+
+    @pytest.mark.parametrize("varname", _RUNTIME_VOLATILE_VARS_ADDED_IN_643)
+    def test_var_excluded_from_collect_environment(self, monkeypatch, varname):
+        """Each newly-denylisted var must NOT appear in collect_environment
+        output even when live in ``os.environ`` (which is the state every
+        rank sees under ``mpirun``)."""
+        from mlpstorage_py.cluster_collector import collect_environment
+
+        _clear_env_allowlist_vars(monkeypatch)
+        monkeypatch.setenv(varname, "some-per-rank-value-12345")
+        out = collect_environment()
+        names = {e["name"] for e in out}
+        assert varname not in names, (
+            f"{varname} is a per-rank / per-invocation launcher variable "
+            "and must be excluded from the fingerprint to prevent spurious "
+            "SystemDriftError on legitimate re-runs (#643)."
+        )
+
+    @pytest.mark.parametrize("varname", _RUNTIME_VOLATILE_VARS_ADDED_IN_643)
+    def test_var_denied_by_env_allowlist_match(self, monkeypatch, varname):
+        """Name-level assertion at the allowlist boundary — decoupled from
+        the collect_environment machinery so a refactor that reshapes the
+        outer collector still surfaces a regression here."""
+        from mlpstorage_py.cluster_collector import _env_allowlist_match
+        assert _env_allowlist_match(varname) is False, (
+            f"{varname} must be denied by _env_allowlist_match (#643)."
+        )
+
+    def test_stable_ompi_vars_still_pass(self, monkeypatch):
+        """Guardrail: the expansion must not swallow the STABLE OMPI vars
+        that legitimately describe MPI configuration (rank count, binding
+        policy). Companion to ``TestEnvironmentRuntimeDenylist``'s
+        equivalent test but re-asserted here so this class is a
+        self-contained contract for the #643 expansion."""
+        from mlpstorage_py.cluster_collector import _env_allowlist_match
+        for stable in (
+            "OMPI_COMM_WORLD_SIZE",
+            "OMPI_COMM_WORLD_LOCAL_SIZE",
+            "OMPI_MCA_mpi_oversubscribe",
+            "OMPI_MCA_hwloc_base_binding_policy",
+        ):
+            assert _env_allowlist_match(stable) is True, (
+                f"{stable} is stable configuration and must survive the "
+                "#643 denylist expansion."
+            )
+
+
 class TestEnvironmentMPIScriptParity:
     """Pattern B (D-36): collect_environment + _env_allowlist_match +
     _mask_credential_id + _redact_secret live inline in MPI_COLLECTOR_SCRIPT.
@@ -2971,7 +3246,10 @@ class TestEnvironmentMPIScriptParity:
         )
         monkeypatch.setenv("AWS_REGION", "us-east-1")
         monkeypatch.setenv("STORAGE_BACKEND", "s3dlio")
-        monkeypatch.setenv("OMPI_COMM_WORLD_RANK", "0")
+        # Post-#643: OMPI_COMM_WORLD_RANK is denylisted. Use the stable
+        # OMPI_COMM_WORLD_SIZE as the OMPI-prefix representative so the
+        # parity test still exercises a non-denylisted OMPI dispatch.
+        monkeypatch.setenv("OMPI_COMM_WORLD_SIZE", "8")
         monkeypatch.setenv("UCX_NET_DEVICES", "mlx5_0:1")
         monkeypatch.setenv("NCCL_DEBUG", "INFO")
 
@@ -3259,6 +3537,36 @@ class TestDrivesCollector:
                             lambda *a, **k: _lsblk_cp(payload))
         out = cc.collect_drives()
         assert out == []
+
+    @pytest.mark.parametrize("tran", ["nvme", "sata", "sas"])
+    def test_collector_interface_passes_drive_instance_schema(
+        self, monkeypatch, tran
+    ):
+        """Issue #637 regression: every TRAN the collector accepts must round-trip
+        through the DriveInstance pydantic schema without a case-mismatch error.
+
+        Prior behavior: DriveInterface enum required 'SAS'/'SATA' uppercase while
+        the collector emitted lowercase 'sas'/'sata', so every SAS/SATA client
+        drive failed [2.1.7 systemsDirectoryFiles] validation.
+        """
+        from mlpstorage_py import cluster_collector as cc
+        from mlpstorage_py.system_description.schema_validator import DriveInstance
+
+        payload = {
+            "blockdevices": [
+                {"name": "sda", "model": "X", "vendor": "Y",
+                 "size": "500000000000", "rota": "1", "tran": tran,
+                 "rm": "0"},
+            ]
+        }
+        monkeypatch.setattr(cc.subprocess, "run",
+                            lambda *a, **k: _lsblk_cp(payload))
+        out = cc.collect_drives()
+        assert len(out) == 1
+        # `media_type` is an SER-02 submitter-fills blank; supply a valid
+        # value so the schema check exercises `interface` in isolation.
+        drive = {**out[0], "unit_count": 1, "media_type": "TLC"}
+        DriveInstance.model_validate(drive)
 
     def test_size_decimal_gb_floor(self, monkeypatch):
         """RESEARCH Q1 — capacity_in_GB = int(size) // 10**9 (decimal GB,
@@ -3665,27 +3973,30 @@ class TestStageScriptPreservesBasename:
         )
 
 
-class TestSharedFsProbeIgnoresStDevAcrossHosts:
-    """Regression for issue #566: the CAP-02 probe must NOT include st_dev
-    in the cross-host identity check.
+class TestSharedFsProbeSucceedsOnMatchingContent:
+    """Regression for issues #566 and #628: the CAP-02 probe must NOT reject
+    a run because st_dev or st_ino differ across nodes.
 
-    st_dev is the kernel's per-mount device id. On FUSE / distributed
-    filesystems (DAOS DFuse, NFS, Lustre, GPFS, BeeGFS, ...) the same
-    shared mount gets a different st_dev on every node because each node
-    runs its own mount instance. st_ino IS identical cluster-wide because
-    it is derived from the underlying object/inode identity.
+    History:
+      #566 — the old probe compared (st_dev, st_ino) tuples; on FUSE /
+        distributed filesystems (DAOS DFuse, NFS, Lustre, GPFS, BeeGFS)
+        st_dev legitimately differs per node. The #566 fix dropped st_dev
+        from the check and compared st_ino only.
+      #628 — st_ino equality is still not a valid universal shared-FS test.
+        Per-mount-inode FUSE filesystems (s3fs, goofys, JuiceFS, many
+        object-storage gateways) assign inodes per-mount even when the
+        underlying namespace is shared. The current probe verifies content
+        instead: rank 0 writes a 64-byte payload, every rank reads it back
+        and reports content_sha256. Only the bytes matter — st_dev and
+        st_ino are no longer collected or checked.
 
-    Pre-fix behavior (the bug): rank 0 gathered (st_dev, st_ino) tuples
-    from every rank and rejected the run unless all tuples were identical,
-    which made CAP-02 unsatisfiable on FUSE — blocking every multi-host
-    DAOS / NFS / Lustre run.
-
-    Post-fix behavior (locked by this test): rank 0 must succeed (status
-    "ok", no failure_summary) when every rank reports the same st_ino,
-    even with mismatched st_dev values.
+    Post-fix behavior (locked by this test): with a fake mpi4py that
+    gathers rank 0's own payload into every slot (i.e., every rank read
+    the same bytes), the probe emits status='ok' regardless of any
+    st_dev/st_ino values that might appear in a real deployment.
     """
 
-    def test_same_st_ino_different_st_dev_succeeds(self, tmp_path, monkeypatch):
+    def test_matching_content_across_ranks_succeeds(self, tmp_path, monkeypatch):
         import contextlib
         import io
         import json
@@ -3693,18 +4004,16 @@ class TestSharedFsProbeIgnoresStDevAcrossHosts:
         import sys
         from unittest.mock import MagicMock
 
-        # Build the exact bad-tuple-good-inode shape from the issue:
-        #   host=R2-06 rank=0 st_dev=46 st_ino=281482956119445
-        #   host=R2-05 rank=1 st_dev=47 st_ino=281482956119445  (different st_dev)
+        # Gather returns [rank_0_payload, rank_0_payload] — simulating a
+        # genuinely shared FS where every rank reads back the same bytes
+        # rank 0 wrote. Under a per-mount-inode FUSE mount the underlying
+        # st_ino values would differ, but the probe no longer looks at
+        # them (issue #628). Only content_sha256/content_length are
+        # consulted, and they match by construction.
         fake_comm = MagicMock()
         fake_comm.Get_rank.return_value = 0
         fake_comm.Get_size.return_value = 2
-        fake_comm.gather.return_value = [
-            {"hostname": "R2-06", "rank": 0, "failure": None,
-             "st_dev": 46, "st_ino": 281482956119445},
-            {"hostname": "R2-05", "rank": 1, "failure": None,
-             "st_dev": 47, "st_ino": 281482956119445},
-        ]
+        fake_comm.gather.side_effect = lambda payload, root=0: [payload, payload]
         fake_comm.bcast.side_effect = lambda v, root=0: v
         fake_comm.Barrier.return_value = None
 
@@ -3717,7 +4026,7 @@ class TestSharedFsProbeIgnoresStDevAcrossHosts:
 
         monkeypatch.setattr(
             sys, "argv",
-            ["probe", str(tmp_path), "fuse-st-dev-mismatch-uuid"],
+            ["probe", str(tmp_path), "content-verify-shared-fs-uuid"],
         )
 
         import time as _time
@@ -3746,8 +4055,8 @@ class TestSharedFsProbeIgnoresStDevAcrossHosts:
         payload = json.loads(m.group(1).strip())
 
         assert payload["status"] == "ok", (
-            "Issue #566: same st_ino with different st_dev must be treated as "
-            "shared FS (FUSE / DAOS / NFS / Lustre all assign st_dev per-node). "
+            "Every rank read back rank 0's bytes → shared FS. Any status "
+            "other than 'ok' means the content-verify check regressed. "
             f"Got payload: {payload!r}"
         )
         assert payload["failure_summary"] is None, (

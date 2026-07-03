@@ -683,10 +683,10 @@ class TestKVCacheRunIntegration:
              patch.object(bm, 'write_metadata'):
             bm._execute_run()
 
-        summary_files = list(Path(bm.run_result_output).glob('kvcache_run_summary_*.json'))
-        assert len(summary_files) == 1, f"Expected 1 summary file, found: {summary_files}"
+        summary_path = Path(bm.run_result_output) / 'summary.json'
+        assert summary_path.exists(), f"Expected summary at {summary_path}"
 
-        data = json.loads(summary_files[0].read_text())
+        data = json.loads(summary_path.read_text())
         assert data['schema_version'] == '1.0'
         assert 'options' in data
         options = data['options']
@@ -703,6 +703,8 @@ class TestKVCacheRunIntegration:
              patch.object(bm, 'write_metadata'):
             rc = bm._execute_run()
 
-        summary_files = list(Path(bm.run_result_output).glob('kvcache_run_summary_*.json'))
-        assert summary_files == [], f"Expected no summary in what-if mode, found: {summary_files}"
+        summary_path = Path(bm.run_result_output) / 'summary.json'
+        assert not summary_path.exists(), (
+            f"Expected no summary in what-if mode, found: {summary_path}"
+        )
         assert rc == 0

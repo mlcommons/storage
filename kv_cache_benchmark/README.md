@@ -108,6 +108,6 @@ KV cache benchmark results are calculated for each workload:
 - "Write Bandwidth (GiB/s)" - Sum of "tier_storage_write_bandwidth_gbps" from all instances during a run
 - "P95 Read Latency (ms)" - Highest of "storage_read_p95_ms" from all instance during a run
 
-Each workload is run three times. The final submission results that will be displayed in the results table is the mean of the three runs for throughput and bandwidth, and the max of the three runs for latency. These results are reported in the generated `kvcache_run_summary` JSON file.
+Each workload is run three times. The final submission results that will be displayed in the results table is the mean of the three runs for throughput and bandwidth, and the max of the three runs for latency. These results are reported in the generated `summary.json` file at the root of the run's result directory.
 
 

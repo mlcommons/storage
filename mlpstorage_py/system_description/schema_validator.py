@@ -80,8 +80,8 @@ class TrafficType(str, Enum):
 
 class DriveInterface(str, Enum):
     nvme  = 'nvme'
-    SAS   = 'SAS'
-    SATA  = 'SATA'
+    sas   = 'sas'
+    sata  = 'sata'
     other = 'other'
 
 

@@ -126,7 +126,7 @@ def _extract_error_rule_ids(combined: str) -> set[str]:
     for line in combined.splitlines():
         if "ERROR]" not in line:
             continue
-        m = re.search(r"\[([234]\.\d+\.\d+) ", line)
+        m = re.search(r"\[([23456]\.\d+(?:\.\d+)+) ", line)
         if m:
             ids.add(m.group(1))
     return ids
@@ -147,7 +147,7 @@ def _extract_error_rule_id_path_pairs(combined: str) -> list[tuple[str, str]]:
     containing a colon).
     """
     pairs: list[tuple[str, str]] = []
-    pattern = re.compile(r"\[([234]\.\d+\.\d+) [a-zA-Z][a-zA-Z0-9]*\] (.+?): ")
+    pattern = re.compile(r"\[([23456]\.\d+(?:\.\d+)+) [a-zA-Z][a-zA-Z0-9]*\] (.+?): ")
     for line in combined.splitlines():
         if "ERROR]" not in line:
             continue
@@ -155,6 +155,74 @@ def _extract_error_rule_id_path_pairs(combined: str) -> list[tuple[str, str]]:
         if m:
             pairs.append((m.group(1), m.group(2)))
     return pairs
+
+
+# ---------------------------------------------------------------------------
+# Extractor regex unit tests (storage#653 follow-up)
+# ---------------------------------------------------------------------------
+#
+# The two extractor helpers above parse violation log lines emitted by
+# BaseCheck.log_violation. Before storage#653, the regex tail was
+# ``[234]\.\d+\.\d+`` — restricted to §2/§3/§4 and 3-part IDs. That
+# silently drops:
+#
+# * §5 (VDB, live since Phase 4) violations — a real bug: the good/bad
+#   fixture assertions would miss any vdb_checks.py violation entirely.
+# * §6 (KVCache, per PR #602) 3-part violations (6.4.x, 6.5.x, 6.6.x).
+# * Any 4-part ID such as PR #602's §6.3.x.x rules (6.3.1.1 etc.).
+#
+# The relaxed regex ``[23456]\.\d+(?:\.\d+)+`` mirrors the rules_coverage
+# relaxation in the same series and pins parity between violation-log
+# parsing and Rules.md discovery.
+
+
+class TestExtractorRegexParity:
+    """Regression guard for storage#653 follow-up.
+
+    Unit-tests the module-level extractors against synthetic log lines so
+    the fix is exercised without spinning up the full validator pipeline.
+    Uses the locked BaseCheck.log_violation format
+    ``[<rule_id> <rule_name>] <path>: <msg>`` per checks/base.py:36.
+    """
+
+    _LINE_FMT = (
+        "2026-07-02 12:00:00 base.py:36 ERROR] "
+        "[{rule_id} {rule_name}] /path/to/results: message"
+    )
+
+    def _line(self, rule_id: str, rule_name: str) -> str:
+        return self._LINE_FMT.format(rule_id=rule_id, rule_name=rule_name)
+
+    def test_extract_ids_captures_sections_5_and_6(self):
+        """Character-class widening — pre-fix, [234] dropped §5 and §6."""
+        combined = "\n".join([
+            self._line("5.3.4", "vdbMetricsReported"),
+            self._line("6.6.1", "kvcacheClosedImmutable"),
+        ])
+        assert _extract_error_rule_ids(combined) == {"5.3.4", "6.6.1"}
+
+    def test_extract_ids_captures_four_part_id(self):
+        """Dotted-tail relaxation — pre-fix, `\\.\\d+\\.\\d+` dropped 4-part."""
+        combined = self._line("6.3.1.1", "kvcacheFixedWorkloadPerOption")
+        assert _extract_error_rule_ids(combined) == {"6.3.1.1"}
+
+    def test_extract_pairs_captures_sections_5_and_6(self):
+        """Same character-class widening on the (rule_id, path) extractor."""
+        combined = "\n".join([
+            self._line("5.3.4", "vdbMetricsReported"),
+            self._line("6.6.1", "kvcacheClosedImmutable"),
+        ])
+        assert _extract_error_rule_id_path_pairs(combined) == [
+            ("5.3.4", "/path/to/results"),
+            ("6.6.1", "/path/to/results"),
+        ]
+
+    def test_extract_pairs_captures_four_part_id(self):
+        """Same dotted-tail relaxation on the (rule_id, path) extractor."""
+        combined = self._line("6.3.1.1", "kvcacheFixedWorkloadPerOption")
+        assert _extract_error_rule_id_path_pairs(combined) == [
+            ("6.3.1.1", "/path/to/results"),
+        ]
 
 
 # ---------------------------------------------------------------------------
@@ -377,6 +445,198 @@ class TestDefinitionOfDoneBad:
             f"first per-benchmark 'Starting' line (line "
             f"{first_benchmark_start_idx}). Pre-loader STRUCT pass must "
             f"run before the loader loop (D-E6).\n"
+            f"--- stdout ---\n{result.stdout}\n"
+            f"--- stderr ---\n{result.stderr}\n"
+        )
+
+
+# ---------------------------------------------------------------------------
+# VDB / KVCache subtree tests (storage#655)
+# ---------------------------------------------------------------------------
+#
+# The Phase 3 vanilla ``build_submission`` fixture creates training +
+# checkpointing subtrees only. That means the DoD subprocess never routes
+# through ``VdbCheck`` (17 real §5 @rule bindings) or ``KVCacheCheck``
+# (§6 stub, will gain real bindings via PR #602) — a test escape called
+# out in storage#655.
+#
+# The kwargs below add per-benchmark subtrees on demand:
+#
+# * ``include_vdb=True`` → ``vector_database/milvus/DISKANN/{datagen,run}/…``
+#   with §5-conformant summary.json and metadata.json.
+# * ``include_kv_cache=True`` → ``kv_cache/llama3.1-8b/{datagen,run}/…``
+#   with a minimally-valid summary.json.
+# * ``vdb_missing_metric_field=<name>`` → pops the named field from the vdb
+#   run summary.json so 5.3.4 vdbMetricsReported fires (bad-fixture knob).
+#
+# We deliberately do NOT engineer a §6 bad case: ``KVCacheCheck`` is a
+# stub (zero @rule bindings), so there is no rule to trip. When PR #602
+# gives §6 real bindings, a follow-up can add a ``kv_cache_missing_field``
+# knob mirroring vdb.
+
+
+class TestBuildSubmissionVdbKvcacheSubtrees:
+    """Unit tests for the ``include_vdb`` / ``include_kv_cache`` kwargs.
+
+    Fast, no subprocess — verifies the sealed-kwargs guard accepts the new
+    keys and that the resulting tree matches the loader's expected shape
+    (mlpstorage_py/submission_checker/loader.py:191, 207).
+    """
+
+    def test_include_vdb_kwarg_creates_vector_database_subtree(self, tmp_path):
+        """include_vdb=True creates results/<sys>/vector_database/<engine>/<index>/…
+
+        Loader shape (loader.py:207-238): the ``vector_database`` mode
+        expects one <engine> subdir with one <index> subdir under it, and
+        {datagen,run}/<ts>/{summary.json, metadata.json} beneath.
+        """
+        root = build_submission(tmp_path, include_vdb=True)
+        vdb_root = (
+            root / "closed" / "Acme" / "results" / "acme-storage-v1"
+            / "vector_database"
+        )
+        assert vdb_root.is_dir(), (
+            "expected vector_database/ subtree under results/<sys>/ when "
+            f"include_vdb=True; tree under {root}:\n"
+            + "\n".join(str(p) for p in root.rglob("*") if "results" in str(p))
+        )
+        # At least one <engine>/<index>/run/<ts>/summary.json must exist.
+        summaries = list(vdb_root.glob("*/*/run/*/summary.json"))
+        assert summaries, (
+            "expected at least one vector_database/<engine>/<index>/run/<ts>/"
+            "summary.json; found none"
+        )
+
+    def test_include_kv_cache_kwarg_creates_kv_cache_subtree(self, tmp_path):
+        """include_kv_cache=True creates results/<sys>/kv_cache/<model>/…
+
+        Loader shape (loader.py:191-205): the ``kv_cache`` mode expects
+        <model>/{datagen,run}/<ts>/ leaves under the benchmark dir.
+        """
+        root = build_submission(tmp_path, include_kv_cache=True)
+        kv_root = (
+            root / "closed" / "Acme" / "results" / "acme-storage-v1"
+            / "kv_cache"
+        )
+        assert kv_root.is_dir(), (
+            "expected kv_cache/ subtree under results/<sys>/ when "
+            f"include_kv_cache=True; tree under {root}:\n"
+            + "\n".join(str(p) for p in root.rglob("*") if "results" in str(p))
+        )
+        summaries = list(kv_root.glob("*/run/*/summary.json"))
+        assert summaries, (
+            "expected at least one kv_cache/<model>/run/<ts>/summary.json; "
+            "found none"
+        )
+
+
+@pytest.mark.integration
+class TestDefinitionOfDoneVdb:
+    """End-to-end tests exercising VdbCheck via the DoD subprocess pipeline.
+
+    Together with TestBuildSubmissionVdbKvcacheSubtrees, closes the
+    storage#655 fixture-coverage gap for §5. Two cases:
+
+    * ``test_bad_vdb_fixture_trips_metrics_reported_rule`` — engineers
+      a missing ``p95_latency_ms`` field to trip 5.3.4, proving VdbCheck
+      fires end-to-end (loader mode routing → check instantiation →
+      log_violation → correct rule-ID prefix in stderr).
+    * ``test_good_vdb_fixture_does_not_trip_section_5_rules`` — the
+      absence case, guarding against a future retrofit that spuriously
+      trips §5 against a compliant fixture.
+    """
+
+    def test_bad_vdb_fixture_trips_metrics_reported_rule(self, tmp_path):
+        """A vdb summary.json missing p95_latency_ms trips 5.3.4.
+
+        Locks the end-to-end plumbing: loader recognizes mode==
+        vector_database → main.MODE_TO_CHECKERS routes to VdbCheck →
+        vdb_metrics_reported fires log_violation → BaseCheck emits the
+        [5.3.4 vdbMetricsReported] prefix → stderr surfaces to the caller.
+        """
+        root = build_submission(
+            tmp_path,
+            include_vdb=True,
+            vdb_missing_metric_field="p95_latency_ms",
+        )
+
+        result = _run_validator(root)
+        combined = _combined_output(result)
+        observed = _extract_error_rule_ids(combined)
+
+        assert "5.3.4" in observed, (
+            f"Bad vdb fixture did not trip 5.3.4 vdbMetricsReported. "
+            f"observed rule IDs: {sorted(observed)}\n"
+            f"Exit code: {result.returncode}\n"
+            f"--- stdout ---\n{result.stdout}\n"
+            f"--- stderr ---\n{result.stderr}\n"
+        )
+
+    def test_good_vdb_fixture_does_not_trip_section_5_rules(self, tmp_path):
+        """A §5-conformant vdb subtree does not spuriously trip any §5 rule.
+
+        The vanilla fixture may still trip pre-existing structural noise
+        outside §5 (mirroring the Path-A relaxation on the training/
+        checkpointing DoD cases), so the assertion narrows to
+        ``no rule ID starting with '5.'``.
+        """
+        root = build_submission(tmp_path, include_vdb=True)
+
+        result = _run_validator(root)
+        combined = _combined_output(result)
+        observed = _extract_error_rule_ids(combined)
+        section_5 = {rid for rid in observed if rid.startswith("5.")}
+
+        assert section_5 == set(), (
+            f"Good vdb fixture tripped §5 rule(s) (expected none): "
+            f"{sorted(section_5)}.\n"
+            f"All observed rule IDs: {sorted(observed)}\n"
+            f"Exit code: {result.returncode}\n"
+            f"--- stdout ---\n{result.stdout}\n"
+            f"--- stderr ---\n{result.stderr}\n"
+        )
+
+
+@pytest.mark.integration
+class TestDefinitionOfDoneKvcache:
+    """End-to-end test that the loader recognizes the kv_cache mode.
+
+    ``KVCacheCheck`` is a stub at present (no @rule bindings, no
+    log_violation calls). We cannot engineer a §6 bad-fixture case, but
+    we can prove the loader routes correctly by asserting that adding
+    the kv_cache subtree does NOT cause the [2.1.10 workloadCategories]
+    unrecognized-mode error to fire against it.
+
+    When PR #602 gives §6 real @rule bindings, a follow-up should add
+    a kv_cache bad-fixture case here mirroring the vdb one above.
+    """
+
+    def test_good_kv_cache_fixture_does_not_trigger_unrecognized_workload(
+        self, tmp_path
+    ):
+        """kv_cache subtree is a recognized mode, not an unknown-workload error.
+
+        Rule 2.1.10 workloadCategories fires when the loader encounters
+        a benchmark-type directory it does not recognize (see
+        SubmissionStructureCheck). If MODE_TO_CHECKERS is missing
+        "kv_cache", the subtree tripped 2.1.10 with a path ending in
+        ``/kv_cache``. This test guards that regression.
+        """
+        root = build_submission(tmp_path, include_kv_cache=True)
+
+        result = _run_validator(root)
+        combined = _combined_output(result)
+        pairs = _extract_error_rule_id_path_pairs(combined)
+
+        offending = [
+            (rid, path) for (rid, path) in pairs
+            if rid == "2.1.10" and path.endswith("/kv_cache")
+        ]
+        assert not offending, (
+            f"kv_cache subtree tripped [2.1.10 workloadCategories] as an "
+            f"unrecognized mode: {offending}. Loader routing regression: "
+            "check MODE_TO_CHECKERS in submission_checker/main.py.\n"
+            f"Exit code: {result.returncode}\n"
             f"--- stdout ---\n{result.stdout}\n"
             f"--- stderr ---\n{result.stderr}\n"
         )

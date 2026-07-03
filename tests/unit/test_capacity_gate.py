@@ -523,12 +523,19 @@ class TestTrainingBenchmarkRequiredBytes:
 
     def test_deferral_message_keeps_rerun_suggestion_for_non_datagen_commands(self):
         """Guardrail for #575: the rewrite must not silently drop the
-        actionable suggestion for the run / datasize commands where
-        --client-host-memory-in-gb IS accepted."""
+        actionable suggestion for the datasize / configview commands
+        where --client-host-memory-in-gb IS accepted.
+
+        Uses ``command="datasize"`` (not ``"run"``) after issue #627:
+        the run path now short-circuits with ``return 0`` before
+        reaching the lazy-collect branch, so it can no longer exercise
+        the deferral-message code path. ``datasize`` still hits it and
+        the #575 regression risk is identical there.
+        """
         from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
 
         bm = MagicMock(spec=TrainingBenchmark)
-        bm.args = SimpleNamespace(data_dir="/data", command="run")
+        bm.args = SimpleNamespace(data_dir="/data", command="datasize")
         try:
             del bm.cluster_information
         except AttributeError:
@@ -544,17 +551,122 @@ class TestTrainingBenchmarkRequiredBytes:
         assert result == 0
         logged = " ".join(str(c.args[0]) for c in bm.logger.info.call_args_list)
         assert "Re-run with --client-host-memory-in-gb" in logged, (
-            "run-path deferral message must retain the actionable re-run "
-            f"suggestion (the flag IS accepted by `run`). Got: {logged!r}"
+            "datasize-path deferral message must retain the actionable re-run "
+            f"suggestion (the flag IS accepted by `datasize`). Got: {logged!r}"
         )
+
+    # ------------------------------------------------------------------
+    # Issue #627: CAP-01 must skip the free-space check on `training run`.
+    # ------------------------------------------------------------------
+    # `training run` reads a pre-generated dataset — it does NOT write a
+    # fresh copy to data-dir. The current gate compares f_bavail against
+    # the full dataset size, which effectively requires two copies worth
+    # of free space (one already-populated + one for the phantom write).
+    # See issue #627 for the 80T/75T-used PFS repro. Fix: return 0 on
+    # `run` so check_capacity_4field trivially passes. datagen / datasize
+    # still compute and enforce the real byte budget.
+
+    def test_returns_zero_when_command_is_run_issue_627(self):
+        """Issue #627: `training run` must skip the free-space check.
+
+        Rationale: the dataset already exists on disk (produced by a prior
+        `datagen`). Requiring an additional full-dataset worth of
+        f_bavail on top of the already-consumed capacity blocks valid
+        runs on filesystems provisioned to just fit the dataset.
+
+        Contract: when args.command == 'run', the gate returns 0 WITHOUT
+        invoking calculate_training_data_size or accumulate_host_info.
+        The 0 return causes check_capacity_4field to trivially pass in
+        _pre_execution_gate (available_bytes >= 0 is always true).
+        CAP-02 shared-FS probe still runs — the fix is scoped to the
+        byte budget, not the whole pre-execution gate.
+        """
+        from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
+
+        bm = MagicMock(spec=TrainingBenchmark)
+        bm.args = SimpleNamespace(data_dir="/mnt/pfs", command="run")
+        # Pre-populate cluster_information so we can prove the early-return
+        # doesn't need it (and thereby prove it didn't fall through to the
+        # calculate_training_data_size code path).
+        bm.cluster_information = MagicMock()
+        bm.combined_params = {"dataset": {}, "reader": {}}
+        bm.logger = MagicMock()
+        bm.accumulate_host_info = MagicMock()
+
+        with patch(
+            "mlpstorage_py.benchmarks.dlio.calculate_training_data_size",
+            return_value=(364_000, 100, 50_797_117_602_000),
+        ) as mock_calc:
+            result = TrainingBenchmark.required_bytes_for_capacity_gate(bm)
+
+        assert result == 0, (
+            f"Issue #627: training run must return 0 required_bytes so "
+            f"CAP-01 skips the free-space check. Got {result!r}."
+        )
+        mock_calc.assert_not_called()
+        bm.accumulate_host_info.assert_not_called()
+
+    def test_still_computes_full_size_when_command_is_datagen_issue_627(self):
+        """Issue #627 scope guard: datagen path must be unchanged.
+
+        The fix targets `run` only. `datagen` still needs to verify the
+        filesystem has room for a fresh full-size dataset before it
+        starts writing. Regression guard for accidental over-scoping.
+        """
+        from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
+
+        bm = MagicMock(spec=TrainingBenchmark)
+        bm.args = SimpleNamespace(data_dir="/mnt/pfs", command="datagen")
+        bm.cluster_information = MagicMock()
+        bm.combined_params = {"dataset": {}, "reader": {}}
+        bm.logger = MagicMock()
+
+        with patch(
+            "mlpstorage_py.benchmarks.dlio.calculate_training_data_size",
+            return_value=(364_000, 100, 50_797_117_602_000),
+        ) as mock_calc:
+            result = TrainingBenchmark.required_bytes_for_capacity_gate(bm)
+
+        assert result == 50_797_117_602_000
+        mock_calc.assert_called_once()
+
+    def test_still_computes_full_size_when_command_is_datasize_issue_627(self):
+        """Issue #627 scope guard: datasize path must be unchanged.
+
+        `datasize` is a planning command — its whole purpose is to tell
+        the operator how much space a datagen would need. Skipping the
+        gate here would defeat that purpose.
+        """
+        from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
+
+        bm = MagicMock(spec=TrainingBenchmark)
+        bm.args = SimpleNamespace(data_dir="/mnt/pfs", command="datasize")
+        bm.cluster_information = MagicMock()
+        bm.combined_params = {"dataset": {}, "reader": {}}
+        bm.logger = MagicMock()
+
+        with patch(
+            "mlpstorage_py.benchmarks.dlio.calculate_training_data_size",
+            return_value=(364_000, 100, 50_797_117_602_000),
+        ) as mock_calc:
+            result = TrainingBenchmark.required_bytes_for_capacity_gate(bm)
+
+        assert result == 50_797_117_602_000
+        mock_calc.assert_called_once()
 
 
 class TestCheckpointingBenchmarkRequiredBytes:
-    """A7 destination join + sum(rank_gb) * GiB * num_checkpoints_write."""
+    """Destination join + sum(rank_gb) * GiB * num_checkpoints_write.
+
+    The per-rank size math itself is covered by
+    ``tests/unit/test_checkpoint_capacity_gate_subset.py`` (issue #644);
+    this test only exercises the aggregation step at the
+    ``required_bytes_for_capacity_gate`` seam.
+    """
 
     def test_returns_sum_rank_gb_times_gib_times_num_checkpoints_write(self):
         from mlpstorage_py.benchmarks.dlio import CheckpointingBenchmark
-        from mlpstorage_py.config import LLM_ALLOWED_VALUES, LLM_SIZE_BY_RANK
+        from mlpstorage_py.config import LLM_SIZE_BY_RANK
 
         bm = MagicMock(spec=CheckpointingBenchmark)
         bm.args = SimpleNamespace(
@@ -564,10 +676,16 @@ class TestCheckpointingBenchmarkRequiredBytes:
             checkpoint_folder="/cp",
         )
         bm.logger = MagicMock()
+        # Delegate the per-rank helper to the real class method so the
+        # aggregation contract is exercised end-to-end (spec=... would
+        # otherwise stub _checkpoint_gb_per_rank to an empty iterable).
+        bm._checkpoint_gb_per_rank = (
+            lambda: CheckpointingBenchmark._checkpoint_gb_per_rank(bm)
+        )
 
-        # llama3-8b: ZeroLevel=3 (sharded across all ranks), model=15, optimizer=90
-        # rank_gb[i] = (15 + 90) / 8 = 13.125 for each of 8 ranks
-        # sum = 105.0; expected = int(105.0 * 1024**3 * 3) = 338368201523 (approx)
+        # llama3-8b: ClosedGPUs=8, num_processes=8 (full mode) so
+        # per_rank = (model + optimizer) / ClosedGPUs is unaffected by
+        # #644's subset fix. Expected = sum(per_rank) * 1024**3 * 3.
         model_gb, optimizer_gb = LLM_SIZE_BY_RANK["llama3-8b"]
         per_rank = (model_gb + optimizer_gb) / 8
         expected = int(per_rank * 8 * 1024**3 * 3)
