@@ -10,16 +10,25 @@ import re
 import sys
 from typing import Tuple, List, Optional
 
-from mlpstorage_py.config import BENCHMARK_TYPES, DATETIME_STR
+from mlpstorage_py.config import (
+    BENCHMARK_TYPES,
+    DATETIME_STR,
+    MLPSTORAGE_ORGNAME_ENVVAR,
+    MLPSTORAGE_SYSTEMNAME_ENVVAR,
+)
 from mlpstorage_py.errors import ConfigurationError, ErrorCode
 
-# Env-var names used by the CLI dispatch layer to source orgname/systemname.
-# generate_output_location itself does NOT read these; values are threaded in
-# via benchmark.args (populated upstream by main._main_impl()'s sentinel-
-# resolution gate). The names are exported here as a single source of truth
-# for the env-var spelling.
-MLPSTORAGE_ORGNAME_ENVVAR = "MLPSTORAGE_ORGNAME"
-MLPSTORAGE_SYSTEMNAME_ENVVAR = "MLPSTORAGE_SYSTEMNAME"
+# Env-var names used by the CLI dispatch layer to source orgname/systemname
+# are imported from mlpstorage_py.config (D-10): config.py is the single
+# source of truth for the env-var spelling. Import direction is one-way
+# (D-11) — config.py MUST NOT import from mlpstorage_py.rules. Downstream
+# callers that historically read `from mlpstorage_py.rules.utils import
+# MLPSTORAGE_*_ENVVAR` continue to work because these names are re-exported
+# by the config import above.
+#
+# generate_output_location itself does NOT read these; values are threaded
+# in via benchmark.args (populated upstream by main._main_impl()'s
+# sentinel-resolution gate).
 
 # Each path segment appended to results_dir by generate_output_location must
 # match this — POSIX-safe alphanumeric plus '.', '_', '-' — and must not be
