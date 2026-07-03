@@ -430,6 +430,15 @@ def build_submission(tmp_path, **overrides) -> Path:
     run_data_dir = overrides.pop("run_data_dir", None)
     run_results_dir = overrides.pop("run_results_dir", None)
 
+    # storage#655: DoD fixture-coverage kwargs for vector_database + kv_cache.
+    # * include_vdb (bool)                       — adds vector_database/milvus/DISKANN/…
+    # * include_kv_cache (bool)                  — adds kv_cache/llama3.1-8b/…
+    # * vdb_missing_metric_field (str | None)    — pops the named field from the
+    #   vdb run summary.json to trip 5.3.4 vdbMetricsReported (bad-fixture knob).
+    include_vdb = overrides.pop("include_vdb", False)
+    include_kv_cache = overrides.pop("include_kv_cache", False)
+    vdb_missing_metric_field = overrides.pop("vdb_missing_metric_field", None)
+
     # Sealed-enum guard — any leftover key is unknown
     if overrides:
         raise TypeError(f"unknown override: {sorted(overrides)}")
@@ -787,6 +796,137 @@ def build_submission(tmp_path, **overrides) -> Path:
 
             if wrong_checkpointing_workload:
                 (chkpt_path / wrong_checkpointing_workload).mkdir()
+
+            # ---------------------------------------------------------------
+            # vector_database/<engine>/<index>/{datagen,run}/<ts>/  (storage#655)
+            # ---------------------------------------------------------------
+            #
+            # Loader shape per loader.py:207-238 — yields one SubmissionLogs
+            # per (engine, index) pair with LoaderMetadata.folder pointing at
+            # the index dir. VdbCheck's rule methods consume the resulting
+            # run_files / datagen_files iterators.
+            #
+            # Content is §5-conformant per test_vdb_checks.py::_summary_run
+            # and ::_summary_datagen so the good-fixture assertion (no §5
+            # rule tripped) holds.  vdb_missing_metric_field pops a named
+            # field from run summary.json to engineer 5.3.4 vdbMetricsReported.
+            if include_vdb:
+                vdb_path = sys_results / "vector_database"
+                vdb_path.mkdir()
+                engine_path = vdb_path / "milvus"
+                engine_path.mkdir()
+                index_path = engine_path / "DISKANN"
+                index_path.mkdir()
+
+                vdb_run_summary = {
+                    "num_vectors": 1_000_000,
+                    "dimension": 128,
+                    "index_type": "DISKANN",
+                    "recall": 0.95,
+                    "throughput_qps": 1000.0,
+                    "total_time_seconds": 60.0,
+                    "query_count": 60_000,
+                    "mean_latency_ms": 1.0,
+                    "p95_latency_ms": 2.0,
+                    "p99_latency_ms": 3.0,
+                    "p999_latency_ms": 4.0,
+                    "database": {"database": "milvus"},
+                }
+                if vdb_missing_metric_field is not None:
+                    vdb_run_summary.pop(vdb_missing_metric_field, None)
+
+                vdb_datagen_summary = {
+                    "num_vectors": 1_000_000,
+                    "dimension": 128,
+                    "index_type": "DISKANN",
+                    "inserted_vectors": 1_000_000,
+                }
+                vdb_meta = {
+                    "benchmark_type": "vector_database",
+                    "model": "DISKANN",
+                    "args": {
+                        "storage_root": "/vdb/data",
+                        "results_dir": "/vdb/results",
+                        "model": "DISKANN",
+                    },
+                    "override_parameters": {},
+                }
+
+                vdb_datagen_dir = index_path / "datagen"
+                vdb_datagen_dir.mkdir()
+                vdb_dg_ts = vdb_datagen_dir / "20250113_130000"
+                vdb_dg_ts.mkdir()
+                (vdb_dg_ts / "summary.json").write_text(
+                    json.dumps(vdb_datagen_summary), encoding="utf-8"
+                )
+                (vdb_dg_ts / "metadata.json").write_text(
+                    json.dumps(vdb_meta), encoding="utf-8"
+                )
+
+                # 5.3.1 vdbRunCount requires exactly 5 run timestamps.
+                # 5.4.2 vdbFilesystemCheck reads a CAP-03 fs_separation.json
+                # sidecar per timestamp (falls back to df-block parsing);
+                # the sidecar is the simpler path for a synthetic fixture.
+                vdb_run_dir = index_path / "run"
+                vdb_run_dir.mkdir()
+                for i in range(5):
+                    vdb_run_ts = vdb_run_dir / f"2025011{3 + i}_140000"
+                    vdb_run_ts.mkdir()
+                    (vdb_run_ts / "summary.json").write_text(
+                        json.dumps(vdb_run_summary), encoding="utf-8"
+                    )
+                    (vdb_run_ts / "metadata.json").write_text(
+                        json.dumps(vdb_meta), encoding="utf-8"
+                    )
+                    (vdb_run_ts / "fs_separation.json").write_text(
+                        json.dumps({"same_filesystem": False}), encoding="utf-8"
+                    )
+
+            # ---------------------------------------------------------------
+            # kv_cache/<model>/{datagen,run}/<ts>/  (storage#655)
+            # ---------------------------------------------------------------
+            #
+            # Loader shape per loader.py:191-205. KVCacheCheck is a stub
+            # (zero @rule bindings) so a valid subtree suffices to prove
+            # the loader recognizes the kv_cache mode without tripping
+            # [2.1.10 workloadCategories]. Once PR #602 gives §6 real
+            # bindings, a kv_cache_missing_field knob can mirror
+            # vdb_missing_metric_field above.
+            if include_kv_cache:
+                kv_path = sys_results / "kv_cache"
+                kv_path.mkdir()
+                kv_model_path = kv_path / "llama3.1-8b"
+                kv_model_path.mkdir()
+
+                kv_summary = {"aggregated_read_bandwidth_gbps": 12.5}
+                kv_meta = {
+                    "benchmark_type": "kv_cache",
+                    "model": "llama3.1-8b",
+                    "args": {"model": "llama3.1-8b"},
+                    "override_parameters": {},
+                }
+
+                kv_datagen_dir = kv_model_path / "datagen"
+                kv_datagen_dir.mkdir()
+                kv_dg_ts = kv_datagen_dir / "20250113_130000"
+                kv_dg_ts.mkdir()
+                (kv_dg_ts / "summary.json").write_text(
+                    json.dumps(kv_summary), encoding="utf-8"
+                )
+                (kv_dg_ts / "metadata.json").write_text(
+                    json.dumps(kv_meta), encoding="utf-8"
+                )
+
+                kv_run_dir = kv_model_path / "run"
+                kv_run_dir.mkdir()
+                kv_run_ts = kv_run_dir / "20250113_140000"
+                kv_run_ts.mkdir()
+                (kv_run_ts / "summary.json").write_text(
+                    json.dumps(kv_summary), encoding="utf-8"
+                )
+                (kv_run_ts / "metadata.json").write_text(
+                    json.dumps(kv_meta), encoding="utf-8"
+                )
 
             if unpaired_results_system:
                 (results_path / "no-yaml-for-this").mkdir(parents=True)
