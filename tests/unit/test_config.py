@@ -5,11 +5,10 @@ Tests cover:
 - Environment variable handling (check_env)
 - Datetime string generation
 - Enum values and constants
-- DEFAULT_RESULTS_DIR env-var override
+- ENV_FALLBACK_RESULTS_DIR / ENV_FALLBACK_SYSTEMNAME env-var override
 """
 
 import os
-import tempfile
 import pytest
 
 from mlpstorage_py.config import (
@@ -305,68 +304,68 @@ class TestExecTypeEnum:
         assert EXEC_TYPE.MPI.value == 'mpi'
 
 
-class TestDefaultResultsDir:
-    """Tests for the DEFAULT_RESULTS_DIR constant.
+class TestEnvFallbackResultsDir:
+    """Tests for the ENV_FALLBACK_RESULTS_DIR constant.
 
-    DEFAULT_RESULTS_DIR is set at module import time using:
-        os.environ.get('MLPERF_RESULTS_DIR', os.path.join(tempfile.gettempdir(), ...))
+    ENV_FALLBACK_RESULTS_DIR is set at module import time using:
+        os.environ.get(MLPSTORAGE_RESULTS_DIR_ENVVAR, "")
 
-    Tests verify that the env-var override and the tempdir fallback both work.
+    Tests verify that the env-var override and the empty-string fallback both
+    work (Phase 5 D-13 retired the tempdir fallback — resolver returns "" when
+    the env var is unset).
     """
 
-    def test_is_a_non_empty_string(self):
-        """DEFAULT_RESULTS_DIR is a non-empty string."""
-        from mlpstorage_py.config import DEFAULT_RESULTS_DIR
-        assert isinstance(DEFAULT_RESULTS_DIR, str)
-        assert len(DEFAULT_RESULTS_DIR) > 0
+    def test_is_a_string(self):
+        """ENV_FALLBACK_RESULTS_DIR is a string (empty or env-sourced)."""
+        from mlpstorage_py.config import ENV_FALLBACK_RESULTS_DIR
+        assert isinstance(ENV_FALLBACK_RESULTS_DIR, str)
 
     def test_matches_current_environment(self):
-        """DEFAULT_RESULTS_DIR reflects MLPERF_RESULTS_DIR if set, else the tempdir path."""
-        from mlpstorage_py.config import DEFAULT_RESULTS_DIR
-        mlperf_env = os.environ.get('MLPERF_RESULTS_DIR')
-        if mlperf_env:
-            assert DEFAULT_RESULTS_DIR == mlperf_env
+        """ENV_FALLBACK_RESULTS_DIR reflects MLPSTORAGE_RESULTS_DIR if set, else empty string."""
+        from mlpstorage_py.config import ENV_FALLBACK_RESULTS_DIR
+        mlps_env = os.environ.get('MLPSTORAGE_RESULTS_DIR')
+        if mlps_env:
+            assert ENV_FALLBACK_RESULTS_DIR == mlps_env
         else:
-            expected = os.path.join(tempfile.gettempdir(), 'mlperf_storage_results')
-            assert DEFAULT_RESULTS_DIR == expected
+            assert ENV_FALLBACK_RESULTS_DIR == ""
 
-    def test_env_var_overrides_tempdir_default(self, monkeypatch):
-        """When MLPERF_RESULTS_DIR is set, the resolver returns that value.
+    def test_env_var_overrides_default(self, monkeypatch):
+        """When MLPSTORAGE_RESULTS_DIR is set, the resolver returns that value.
 
         Calls the helper directly rather than reloading mlpstorage_py.config:
         reload would rebuild the PARAM_VALIDATION enum class, breaking
         identity comparisons in modules that already imported the original.
         """
-        from mlpstorage_py.config import _resolve_default_results_dir
-        monkeypatch.setenv('MLPERF_RESULTS_DIR', '/custom/mlperf/results')
-        assert _resolve_default_results_dir() == '/custom/mlperf/results'
+        from mlpstorage_py.config import _resolve_env_fallback_results_dir
+        monkeypatch.setenv('MLPSTORAGE_RESULTS_DIR', '/custom/mlperf/results')
+        assert _resolve_env_fallback_results_dir() == '/custom/mlperf/results'
 
-    def test_falls_back_to_tempdir_when_env_not_set(self, monkeypatch):
-        """When MLPERF_RESULTS_DIR is absent, the resolver uses tempdir."""
-        from mlpstorage_py.config import _resolve_default_results_dir
-        monkeypatch.delenv('MLPERF_RESULTS_DIR', raising=False)
-        expected = os.path.join(tempfile.gettempdir(), 'mlperf_storage_results')
-        assert _resolve_default_results_dir() == expected
+    def test_returns_empty_string_when_env_not_set(self, monkeypatch):
+        """When MLPSTORAGE_RESULTS_DIR is absent, the resolver returns empty string (D-13)."""
+        from mlpstorage_py.config import _resolve_env_fallback_results_dir
+        monkeypatch.delenv('MLPSTORAGE_RESULTS_DIR', raising=False)
+        assert _resolve_env_fallback_results_dir() == ""
 
 
-class TestDefaultSystemname:
-    """Tests for the DEFAULT_SYSTEMNAME constant (LAY-04).
+class TestEnvFallbackSystemname:
+    """Tests for the ENV_FALLBACK_SYSTEMNAME constant (LAY-04, D-12).
 
-    DEFAULT_SYSTEMNAME mirrors the DEFAULT_RESULTS_DIR pattern: reads the
-    MLPERF_SYSTEMNAME env var, falling back to an empty string when unset.
+    ENV_FALLBACK_SYSTEMNAME mirrors the ENV_FALLBACK_RESULTS_DIR pattern: reads
+    the MLPSTORAGE_SYSTEMNAME env var, falling back to an empty string when
+    unset.
     """
 
-    def test_default_systemname_env_var(self, monkeypatch):
-        """DEFAULT_SYSTEMNAME reflects MLPERF_SYSTEMNAME env var when set, empty otherwise."""
+    def test_env_fallback_systemname_env_var(self, monkeypatch):
+        """ENV_FALLBACK_SYSTEMNAME reflects MLPSTORAGE_SYSTEMNAME env var when set, empty otherwise."""
         import mlpstorage_py.config as cfg_mod
 
         # Call the helper directly — reloading mlpstorage_py.config re-mints
         # PARAM_VALIDATION (and other enums), breaking enum-identity in
         # already-imported modules like mlpstorage_py.rules.* and corrupting
         # downstream integration tests.
-        monkeypatch.setenv('MLPERF_SYSTEMNAME', 'sys-v1')
-        assert cfg_mod._resolve_default_systemname() == 'sys-v1'
+        monkeypatch.setenv('MLPSTORAGE_SYSTEMNAME', 'sys-v1')
+        assert cfg_mod._resolve_env_fallback_systemname() == 'sys-v1'
 
-        monkeypatch.delenv('MLPERF_SYSTEMNAME', raising=False)
-        assert cfg_mod._resolve_default_systemname() == ''
+        monkeypatch.delenv('MLPSTORAGE_SYSTEMNAME', raising=False)
+        assert cfg_mod._resolve_env_fallback_systemname() == ''
 
