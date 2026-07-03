@@ -456,7 +456,7 @@ def _print_kvcache_section(args, lines: List[str]) -> None:
     # (the closed-mode mandate; open-mode default if user passed None).
     lines.append(_row("seed (effective):",               _kvcache_effective(args, 'seed', 42)))
     lines.append(_row("trials (effective):",             _kvcache_effective(args, 'trials', 3)))
-    lines.append(_row("inter_option_delay (effective):", _kvcache_effective(args, 'inter_option_delay', 20)))
+    lines.append(_row("inter_option_delay (effective):", _kvcache_effective(args, 'inter_option_delay', 90)))
 
     total_ranks = _kvcache_total_ranks(args)
     if total_ranks is not None:

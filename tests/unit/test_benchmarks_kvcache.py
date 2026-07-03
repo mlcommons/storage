@@ -398,7 +398,7 @@ def _make_run_benchmark(tmp_path, what_if=False):
         seed=42,
         cache_dir='/tmp/kv',
         trials=3,
-        inter_option_delay=20,
+        inter_option_delay=90,
         kvcache_bin_path=None,
         config=None,
         hosts=['localhost'],
@@ -1154,6 +1154,27 @@ class TestClosedEnforcement:
         bm.args.mode = 'closed'
         return bm
 
+    @pytest.fixture(autouse=True)
+    def _no_subprocess_fork(self, request):
+        # Defense in depth. The `*_returns_1` tests below expect the CLOSED
+        # guard to short-circuit before any subprocess launches, so they do
+        # not patch _execute_run's collaborators. If the runtime and the
+        # test ever drift (as happened during the storage#664 rename), the
+        # guard misses and _execute_run falls into the real mpirun /
+        # ssh-probe / aggregation path. On localhost with mocked
+        # kvcache_bin_path=None that expands into a fork storm heavy enough
+        # to OOM the host. This autouse fixture neutralizes the dangerous
+        # collaborators for the whole class so a guard miss can only cause
+        # a clean assertion failure, never a runaway fork.
+        if 'bm' not in request.fixturenames:
+            yield
+            return
+        bm = request.getfixturevalue('bm')
+        with patch.object(bm, '_execute_command', return_value=('', '', 0)), \
+             patch.object(bm, '_probe_results_dir_shared'), \
+             patch.object(bm, '_interruptible_sleep'):
+            yield
+
     def test_closed_seed_non_42_returns_1(self, bm):
         """CLOSED: --seed != 42 must hard-fail with return code 1."""
         bm.args.seed = 99
@@ -1163,7 +1184,7 @@ class TestClosedEnforcement:
     def test_closed_seed_42_is_allowed(self, bm, tmp_path):
         """CLOSED: --seed 42 (the mandated value) must not fail."""
         bm.args.seed = 42
-        # Keep trials=3 and inter_option_delay=20 (CLOSED mandated values from fixture)
+        # Keep trials=3 and inter_option_delay=90 (CLOSED mandated values from fixture)
         _agg = {
             'option': 1, 'aggregated_read_bandwidth_gbps': 0.0,
             'aggregated_write_bandwidth_gbps': 0.0,
@@ -1184,7 +1205,7 @@ class TestClosedEnforcement:
     def test_closed_seed_none_uses_default_42(self, bm, tmp_path):
         """CLOSED: seed=None (not set by user) must not fail (default 42 applies)."""
         bm.args.seed = None
-        # Keep trials=3 and inter_option_delay=20 (CLOSED mandated values from fixture)
+        # Keep trials=3 and inter_option_delay=90 (CLOSED mandated values from fixture)
         _agg = {
             'option': 1, 'aggregated_read_bandwidth_gbps': 0.0,
             'aggregated_write_bandwidth_gbps': 0.0,
@@ -1208,9 +1229,15 @@ class TestClosedEnforcement:
         rc = bm._execute_run()
         assert rc == 1
 
-    def test_closed_inter_option_delay_non_20_returns_1(self, bm):
-        """CLOSED: --inter-option-delay != 20 must hard-fail with return code 1."""
-        bm.args.inter_option_delay = 10
+    def test_closed_inter_option_delay_non_90_returns_1(self, bm):
+        """CLOSED: --inter-option-delay != 90 must hard-fail with return code 1.
+
+        Uses 20 as the non-90 value (storage#664) to guard against a
+        regression to the pre-#664 enforcement of 20 — if someone reverts
+        the enforced value back to 20, the previously-mandated 20 would
+        pass and this test would fire.
+        """
+        bm.args.inter_option_delay = 20
         rc = bm._execute_run()
         assert rc == 1
 
@@ -1535,7 +1562,7 @@ class TestWrapperCommandForwardsPerOptionArgs:
     def test_closed_option1_wrapper_cmd_contains_8b_model(self, tmp_path):
         bm = _make_run_benchmark(tmp_path)
         bm.args.mode = 'closed'
-        # CLOSED requires trials=3 and inter_option_delay=20 (the fixture's
+        # CLOSED requires trials=3 and inter_option_delay=90 (the fixture's
         # values); overriding them would trigger CLOSED enforcement and
         # short-circuit before any command is built.
         cmd0 = self._capture_first_cmd(bm, self._fake_agg())
