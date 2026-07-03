@@ -126,7 +126,7 @@ def _extract_error_rule_ids(combined: str) -> set[str]:
     for line in combined.splitlines():
         if "ERROR]" not in line:
             continue
-        m = re.search(r"\[([234]\.\d+\.\d+) ", line)
+        m = re.search(r"\[([23456]\.\d+(?:\.\d+)+) ", line)
         if m:
             ids.add(m.group(1))
     return ids
@@ -147,7 +147,7 @@ def _extract_error_rule_id_path_pairs(combined: str) -> list[tuple[str, str]]:
     containing a colon).
     """
     pairs: list[tuple[str, str]] = []
-    pattern = re.compile(r"\[([234]\.\d+\.\d+) [a-zA-Z][a-zA-Z0-9]*\] (.+?): ")
+    pattern = re.compile(r"\[([23456]\.\d+(?:\.\d+)+) [a-zA-Z][a-zA-Z0-9]*\] (.+?): ")
     for line in combined.splitlines():
         if "ERROR]" not in line:
             continue
