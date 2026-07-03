@@ -126,7 +126,7 @@ def _extract_error_rule_ids(combined: str) -> set[str]:
     for line in combined.splitlines():
         if "ERROR]" not in line:
             continue
-        m = re.search(r"\[([234]\.\d+\.\d+) ", line)
+        m = re.search(r"\[([23456]\.\d+(?:\.\d+)+) ", line)
         if m:
             ids.add(m.group(1))
     return ids
@@ -147,7 +147,7 @@ def _extract_error_rule_id_path_pairs(combined: str) -> list[tuple[str, str]]:
     containing a colon).
     """
     pairs: list[tuple[str, str]] = []
-    pattern = re.compile(r"\[([234]\.\d+\.\d+) [a-zA-Z][a-zA-Z0-9]*\] (.+?): ")
+    pattern = re.compile(r"\[([23456]\.\d+(?:\.\d+)+) [a-zA-Z][a-zA-Z0-9]*\] (.+?): ")
     for line in combined.splitlines():
         if "ERROR]" not in line:
             continue
@@ -155,6 +155,74 @@ def _extract_error_rule_id_path_pairs(combined: str) -> list[tuple[str, str]]:
         if m:
             pairs.append((m.group(1), m.group(2)))
     return pairs
+
+
+# ---------------------------------------------------------------------------
+# Extractor regex unit tests (storage#653 follow-up)
+# ---------------------------------------------------------------------------
+#
+# The two extractor helpers above parse violation log lines emitted by
+# BaseCheck.log_violation. Before storage#653, the regex tail was
+# ``[234]\.\d+\.\d+`` — restricted to §2/§3/§4 and 3-part IDs. That
+# silently drops:
+#
+# * §5 (VDB, live since Phase 4) violations — a real bug: the good/bad
+#   fixture assertions would miss any vdb_checks.py violation entirely.
+# * §6 (KVCache, per PR #602) 3-part violations (6.4.x, 6.5.x, 6.6.x).
+# * Any 4-part ID such as PR #602's §6.3.x.x rules (6.3.1.1 etc.).
+#
+# The relaxed regex ``[23456]\.\d+(?:\.\d+)+`` mirrors the rules_coverage
+# relaxation in the same series and pins parity between violation-log
+# parsing and Rules.md discovery.
+
+
+class TestExtractorRegexParity:
+    """Regression guard for storage#653 follow-up.
+
+    Unit-tests the module-level extractors against synthetic log lines so
+    the fix is exercised without spinning up the full validator pipeline.
+    Uses the locked BaseCheck.log_violation format
+    ``[<rule_id> <rule_name>] <path>: <msg>`` per checks/base.py:36.
+    """
+
+    _LINE_FMT = (
+        "2026-07-02 12:00:00 base.py:36 ERROR] "
+        "[{rule_id} {rule_name}] /path/to/results: message"
+    )
+
+    def _line(self, rule_id: str, rule_name: str) -> str:
+        return self._LINE_FMT.format(rule_id=rule_id, rule_name=rule_name)
+
+    def test_extract_ids_captures_sections_5_and_6(self):
+        """Character-class widening — pre-fix, [234] dropped §5 and §6."""
+        combined = "\n".join([
+            self._line("5.3.4", "vdbMetricsReported"),
+            self._line("6.6.1", "kvcacheClosedImmutable"),
+        ])
+        assert _extract_error_rule_ids(combined) == {"5.3.4", "6.6.1"}
+
+    def test_extract_ids_captures_four_part_id(self):
+        """Dotted-tail relaxation — pre-fix, `\\.\\d+\\.\\d+` dropped 4-part."""
+        combined = self._line("6.3.1.1", "kvcacheFixedWorkloadPerOption")
+        assert _extract_error_rule_ids(combined) == {"6.3.1.1"}
+
+    def test_extract_pairs_captures_sections_5_and_6(self):
+        """Same character-class widening on the (rule_id, path) extractor."""
+        combined = "\n".join([
+            self._line("5.3.4", "vdbMetricsReported"),
+            self._line("6.6.1", "kvcacheClosedImmutable"),
+        ])
+        assert _extract_error_rule_id_path_pairs(combined) == [
+            ("5.3.4", "/path/to/results"),
+            ("6.6.1", "/path/to/results"),
+        ]
+
+    def test_extract_pairs_captures_four_part_id(self):
+        """Same dotted-tail relaxation on the (rule_id, path) extractor."""
+        combined = self._line("6.3.1.1", "kvcacheFixedWorkloadPerOption")
+        assert _extract_error_rule_id_path_pairs(combined) == [
+            ("6.3.1.1", "/path/to/results"),
+        ]
 
 
 # ---------------------------------------------------------------------------

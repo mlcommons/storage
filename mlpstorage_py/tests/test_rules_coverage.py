@@ -114,7 +114,7 @@ class TestRulesCoverageReconciliation:
         """
         fake_md = tmp_path / "fake.md"
         original = RULES_MD_PATH.read_text(encoding="utf-8")
-        # Locked regex: ^([23456]\.\d+\.\d+)\.\s+\*\*([a-zA-Z][a-zA-Z0-9]+)\*\*
+        # Locked regex: ^([23456]\.\d+(?:\.\d+)+)\.\s+\*\*([a-zA-Z][a-zA-Z0-9]+)\*\*
         fake_md.write_text(
             original + "\n2.1.99. **fakeRule** -- placeholder for testing\n",
             encoding="utf-8",
@@ -124,6 +124,27 @@ class TestRulesCoverageReconciliation:
             "Expected 2.1.99 in unmapped set, got {}".format(
                 sorted(result["unmapped"])
             )
+        )
+
+    def test_inject_four_part_unmapped_id_returns_in_unmapped_set(self, tmp_path):
+        """4-part IDs (e.g., 6.3.1.1) must be discovered by the regex.
+
+        Regression guard for storage#653: the original regex only accepted
+        3-part IDs, so PR #602's twelve §6.3.x.x rules were silently skipped
+        — undiscovered rather than unmapped, so the coverage gate could
+        never enforce them. The relaxed regex accepts N-part IDs; this test
+        pins that behavior for the smallest interesting case.
+        """
+        fake_md = tmp_path / "fake.md"
+        original = RULES_MD_PATH.read_text(encoding="utf-8")
+        fake_md.write_text(
+            original + "\n6.3.99.1. **fakeFourPartRule** -- placeholder for testing\n",
+            encoding="utf-8",
+        )
+        result = reconcile(rules_md_path=str(fake_md))
+        assert "6.3.99.1" in result["unmapped"], (
+            "Expected 6.3.99.1 in unmapped set (4-part IDs must be "
+            "discoverable), got {}".format(sorted(result["unmapped"]))
         )
 
     def test_baseline_no_stale_entries(self):
