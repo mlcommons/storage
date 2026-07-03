@@ -7,6 +7,39 @@ by isolating data generation from storage operations using shared memory buffers
 import os
 import time
 import multiprocessing as mp
+
+
+def _writer_mp_context():
+    """Return the multiprocessing context for the streaming-checkpoint writer.
+
+    Prefers ``forkserver`` — children fork from a clean, early-started
+    interpreter with no live Tokio runtime — falling back to ``spawn``
+    only on platforms without ``forkserver`` (Windows/macOS). ``fork``
+    is intentionally never used.
+
+    Issue #642: before this fix, ``save()`` used ``mp.get_context('fork')``.
+    On the s3dlio object-storage path the parent has already started
+    s3dlio's Tokio runtime via ``ObjStoreLibStorage._preflight()`` →
+    ``s3dlio.list()`` by the time the writer subprocess is created;
+    ``fork()`` then copies the parent's mutex state without the threads
+    holding those mutexes and the writer futex-deadlocks the first time
+    it re-enters s3dlio. The old code comment claimed fork was safe
+    "because the writer child creates fresh StorageWriter instances after
+    fork so Tokio/Rayon are initialized cleanly in the child" — that
+    reasoning holds for what the child does, not for the mutex state the
+    child inherits.
+
+    ``spawn`` is a fallback rather than the primary choice because it
+    re-imports ``__main__`` and blocks MPI ranks re-joining the
+    OpenMPI communicator (the historical reason the pre-#642 code
+    picked ``fork`` over ``spawn`` in the first place). ``forkserver``
+    gets the "clean interpreter, no live Tokio" property of ``spawn``
+    without ``spawn``'s ``__main__`` re-import.
+    """
+    try:
+        return mp.get_context('forkserver')
+    except ValueError:
+        return mp.get_context('spawn')
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import shared_memory
 from typing import Optional, Dict, Any
@@ -170,11 +203,11 @@ class StreamingCheckpointing:
         if self.use_direct_io:
             print(f"[Main] ⚠ Disabling O_DIRECT (shared_memory buffers not page-aligned)")
         
-        # Start writer process with fork context (Linux only).
-        # Uses 'fork' to inherit environment variables (AWS credentials, etc.)
-        # and to avoid MPI re-initialization deadlocks that occur with 'spawn'
-        # (spawned children inherit OMPI_COMM_WORLD_* and block trying to
-        # re-join the MPI communicator).
+        # Writer subprocess context — see `_writer_mp_context` at module
+        # scope for the forkserver-over-fork rationale (#642: fork after
+        # live s3dlio Tokio deadlocks; forkserver avoids re-importing
+        # __main__, which is what makes spawn hang MPI ranks re-joining
+        # the OpenMPI communicator).
         #
         # CRITICAL: IPC objects (Queue, Event) MUST be created from the SAME
         # context as the child process — mixing contexts (e.g. fork-context
@@ -182,15 +215,7 @@ class StreamingCheckpointing:
         #   RuntimeError: A SemLock created in a fork context is being shared
         #                 with a process in a spawn context.
         # Always create IPC objects from ctx BEFORE ctx.Process().
-        #
-        # Fork safety: the writer child does NOT call dgen-py or s3dlio from the
-        # parent's Rust runtimes — it creates fresh StorageWriter instances after
-        # fork, so Tokio/Rayon are initialized cleanly in the child.
-        try:
-            ctx = mp.get_context('fork')
-        except ValueError:
-            # Fork not available (Windows/macOS) — fall back to spawn.
-            ctx = mp.get_context('spawn')
+        ctx = _writer_mp_context()
 
         # Setup IPC using the same context as the child process.
         buffer_queue = ctx.Queue(maxsize=self.num_buffers)

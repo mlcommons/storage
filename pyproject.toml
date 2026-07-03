@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlpstorage"
-version = "3.0.28"
+version = "3.0.29"
 description = "MLPerf Storage Benchmark Suite"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -79,7 +79,10 @@ vectordb-elasticsearch = [
 packages = {find = {include = ["mlpstorage_py*", "vdbbench*"]}}
 
 [tool.setuptools.package-data]
-"mlpstorage_py" = ["../configs/dlio/workload/*.yaml"]
+"mlpstorage_py" = [
+    "../configs/dlio/workload/*.yaml",
+    "system_description/sysctl_allowlist.txt",
+]
 
 [project.scripts]
 mlpstorage = 'mlpstorage_py.main:main'
