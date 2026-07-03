@@ -15,7 +15,7 @@ import sys
 import traceback
 
 from mlpstorage_py.cli_parser import parse_arguments, validate_args, update_args
-from mlpstorage_py.config import HISTFILE, DATETIME_STR, EXIT_CODE, DEFAULT_RESULTS_DIR, get_datetime_string, HYDRA_OUTPUT_SUBDIR
+from mlpstorage_py.config import HISTFILE, DATETIME_STR, EXIT_CODE, get_datetime_string, HYDRA_OUTPUT_SUBDIR
 from mlpstorage_py.debug import debugger_hook, MLPS_DEBUG
 from mlpstorage_py.history import HistoryTracker
 from mlpstorage_py.mlps_logging import setup_logging, apply_logging_options
@@ -244,17 +244,6 @@ def run_benchmark(args, run_datetime):
 
     benchmark = benchmark_class(args, run_datetime=run_datetime, logger=logger)
 
-    # Warn if the user is relying on the temp-dir default for results.
-    # Results stored in /tmp (or equivalent) are wiped on reboot.
-    _results_dir = getattr(args, 'results_dir', DEFAULT_RESULTS_DIR)
-    if _results_dir == DEFAULT_RESULTS_DIR and not os.environ.get('MLPERF_RESULTS_DIR'):
-        logger.warning(
-            f"Results directory not specified. Writing results to the system temp directory: "
-            f"{DEFAULT_RESULTS_DIR}. These results will NOT persist across a reboot. "
-            f"Use --results-dir <path> or set the MLPERF_RESULTS_DIR environment variable "
-            f"to save results permanently."
-        )
-
     ret_code = EXIT_CODE.SUCCESS
 
     try:
@@ -435,7 +424,7 @@ def _main_impl():
         # for the reports subcommand. Keeping the import here lets validate /
         # rules-coverage / version run on a base install.
         from mlpstorage_py.report_generator import ReportGenerator
-        results_dir = args.results_dir if hasattr(args, 'results_dir') else DEFAULT_RESULTS_DIR
+        results_dir = getattr(args, 'results_dir', "")
         report_generator = ReportGenerator(results_dir, args, logger=logger)
         return report_generator.generate_reports()
 
