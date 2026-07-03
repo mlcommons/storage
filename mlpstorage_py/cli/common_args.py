@@ -129,7 +129,10 @@ HELP_MESSAGES = {
     'reportgen': "Generate a report from the benchmark results.",
 
     # Checkpoint folder is used for training and checkpointing
-    'checkpoint_folder': "Location for checkpoint files for training or checkpointing workloads",
+    'checkpoint_folder': (
+        "Location for checkpoint files for training or checkpointing workloads. "
+        "Defaults to MLPSTORAGE_CHECKPOINT_FOLDER env var if set."
+    ),
 
     # Checkpointing help messages
     'checkpoint_run': "The checkpoint command executes checkpoint saves and restores for a given model.",
