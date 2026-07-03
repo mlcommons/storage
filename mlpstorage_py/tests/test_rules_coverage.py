@@ -147,6 +147,61 @@ class TestRulesCoverageReconciliation:
             "discoverable), got {}".format(sorted(result["unmapped"]))
         )
 
+    def test_pr602_section_6_ids_are_all_mapped(self, tmp_path):
+        """Companion-PR guard for storage#658 (unblocks PR #602 merge).
+
+        Simulates PR #602's ``Rules.md`` state by appending the 19 §6
+        rule-ID lines the PR adds, then asserts none of them surface in
+        ``reconcile()['unmapped']``. RED against an unpopulated
+        ``coverage_mapping.py`` (both registries empty for §6), GREEN once
+        ``STUB_COVERAGE['KVCacheCheck']`` and ``OUT_OF_SCOPE_RULES`` are
+        populated for the seventeen enforceable and two descriptive rules.
+
+        The synthetic lines are minimal (``ID. **name** -- placeholder``)
+        because the enumerator only reads ``id`` and ``name``; the fixture
+        is not sensitive to PR #602's prose or table content.
+        """
+        pr602_section_6_ids = [
+            ("6.3.1.1", "kvcacheFixedWorkloadPerOption"),
+            ("6.3.2.1", "kvcacheClosedSequenceLocks"),
+            ("6.3.2.2", "kvcacheAutoscalingProhibited"),
+            ("6.3.3.1", "kvcacheClientDefinition"),
+            ("6.3.3.2", "kvcacheScaleUpModel"),
+            ("6.3.3.3", "kvcachePerClientIsolation"),
+            ("6.3.3.4", "kvcacheSharedResultsDir"),
+            ("6.3.4.1", "kvcacheAggregateBandwidth"),
+            ("6.3.4.2", "kvcacheAggregateThroughput"),
+            ("6.3.4.3", "kvcacheAggregateDeviceLatency"),
+            ("6.3.4.4", "kvcacheLatencyValidity"),
+            ("6.3.4.5", "kvcacheHeadlineResult"),
+            ("6.4.1", "kvcachePosixCacheDir"),
+            ("6.4.2", "kvcachePosixIoModel"),
+            ("6.5.1", "kvcacheObjectViaGateway"),
+            ("6.5.2", "kvcacheObjectLatencyScope"),
+            ("6.6.1", "kvcacheClosedImmutable"),
+            ("6.6.2", "kvcacheOpenAllowances"),
+            ("6.6.3", "kvcacheOpenInvocationNote"),
+        ]
+        appended = "\n" + "\n".join(
+            "{}. **{}** -- placeholder for testing".format(rid, name)
+            for rid, name in pr602_section_6_ids
+        ) + "\n"
+        fake_md = tmp_path / "fake_rules_with_pr602_section6.md"
+        original = RULES_MD_PATH.read_text(encoding="utf-8")
+        fake_md.write_text(original + appended, encoding="utf-8")
+
+        result = reconcile(rules_md_path=str(fake_md))
+
+        pr602_ids = {rid for rid, _ in pr602_section_6_ids}
+        unmapped_from_pr602 = pr602_ids & result["unmapped"]
+        assert unmapped_from_pr602 == set(), (
+            "PR #602 §6 IDs must all be mapped (via STUB_COVERAGE or "
+            "OUT_OF_SCOPE_RULES) so the coverage gate does not fail when "
+            "PR #602 merges. Unmapped IDs: {}".format(
+                sorted(unmapped_from_pr602)
+            )
+        )
+
     def test_baseline_no_stale_entries(self):
         """At Phase 3 land time both registries are empty → no stale entries.
 
