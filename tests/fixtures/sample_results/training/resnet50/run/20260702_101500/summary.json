@@ -1,0 +1,30 @@
+{
+  "start": "2026-07-02 10:15:00",
+  "end": "2026-07-02 10:20:00",
+  "num_accelerators": 8,
+  "num_hosts": 1,
+  "host_memory_GB": [
+    256
+  ],
+  "host_cpu_count": [
+    64
+  ],
+  "workload": "resnet50_h100",
+  "metric": {
+    "train_au_percentage": [
+      92.0,
+      91.8,
+      92.1
+    ],
+    "train_throughput_samples_per_second": [
+      2100.0,
+      2098.0,
+      2102.0
+    ],
+    "train_io_throughput_MB_per_second": [
+      3200.0,
+      3180.0,
+      3220.0
+    ]
+  }
+}
