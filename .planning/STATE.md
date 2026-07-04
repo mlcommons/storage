@@ -4,18 +4,18 @@ milestone: v1.1
 milestone_name: Content-addressed code-image pool
 current_phase: 6
 current_phase_name: Content-addressed pool + capture-or-verify rewrite
-current_plan: 1
+current_plan: 2
 status: executing
-stopped_at: Completed Phase 6 Plan 01 (pointer + pool-dir-name helpers)
-last_updated: "2026-07-04T23:21:00Z"
+stopped_at: Completed Phase 6 Plan 02 (content-addressed pool + pointer rewrite)
+last_updated: "2026-07-04T23:38:00Z"
 last_activity: 2026-07-04
-last_activity_desc: Phase 6 Plan 01 landed — pointer file + pool dir name helpers (TDD RED e085da1 → GREEN 01fe661).
+last_activity_desc: Phase 6 Plan 02 landed — capture_or_verify_code_image rewritten for content-addressed pool + pointer semantics (RED 7a9b917/eb413cb/7984310 → GREEN e0ad6e8 → cleanup 04cb93b).
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 4
-  completed_plans: 1
-  percent: 8
+  completed_plans: 2
+  percent: 17
 ---
 
 # Project State
@@ -23,9 +23,9 @@ progress:
 ## Current Position
 
 Phase: 6 — Content-addressed pool + capture-or-verify rewrite
-Plan: 1 of 4 complete — pointer file + pool dir name helpers
-Status: In progress (Plan 06-01 landed; Plan 06-02 next)
-Last activity: 2026-07-04 — Phase 6 Plan 01 landed: pointer file + pool dir name helpers on submission_checker/tools/code_image.py (RED e085da1 → GREEN 01fe661; 18 new unit tests; PTR-01/02 + POOL-01/02 complete).
+Plan: 2 of 4 complete — content-addressed pool + pointer rewrite
+Status: In progress (Plan 06-02 landed; Plan 06-03 next)
+Last activity: 2026-07-04 — Phase 6 Plan 02 landed: capture_or_verify_code_image rewrite delivers CAPVER-01/02/03 + POOL-01..04 + PTR-01 + UX-01 (9 of 10 phase REQ-IDs). Content-addressed pool at <results_dir>/<orgname>/code-<hash8>/ with atomic .mlps-code-image pointers; retired reject strings gone from module and Rules.md; 28 new unit tests, 18 retired tests, 839 total passing.
 
 ## Milestone Snapshot
 
