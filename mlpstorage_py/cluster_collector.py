@@ -1287,6 +1287,15 @@ _ENV_RUNTIME_DENYLIST: Final[frozenset] = frozenset({
     "OMPI_MCA_orte_ess_node_rank",
     "OMPI_MCA_orte_node_regex",
     "OMPI_MCA_orte_top_session_dir",
+    # Issue #663 — Open-MPI vars the #643 audit missed. Three are set only
+    # on non-rank-0 processes (asymmetric fingerprint → breaks quantity:N
+    # dedup); OMPI_MCA_orte_parent_uri also carries a random per-mpirun
+    # job id + TCP port and independently trips SystemDriftError on
+    # legitimate re-runs.
+    "OMPI_MCA_ess_base_num_procs",
+    "OMPI_MCA_orte_parent_uri",
+    "OMPI_MCA_plm",
+    "OMPI_MCA_routed",
 })
 
 
@@ -2271,6 +2280,12 @@ _ENV_RUNTIME_DENYLIST = (
     "OMPI_MCA_orte_ess_node_rank",
     "OMPI_MCA_orte_node_regex",
     "OMPI_MCA_orte_top_session_dir",
+    # Issue #663 — Open-MPI vars the #643 audit missed. Mirror of module
+    # copy above; TestEnvironmentMPIScriptParity enforces lockstep.
+    "OMPI_MCA_ess_base_num_procs",
+    "OMPI_MCA_orte_parent_uri",
+    "OMPI_MCA_plm",
+    "OMPI_MCA_routed",
 )
 
 
