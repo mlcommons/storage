@@ -601,6 +601,373 @@ class ReportGenerator:
             f"Run {benchmark_run.run_id} validated as {category.value.upper()}"
         )
 
+    # ------------------------------------------------------------------
+    # Per-workload aggregation helpers (D-19..D-22)
+    # ------------------------------------------------------------------
+    #
+    # ``_aggregate_workload_metrics`` is the single point where per-workload
+    # aggregation math lives. It is added here (Plan 06-02) but not yet
+    # wired into ``_process_workload_groups``; wiring happens in Plan 06-04
+    # (the TODO at ``metrics={}`` in this file's ``_process_workload_groups``
+    # is the eventual call site).
+    #
+    # Dispatch on ``runs[0].benchmark_type``:
+    #   - training       -> ``_aggregate_training``  (D-19, 5-run mean)
+    #   - checkpointing  -> ``_aggregate_checkpointing``  (D-20/D-28)
+    #   - vector_database-> ``_aggregate_vdb``  (D-21, pass-through)
+    #   - kv_cache       -> ``_aggregate_kvcache``  (D-22/D-16, pass-through)
+    #
+    # Empty-metric handling: raises ``statistics.StatisticsError`` — the
+    # helper deliberately does NOT swallow it (D-23). The caller in 06-04
+    # is responsible for the ``except StatisticsError`` split from the
+    # broad ``except Exception:`` and for downgrading ``category`` to
+    # ``PARAM_VALIDATION.INVALID`` with the D-24 verbatim message.
+
+    def _aggregate_workload_metrics(
+        self,
+        runs: List[BenchmarkRun],
+        warmup_set: Set[str],
+    ) -> Dict[str, Any]:
+        """
+        Compute aggregated metrics for one workload (per D-19..D-22).
+
+        Dispatches on ``runs[0].benchmark_type`` and returns the aggregated
+        metric dict that eventually populates the ``metrics=`` slot on the
+        workload ``Result`` (see the TODO at ``_process_workload_groups``).
+
+        Args:
+            runs: The workload's ``BenchmarkRun`` invocations. For training,
+                a 6-invocation set (1 warmup + 5 real) after
+                ``_process_single_run`` collision detection. For
+                checkpointing, 1–2 invocations per Rules.md §2.1.23. For
+                vdb / kvcache, a single-invocation list.
+            warmup_set: Set of ABSOLUTE paths (as populated in
+                ``self.warmup_result_dirs``). Used ONLY by the training
+                branch to filter warmup runs out of the 5-run mean
+                (D-19). The checkpointing / vdb / kvcache branches ignore
+                this argument (D-20/D-28: no warmup for those types).
+
+        Returns:
+            A dict of aggregated metric names to values. Key convention:
+              - training      : ``train_mean_of_<basename>`` (D-13)
+              - checkpointing : ``checkpoint_mean_of_<basename>`` (D-13)
+              - vdb           : ``vdb_<source-name>`` pass-through (D-15)
+              - kvcache       : ``kvcache_aggregated_<...>`` +
+                ``kvcache_option_<opt>_aggregated_<...>`` (D-15..D-17)
+
+        Raises:
+            statistics.StatisticsError: When a metric list is empty (training
+                or checkpointing branch). The caller in 06-04 catches this
+                and downgrades the workload's ``category`` to
+                ``PARAM_VALIDATION.INVALID`` per D-23. Do NOT swallow this
+                here — the split from the broad ``except Exception:`` is
+                the loud-failure contract (D-23; PITFALLS #3).
+        """
+        if not runs:
+            return {}
+        bt = runs[0].benchmark_type
+        if bt == BENCHMARK_TYPES.training:
+            return self._aggregate_training(runs, warmup_set)
+        elif bt == BENCHMARK_TYPES.checkpointing:
+            return self._aggregate_checkpointing(runs)
+        elif bt == BENCHMARK_TYPES.vector_database:
+            return self._aggregate_vdb(runs)
+        elif bt == BENCHMARK_TYPES.kv_cache:
+            return self._aggregate_kvcache(runs)
+        else:
+            return {}
+
+    def _aggregate_training(
+        self,
+        runs: List[BenchmarkRun],
+        warmup_set: Set[str],
+    ) -> Dict[str, float]:
+        """
+        Training-branch aggregation (D-19, Rules.md §2.1.17).
+
+        Filters ``runs`` down to the non-warmup invocations
+        (``abspath(run.result_dir) not in warmup_set``), then for each
+        metric key present in EVERY non-warmup invocation, computes:
+
+            per_run = [fmean(inv.metrics[key]) for inv in non_warmup]
+            outer   = fmean(per_run)
+
+        emitting under ``train_mean_of_<basename>`` where basename is the
+        source key with any redundant ``train_`` prefix stripped (D-13).
+
+        Empty inner metric list -> ``StatisticsError`` propagates (D-23).
+        Missing key in a given invocation is skipped via key intersection
+        (a partial-coverage key is not aggregated — the caller sees it
+        absent from the output).
+
+        Count strictness (D-27) and warmup detection (D-26) are enforced
+        at the CALLER site in 06-04, not here — the helper focuses on
+        math. If ``non_warmup`` is empty after filtering, this raises
+        ``StatisticsError`` with a helpful ``args[0]`` so the caller can
+        surface INVALID.
+        """
+        non_warmup = [
+            r for r in runs
+            if os.path.abspath(r.result_dir or "") not in warmup_set
+        ]
+        if not non_warmup:
+            raise StatisticsError(
+                "no non-warmup invocations to aggregate for training workload"
+            )
+
+        # Intersection of metric keys across all non-warmup invocations.
+        # A key present in some invocations but not all is skipped — the
+        # caller sees it missing from the output and can decide.
+        metric_dicts = [(inv.metrics or {}) for inv in non_warmup]
+        common_keys = set(metric_dicts[0].keys())
+        for md in metric_dicts[1:]:
+            common_keys &= set(md.keys())
+
+        out: Dict[str, float] = {}
+        for key in sorted(common_keys):
+            per_run_means: List[float] = []
+            for inv in non_warmup:
+                metric_list = (inv.metrics or {}).get(key)
+                if not metric_list:
+                    # Loud failure per D-23: empty metric list is NOT
+                    # silently coerced to 0.0. Caller wraps this in a
+                    # try/except StatisticsError and emits the D-24
+                    # ``_INVALID_MSG_EMPTY_METRIC`` template.
+                    raise StatisticsError(
+                        f"metric {key} is empty in invocation "
+                        f"{os.path.basename(inv.result_dir or '')}"
+                    )
+                per_run_means.append(fmean(metric_list))
+            outer = fmean(per_run_means)
+            # D-13: strip redundant ``train_`` prefix from the source key
+            # so the emitted column looks like ``train_mean_of_<basename>``.
+            basename = key
+            if basename.startswith("train_"):
+                basename = basename[len("train_"):]
+            out[f"train_mean_of_{basename}"] = outer
+        return out
+
+    def _aggregate_checkpointing(
+        self,
+        runs: List[BenchmarkRun],
+    ) -> Dict[str, float]:
+        """
+        Checkpointing-branch aggregation (D-20/D-28, Rules.md §2.1.23).
+
+        ``warmup_set`` is not accepted here — checkpointing has no warmup
+        per Rules.md §2.1.23; the dispatcher in
+        ``_aggregate_workload_metrics`` ignores ``warmup_set`` for this
+        branch and calls this method without it.
+
+        For each metric key present in every invocation's ``metric`` dict,
+        computes ``fmean(run.metrics[key])`` intra-list over the 10-op
+        list per invocation. If ``len(runs) > 1`` (rare per Rules.md
+        §2.1.23 which permits 1–2 timestamp directories), takes the
+        inter-invocation ``fmean`` for shape consistency with the
+        training branch. Op-count strictness (D-24 template c) is a
+        caller-side gate in 06-04, not here.
+
+        Empty metric list -> ``StatisticsError`` propagates (D-23). Do
+        NOT copy the "fmean(x) if x, coerce to zero otherwise" idiom
+        from ``benchmarks/kvcache.py:793`` — that is the PITFALLS #3
+        anti-pattern and the loud-failure principle forbids it here.
+        """
+        if not runs:
+            raise StatisticsError(
+                "no checkpointing invocations to aggregate"
+            )
+
+        metric_dicts = [(r.metrics or {}) for r in runs]
+        common_keys = set(metric_dicts[0].keys())
+        for md in metric_dicts[1:]:
+            common_keys &= set(md.keys())
+
+        out: Dict[str, float] = {}
+        for key in sorted(common_keys):
+            per_run_means: List[float] = []
+            for r in runs:
+                metric_list = (r.metrics or {}).get(key)
+                if not metric_list:
+                    raise StatisticsError(
+                        f"metric {key} is empty in invocation "
+                        f"{os.path.basename(r.result_dir or '')}"
+                    )
+                per_run_means.append(fmean(metric_list))
+            outer = fmean(per_run_means) if len(per_run_means) > 1 else per_run_means[0]
+            basename = key
+            if basename.startswith("checkpoint_"):
+                basename = basename[len("checkpoint_"):]
+            out[f"checkpoint_mean_of_{basename}"] = outer
+        return out
+
+    def _aggregate_vdb(
+        self,
+        runs: List[BenchmarkRun],
+    ) -> Dict[str, Any]:
+        """
+        VDB-branch aggregation (D-21) — pass-through, NOT math.
+
+        vdb's internal ``vdb-aggregate`` tool (see
+        ``benchmarks/vectordbbench.py:508``) owns the math contract per
+        the D-22 boundary; this helper copies pre-computed values from
+        the workload's ``summary.json`` into ``vdb_*`` columns.
+
+        Read fields (per ``submission_checker/checks/vdb_checks.py:44-51``
+        ``_REQUIRED_METRIC_FIELDS``): ``throughput_qps``,
+        ``mean_latency_ms``, ``p95_latency_ms``, ``p99_latency_ms``,
+        ``p999_latency_ms``. Emit as ``vdb_<source-name>`` (D-15). Missing
+        fields emit ``None`` (D-22 boundary: vdb owns validity — INVALID
+        rules-strict is training + checkpointing only).
+
+        Recall fallback: if ``recall`` is absent from ``summary.json``,
+        fall back to ``<workload_dir>/recall_stats.json`` per the pattern
+        at ``submission_checker/checks/vdb_checks.py:462-469``.
+
+        Identity columns (D-15): ``vdb_engine`` and ``vdb_index_type``
+        read from ``runs[0].parameters`` (the ``BenchmarkRun`` accessor
+        for CLI/YAML args on disk).
+        """
+        run = runs[0]
+        summary = self._load_workload_summary(run)
+
+        _VDB_METRIC_FIELDS = (
+            "throughput_qps",
+            "mean_latency_ms",
+            "p95_latency_ms",
+            "p99_latency_ms",
+            "p999_latency_ms",
+        )
+        out: Dict[str, Any] = {}
+        for field_name in _VDB_METRIC_FIELDS:
+            out[f"vdb_{field_name}"] = summary.get(field_name)
+
+        # Recall (D-21) — first summary.json, then recall_stats.json fallback
+        # (per submission_checker/checks/vdb_checks.py:462-469).
+        recall = summary.get("recall")
+        if recall is None and run.result_dir:
+            recall_stats_path = os.path.join(run.result_dir, "recall_stats.json")
+            if os.path.isfile(recall_stats_path):
+                try:
+                    with open(recall_stats_path, "r") as f:
+                        recall_stats = json.load(f)
+                    recall = recall_stats.get("recall")
+                except (OSError, ValueError) as e:
+                    self.logger.warning(
+                        f"vdb: could not read recall_stats.json at "
+                        f"{recall_stats_path}: {e}"
+                    )
+        out["vdb_recall"] = recall
+
+        # Identity columns (D-15). ``BenchmarkRun`` exposes CLI/YAML args
+        # via ``.parameters``; use ``.get`` so missing keys emit ``None``.
+        params = run.parameters or {}
+        out["vdb_engine"] = params.get("engine")
+        out["vdb_index_type"] = params.get("index_type")
+        return out
+
+    def _aggregate_kvcache(
+        self,
+        runs: List[BenchmarkRun],
+    ) -> Dict[str, Any]:
+        """
+        KVCache-branch aggregation (D-22/D-16/D-17) — pass-through, NOT math.
+
+        kvcache's internal ``_aggregate_option_results`` at
+        ``benchmarks/kvcache.py:791-803`` owns the math contract per the
+        D-22 boundary. Trust the source verbatim — including any ``0.0``
+        sentinel values from the "fmean-when-nonempty, coerce-to-zero
+        otherwise" idiom at ``benchmarks/kvcache.py:793``. That
+        silent-failure amplifier
+        belongs in kvcache, not in reportgen (PITFALLS #3).
+
+        Emits:
+          - Top-level identity (D-15): ``kvcache_performance_profile``
+            from ``runs[0].parameters['performance_profile']``.
+          - Top-level per-run aggregates (D-14) copied verbatim from
+            ``summary.json`` — ``kvcache_aggregated_read_bandwidth_gbps``,
+            ``kvcache_aggregated_write_bandwidth_gbps``,
+            ``kvcache_aggregated_avg_throughput_tokens_per_sec``,
+            ``kvcache_aggregated_storage_throughput_tokens_per_sec``,
+            ``kvcache_aggregated_p95_latency_ms``.
+          - Per-option flattening (D-16): for each
+            ``(option_name, option_dict)`` in ``summary['options']``,
+            emits ``kvcache_option_<option_name>_<metric_name>`` for each
+            ``(metric_name, value)`` pair. Since kvcache's internal keys
+            are ``aggregated_*`` (per ``benchmarks/kvcache.py:791-803``),
+            the resulting output columns look like
+            ``kvcache_option_<opt>_aggregated_read_bandwidth_gbps`` —
+            preserving the grep-chain from source to output (D-17).
+        """
+        run = runs[0]
+        summary = self._load_workload_summary(run)
+
+        out: Dict[str, Any] = {}
+        # Identity column (D-15) — read from BenchmarkRun.parameters.
+        params = run.parameters or {}
+        out["kvcache_performance_profile"] = params.get("performance_profile")
+
+        # Top-level per-run aggregates (D-14). Copy verbatim from source;
+        # Zero sentinels from kvcache's "fmean-or-zero" idiom are
+        # preserved (D-22 boundary — do NOT re-interpret).
+        _KVCACHE_TOPLEVEL_FIELDS = (
+            "aggregated_read_bandwidth_gbps",
+            "aggregated_write_bandwidth_gbps",
+            "aggregated_avg_throughput_tokens_per_sec",
+            "aggregated_storage_throughput_tokens_per_sec",
+            "aggregated_p95_latency_ms",
+        )
+        for field_name in _KVCACHE_TOPLEVEL_FIELDS:
+            out[f"kvcache_{field_name}"] = summary.get(field_name)
+
+        # Per-option flattening (D-16).
+        options = summary.get("options") or {}
+        if not options:
+            self.logger.warning(
+                f"kvcache: summary.json at {run.result_dir!r} has no "
+                "'options' dict — per-option columns will be absent."
+            )
+        else:
+            for option_name, option_dict in options.items():
+                if not isinstance(option_dict, dict):
+                    continue
+                for metric_name, value in option_dict.items():
+                    # D-17: keep the source ``aggregated_`` prefix
+                    # verbatim to preserve the grep-chain from source
+                    # summary.json field to output column name.
+                    out[f"kvcache_option_{option_name}_{metric_name}"] = value
+        return out
+
+    def _load_workload_summary(self, run: BenchmarkRun) -> Dict[str, Any]:
+        """
+        Load the workload's ``summary.json`` for vdb / kvcache pass-through
+        branches.
+
+        ``BenchmarkRun`` does not expose a ``summary_data`` accessor on
+        this branch of the code base, so the helper reads
+        ``<run.result_dir>/summary.json`` directly. Missing file or
+        malformed JSON logs a warning and returns ``{}`` — the caller
+        emits empty pass-through columns rather than aborting the whole
+        reportgen pass (threat T-06-06 mitigation).
+        """
+        if not run.result_dir:
+            return {}
+        summary_path = os.path.join(run.result_dir, "summary.json")
+        if not os.path.isfile(summary_path):
+            self.logger.warning(
+                f"summary.json not found at {summary_path}; "
+                "pass-through columns will be empty."
+            )
+            return {}
+        try:
+            with open(summary_path, "r") as f:
+                return json.load(f)
+        except (OSError, ValueError) as e:
+            self.logger.warning(
+                f"summary.json at {summary_path} could not be read: {e}; "
+                "pass-through columns will be empty."
+            )
+            return {}
+
     def _process_workload_groups(self, benchmark_runs: List[BenchmarkRun]) -> None:
         """
         Group runs by workload and run submission-level validation.
