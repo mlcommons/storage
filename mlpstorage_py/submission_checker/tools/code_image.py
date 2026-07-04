@@ -583,7 +583,8 @@ def _write_pointer_atomic(run_leaf: Path, full_hash: str, log) -> None:
             (NOT `except Exception`) is intentional — KeyboardInterrupt
             and SystemExit must also trigger tmp cleanup so a ^C mid-write
             never leaks a stale sibling into the run leaf (verbatim
-            carry-over from mlpstorage_py/results_dir/code_image.py:160-186).
+            carry-over from the legacy results_dir capture path retired in
+            Phase 6 Plan 06-03 / D-60).
     """
     assert re.fullmatch(r"[0-9a-f]{32}", full_hash), (
         f"live hash must be 32 lowercase hex chars, got {full_hash!r}"
