@@ -49,8 +49,13 @@ that exceed RAM.
 
 | Build Parameter | Type | Default | Description |
 |----------------|------|---------|-------------|
-| `MaxDegree` | int | 64 | Maximum out-degree of each graph node |
-| `SearchListSize` | int | 200 | Candidate-list size during index build |
+| `max_degree` | int | 64 | Maximum out-degree of each graph node |
+| `search_list_size` | int | 200 | Candidate-list size during index build |
+
+> **Note:** knowhere reads snake_case DiskANN build parameters; the legacy
+> CamelCase spellings (`MaxDegree`, `SearchListSize`) are still accepted in
+> configs for backward compatibility and are normalized to snake_case before
+> index creation (see issue #590).
 
 | Search Parameter | Type | Default | Description |
 |-----------------|------|---------|-------------|

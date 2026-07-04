@@ -44,8 +44,8 @@ def parse_args():
     # Index parameters
     parser.add_argument("--index-type", type=str, default="DISKANN", help="Index type")
     parser.add_argument("--metric-type", type=str, default="COSINE", help="Metric type for index")
-    parser.add_argument("--max-degree", type=int, default=16, help="DiskANN MaxDegree parameter")
-    parser.add_argument("--search-list-size", type=int, default=200, help="DiskANN SearchListSize parameter")
+    parser.add_argument("--max-degree", type=int, default=16, help="DiskANN max_degree build parameter")
+    parser.add_argument("--search-list-size", type=int, default=200, help="DiskANN search_list_size build parameter")
     parser.add_argument("--M", type=int, default=16, help="HNSW M parameter")
     parser.add_argument("--ef-construction", type=int, default=200, help="HNSW efConstruction parameter")
     parser.add_argument("--inline-pq", type=int, default=16, help="AISAQ inline_pq parameter, performance(max_degree) vs scale(0) mode")
@@ -329,9 +329,12 @@ def main():
             "efConstruction": args.ef_construction
         }
     elif args.index_type == "DISKANN":
+        # knowhere's DiskANN config reads snake_case keys (max_degree,
+        # search_list_size); CamelCase keys are silently ignored and the
+        # index is built with server defaults (issue #590).
         index_params["params"] = {
-            "MaxDegree": args.max_degree,
-            "SearchListSize": args.search_list_size
+            "max_degree": args.max_degree,
+            "search_list_size": args.search_list_size
         }
     elif args.index_type == "AISAQ":
         index_params["params"] = {

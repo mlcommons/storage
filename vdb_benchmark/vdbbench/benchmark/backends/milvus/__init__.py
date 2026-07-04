@@ -62,13 +62,13 @@ def backend_descriptor() -> BackendDescriptor:
                 ),
                 build_params=[
                     ParamDescriptor(
-                        name="MaxDegree",
+                        name="max_degree",
                         description="Maximum out-degree of each graph node.",
                         type="int",
                         default=64,
                     ),
                     ParamDescriptor(
-                        name="SearchListSize",
+                        name="search_list_size",
                         description="Candidate-list size during index build.",
                         type="int",
                         default=200,

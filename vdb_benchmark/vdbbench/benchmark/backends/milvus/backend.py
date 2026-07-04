@@ -83,9 +83,14 @@ class MilvusBackend(VectorDBBackend):
                 "efConstruction": params.get("efConstruction", 200),
             }
         elif index_type == "DISKANN":
+            # knowhere reads snake_case DiskANN build params; CamelCase keys
+            # are silently ignored (issue #590). Accept legacy CamelCase from
+            # older configs but always emit snake_case to Milvus.
             ip["params"] = {
-                "MaxDegree": params.get("MaxDegree", 64),
-                "SearchListSize": params.get("SearchListSize", 200),
+                "max_degree": params.get(
+                    "max_degree", params.get("MaxDegree", 64)),
+                "search_list_size": params.get(
+                    "search_list_size", params.get("SearchListSize", 200)),
             }
         elif index_type == "AISAQ":
             ip["params"] = {
