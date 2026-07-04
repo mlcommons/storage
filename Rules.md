@@ -430,6 +430,7 @@ root_folder (or any name you prefer)
 | *Storage parameters*         |                                                                                                                                     |          |
 | storage.storage_root         | The storage root directory                                                                                                          | ./       |
 | storage.storage_type         | The storage type                                                                                                                    | local_fs |
+| storage.storage_options.prefetch_window | Client-side s3dlio prefetch depth for object-storage runs. Same class of knob as `reader.read_threads`: tunes client I/O concurrency, not workload semantics (same bytes, same access pattern, same AU rule). Object-storage-only: on POSIX, prefetch flows through the reclaimable page cache and imposes no whole-record host-memory pressure; on object storage each prefetch slot pins a whole record until consumed, so the closed default may leave no valid operating point for large-record models. Uncapped, matching `reader.read_threads`. | s3dlio default |
 
 3.6.3. **trainingOpenSubmissionParameters** -- For OPEN submissions of this benchmark, only a few additional parameters can be modified over those allowed in CLOSED, and those additional parameters are listed in the table below.  Any other parameters being modified must generate a message and fail the validation.
 

@@ -28,6 +28,15 @@ class TrainingRunRulesChecker(RunRulesChecker):
         'checkpoint.checkpoint_folder',
         'storage.storage_type',
         'storage.storage_root',
+        # Issue #666: s3dlio client-side prefetch depth for object-storage
+        # runs. Same class of knob as reader.read_threads — tunes client I/O
+        # concurrency, not workload semantics (same bytes, same access
+        # pattern, same AU rule). Promoted from OPEN-only (#629/#634) to
+        # CLOSED-allowed because on object storage each prefetch slot pins
+        # a whole record in host memory, and at the s3dlio default no
+        # CLOSED-valid operating point exists for unet3d on typical
+        # client-memory budgets. See Rules.md §3.6.2.
+        'storage.storage_options.prefetch_window',
     ]
 
     # Parameters allowed for OPEN submission (but not CLOSED)
@@ -36,11 +45,6 @@ class TrainingRunRulesChecker(RunRulesChecker):
         'dataset.format',
         'dataset.num_samples_per_file',
         'reader.data_loader',
-        # Issue #629: s3dlio client-side prefetch depth for object-storage
-        # runs. Documented as a tunable in docs/RetinaNet_NP_Scaling_Results.md
-        # (default 256). Tunes I/O concurrency, not the workload spec —
-        # OPEN-only so closed submissions stay comparable.
-        'storage.storage_options.prefetch_window',
     ]
 
     # Parameters that the mlpstorage tool injects into the DLIO config without

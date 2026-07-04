@@ -518,7 +518,7 @@ wheels = [
 
 [[package]]
 name = "mlpstorage"
-version = "3.0.30"
+version = "3.0.31"
 source = { editable = "." }
 dependencies = [
     { name = "dlio-benchmark", marker = "sys_platform == 'linux'" },
