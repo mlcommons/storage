@@ -1,0 +1,12 @@
+{
+  "throughput_qps": 980.2,
+  "mean_latency_ms": 15.6,
+  "p95_latency_ms": 22.1,
+  "p99_latency_ms": 30.4,
+  "p999_latency_ms": 48.7,
+  "engine": "pgvector",
+  "index_type": "ivfflat",
+  "workload": "pgvector_ivfflat",
+  "start": "2026-07-04 12:00:00",
+  "end": "2026-07-04 12:15:00"
+}
