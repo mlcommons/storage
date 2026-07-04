@@ -3202,6 +3202,54 @@ class TestEnvironmentRuntimeDenylistExpanded643:
             )
 
 
+class TestEnvironmentRuntimeDenylistExpanded663:
+    """Follow-up expansion (storage#663): four Open-MPI vars missed by the
+    #643 audit — three are set only on non-rank-0 processes (asymmetric
+    fingerprint defeats ``quantity: N`` dedup) and one carries a randomly-
+    generated per-invocation URI (job id + TCP port) that also trips
+    ``SystemDriftError`` on legitimate re-runs.
+
+    Kept in its own class so the #663 expansion is documented and grepable
+    like the #643 one before it. Uses the same ``_env_allowlist_match``
+    exclusion mechanism.
+    """
+
+    _RUNTIME_VOLATILE_VARS_ADDED_IN_663 = [
+        "OMPI_MCA_ess_base_num_procs",
+        "OMPI_MCA_orte_parent_uri",
+        "OMPI_MCA_plm",
+        "OMPI_MCA_routed",
+    ]
+
+    @pytest.mark.parametrize("varname", _RUNTIME_VOLATILE_VARS_ADDED_IN_663)
+    def test_var_excluded_from_collect_environment(self, monkeypatch, varname):
+        """Each newly-denylisted var must NOT appear in collect_environment
+        output even when live in ``os.environ`` (the state non-rank-0
+        processes see under ``mpirun``)."""
+        from mlpstorage_py.cluster_collector import collect_environment
+
+        _clear_env_allowlist_vars(monkeypatch)
+        monkeypatch.setenv(varname, "some-per-rank-value-12345")
+        out = collect_environment()
+        names = {e["name"] for e in out}
+        assert varname not in names, (
+            f"{varname} is a per-rank / per-invocation launcher variable "
+            "and must be excluded from the fingerprint to prevent asymmetric "
+            "rank fingerprints (breaking quantity: N dedup) and spurious "
+            "SystemDriftError on legitimate re-runs (#663)."
+        )
+
+    @pytest.mark.parametrize("varname", _RUNTIME_VOLATILE_VARS_ADDED_IN_663)
+    def test_var_denied_by_env_allowlist_match(self, monkeypatch, varname):
+        """Name-level assertion at the allowlist boundary — decoupled from
+        the collect_environment machinery so a refactor that reshapes the
+        outer collector still surfaces a regression here."""
+        from mlpstorage_py.cluster_collector import _env_allowlist_match
+        assert _env_allowlist_match(varname) is False, (
+            f"{varname} must be denied by _env_allowlist_match (#663)."
+        )
+
+
 class TestEnvironmentMPIScriptParity:
     """Pattern B (D-36): collect_environment + _env_allowlist_match +
     _mask_credential_id + _redact_secret live inline in MPI_COLLECTOR_SCRIPT.
