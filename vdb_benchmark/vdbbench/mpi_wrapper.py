@@ -172,9 +172,11 @@ def _build_index_params(args: argparse.Namespace) -> dict[str, Any]:
         }
 
     elif index_type == "DISKANN":
+        # snake_case is required by knowhere's DiskANN config; CamelCase
+        # keys are silently ignored at build time (issue #590).
         index_params["params"] = {
-            "MaxDegree": args.max_degree,
-            "SearchListSize": args.search_list_size,
+            "max_degree": args.max_degree,
+            "search_list_size": args.search_list_size,
         }
 
     elif index_type == "AISAQ":

@@ -509,13 +509,13 @@ def _add_vectordb_open_args(parser, command):
             '--max-degree',
             type=int,
             default=16,
-            help="DiskANN MaxDegree parameter.",
+            help="DiskANN max_degree build parameter.",
         )
         parser.add_argument(
             '--search-list-size',
             type=int,
             default=200,
-            help="DiskANN SearchListSize parameter.",
+            help="DiskANN search_list_size build parameter.",
         )
         # HNSW parameters.
         parser.add_argument(
