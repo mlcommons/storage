@@ -1010,10 +1010,13 @@ class TestClosedStorageOptionsPrefetchWindowIssue666:
         checker = TrainingRunRulesChecker(run, logger=mock_logger)
         issues = checker.check_allowed_params()
 
-        # CLOSED-allowed params produce no issue in check_allowed_params.
-        assert issues == [], (
+        # check_allowed_params emits one PARAM_VALIDATION.CLOSED "override
+        # allowed" note per override; must not upgrade to OPEN or INVALID.
+        assert len(issues) == 1
+        assert issues[0].validation == PARAM_VALIDATION.CLOSED, (
             f"Issue #666: storage.storage_options.prefetch_window must be "
-            f"CLOSED-allowed and produce zero issues, got {issues!r}"
+            f"CLOSED-allowed, got {issues[0].validation!r}. Message: "
+            f"{issues[0].message!r}"
         )
 
     def test_prefetch_window_in_closed_allowed_params_issue_666(self):
