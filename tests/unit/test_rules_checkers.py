@@ -957,34 +957,46 @@ class TestTrainingParquetFormat:
                 f"dataset.format={format_value} should be OPEN category"
 
 
-class TestOpenStorageOptionsPrefetchWindowIssue629:
-    """Issue #629: `storage.storage_options.prefetch_window` is an s3dlio
-    client-side prefetch-depth knob (docs/RetinaNet_NP_Scaling_Results.md
-    documents it as a tunable, default 256). Tuning it changes I/O
-    concurrency, not the workload spec — so it belongs in OPEN's
-    allow-list. Before this fix it was absent from every allow-list and
-    was rejected as INVALID, aborting the reporter's OPEN run.
+class TestClosedStorageOptionsPrefetchWindowIssue666:
+    """Issue #666: `storage.storage_options.prefetch_window` is a client-side
+    I/O parallelism knob in exactly the same class as `reader.read_threads`
+    (which has always been CLOSED-tunable): same bytes, same access pattern,
+    same AU rule — it only tunes request concurrency, not workload semantics.
+
+    On object storage each prefetch slot pins a whole record in host memory
+    until consumed. For unet3d (~140 MiB records) at the s3dlio default
+    (min(prefetch_window, 64) = 64 concurrent GETs per worker), a single
+    read_thread pins ~18.5 GiB. That leaves no CLOSED-valid operating point
+    on typical unet3d client-memory budgets — lowering read_threads fails AU,
+    raising it OOMs the host. Reporter (bissantz) demonstrated the deadlock
+    and MEMBER russfellows +1'd 2026-07-03.
+
+    Issue #629 previously promoted this knob from INVALID to OPEN-only via
+    PR #634. Issue #666 promotes it further: from OPEN-only to CLOSED-allowed
+    (uncapped, matching read_threads' treatment). Rules.md §3.6.2 CLOSED
+    tunable-parameters table now lists it alongside the other
+    ``storage.*`` entries. This test class supersedes the #629 test class of
+    the same shape.
     """
 
     @pytest.fixture
     def mock_logger(self):
         return MagicMock()
 
-    def test_prefetch_window_override_is_open_category_issue_629(self, mock_logger):
-        """OPEN override of storage.storage_options.prefetch_window must
-        classify as OPEN, not INVALID.
+    def test_prefetch_window_override_is_closed_category_issue_666(self, mock_logger):
+        """CLOSED override of storage.storage_options.prefetch_window must
+        classify as CLOSED (permitted), not OPEN or INVALID.
 
-        Repro from issue #629:
-          mlpstorage open training unet3d run object \\
+        Post-#666:
+          mlpstorage closed training unet3d run object \\
             --params storage.storage_options.prefetch_window=8 ...
-          -> ERROR: INVALID: Disallowed parameter override:
-             storage.storage_options.prefetch_window = 8
+          -> CLOSED-allowed override; no message; not upgraded to OPEN.
         """
         data = BenchmarkRunData(
             benchmark_type=BENCHMARK_TYPES.training,
             model="unet3d",
             command="run",
-            run_datetime="20260701_195014",
+            run_datetime="20260704_120000",
             num_processes=1,
             parameters={
                 "dataset": {"num_files_train": 28271},
@@ -998,29 +1010,28 @@ class TestOpenStorageOptionsPrefetchWindowIssue629:
         checker = TrainingRunRulesChecker(run, logger=mock_logger)
         issues = checker.check_allowed_params()
 
-        assert len(issues) == 1
-        assert issues[0].validation == PARAM_VALIDATION.OPEN, (
-            f"Issue #629: storage.storage_options.prefetch_window must be "
-            f"OPEN-allowed, got {issues[0].validation!r}. Message: "
-            f"{issues[0].message!r}"
+        # CLOSED-allowed params produce no issue in check_allowed_params.
+        assert issues == [], (
+            f"Issue #666: storage.storage_options.prefetch_window must be "
+            f"CLOSED-allowed and produce zero issues, got {issues!r}"
         )
 
-    def test_prefetch_window_in_open_allowed_params_issue_629(self):
-        """Set-membership assertion: locks the allow-list entry."""
+    def test_prefetch_window_in_closed_allowed_params_issue_666(self):
+        """Set-membership assertion: locks the CLOSED allow-list entry."""
         assert (
             'storage.storage_options.prefetch_window'
-            in TrainingRunRulesChecker.OPEN_ALLOWED_PARAMS
+            in TrainingRunRulesChecker.CLOSED_ALLOWED_PARAMS
         )
 
-    def test_prefetch_window_not_in_closed_allowed_params_issue_629(self):
-        """Scope guard: prefetch_window must NOT be CLOSED-allowed.
+    def test_prefetch_window_not_in_open_allowed_params_issue_666(self):
+        """Scope guard: prefetch_window must appear ONLY in CLOSED after #666.
 
-        On CLOSED, all client tuning knobs affecting AU stay at their
-        defaults so submissions are comparable. Adding this to
-        CLOSED_ALLOWED_PARAMS would let closed submitters game AU by
-        cranking prefetch depth. This is an OPEN-only knob.
+        Duplicating it into OPEN_ALLOWED_PARAMS is not a bug per se — the
+        allow-list check would still admit it — but it would drift the
+        two lists' semantics ("what OPEN adds on top of CLOSED"). Keep
+        it in CLOSED only.
         """
         assert (
             'storage.storage_options.prefetch_window'
-            not in TrainingRunRulesChecker.CLOSED_ALLOWED_PARAMS
+            not in TrainingRunRulesChecker.OPEN_ALLOWED_PARAMS
         )
