@@ -126,6 +126,17 @@ class CodeTreeUnreadable(CodeImageError):
     """
 
 
+class PointerMalformed(CodeImageError):
+    """Raised when .mlps-code-image content does not parse as md5-tree-v2:<32-hex> per D-61.
+
+    Subclasses CodeImageError so main.py's existing exit-code mapping surfaces
+    this as EXIT_CODE.CODE_IMAGE_ERROR without a new handler. Distinct from
+    MalformedHashFile (which covers .code-hash.json / the sidecar JSON) so the
+    caller can log the right diagnostic when a submitter hand-edits the
+    pointer file (RESEARCH Pitfall 3).
+    """
+
+
 @dataclass(frozen=True)
 class CodeImage:
     """In-memory representation of a captured code image (D-02)."""
@@ -139,6 +150,11 @@ class CodeImage:
 
 # Private constants
 _HASH_FILENAME = ".code-hash.json"
+# Pointer sentinel written into every submission run-leaf pointing at the
+# content-addressed pool image whose hash matches the live source tree.
+# Content shape: `md5-tree-v2:<32-hex>` (D-61, Plan 06-01). Leading dot keeps
+# it invisible to a naive `Path.glob("code-*")` pool scan (RESEARCH Pitfall 4).
+_POINTER_FILENAME = ".mlps-code-image"
 _TMP_SUFFIX = "code.tmp"
 _CODE_DIRNAME = "code"
 # Bumped to v2 alongside the source-vs-copy hash-target fix in PR #512.
@@ -503,6 +519,112 @@ def _resolve_git_sha(source_root: Path, log) -> str | None:
         log.warning("Failed to resolve git SHA in %s: %s (D-08)", source_root, e)
     
     return None
+
+
+def _pool_dir_name(full_hash: str) -> str:
+    """Return the pool-image directory name for `full_hash` (D-62).
+
+    Shape: `code-<first-8-hex>`. The 8-char prefix keeps directory names
+    short while remaining collision-resistant for the pool sizes MLPerf
+    submitters actually stage. Callers are responsible for passing a
+    validated 32-lowercase-hex string; this helper does no validation of
+    its own so it can be used inline in path assembly without try/except.
+    """
+    return f"code-{full_hash[:8]}"
+
+
+def _write_pointer_atomic(run_leaf: Path, full_hash: str, log) -> None:
+    """Write `_POINTER_FILENAME` inside run_leaf atomically (D-61, D-65).
+
+    Contract: on return, either the pointer contains the full expected
+    content or the run_leaf contains no pointer file at all. No partial
+    writes are ever visible to a concurrent reader.
+
+    Args:
+        run_leaf: Directory the pointer file will be written into. Must
+            already exist.
+        full_hash: 32-lowercase-hex md5-tree-v2 digest identifying the
+            content-addressed pool image this run resolves to.
+        log: Logger object.
+
+    Raises:
+        AssertionError: full_hash is not 32 lowercase hex chars.
+        BaseException: Any error inside the tmp-write block propagates
+            after the tmp sibling is cleaned up. `except BaseException`
+            (NOT `except Exception`) is intentional — KeyboardInterrupt
+            and SystemExit must also trigger tmp cleanup so a ^C mid-write
+            never leaks a stale sibling into the run leaf (verbatim
+            carry-over from mlpstorage_py/results_dir/code_image.py:160-186).
+    """
+    assert re.fullmatch(r"[0-9a-f]{32}", full_hash), (
+        f"live hash must be 32 lowercase hex chars, got {full_hash!r}"
+    )
+    dst = run_leaf / _POINTER_FILENAME
+    # Leading dot on the tmp sibling is REQUIRED — RESEARCH Pitfall 4.
+    # A downstream `Path.glob("code-*")` pool scan (Plan 06-02) must not
+    # pick up an in-flight tmp file mid-write.
+    tmp = run_leaf / f".{_POINTER_FILENAME}.tmp.{os.getpid()}"
+    if tmp.exists():
+        # Stale from a prior crash between tmp-write and os.rename.
+        tmp.unlink(missing_ok=True)
+    try:
+        with open(tmp, "w", encoding="utf-8") as f:
+            # No trailing newline — D-61 permits either but the writer is
+            # locked to the shorter form so the round-trip is byte-exact.
+            f.write(f"{_ALGORITHM}:{full_hash}")
+    except BaseException:
+        # KeyboardInterrupt / SystemExit reach here too — that is
+        # intentional (D-65 atomicity contract).
+        tmp.unlink(missing_ok=True)
+        raise
+    # Atomic on same fs — after this returns, `dst` is complete.
+    os.rename(str(tmp), str(dst))
+    log.debug("wrote pointer file %s → %s:%s", dst, _ALGORITHM, full_hash)
+
+
+def _read_pointer(run_leaf: Path, log) -> tuple[str, str]:
+    """Read `_POINTER_FILENAME` from run_leaf, return (algorithm, full_hash) per D-61, PTR-02.
+
+    Rejects every malformed variant surfaced in RESEARCH Pitfall 3:
+    empty tail (`md5-tree-v2:`), short hash, uppercase hex, missing
+    colon, and unknown algorithm. Every rejection raises PointerMalformed
+    naming the offending pointer path.
+
+    Args:
+        run_leaf: Directory containing `_POINTER_FILENAME`.
+        log: Logger object.
+
+    Returns:
+        Tuple of (algorithm, full_hash) where algorithm is the literal
+        string `md5-tree-v2` and full_hash is 32 lowercase hex chars.
+
+    Raises:
+        FileNotFoundError: Pointer file is absent. Caller can distinguish
+            "pool image not linked" from "pool image linked but pointer
+            corrupted".
+        PointerMalformed: File present but not a valid `md5-tree-v2:<hex32>`
+            line.
+    """
+    path = run_leaf / _POINTER_FILENAME
+    # `.strip()` tolerates trailing whitespace / newline per D-61 (both
+    # forms are permitted). Any accidental extra `:` in the hex tail
+    # would still fail the hex regex below, so `partition(':')` is safe.
+    line = path.read_text(encoding="utf-8").strip()
+    if ":" not in line:
+        raise PointerMalformed(
+            f"{path}: expected '{_ALGORITHM}:<hex32>', got {line!r}"
+        )
+    alg, _, hex_part = line.partition(":")
+    if alg != _ALGORITHM:
+        raise PointerMalformed(
+            f"{path}: unknown algorithm {alg!r} (expected {_ALGORITHM!r})"
+        )
+    if not re.fullmatch(r"[0-9a-f]{32}", hex_part):
+        raise PointerMalformed(
+            f"{path}: hash after ':' is not 32 lowercase hex chars, "
+            f"got {hex_part!r}"
+        )
+    return alg, hex_part
 
 
 def _now_utc_iso() -> str:
