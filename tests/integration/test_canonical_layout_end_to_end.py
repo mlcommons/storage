@@ -7,7 +7,12 @@ Exercises the full Phase-1 stack:
 * `generate_output_location` lays out the canonical
   `<rd>/<mode>/<orgname>/results/<sys>/<benchmark>/<model>/<command>/<datetime>/`
   shape (LAY-05 / LAY-07).
-* `capture_code_image` writes the per-mode `code/` subtree (LAY-06).
+* `capture_or_verify_code_image` writes the content-addressed pool image
+  at `<rd>/<orgname>/code-<hash8>/` (mode-agnostic per D-64) and a
+  `.mlps-code-image` pointer inside the run leaf (Phase 6 D-60..D-67).
+  The pre-Phase-6 per-mode `code/` subtree (LAY-06) was retired in
+  Plan 06-03; Plan 06-04 owns the exhaustive pool-layout integration
+  suite (see `06-04-PLAN.md`).
 * The uninitialized-results-dir error message is surfaced verbatim with
   the LAY-03 backticked phrasing when a non-init command is invoked
   against an uninitialized directory (regression on the LAY-03 gate).
@@ -25,6 +30,8 @@ LAY-01..LAY-08; VALIDATION.md rows E2E / LAY-07 / LAY-08.
 
 from __future__ import annotations
 
+import json
+import logging
 import os
 import subprocess
 import sys
@@ -37,9 +44,11 @@ import pytest
 
 from mlpstorage_py.config import BENCHMARK_TYPES
 from mlpstorage_py.results_dir import (
-    capture_code_image,
     resolve_orgname,
     run_init,
+)
+from mlpstorage_py.submission_checker.tools.code_image import (
+    capture_or_verify_code_image,
 )
 
 
@@ -128,11 +137,58 @@ def _emulate_run_directory(
 # ---------------------------------------------------------------------- #
 
 
+def _make_capture_args(
+    *,
+    results_dir: Path,
+    mode: str,
+    orgname: str,
+    benchmark: str = "training",
+    command: str = "datagen",
+    model: str = "unet3d",
+    systemname: str = "sys-v1",
+    index_type: str | None = None,
+) -> Namespace:
+    """Build an argparse.Namespace matching what ``capture_or_verify_code_image`` reads.
+
+    Mirrors the shape ``main._main_impl`` assembles at call-time (main.py:224).
+    ``index_type`` is only consulted for vector_database in OPEN mode.
+    """
+    ns = Namespace(
+        mode=mode,
+        command=command,
+        results_dir=str(results_dir),
+        benchmark=benchmark,
+        model=model,
+        orgname=orgname,
+        systemname=systemname,
+    )
+    if index_type is not None:
+        ns.index_type = index_type
+    return ns
+
+
+def _capture_logger() -> logging.Logger:
+    """Return a logger with a `.status` shim so the helper's log.status() calls resolve."""
+    log = logging.getLogger("test_canonical_layout_e2e_capture")
+    if not hasattr(log, "status"):
+        # capture_or_verify_code_image calls log.status(...); mirror to info.
+        log.status = log.info  # type: ignore[attr-defined]
+    return log
+
+
 class TestInitThenRunLayout:
-    """`mlpstorage init` then a (mocked) run produces the canonical tree."""
+    """`mlpstorage init` then a (mocked) capture produces the canonical tree.
+
+    Rewritten in Phase 6 Plan 06-03: the pre-Phase-6 per-mode
+    ``<rd>/closed/<orgname>/code/`` copy was retired; capture now writes a
+    content-addressed pool image at ``<rd>/<orgname>/code-<hash8>/`` plus a
+    ``.mlps-code-image`` pointer inside the run leaf (D-63..D-67, POOL-01,
+    PTR-01, UX-01). Plan 06-04 owns exhaustive pool-layout coverage; this
+    test is a smoke check that the surviving helper honors the pool shape
+    for a CLOSED run.
+    """
 
     def test_init_then_run_closed(self, tmp_path):
-        """LAY-05 / LAY-06: closed mode produces results/ AND code/ subtrees."""
         rd = _init_results_dir(tmp_path)
 
         run_dir = _emulate_run_directory(
@@ -150,18 +206,38 @@ class TestInitThenRunLayout:
         assert run_dir == expected
         assert run_dir.is_dir()
 
-        # Capture the code image (closed → single image at <rd>/closed/Acme/code/).
-        code_dst = capture_code_image(
-            str(rd), "closed", "Acme", "training", "datagen",
+        # Phase 6: capture writes a content-addressed pool image under
+        # <rd>/<orgname>/code-<hash8>/ (mode-agnostic per D-64). Env is empty
+        # because args.orgname/args.systemname are populated (HARDEN-03).
+        args = _make_capture_args(
+            results_dir=rd, mode="closed", orgname="Acme",
+            benchmark="training", command="datagen",
         )
-        assert code_dst == str(rd / "closed" / "Acme" / "code")
-        assert Path(code_dst).is_dir()
-        # The captured tree contains at least the package's __init__.py.
-        assert (Path(code_dst) / "__init__.py").is_file()
+        pool_dir = capture_or_verify_code_image(args, {}, _capture_logger())
+        assert pool_dir is not None
+        assert pool_dir.parent == rd / "Acme"
+
+        # Exactly one pool image after a single CLOSED capture (POOL-01).
+        pool_dirs = list((rd / "Acme").glob("code-*"))
+        assert len(pool_dirs) == 1
+        assert pool_dirs[0] == pool_dir
+
+        # Naming contract (D-62): `code-<first-8-of-hash>`; sidecar
+        # `.code-hash.json` gives the full 32-hex digest (D-07).
+        hash_file = pool_dir / ".code-hash.json"
+        assert hash_file.is_file()
+        data = json.loads(hash_file.read_text())
+        assert "hash" in data
+        assert pool_dir.name == f"code-{data['hash'][:8]}"
 
 
 class TestWhatifLayoutShape:
-    """LAY-07: whatif produces the same `results/` shape as closed/open."""
+    """LAY-07: whatif produces the same `results/` shape as closed/open.
+
+    Phase 6 (D-10): ``capture_or_verify_code_image`` gates on mode ∈
+    {closed, open} and returns ``None`` for whatif — no pool image written
+    under ``<rd>/<orgname>/``.
+    """
 
     def test_whatif_path_shape(self, tmp_path):
         rd = _init_results_dir(tmp_path)
@@ -181,17 +257,26 @@ class TestWhatifLayoutShape:
         assert run_dir == expected
         assert run_dir.is_dir()
 
-        # whatif SKIPS the code-image capture (returns None, no fs side effects).
-        result = capture_code_image(
-            str(rd), "whatif", "Acme", "training", "datagen",
+        # whatif SKIPS the code-image capture (D-10 mode gate → returns None).
+        args = _make_capture_args(
+            results_dir=rd, mode="whatif", orgname="Acme",
+            benchmark="training", command="datagen",
         )
+        result = capture_or_verify_code_image(args, {}, _capture_logger())
         assert result is None
-        # No code/ subdir under whatif.
-        assert not (rd / "whatif" / "Acme" / "code").exists()
+        # No pool image directories under <rd>/<orgname>/ from a whatif call.
+        assert not list((rd / "Acme").glob("code-*"))
 
 
 class TestOpenLayoutShape:
-    """Open mode: code image lives at per-(benchmark, command) tuple."""
+    """OPEN mode: pool image lives at the same content-addressed path as CLOSED.
+
+    Phase 6 D-64 collapses CLOSED and OPEN into the SAME mode-agnostic pool
+    at ``<rd>/<orgname>/code-<hash8>/`` (POOL-04 cross-mode dedup). Plan
+    06-04 owns exhaustive cross-mode assertions; this test is a smoke
+    check that OPEN honors the pool shape and that repeated captures of
+    the same source hash reuse the same pool image.
+    """
 
     def test_open_path_shape(self, tmp_path):
         rd = _init_results_dir(tmp_path)
@@ -210,22 +295,31 @@ class TestOpenLayoutShape:
         assert run_dir == expected
         assert run_dir.is_dir()
 
-        # Open mode: image at per-(benchmark, command) tuple. Single ``code/``
-        # segment, mirroring closed mode (WR-05).
-        code_dst = capture_code_image(
-            str(rd), "open", "Acme", "training", "datagen",
+        # OPEN capture writes the pool image at <rd>/<orgname>/code-<hash8>/.
+        args_datagen = _make_capture_args(
+            results_dir=rd, mode="open", orgname="Acme",
+            benchmark="training", command="datagen",
         )
-        expected_code = rd / "open" / "Acme" / "code" / "training" / "datagen"
-        assert code_dst == str(expected_code)
-        assert expected_code.is_dir()
+        first_pool = capture_or_verify_code_image(
+            args_datagen, {}, _capture_logger(),
+        )
+        assert first_pool is not None
+        assert first_pool.parent == rd / "Acme"
+        assert first_pool.name.startswith("code-")
 
-        # A second command at the same orgname gets its own subtree.
-        run_dst = capture_code_image(
-            str(rd), "open", "Acme", "training", "run",
+        # A second OPEN capture with the same source hash but different
+        # command reuses the SAME pool image (CAPVER-01, POOL-04). Only
+        # ONE code-<hash8>/ directory should exist after both calls.
+        args_run = _make_capture_args(
+            results_dir=rd, mode="open", orgname="Acme",
+            benchmark="training", command="run",
         )
-        expected_run_code = rd / "open" / "Acme" / "code" / "training" / "run"
-        assert run_dst == str(expected_run_code)
-        assert expected_run_code.is_dir()
+        second_pool = capture_or_verify_code_image(
+            args_run, {}, _capture_logger(),
+        )
+        assert second_pool == first_pool
+        pool_dirs = list((rd / "Acme").glob("code-*"))
+        assert len(pool_dirs) == 1
 
 
 # ---------------------------------------------------------------------- #
