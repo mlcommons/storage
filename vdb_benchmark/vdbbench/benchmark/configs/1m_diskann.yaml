@@ -28,8 +28,8 @@ index:
   index_type: DISKANN
   metric_type: COSINE
   index_params:
-    MaxDegree: 64
-    SearchListSize: 200
+    max_degree: 64
+    search_list_size: 200
   num_shards: 1
 
 search:
