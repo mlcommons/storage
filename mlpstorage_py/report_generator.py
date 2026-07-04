@@ -15,7 +15,8 @@ import pprint
 import sys
 
 from dataclasses import dataclass
-from typing import List, Dict, Any, Optional
+from statistics import fmean, StatisticsError
+from typing import List, Dict, Any, Optional, Set
 
 from mlpstorage_py.mlps_logging import setup_logging, apply_logging_options
 from mlpstorage_py.config import MLPS_DEBUG, BENCHMARK_TYPES, EXIT_CODE, PARAM_VALIDATION, LLM_MODELS, MODELS, ACCELERATORS
@@ -27,6 +28,25 @@ from mlpstorage_py.reporting import (
     ClosedRequirementsFormatter,
     ReportSummaryFormatter,
     discover_scan_roots,
+)
+
+
+# D-24 verbatim INVALID message templates. DO NOT paraphrase — tests/unit/test_aggregation.py
+# asserts these substrings verbatim (Phase 5 D-02 precedent). Formatted at call sites via
+# ``.format(n=..., key=..., basename=...)``; the ``§`` (U+00A7) character is intentional and
+# grep-tested.
+_INVALID_MSG_TRAINING_COUNT = (
+    "expected 6 training invocations per Rules.md §2.1.17 (1 warmup + 5 real); found {n}"
+)
+_INVALID_MSG_WARMUP_UNDETECTED = (
+    "expected exactly 1 warmup invocation to be detected; found 0 in a 6-invocation set. "
+    "Cannot compute Rules.md §2.1.17 5-run mean."
+)
+_INVALID_MSG_CHECKPOINT_COUNT = (
+    "expected 10 checkpoint operations per Rules.md §2.1.23; found {n}"
+)
+_INVALID_MSG_EMPTY_METRIC = (
+    "metric {key} is empty in invocation {basename}; cannot aggregate"
 )
 
 
