@@ -212,13 +212,16 @@ class TestReportGeneratorGenerateReports:
         results_dir = tmp_path / "results"
         results_dir.mkdir()
 
-        # Model-level rollup: one results.{json,csv} per <model>/ folder,
-        # covering every command's timestamps for that model. The mock
-        # leaf must live under the canonical training layout
-        # `<results>/training/<model>/<command>/<ts>/` so the grouping
-        # helper can walk up two levels to land at `<model>/`.
+        # Per-model rollup: one results.{json,csv} inside the training
+        # `<model>/run/` folder, covering every timestamp for that model.
+        # Rules.md 2.1.16 (runResultsJson) mandates the file live "within
+        # the 'run' phase directory within the 'training' directory
+        # hierarchy" — one level below `<model>/`. The mock leaf lives
+        # under `<results>/training/<model>/run/<ts>/`; the grouping
+        # helper walks up ONE level to land at `<model>/run/`.
         self._model_folder = results_dir / "training" / "unet3d"
-        leaf = self._model_folder / "run" / "20250111_120000"
+        self._run_folder = self._model_folder / "run"
+        leaf = self._run_folder / "20250111_120000"
         leaf.mkdir(parents=True)
 
         with patch.object(ReportGenerator, 'accumulate_results'):
@@ -255,19 +258,30 @@ class TestReportGeneratorGenerateReports:
         assert result == EXIT_CODE.SUCCESS
 
     def test_creates_json_file(self, generator):
-        """Should create results.json inside the <model>/ folder."""
+        """Should create results.json inside the <model>/run/ folder
+        (Rules.md 2.1.16 runResultsJson)."""
         generator.generate_reports()
-        json_file = os.path.join(str(self._model_folder), 'results.json')
+        json_file = os.path.join(str(self._run_folder), 'results.json')
         assert os.path.exists(json_file), (
-            f"Expected model-level rollup at {json_file}"
+            f"Expected per-model rollup at {json_file} "
+            "(Rules.md 2.1.16 runResultsJson)"
+        )
+        # Belt-and-braces: the pre-fix location one level up must NOT
+        # be written — otherwise a checker seeing the file at both
+        # `<model>/` and `<model>/run/` would let the bug regress
+        # silently while the run/ assertion still passes.
+        stray = os.path.join(str(self._model_folder), 'results.json')
+        assert not os.path.exists(stray), (
+            f"Unexpected stray rollup at {stray}; Rules.md 2.1.16 "
+            "requires results.json inside run/ only."
         )
 
     def test_creates_csv_file(self, generator):
-        """Should create results.csv inside the <model>/ folder."""
+        """Should create results.csv inside the <model>/run/ folder."""
         generator.generate_reports()
-        csv_file = os.path.join(str(self._model_folder), 'results.csv')
+        csv_file = os.path.join(str(self._run_folder), 'results.csv')
         assert os.path.exists(csv_file), (
-            f"Expected model-level rollup at {csv_file}"
+            f"Expected per-model rollup at {csv_file}"
         )
 
     def test_creates_global_summary_files(self, generator):
@@ -537,11 +551,12 @@ class TestReportGeneratorIntegration:
         results_dir = tmp_path / "results"
         results_dir.mkdir()
 
-        # Model-level rollups land at `<...>/training/<model>/`, so the
-        # mock leaf must live under the canonical layout for the parent
-        # arithmetic in _model_group_folder() to resolve correctly.
+        # Per-model rollup lands at `<...>/training/<model>/run/`
+        # (Rules.md 2.1.16 runResultsJson). The mock leaf lives under
+        # the canonical layout so _model_group_folder() resolves correctly.
         model_folder = results_dir / "training" / "unet3d"
-        leaf = model_folder / "run" / "20250111_120000"
+        run_folder = model_folder / "run"
+        leaf = run_folder / "20250111_120000"
         leaf.mkdir(parents=True)
 
         # Create mock benchmark run
@@ -577,9 +592,9 @@ class TestReportGeneratorIntegration:
         result = generator.generate_reports()
         assert result == EXIT_CODE.SUCCESS
 
-        # Per-model rollup lands inside the <model>/ folder.
-        assert os.path.exists(os.path.join(str(model_folder), 'results.json'))
-        assert os.path.exists(os.path.join(str(model_folder), 'results.csv'))
+        # Per-model rollup lands inside <model>/run/ (Rules.md 2.1.16).
+        assert os.path.exists(os.path.join(str(run_folder), 'results.json'))
+        assert os.path.exists(os.path.join(str(run_folder), 'results.csv'))
         # Global summary is preserved at the results_dir root alongside it.
         assert os.path.exists(os.path.join(str(results_dir), 'results.json'))
         assert os.path.exists(os.path.join(str(results_dir), 'results.csv'))

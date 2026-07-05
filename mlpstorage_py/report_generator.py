@@ -373,13 +373,17 @@ class ReportGenerator:
 
         Uses the canonical layouts from generate_output_location():
 
-        * training / kv_cache     — leaf is `.../<model>/<command>/<ts>/`
-                                  → walk up two levels to land at `<model>/`.
-        * checkpointing           — leaf is `.../<model>/<ts>/` (no <command>)
-                                  → walk up one level to land at `<model>/`.
-        * vector_database         — leaf is `.../<engine>/<index>/<command>/<ts>/`
-                                  → walk up two levels to land at `<engine>/<index>/`
-                                     (the "model-like" grouping key for vdb).
+        * training        — leaf is `.../<model>/run/<ts>/`
+                          → walk up one level to land at `<model>/run/`.
+                          Rules.md 2.1.16 (runResultsJson) mandates
+                          results.json inside the "run" phase directory.
+        * kv_cache        — leaf is `.../<model>/<command>/<ts>/`
+                          → walk up two levels to land at `<model>/`.
+        * checkpointing   — leaf is `.../<model>/<ts>/` (no <command>)
+                          → walk up one level to land at `<model>/`.
+        * vector_database — leaf is `.../<engine>/<index>/<command>/<ts>/`
+                          → walk up two levels to land at `<engine>/<index>/`
+                             (the "model-like" grouping key for vdb).
 
         Returns None (and logs a warning) if the run has no result_dir.
         """
@@ -393,10 +397,12 @@ class ReportGenerator:
             return None
         leaf_abs = os.path.abspath(leaf)
         bt = result.benchmark_type
-        if bt == BENCHMARK_TYPES.checkpointing:
-            # <ts>/ → <model>/
+        if bt in (BENCHMARK_TYPES.checkpointing, BENCHMARK_TYPES.training):
+            # checkpointing: <ts>/ → <model>/
+            # training:      <ts>/ → run/   (Rules.md 2.1.16 — results.json
+            #                                lives inside the run/ phase dir)
             return os.path.dirname(leaf_abs)
-        # training, kv_cache, vector_database: <ts>/ → <command>/ → group folder
+        # kv_cache, vector_database: <ts>/ → <command>/ → group folder
         return os.path.dirname(os.path.dirname(leaf_abs))
 
     # Canonical result-tree depths: number of parent hops from the run's
