@@ -849,8 +849,8 @@ mlpstorage reports reportgen --results-dir <path> --systemname <name>
 - **`--results-dir <path>`, `-rd <path>`** (required)
   Results tree to summarize. Accepts either a flat benchmark-type root (legacy) or a canonical sentinel-bearing submission root; when the sentinel is detected, `reportgen` scopes to `<results-dir>/<mode>/<orgname>/results/<systemname>/` and walks only that slice, so a single results-dir hosting runs from multiple systems does not have its runs mashed into one report.
 
-- **`--systemname <name>`, `-sn <name>`** (required)
-  System-under-test identifier. Under the canonical tree this pins reportgen to a single `results/<systemname>/` slice; under a flat tree it tags the emitted report. Defaults to `$MLPERF_SYSTEMNAME` as everywhere else.
+- **`--systemname <name>`, `-sn <name>`** (optional)
+  System-under-test identifier. Under the canonical tree this pins reportgen to a single `results/<systemname>/` slice; under a flat tree it tags the emitted report. Defaults to `$MLPSTORAGE_SYSTEMNAME` as everywhere else. When omitted, reportgen operates on the entire results-dir tree and derives systemname per row from the workload dir's path segment (open/<org>/results/<systemname>/... or checkpointing/training/vdb/kvcache analog).
 
 `--output-dir` was removed in PR #617. The rollup outputs must land inside the submission tree so submitters cannot accidentally exclude the summary from what MLCommons reviews.
 
