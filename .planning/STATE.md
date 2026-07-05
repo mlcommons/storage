@@ -5,17 +5,17 @@ milestone_name: Content-addressed code-image pool
 current_phase: 6
 current_phase_name: Content-addressed pool + capture-or-verify rewrite
 status: executing
-stopped_at: Completed Phase 6 Plan 02 (content-addressed pool + pointer rewrite)
-last_updated: "2026-07-04T23:52:06.282Z"
-last_activity: 2026-07-04
-last_activity_desc: "Phase 6 Plan 02 landed: capture_or_verify_code_image rewrite delivers CAPVER-01/02/03 + POOL-01..04 + PTR-01 + UX-01 (9 of 10 phase REQ-IDs). Content-addressed pool at <results_dir>/<orgname>/code-<hash8>/ with atomic .mlps-code-image pointers; retired reject strings gone from module and Rules.md; 28 new unit tests, 18 retired tests, 839 total passing."
+stopped_at: Completed Phase 6 Plan 04 (integration coverage for pool + pointer flow)
+last_updated: "2026-07-05T02:57:01Z"
+last_activity: 2026-07-05
+last_activity_desc: "Phase 6 Plan 04 landed: integration coverage for SC-1..SC-5 + D-66 + UX-01 negative-grep across six test_pool_*.py files (15 tests total, 11 added this session). All 35 pool-layout integration tests pass in 0.57s; no production code modified (tests-only plan)."
 progress:
   total_phases: 3
   completed_phases: 0
   total_plans: 4
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
-current_plan: 2
+current_plan: 4
 ---
 
 # Project State
@@ -23,9 +23,9 @@ current_plan: 2
 ## Current Position
 
 Phase: 6 — Content-addressed pool + capture-or-verify rewrite
-Plan: 3 of 4 complete — content-addressed pool + pointer rewrite
-Status: In progress (Plan 06-02 landed; Plan 06-03 next)
-Last activity: 2026-07-04 — Phase 6 Plan 02 landed: capture_or_verify_code_image rewrite delivers CAPVER-01/02/03 + POOL-01..04 + PTR-01 + UX-01 (9 of 10 phase REQ-IDs). Content-addressed pool at <results_dir>/<orgname>/code-<hash8>/ with atomic .mlps-code-image pointers; retired reject strings gone from module and Rules.md; 28 new unit tests, 18 retired tests, 839 total passing.
+Plan: 4 of 4 complete — integration coverage for pool + pointer flow
+Status: Phase 6 code work complete; ready for `/gsd-transition` (or Phase 7 planning)
+Last activity: 2026-07-05 — Phase 6 Plan 04 landed: integration coverage for SC-1..SC-5 + D-66 + UX-01 negative-grep across six test_pool_*.py files (15 tests total, 11 added this session). All 35 pool-layout integration tests pass in 0.57s; no production code modified (tests-only plan).
 
 ## Milestone Snapshot
 
@@ -66,21 +66,25 @@ Coverage: 18/18 v1 requirements mapped, each to exactly one phase.
 
 ## Session Continuity
 
-**Stopped at:** Completed Phase 6 Plan 01 (pointer + pool-dir-name helpers)
+**Stopped at:** Completed Phase 6 Plan 04 (integration coverage for pool + pointer flow)
 **Resume file:** None
 
-**Last session:** 2026-07-04T23:51:45.769Z
+**Last session:** 2026-07-05T02:57:01Z
 
-**Next action:** `/gsd-execute-phase 6` to run Plan 06-02 (wire the new helpers into `capture_or_verify_code_image`).
+**Next action:** `/gsd-transition` to close Phase 6 and route to Phase 7 planning (one-shot legacy migration + hand-edit detection, MIG-01..03).
 
 ## Performance Metrics
 
 | Phase | Plan | Duration | Notes |
 |-------|------|----------|-------|
 | Phase 6 P3 | 6 min | 2 tasks | 5 files |
+| Phase 6 P4 | 12 min | 6 tasks | 6 files created (5 test + 1 summary); +11 integration tests, +0.13s runtime |
 
 ## Decisions
 
 - [Phase ?]: [06-03] Retire mlpstorage_py/results_dir/code_image.py entirely (D-60) rather than convert it to a no-op shim — RESEARCH scout confirmed zero consumers of self.code_image_path outside its own dry-run assertion test. Sole capture path now: main.py:224 → capture_or_verify_code_image.
 - [Phase ?]: [06-03] Task 1's retire commit also scrubbed the stale docstring line-number reference at submission_checker/tools/code_image.py:586 so SC#9's substring grep gate returns zero everywhere in the tree, not just at import sites.
 - [Phase ?]: [06-03] Rewrote (not skipped) all three Category B methods in tests/integration/test_canonical_layout_end_to_end.py; each rewrite stayed well under the ~50-LoC per-method threshold that SC#6 sets for the skip fallback. Plan 06-04 still owns exhaustive pool-layout integration coverage.
+- [Phase ?]: [06-04] Patched `mlpstorage_py.rules.utils.DATETIME_STR` (not `time.sleep`) for multi-call reuse/dedup tests — `DATETIME_STR` is module-load constant, so sleeping does not re-evaluate `datetime.now()`. Deterministic + sub-millisecond.
+- [Phase ?]: [06-04] Concurrent D-66 test uses `multiprocessing.get_context('fork')` + in-subprocess re-patch of `find_source_root` (parent's monkeypatch does not survive fork); 5-iteration stability loop confirms invariant holds every scheduling outcome.
+- [Phase ?]: [06-04] Concurrent test allows 1 OR 2 pointer files (workers may share `DATETIME_STR` and land in same run leaf); the D-66 invariant is on the POOL image, not the run leaf pointer.
