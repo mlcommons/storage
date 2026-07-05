@@ -1698,11 +1698,60 @@ class ReportGenerator:
         self.logger.info(f'Writing results to {csv_file}')
         flattened_results = [flatten_nested_dict(r) for r in results]
         flattened_results = [remove_nan_values(r) for r in flattened_results]
-        fieldnames = set()
-        for l in flattened_results:
-            fieldnames.update(l.keys())
+
+        # D-11 grouped-ordering assembly. Replaces the pure alphabetical
+        # field-name sort — that would put `checkpoint_*` before
+        # `train_*` and break the invariant 06-05's TestColumnOrdering
+        # test-locks.
+        ordered_fieldnames = self._ordered_fieldnames(flattened_results)
 
         with open(csv_file, 'w+', newline='') as file_object:
-            csv_writer = csv.DictWriter(f=file_object, fieldnames=sorted(fieldnames), lineterminator='\n')
+            csv_writer = csv.DictWriter(f=file_object, fieldnames=ordered_fieldnames, lineterminator='\n')
             csv_writer.writeheader()
             csv_writer.writerows(flattened_results)
+
+    def _ordered_fieldnames(self, rows: List[dict]) -> List[str]:
+        """D-11 grouped-ordering CSV header assembly.
+
+        Layout (exact):
+
+        1. Fixed 6-column prefix, in this exact order:
+           ``['category', 'orgname', 'systemname', 'benchmark_type',
+              'model', 'accelerator']``
+        2. Sorted ``train_*`` columns.
+        3. Sorted ``checkpoint_*`` columns.
+        4. Sorted ``vdb_*`` columns.
+        5. Sorted ``kvcache_*`` columns.
+        6. Any remaining un-prefixed columns, sorted (defensive: catches
+           new columns future refactors may introduce).
+        7. Trailing ``['issues']`` (D-12 last-position invariant).
+
+        For an EMPTY ``rows`` list this returns the prefix + trailing
+        columns only — the minimal header shape D-03 requires for
+        empty-model-dir emission (``results.csv`` = header row only).
+        """
+        prefix = ['category', 'orgname', 'systemname',
+                  'benchmark_type', 'model', 'accelerator']
+        trailing = ['issues']
+
+        all_keys: Set[str] = set()
+        for r in rows:
+            all_keys.update(r.keys())
+
+        prefix_set = set(prefix)
+        trailing_set = set(trailing)
+        remaining = all_keys - prefix_set - trailing_set
+
+        train_cols = sorted(k for k in remaining if k.startswith('train_'))
+        checkpoint_cols = sorted(k for k in remaining if k.startswith('checkpoint_'))
+        vdb_cols = sorted(k for k in remaining if k.startswith('vdb_'))
+        kvcache_cols = sorted(k for k in remaining if k.startswith('kvcache_'))
+
+        grouped = train_cols + checkpoint_cols + vdb_cols + kvcache_cols
+        other = sorted(k for k in remaining if k not in set(grouped))
+
+        # `other` catches any un-prefixed column not covered by the
+        # fixed prefix / trailing sets — should be empty in practice.
+        # Sorted-appending keeps behavior deterministic if a future
+        # row-shape change introduces such a column.
+        return prefix + grouped + other + trailing
