@@ -931,7 +931,7 @@ Reports which Rules.md IDs are referenced by `@rule(rule_id=...)`-decorated chec
 
 ## ENVIRONMENT
 
-This section enumerates every environment variable mlpstorage reads or borrows, grouped by ownership tier. Six tiers: Owned (mlpstorage authors the name), MPI-borrowed / AWS-borrowed / Storage-borrowed (third-party contracts mlpstorage consumes), Diagnostic (mlpstorage internal reads surfaced for troubleshooting), and Internal-write (mlpstorage may overwrite user-set values during execution). An automated sync test (`tests/unit/test_env_var_manpage_sync.py`) asserts this section stays symmetric with the actual `os.environ` reads in the codebase.
+This section enumerates every environment variable mlpstorage reads or borrows, grouped by ownership tier. Seven tiers: Owned (mlpstorage authors the name), MPI-borrowed / AWS-borrowed / Storage-borrowed (third-party contracts mlpstorage consumes), Storage-backend (s3dlio Rust layer, not Python code), Diagnostic (mlpstorage internal reads surfaced for troubleshooting), and Internal-write (mlpstorage may overwrite user-set values during execution). An automated sync test (`tests/unit/test_env_var_manpage_sync.py`) asserts this section stays symmetric with the actual `os.environ` reads in the codebase.
 
 ### Owned
 
@@ -963,6 +963,9 @@ This section enumerates every environment variable mlpstorage reads or borrows, 
 | `AWS_REGION` | `mlpstorage_py/storage_config.py` | `'us-east-1'` | AWS region for S3 endpoint selection; defaults to `us-east-1` when unset. |
 | `AWS_CA_BUNDLE` | `mlpstorage_py/storage_config.py` | [not set] | Path to a custom CA bundle for TLS verification; unset uses the system default. |
 | `AWS_ENDPOINT_URL` | `mlpstorage_py/storage_config.py`; `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py:168` | [not set] | Custom S3-compatible endpoint URL. `[cross-ref → internal-write]` — also written at `s3dlio_writer.py:168` during multi-endpoint selection; see Internal-write cross-refs below. |
+| `AWS_SESSION_TOKEN` | boto3/s3dlio via storage backend init | [not set] | Temporary STS session token; consumed by boto3/s3dlio via storage backend init. |
+| `AWS_DEFAULT_REGION` | boto3/s3dlio via storage backend init | [not set] | Fallback region when `AWS_REGION` is unset; consumed by boto3/s3dlio. |
+| `AWS_S3_ADDRESSING_STYLE` | boto3/s3dlio via storage backend init | [not set] | Controls virtual-hosted vs. path-style S3 addressing; consumed by boto3/s3dlio. |
 
 ### Storage-borrowed
 
@@ -976,6 +979,35 @@ This section enumerates every environment variable mlpstorage reads or borrows, 
 | `S3_ENDPOINT_TEMPLATE` | `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py` | [not set] | URI template for S3 endpoint construction; s3dlio endpoint fallback chain per D-08. |
 | `S3_ENDPOINT_FILE` | `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py` | [not set] | Path to a file containing S3 endpoint URIs; s3dlio endpoint fallback chain per D-08. |
 | `S3_ENDPOINT` | `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py` | [not set] | Single S3 endpoint URI; lowest-priority entry in the s3dlio endpoint fallback chain per D-08. |
+
+### Storage-backend
+
+The following table is anchored on s3dlio v0.9.106. The defaults for `S3DLIO_PUT_VERIFY` and `S3DLIO_MPU_PUT_VERIFY` changed in this release (from `true` to `false`); behavior may differ on earlier versions. For cloud-specific credential and endpoint env vars consumed by s3dlio for Azure or GCS backends, see s3dlio's [Environment_Variables.md](https://github.com/mlcommons/s3dlio/blob/main/docs/Environment_Variables.md).
+
+| Env var | Read by | Default when unset | Notes |
+|---|---|---|---|
+| `S3DLIO_SKIP_HEAD` | s3dlio Rust binary (not mlpstorage_py) | `false` | Skips HEAD requests for object existence checks. [high-risk: alters measured benchmark behavior] Enabling this removes per-read existence verification; can significantly increase throughput by reducing API call overhead. |
+| `S3DLIO_ENABLE_RANGE_OPTIMIZATION` | s3dlio Rust binary (not mlpstorage_py) | `false` | Enables multi-range read coalescing. [high-risk: alters measured benchmark behavior] Can substantially change read throughput for workloads with many small reads. |
+| `S3DLIO_RANGE_THRESHOLD_MB` | s3dlio Rust binary (not mlpstorage_py) | `8` | Minimum size threshold (MB) for range-read coalescing. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_RANGE_CONCURRENCY` | s3dlio Rust binary (not mlpstorage_py) | `4` | Number of concurrent range-read sub-requests. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_CHUNK_SIZE` | s3dlio Rust binary (not mlpstorage_py) | `8388608` | Read/write chunk size in bytes. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_H2C` | s3dlio Rust binary (not mlpstorage_py) | `false` | Enables HTTP/2 cleartext (H2C) transport. [high-risk: alters measured benchmark behavior] Switching transport protocol changes connection multiplexing and can alter throughput substantially. |
+| `S3DLIO_H2_ADAPTIVE_WINDOW` | s3dlio Rust binary (not mlpstorage_py) | `false` | Enables HTTP/2 adaptive flow-control window. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_H2_STREAM_WINDOW_MB` | s3dlio Rust binary (not mlpstorage_py) | `1` | HTTP/2 per-stream flow-control window size (MB). [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_H2_CONN_WINDOW_MB` | s3dlio Rust binary (not mlpstorage_py) | `1` | HTTP/2 per-connection flow-control window size (MB). [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_POOL_MAX_IDLE_PER_HOST` | s3dlio Rust binary (not mlpstorage_py) | `10` | Maximum idle connections per host in the connection pool. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_POOL_IDLE_TIMEOUT_SECS` | s3dlio Rust binary (not mlpstorage_py) | `90` | Time (seconds) before idle connections are evicted. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_PUT_VERIFY` | s3dlio Rust binary (not mlpstorage_py) | `false` | Enables checksum verification on PUT operations. Changed from `true` to `false` in v0.9.106. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_MPU_PUT_VERIFY` | s3dlio Rust binary (not mlpstorage_py) | `false` | Enables checksum verification on multipart PUT operations. Changed from `true` to `false` in v0.9.106. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_MULTIPART_THRESHOLD_MB` | s3dlio Rust binary (not mlpstorage_py) | `64` | Object size threshold (MB) above which multipart upload is used. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_RT_THREADS` | s3dlio Rust binary (not mlpstorage_py) | `1` | Number of Tokio runtime threads. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_MAX_RETRY_ATTEMPTS` | s3dlio Rust binary (not mlpstorage_py) | `3` | Maximum number of retry attempts on transient errors. [medium-risk: affects run stability, not throughput measurement] |
+| `S3DLIO_CONNECT_TIMEOUT_SECS` | s3dlio Rust binary (not mlpstorage_py) | `30` | TCP connection timeout in seconds. [medium-risk: affects run stability, not throughput measurement] |
+| `S3DLIO_OPERATION_TIMEOUT_SECS` | s3dlio Rust binary (not mlpstorage_py) | `300` | Per-operation timeout in seconds. [medium-risk: affects run stability, not throughput measurement] |
+| `S3DLIO_PUT_MAX_RETRIES` | s3dlio Rust binary (not mlpstorage_py) | `3` | Maximum retries for PUT operations. [medium-risk: affects run stability, not throughput measurement] |
+| `S3DLIO_PUT_RETRY_DELAY_MS` | s3dlio Rust binary (not mlpstorage_py) | `100` | Delay (ms) between PUT retries. [medium-risk: affects run stability, not throughput measurement] |
+| `S3DLIO_MPU_MAX_RETRIES` | s3dlio Rust binary (not mlpstorage_py) | `3` | Maximum retries for multipart upload operations. [medium-risk: affects run stability, not throughput measurement] |
+| `S3DLIO_MPU_RETRY_DELAY_S` | s3dlio Rust binary (not mlpstorage_py) | `1` | Delay (seconds) between multipart upload retries. [medium-risk: affects run stability, not throughput measurement] |
 
 ### Diagnostic
 
