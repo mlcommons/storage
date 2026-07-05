@@ -38,6 +38,10 @@ from ..tools.code_image import (
     CodeImageError,
     MissingHashFile,
     MalformedHashFile,
+    PointerMalformed,
+    _read_pointer,
+    _pool_dir_name,
+    _read_hash_file,
 )
 
 
@@ -345,6 +349,59 @@ def _check_code_image_layered(
             valid = False
 
     return valid
+
+
+# ---------------------------------------------------------------------------
+# resolve_run_pool_image (Phase 8 D-89, CHECK-05)
+# ---------------------------------------------------------------------------
+
+def resolve_run_pool_image(
+    run_leaf: Path,
+    results_dir: Path,
+    orgname: str,
+    log,
+) -> tuple[Path, dict]:
+    """Resolve run leaf → pool image path + hash data.
+
+    Steps 1-4 of the D-89 CHECK-05 flow. Steps 5-6 (REFERENCE_CHECKSUMS lookup
+    and upstream-identity comparison) are caller responsibility.
+
+    Raises FileNotFoundError if .mlps-code-image is absent, PointerMalformed if
+    malformed, MissingHashFile / MalformedHashFile if .code-hash.json is absent
+    or invalid.
+
+    Args:
+        run_leaf: Path to the per-timestamp run directory that holds the
+            ``.mlps-code-image`` pointer file.
+        results_dir: The top-level submission root (``args.input``). The pool
+            lives at ``<results_dir>/<orgname>/code-<hash8>/`` per D-89/D-62.
+        orgname: Organization name (directory name under the top-level pool
+            root, e.g. ``"acme"``).
+        log: Logger object passed through to ``_read_pointer`` and
+            ``_read_hash_file``.
+
+    Returns:
+        ``(pool_image_path, hash_data)`` where ``pool_image_path`` is the
+        resolved ``Path`` to the pool image directory and ``hash_data`` is the
+        parsed ``.code-hash.json`` dict (keys: ``hash``, ``algorithm``,
+        ``captured_at``, ``mlpstorage_version``, ``git_sha``).
+
+    Raises:
+        FileNotFoundError: ``.mlps-code-image`` absent in ``run_leaf``.
+        PointerMalformed: File present but not a valid ``md5-tree-v2:<hex32>``.
+        MissingHashFile: ``.code-hash.json`` absent in the resolved pool image.
+        MalformedHashFile: ``.code-hash.json`` present but invalid.
+    """
+    # Step 1-2: read pointer; propagate FileNotFoundError and PointerMalformed.
+    _alg, full_hash = _read_pointer(run_leaf, log)
+
+    # Step 3: resolve pool image path.
+    pool_image_path = results_dir / orgname / _pool_dir_name(full_hash)
+
+    # Step 4: read hash file; propagate MissingHashFile and MalformedHashFile.
+    hash_data = _read_hash_file(pool_image_path, log)
+
+    return pool_image_path, hash_data
 
 
 # ---------------------------------------------------------------------------
