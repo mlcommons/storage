@@ -354,7 +354,7 @@ class TrainingCheck(BaseCheck):
                 # 2.1.19 already flags missing summary; do not double-fire here.
                 continue
 
-            run_num_files_train = summary.get("num_files_train")
+            run_num_files_train = self._to_int(summary.get("num_files_train"))
             run_num_files_eval = summary.get("num_files_eval")
             run_data_dir = metadata.get("args", {}).get("data_dir")
 
@@ -411,6 +411,22 @@ class TrainingCheck(BaseCheck):
         return valid
 
     @staticmethod
+    def _to_int(v):
+        """Coerce v to int; return None if v is None or non-numeric.
+
+        JSON/YAML round-tripping can serialise integer values as strings
+        (e.g. ``"68090280"``). Using bare ``>`` / ``<`` between an int
+        and a str raises TypeError (issue #681), so callers must coerce
+        before comparing.
+        """
+        if v is None:
+            return None
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
     def _group_datasize_by_data_dir(datasize_files):
         """Group loaded datasize tuples by ``args.data_dir`` value.
 
@@ -426,7 +442,7 @@ class TrainingCheck(BaseCheck):
             data_dir = metadata.get("args", {}).get("data_dir")
             params = metadata.get("parameters", {}) or {}
             dataset_params = params.get("dataset", {}) or {}
-            num_files_train = dataset_params.get("num_files_train")
+            num_files_train = TrainingCheck._to_int(dataset_params.get("num_files_train"))
             grouped.setdefault(data_dir, []).append((num_files_train, ts))
         return grouped
 
@@ -450,7 +466,7 @@ class TrainingCheck(BaseCheck):
             return None, None
         params = latest_metadata.get("parameters", {}) or {}
         dataset_params = params.get("dataset", {}) or {}
-        num_files_train = dataset_params.get("num_files_train")
+        num_files_train = TrainingCheck._to_int(dataset_params.get("num_files_train"))
         data_dir = latest_metadata.get("args", {}).get("data_dir")
         return num_files_train, data_dir
 
