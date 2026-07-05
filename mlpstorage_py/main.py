@@ -43,6 +43,7 @@ from mlpstorage_py.progress import progress_context
 from mlpstorage_py.results_dir import resolve_orgname
 from mlpstorage_py.results_dir.errors import ResultsDirNotInitializedError
 from mlpstorage_py.submission_checker.tools.code_image import capture_or_verify_code_image, CodeImageError
+from mlpstorage_py.submission_checker.tools.legacy_migration import _check_and_migrate_legacy_layout
 
 logger = setup_logging("MLPerfStorage")
 signal_received = False
@@ -221,6 +222,7 @@ def run_benchmark(args, run_datetime):
         total=None,
         logger=logger
     ) as (update, set_desc):
+        _check_and_migrate_legacy_layout(args, os.environ, logger)
         capture_or_verify_code_image(args, os.environ, logger)
 
     program_switch_dict = dict(
