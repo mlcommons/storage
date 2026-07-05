@@ -925,12 +925,66 @@ Reports which Rules.md IDs are referenced by `@rule(rule_id=...)`-decorated chec
 
 ## ENVIRONMENT
 
-- **`MLPERF_RESULTS_DIR`** — default value for `--results-dir` when the flag is not supplied. The path must still have been initialized with `mlpstorage init`.
-- **`MLPERF_SYSTEMNAME`** — default value for `--systemname` / `-sn` when the flag is not supplied. Emitting subcommands require systemname to be set via flag or env; an empty value is rejected at parse time.
-- **`MLPERF_DATA_DIR`** — fallback value for `--data-dir` for some commands.
-- **`MPI_RUN_BIN`** — overrides the path used when invoking `mpirun`.
+This section enumerates every environment variable mlpstorage reads or borrows, grouped by ownership tier. Six tiers: Owned (mlpstorage authors the name), MPI-borrowed / AWS-borrowed / Storage-borrowed (third-party contracts mlpstorage consumes), Diagnostic (mlpstorage internal reads surfaced for troubleshooting), and Internal-write (mlpstorage may overwrite user-set values during execution). An automated sync test (`tests/unit/test_env_var_manpage_sync.py`) asserts this section stays symmetric with the actual `os.environ` reads in the codebase.
 
-There is intentionally **no `MLPERF_ORGNAME` environment variable** and no `--orgname` flag on benchmark subcommands. Orgname is sourced exclusively from the `mlperf-results.yaml` sentinel written by `mlpstorage init`.
+### Owned
+
+| Env var | Read by | Default when unset | Notes |
+|---|---|---|---|
+| `MLPSTORAGE_RESULTS_DIR` | all emitting subcommands | none — CLI fails at parse time with loud error (see Phase 5 D-02 template) | Required on every emitting subcommand; path must already be initialized with `mlpstorage init`. |
+| `MLPSTORAGE_SYSTEMNAME` | all emitting subcommands | none — CLI fails at parse time with loud error (see Phase 5 D-02 template) | Required on every emitting subcommand; per-run system-under-test identifier. |
+| `MLPSTORAGE_DATA_DIR` | all emitting subcommands | [not set] | Optional fallback for `--data-dir`; if unset the flag must be supplied explicitly. |
+| `MLPSTORAGE_CHECKPOINT_FOLDER` | all emitting subcommands | [not set] | Optional fallback for `--checkpoint-folder`; if unset the flag must be supplied explicitly. |
+| `MLPSTORAGE_ORGNAME` | `mlpstorage init` at init time | [not set] | Read only by `init` subcommand; all other commands source orgname from the `mlperf-results.yaml` sentinel. |
+| `MLPSTORAGE_CHECKPOINT_URI_SCHEME` | `mlpstorage_py/checkpointing/storage_writers/__init__.py:44` (via `CHECKPOINT_URI_SCHEME_ENV` constant) | [not set] | Selects checkpoint storage backend (`s3`, `file`, etc.). `[internal-write]` — also written by `mlpstorage_py/benchmarks/dlio.py` during checkpointing setup. |
+| `KVCACHE_SELECTED_WORKLOADS` | `kv-cache-wrapper.sh` (shell dispatch layer); displayed by `run_summary.py:546` | [not set] | `[shell-wrapper-read]` — filters which kvcache workloads run; unset = run all. Functionally owned by mlpstorage; only the shell wrapper reads it. |
+
+### MPI-borrowed
+
+| Env var | Read by | Default when unset | Notes |
+|---|---|---|---|
+| `MPI_RUN_BIN` | `mlpstorage_py/utils.py` (MPI launcher resolution) | [not set] | Overrides the `mpirun` binary path; if unset mlpstorage searches `PATH` for `mpirun`. |
+| `MPI_EXEC_BIN` | `mlpstorage_py/utils.py` (MPI launcher resolution) | [not set] | Alternative override for `mpiexec`; consulted when `MPI_RUN_BIN` is also unset. |
+| `OMPI_COMM_WORLD_RANK` | `mlpstorage_py/cluster_collector.py` (rank detection) | [not set] | OpenMPI-injected rank index; read to identify rank-0 for sidecar writes. |
+| `PMI_RANK` | `mlpstorage_py/cluster_collector.py` (rank detection) | [not set] | PMI-injected rank index; fallback when `OMPI_COMM_WORLD_RANK` is absent (e.g. MPICH-derived launchers). |
+
+### AWS-borrowed
+
+| Env var | Read by | Default when unset | Notes |
+|---|---|---|---|
+| `AWS_ACCESS_KEY_ID` | boto3/s3dlio via storage backend init | [not set] | Read by boto3/s3dlio via storage backend init; consumed as-is. |
+| `AWS_SECRET_ACCESS_KEY` | boto3/s3dlio via storage backend init | [not set] | Read by boto3/s3dlio via storage backend init; consumed as-is. |
+| `AWS_REGION` | `mlpstorage_py/storage_config.py` | `'us-east-1'` | AWS region for S3 endpoint selection; defaults to `us-east-1` when unset. |
+| `AWS_CA_BUNDLE` | `mlpstorage_py/storage_config.py` | [not set] | Path to a custom CA bundle for TLS verification; unset uses the system default. |
+| `AWS_ENDPOINT_URL` | `mlpstorage_py/storage_config.py`; `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py:168` | [not set] | Custom S3-compatible endpoint URL. `[cross-ref → internal-write]` — also written at `s3dlio_writer.py:168` during multi-endpoint selection; see Internal-write cross-refs below. |
+
+### Storage-borrowed
+
+| Env var | Read by | Default when unset | Notes |
+|---|---|---|---|
+| `BUCKET` | `mlpstorage_py/storage_config.py` | [not set] | S3 bucket name for object-storage runs; required when `--storage object` is selected. |
+| `STORAGE_LIBRARY` | `mlpstorage_py/storage_config.py` | `'s3dlio'` | Storage client library selection; defaults to `s3dlio`. |
+| `STORAGE_URI_SCHEME` | `mlpstorage_py/storage_config.py` | `'s3'` | URI scheme for storage paths; defaults to `s3`. |
+| `S3_LOAD_BALANCE_STRATEGY` | `mlpstorage_py/storage_config.py` | `'round_robin'` | Load-balance strategy across S3 endpoints; defaults to `round_robin`. |
+| `S3_ENDPOINT_URIS` | `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py:44` | [not set] | Space-separated list of S3 endpoint URIs; part of the s3dlio endpoint fallback chain per D-08. |
+| `S3_ENDPOINT_TEMPLATE` | `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py` | [not set] | URI template for S3 endpoint construction; s3dlio endpoint fallback chain per D-08. |
+| `S3_ENDPOINT_FILE` | `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py` | [not set] | Path to a file containing S3 endpoint URIs; s3dlio endpoint fallback chain per D-08. |
+| `S3_ENDPOINT` | `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py` | [not set] | Single S3 endpoint URI; lowest-priority entry in the s3dlio endpoint fallback chain per D-08. |
+
+### Diagnostic
+
+No environment variables are diagnostic-only under the current inventory (2026-07-04). This tier header is preserved so future diagnostic env vars have a home; the sync test in `tests/unit/test_env_var_manpage_sync.py` allows this tier to be empty.
+
+### Internal-write
+
+| Env var | Read by | Default when unset | Notes |
+|---|---|---|---|
+| `DLIO_DROP_CACHES_TIMEOUT` | `mlpstorage_py/benchmarks/dlio.py:629` (write), `:602` (read via `in os.environ`) | [not set] | mlpstorage writes this var before invoking DLIO to communicate the drop-caches timeout; also read to detect whether it has already been set. |
+
+- **Cross-ref:** `AWS_ENDPOINT_URL` is documented as AWS-borrowed (primary tier); mlpstorage overwrites it at `s3dlio_writer.py:168` during multi-endpoint selection. Not a duplicate `MANPAGE_ENV_VAR_TIERS` entry per D-13.
+- **Cross-ref:** `MLPSTORAGE_CHECKPOINT_URI_SCHEME` is documented as Owned (primary tier); mlpstorage writes it at `mlpstorage_py/benchmarks/dlio.py` during checkpointing setup. Not a duplicate `MANPAGE_ENV_VAR_TIERS` entry per D-12/D-13.
+
+There is intentionally no `MLPSTORAGE_ORGNAME` fallback consulted by non-init commands — orgname is sourced exclusively from the `mlperf-results.yaml` sentinel written by `mlpstorage init`. The row in the Owned table above documents where `mlpstorage init` reads the flag, not a runtime fallback path.
 
 ## EXIT STATUS
 
