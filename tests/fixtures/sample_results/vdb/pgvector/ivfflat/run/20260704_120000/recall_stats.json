@@ -1,4 +1,5 @@
 {
+  "recall": 0.975,
   "recall_at_k": 0.975,
   "num_queries_evaluated": 10000,
   "k": 10,
