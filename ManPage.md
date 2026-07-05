@@ -29,7 +29,7 @@ Where:
 - `<command>` is `datasize`, `datagen`, `run`, or `configview` (subset depending on benchmark)
 - `<storage>` is `file` or `object` — required by `datagen`, `run`, and `configview` for the benchmarks that touch storage
 - `<orgname>` is the submitter / organization name pinned to the results-dir by `mlpstorage init`; `[A-Za-z0-9._-]+`, case-sensitive
-- `<name>` (for `--systemname`) is the per-run system-under-test identifier; required on every emitting subcommand (`run`, `datagen`, `configview`, `reportgen`, `history`), and may be supplied via the `MLPERF_SYSTEMNAME` environment variable
+- `<name>` (for `--systemname`) is the per-run system-under-test identifier; required on every emitting subcommand (`run`, `datagen`, `configview`, `reportgen`, `history`), and may be supplied via the `MLPSTORAGE_SYSTEMNAME` environment variable
 
 Before any emitting subcommand can run, the `<results-dir>` must be initialized with `mlpstorage init`. The single bootstrap command `mlpstorage init <orgname> <path>` writes a `mlperf-results.yaml` sentinel that pins orgname to the directory; every later non-init command reads it as authoritative.
 
@@ -77,8 +77,8 @@ Mechanisms used:
 - **Benchmark and model as positionals.** Only models valid for the chosen mode appear as subparsers. A user cannot type `mlpstorage closed training cosmoflow ...` because `cosmoflow` only exists under `whatif`.
 - **Command as a positional.** `datasize`, `datagen`, `run`, and `configview` are distinct subparsers, so each command sees only the flags relevant to it. `datasize` does not accept storage-access flags; `datagen` and `run` do.
 - **Storage protocol as a positional.** Commands that touch storage require `file` or `object` as a positional after the command name, making the access path explicit at the call site and visible in command history.
-- **Orgname pinned to the results-dir by `mlpstorage init`.** There is no `--orgname` flag on any benchmark subcommand and no `MLPERF_ORGNAME` environment variable consulted by non-init commands. The results-dir is initialized exactly once with `mlpstorage init <orgname> <path>`, which atomically writes a `mlperf-results.yaml` sentinel. Every later command reads the sentinel; emitting subcommands invoked against an un-initialized results-dir refuse with a `ConfigurationError` directing the submitter to run `init` first. Re-initializing the same directory with the same orgname is idempotent; supplying a different orgname raises `DoubleInitError` rather than silently overwriting.
-- **Systemname is per-run.** The `--systemname`/`-sn` flag (defaulting to `$MLPERF_SYSTEMNAME` when set) is required on every emitting subcommand. Because each run names its own system, the same results-dir can host runs from multiple system-under-test configurations without cross-contamination.
+- **Orgname pinned to the results-dir by `mlpstorage init`.** There is no `--orgname` flag on any benchmark subcommand and no `MLPSTORAGE_ORGNAME` environment variable consulted by non-init commands. The results-dir is initialized exactly once with `mlpstorage init <orgname> <path>`, which atomically writes a `mlperf-results.yaml` sentinel. Every later command reads the sentinel; emitting subcommands invoked against an un-initialized results-dir refuse with a `ConfigurationError` directing the submitter to run `init` first. Re-initializing the same directory with the same orgname is idempotent; supplying a different orgname raises `DoubleInitError` rather than silently overwriting.
+- **Systemname is per-run.** The `--systemname`/`-sn` flag (defaulting to `$MLPSTORAGE_SYSTEMNAME` when set) is required on every emitting subcommand. Because each run names its own system, the same results-dir can host runs from multiple system-under-test configurations without cross-contamination.
 - **Mutually exclusive groups.** For example, VectorDB's `--runtime` and `--queries` are wired into an `add_mutually_exclusive_group()`, so only one can be supplied.
 - **Pinned defaults in closed.** Closed kvcache pins `--gpu-mem-gb`, `--cpu-mem-gb`, `--duration`, `--trials`, `--seed`, `--rag-num-docs`, and several boolean knobs to their rules-mandated values, with no flag exposed to change them. Closed training/checkpointing/vectordb pin `--loops=1`, an empty `--params`, and `--allow-invalid-params=False` as internal defaults (the flags themselves are not registered on the closed parsers).
 - **Post-parse validators.** What argparse cannot express (for example, "`--num-checkpoints-write` must be 10 or 0 in closed per Rules §4.7.1") is enforced by `validate_<benchmark>_arguments()` functions called immediately after parsing.
@@ -261,7 +261,7 @@ VectorDB does not use `--data-dir`; vectors are loaded directly into the databas
 
 ## RESULTS DIRECTORY (`--results-dir`)
 
-The results directory accumulates every artifact produced by `mlpstorage` as each new invocation of `mlpstorage` executes. The default is `$MLPERF_RESULTS_DIR` if set, otherwise it must be supplied explicitly. Its layout follows the canonical Rules.md §2.1 shape from the moment `mlpstorage init` creates the sentinel:
+The results directory accumulates every artifact produced by `mlpstorage` as each new invocation of `mlpstorage` executes. The default is `$MLPSTORAGE_RESULTS_DIR` if set, otherwise it must be supplied explicitly. Its layout follows the canonical Rules.md §2.1 shape from the moment `mlpstorage init` creates the sentinel:
 
 ```
 <results-dir>/
@@ -271,7 +271,7 @@ The results directory accumulates every artifact produced by `mlpstorage` as eac
 │       ├── systems/
 │       │   └── <systemname>.yaml         auto-generated on first `run`; see SYSTEM DESCRIPTION
 │       └── results/
-│           └── <systemname>/             from --systemname / MLPERF_SYSTEMNAME
+│           └── <systemname>/             from --systemname / MLPSTORAGE_SYSTEMNAME
 │               └── <benchmark-specific tail>
 ```
 
@@ -473,7 +473,7 @@ The `init` subcommand takes no flags — universal flags such as `--results-dir`
 ### Universal options (every non-init command)
 
 - **`--results-dir <path>`, `-rd <path>`**
-  Root directory for all written artifacts. Required for any command that writes results. Defaults to `$MLPERF_RESULTS_DIR` if set. Must already be initialized with `mlpstorage init`; commands that consult the orgname-resolution gate refuse to run otherwise.
+  Root directory for all written artifacts. Required for any command that writes results. Defaults to `$MLPSTORAGE_RESULTS_DIR` if set. Must already be initialized with `mlpstorage init`; commands that consult the orgname-resolution gate refuse to run otherwise.
 
 - **`--systemname <name>`, `-sn <name>`**
   System-under-test identifier for the current run. Required on every emitting subcommand (`run`, `datagen`, `configview`, `history rerun`). Defaults to `$MLPSTORAGE_SYSTEMNAME`. Each mode (closed/open/whatif) owns its own `<systemname>.yaml` under the per-mode `systems/` directory, so the same name across modes is fine. See the Reports subsection for reportgen's optional-systemname multi-system-fallback behavior.
@@ -1023,7 +1023,7 @@ mlpstorage init Acme /mnt/results
 Size, generate, and run UNet3D in closed mode against a POSIX storage target:
 
 ```
-export MLPERF_SYSTEMNAME=acme-prod-v1
+export MLPSTORAGE_SYSTEMNAME=acme-prod-v1
 
 mlpstorage closed training unet3d datasize \
     --accelerator-type b200 --max-accelerators 8 \
