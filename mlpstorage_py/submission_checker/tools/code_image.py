@@ -152,6 +152,20 @@ class LegacyLayoutDetected(CodeImageError):
     """
 
 
+class HandEditedCodeImage(CodeImageError):
+    """Raised in Phase 7 pass 1 when a legacy ``code/`` re-hashes to a digest
+    that does not match its own ``.code-hash.json.hash`` (D-73).
+
+    Aborts migration BEFORE any writes — pass 2 is unreachable when this raises.
+    Also raised if ``.code-hash.json`` is missing (via ``MissingHashFile`` chain)
+    or malformed (via ``MalformedHashFile`` chain), since the sidecar IS the
+    tamper-evidence anchor.
+
+    Subclasses ``CodeImageError`` so ``main.py``'s existing exit-code mapping
+    catches it without a new handler.
+    """
+
+
 class PoolCorruption(CodeImageError):
     """Raised when the D-66 loser branch verifies a pre-existing pool image and
     its ``.code-hash.json.hash`` does not match the live source hash.
