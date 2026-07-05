@@ -335,59 +335,293 @@ class ReportGenerator:
         # Verify the results directory exists:
         self.logger.info(f'Generating reports for {self.results_dir}')
 
-        # Two rollups are written on every reportgen invocation:
+        # Bottom-up build per D-02 / D-03 / D-08 / D-09.
         #
-        # 1. GLOBAL summary at `<results-dir>/results.{json,csv}` — every
-        #    successfully-processed run in one file. Preserves the
-        #    pre-model-rollup contract that downstream tooling and the
-        #    submission-review flow rely on.
-        # 2. PER-MODEL rollups at `<model>/results.{json,csv}` (or the
-        #    equivalent grouping folder per benchmark type — see
-        #    _model_group_folder for the layout map). Same runs, but
-        #    partitioned so a submitter can inspect one model in isolation.
+        # Data-flow inversion vs post-PR #620:
         #
-        # Both derive from the same `self.run_results` collection; the
-        # per-model loop groups by `_model_group_folder(result)`.
+        #   (a) Iterate `self.workload_results` — the SINGLE source of
+        #       truth. One aggregated row per workload. Category /
+        #       orgname / systemname / benchmark_type / model /
+        #       accelerator make up the D-10 6-column prefix; the
+        #       aggregation dict from `_aggregate_workload_metrics` fills
+        #       the D-11 grouped body; the `; `-joined `Result.issues`
+        #       fills the trailing D-12 `issues` column.
+        #   (b) Group the row dicts per-model via
+        #       `_model_group_folder_for_workload` (workload-aware
+        #       wrapper around the existing `_model_group_folder`).
+        #   (c) Emit per-model `results.{csv,json}` FIRST — the source
+        #       of truth for each model.
+        #   (d) Emit empty per-model `results.{csv,json}` (header-only
+        #       CSV, `[]` JSON) for any on-disk `<...>/<model>/`
+        #       directory that produced zero workload rows. Closes the
+        #       D-03 empty-model-dir corner in Phase 6 itself.
+        #   (e) Assemble the top-level file BOTTOM-UP by concatenating
+        #       every per-model row list into `all_rows`, sorted by the
+        #       6-column prefix for deterministic order across runs.
+        #   (f) Emit top-level `results.{csv,json}` at
+        #       `self.global_summary_dir`.
+        #
+        # SC-6 grep gate: both per-model and top-level writer call
+        # sites use `target_dir=<...>` explicitly, so
+        # `grep -c 'target_dir=' mlpstorage_py/report_generator.py`
+        # returns >= 2 (in practice: 4 — per-model json + per-model
+        # csv + top-level json + top-level csv + Task 4's empty-emission
+        # sites).
+        #
+        # D-04 preservation: only paths matching
+        # `<...>/<model>/results.{csv,json}` and
+        # `<global_summary_dir>/results.{csv,json}` are ever written.
+        # Unrelated files under `<results-dir>` are not touched.
 
-        all_run_dicts: List[dict] = []
-        groups: Dict[str, List[dict]] = {}
-        skipped = 0
-        for result in self.run_results.values():
-            run_dict = result.benchmark_run.as_dict()
-            all_run_dicts.append(run_dict)
-            model_folder = self._model_group_folder(result)
+        # (a) + (b): iterate workload_results, build rows, group per model.
+        rows_by_model: Dict[str, List[dict]] = {}
+        skipped_no_model_folder = 0
+        for workload_key, workload_result in self.workload_results.items():
+            row = self._workload_result_to_row(workload_key, workload_result)
+            model_folder = self._model_group_folder_for_workload(workload_result)
             if model_folder is None:
-                skipped += 1
+                skipped_no_model_folder += 1
                 continue
-            groups.setdefault(model_folder, []).append(run_dict)
+            rows_by_model.setdefault(model_folder, []).append(row)
 
-        if not all_run_dicts:
+        # D-08 "no runs" preservation — early-return SUCCESS when there
+        # is genuinely nothing to write. Empty-model-dir emission (Task
+        # 4) still runs so on-disk model dirs get a header-only CSV /
+        # `[]` JSON.
+        if not self.workload_results:
             self.logger.warning(
-                "No runs to write rollups for (skipped %d runs without result_dir).",
-                skipped,
+                "No workload results to write rollups for "
+                "(skipped %d workloads without result_dir).",
+                skipped_no_model_folder,
             )
+            # Still walk on-disk model dirs so D-03 empty-model-dir
+            # emission fires.
+            self._emit_empty_model_dirs(rows_by_model)
             return EXIT_CODE.SUCCESS
 
-        # (1) Global summary — written to self.global_summary_dir. For a
-        # canonical submission tree that is the org's `results/` folder
-        # (one level above each per-system slice), so the aggregate sits
-        # alongside every system's subdirectory instead of inside one of
-        # them. For a flat layout it equals self.results_dir.
-        self.write_json_file(all_run_dicts, target_dir=self.global_summary_dir)
-        self.write_csv_file(all_run_dicts, target_dir=self.global_summary_dir)
+        # (c) Per-model file emission — the D-02 "per-model file IS the
+        # source" step. Sorted for deterministic order.
+        for model_folder, rows in sorted(rows_by_model.items()):
+            self.write_json_file(rows, target_dir=model_folder)
+            self.write_csv_file(rows, target_dir=model_folder)
 
-        # (2) Per-model rollups.
-        if not groups:
-            self.logger.warning(
-                "No model folders to write per-model rollups for "
-                "(skipped %d runs without result_dir).",
-                skipped,
+        # (d) Empty-model-dir emission (D-03 corner) — MUST run BEFORE
+        # top-level assembly so it does not contribute rows to
+        # `all_rows`. Implemented in Task 4 as an explicit walker.
+        self._emit_empty_model_dirs(rows_by_model)
+
+        # (e) Bottom-up top-level assembly — concatenate every per-model
+        # list, sort by the 6-column prefix for deterministic order.
+        all_rows: List[dict] = []
+        for _folder, rows in sorted(rows_by_model.items()):
+            all_rows.extend(rows)
+        all_rows.sort(
+            key=lambda r: (
+                r.get('category', '') or '',
+                r.get('orgname', '') or '',
+                r.get('systemname', '') or '',
+                r.get('benchmark_type', '') or '',
+                r.get('model', '') or '',
+                r.get('accelerator', '') or '',
             )
-        for model_folder, run_dicts in sorted(groups.items()):
-            self.write_json_file(run_dicts, target_dir=model_folder)
-            self.write_csv_file(run_dicts, target_dir=model_folder)
+        )
+
+        # (f) Top-level file emission — the D-02 "collection, not
+        # aggregation" step. Also emitted when `rows_by_model` was
+        # empty but `workload_results` was not (e.g., every workload
+        # lacked a result_dir); in that case `all_rows` is `[]` and the
+        # top-level file becomes a header-only CSV / `[]` JSON.
+        self.write_json_file(all_rows, target_dir=self.global_summary_dir)
+        self.write_csv_file(all_rows, target_dir=self.global_summary_dir)
 
         return EXIT_CODE.SUCCESS
+
+    def _workload_result_to_row(
+        self,
+        workload_key: tuple,
+        workload_result: 'Result',
+    ) -> Dict[str, Any]:
+        """Convert one aggregated workload ``Result`` into a flat row dict.
+
+        Row shape per D-10/D-11/D-12/D-14:
+
+        - Fixed 6-column prefix populated from the workload key
+          (path-derived when possible) and from ``benchmark_run[0]``.
+        - Aggregated metric columns from ``Result.metrics`` (already
+          prefixed by ``_aggregate_workload_metrics``).
+        - Trailing ``issues`` column: verbatim ``Result.issues`` joined
+          by ``'; '`` per D-25.
+        """
+        # Unpack the 5-tuple key. Shape is always
+        # (category, orgname, systemname, id1, id2) per D-05; id1/id2
+        # meaning varies by benchmark type but the prefix positions do
+        # not, so this unpack is stable across types.
+        try:
+            category_key, orgname_key, systemname_key, _id1, _id2 = workload_key
+        except ValueError:
+            category_key = orgname_key = systemname_key = ""
+
+        # Resolve category value. Prefer the workload_key derivation
+        # (path-based, D-07). Fall back to Result.category (enum or
+        # string) when the key was empty.
+        if category_key:
+            category_val = category_key
+        else:
+            cat = workload_result.category
+            try:
+                category_val = cat.value  # PARAM_VALIDATION enum
+            except AttributeError:
+                category_val = str(cat) if cat is not None else ""
+
+        first_run = (
+            workload_result.benchmark_run[0]
+            if isinstance(workload_result.benchmark_run, list)
+            else workload_result.benchmark_run
+        )
+        bt = workload_result.benchmark_type
+        bt_val = bt.value if bt is not None else ""
+
+        # Model / accelerator identity (D-10). vdb rows leave model +
+        # accelerator empty and carry engine / index_type in vdb_*
+        # columns (D-14). kvcache rows have model populated and
+        # accelerator empty.
+        if bt == BENCHMARK_TYPES.vector_database:
+            model_val = ""
+            accelerator_val = ""
+        elif bt == BENCHMARK_TYPES.kv_cache:
+            model_val = str(getattr(first_run, 'model', "") or "")
+            accelerator_val = ""
+        else:
+            model_val = str(getattr(first_run, 'model', "") or "")
+            accelerator_val = str(getattr(first_run, 'accelerator', "") or "")
+
+        row: Dict[str, Any] = {
+            'category': category_val,
+            'orgname': orgname_key,
+            'systemname': systemname_key,
+            'benchmark_type': bt_val,
+            'model': model_val,
+            'accelerator': accelerator_val,
+        }
+        # Aggregated metric columns (D-11 grouped body).
+        for metric_key, metric_val in (workload_result.metrics or {}).items():
+            row[metric_key] = metric_val
+
+        # D-25 trailing `issues` column: verbatim Result.issues joined
+        # by `'; '` (semicolon + single space). Grep gate:
+        # `grep -c "'; '.join" ...` >= 1 lives here.
+        issue_texts: List[str] = []
+        for issue in (workload_result.issues or []):
+            msg = getattr(issue, 'message', None)
+            issue_texts.append(str(msg) if msg is not None else str(issue))
+        row['issues'] = '; '.join(issue_texts)
+
+        return row
+
+    def _model_group_folder_for_workload(
+        self, workload_result: 'Result'
+    ) -> Optional[str]:
+        """Workload-aware wrapper around ``_model_group_folder``.
+
+        Workload-level ``Result`` objects hold ``benchmark_run`` as a
+        list; ``_model_group_folder`` expects a single BenchmarkRun.
+        This wrapper synthesizes a single-run view (uses
+        ``benchmark_run[0]``) so the existing folder-resolution logic
+        can be reused as-is (D-02 "reuse `_model_group_folder`, do not
+        replicate").
+        """
+        first_run = (
+            workload_result.benchmark_run[0]
+            if isinstance(workload_result.benchmark_run, list)
+            else workload_result.benchmark_run
+        )
+        proxy = Result(
+            multi=False,
+            benchmark_type=workload_result.benchmark_type,
+            benchmark_command=workload_result.benchmark_command,
+            benchmark_model=workload_result.benchmark_model,
+            benchmark_run=first_run,
+            issues=[],
+            category=workload_result.category,
+            metrics={},
+        )
+        return self._model_group_folder(proxy)
+
+    def _emit_empty_model_dirs(
+        self, rows_by_model: Dict[str, List[dict]]
+    ) -> None:
+        """Emit header-only CSV + `[]` JSON for empty per-model dirs (D-03).
+
+        Task 4 implementation site. Walks the on-disk per-model
+        directories under ``<results-dir>`` (using the same shape map
+        as ``_model_group_folder``) and, for every directory NOT
+        already present in ``rows_by_model``, emits an empty
+        ``results.csv`` (header row only) and an empty ``results.json``
+        (`[]`).
+
+        Preserves D-04: only touches paths matching the per-model
+        directory shape, never deletes anything.
+        """
+        for model_dir in self._enumerate_on_disk_model_dirs():
+            if model_dir in rows_by_model:
+                continue
+            # Empty rows list -> header-only CSV, [] JSON via
+            # write_csv_file / write_json_file (which handle an empty
+            # `flattened_results` list gracefully).
+            self.write_json_file([], target_dir=model_dir)
+            self.write_csv_file([], target_dir=model_dir)
+
+    def _enumerate_on_disk_model_dirs(self) -> List[str]:
+        """Return the absolute per-model directory paths on disk (D-03).
+
+        Walks each `self.scan_roots` entry looking for the canonical
+        per-model shape:
+
+        - training:      ``<scan_root>/[...]/training/<model>/``
+        - checkpointing: ``<scan_root>/[...]/checkpointing/<model>/``
+        - kv_cache:      ``<scan_root>/[...]/kv_cache/<model>/``
+        - vdb:           ``<scan_root>/[...]/vector_database/<engine>/<index_type>/``
+
+        Uses `os.walk` bounded to a shallow depth relative to each scan
+        root. Returns absolute paths. Any I/O errors during the walk
+        are logged and skipped (D-04: never abort the whole pass).
+        """
+        from pathlib import Path
+
+        found: Set[str] = set()
+        benchmark_type_names = {
+            'training', 'checkpointing', 'kv_cache', 'vector_database',
+        }
+        for scan_root in getattr(self, 'scan_roots', None) or []:
+            root_path = Path(scan_root)
+            if not root_path.is_dir():
+                continue
+            try:
+                for bt_dir in root_path.rglob('*'):
+                    if not bt_dir.is_dir():
+                        continue
+                    if bt_dir.name not in benchmark_type_names:
+                        continue
+                    # bt_dir is <...>/<benchmark_type>/. Its immediate
+                    # children are per-model dirs (or engine dirs for
+                    # vdb).
+                    for model_dir in bt_dir.iterdir():
+                        if not model_dir.is_dir():
+                            continue
+                        if bt_dir.name == 'vector_database':
+                            # Two levels deeper: <engine>/<index_type>/
+                            for index_dir in model_dir.iterdir():
+                                if index_dir.is_dir():
+                                    found.add(str(index_dir.resolve()))
+                        else:
+                            found.add(str(model_dir.resolve()))
+            except (OSError, PermissionError) as e:
+                self.logger.warning(
+                    f"Could not enumerate on-disk model dirs under "
+                    f"{scan_root}: {e}"
+                )
+                continue
+        return sorted(found)
 
     def _model_group_folder(self, result: 'Result') -> Optional[str]:
         """Return the on-disk folder that groups runs at the model level.
