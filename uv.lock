@@ -518,7 +518,7 @@ wheels = [
 
 [[package]]
 name = "mlpstorage"
-version = "3.0.32"
+version = "3.0.33"
 source = { editable = "." }
 dependencies = [
     { name = "dlio-benchmark", marker = "sys_platform == 'linux'" },
@@ -616,7 +616,7 @@ requires-dist = [
     { name = "pyyaml", marker = "extra == 'vectordb-milvus'", specifier = ">=6.0" },
     { name = "pyyaml", marker = "extra == 'vectordb-pgvector'", specifier = ">=6.0" },
     { name = "rich", specifier = ">=13.0" },
-    { name = "s3dlio", specifier = ">=0.9.102" },
+    { name = "s3dlio", specifier = ">=0.9.106" },
     { name = "s3torchconnector", specifier = ">=1.5.0" },
     { name = "tabulate", marker = "extra == 'vectordb'", specifier = ">=0.9" },
     { name = "tabulate", marker = "extra == 'vectordb-elasticsearch'", specifier = ">=0.9" },
