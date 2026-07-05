@@ -220,6 +220,7 @@ def _parse_manpage_env_vars(manpage_path: pathlib.Path) -> dict[str, str]:
         "mpi-borrowed": "mpi-borrowed",
         "aws-borrowed": "aws-borrowed",
         "storage-borrowed": "storage-borrowed",
+        "storage-backend": "storage-backend",  # Phase 7.5 D-01: s3dlio Rust-layer vars
         "diagnostic": "diagnostic",
         "internal-write": "internal-write",
     }
@@ -393,11 +394,11 @@ class TestPerVarTierAssignment:
         )
 
     def test_every_tier_value_is_one_of_six_canonical_strings(self):
-        """MANPAGE_ENV_VAR_TIERS values must be one of the six canonical tier strings (D-07).
+        """MANPAGE_ENV_VAR_TIERS values must be one of the seven canonical tier strings (Phase 7.5 D-01).
 
-        The six valid values are:
+        The seven valid values are:
             'owned', 'mpi-borrowed', 'aws-borrowed', 'storage-borrowed',
-            'diagnostic', 'internal-write'
+            'storage-backend', 'diagnostic', 'internal-write'
 
         Any spelling variation (extra whitespace, wrong capitalisation, unknown tier)
         fails this test.
@@ -407,6 +408,7 @@ class TestPerVarTierAssignment:
             "mpi-borrowed",
             "aws-borrowed",
             "storage-borrowed",
+            "storage-backend",  # Phase 7.5 D-01: s3dlio Rust-layer vars
             "diagnostic",
             "internal-write",
         }
