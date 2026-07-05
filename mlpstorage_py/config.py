@@ -171,6 +171,80 @@ _LEGACY_ENVVAR_MAP = {
     MLPSTORAGE_ORGNAME_ENVVAR: "MLPERF_ORGNAME",
 }
 
+# -----------------------------------------------------------------------------
+# ManPage sync symbols — SINGLE SOURCE OF TRUTH for the env-var sync test and
+# ManPage ENVIRONMENT section authoring (Phase 7 D-05/D-10/D-11).
+#
+# _MANPAGE_SYNC_ALLOWLIST: env-var names the sync test MUST skip because they
+# are either POSIX identity plumbing (USER/LOGNAME/PATH) or legacy MLPERF_*
+# migration-detection strings intentionally excluded from the ManPage (D-05).
+# Allow-list rationale: mlpstorage documents env vars it OWNS or BORROWS as
+# functional contracts — not system identity plumbing or deprecated migration
+# sentinels.
+#
+# MANPAGE_ENV_VAR_TIERS: maps every non-allowlisted env var mlpstorage reads
+# to exactly one PRIMARY tier string (D-13/D-14). Six allowed primary-tier
+# values: 'owned', 'mpi-borrowed', 'aws-borrowed', 'storage-borrowed',
+# 'diagnostic', 'internal-write'. Dual-role vars (MLPSTORAGE_CHECKPOINT_URI_SCHEME,
+# AWS_ENDPOINT_URL) carry a single primary-tier value; their internal-write
+# cross-ref is ManPage prose only per D-13 (no tuple values — D-13 explicitly
+# rejects the tuple form in favour of prose cross-refs).
+#
+# Import direction is one-way (D-11): config.py MUST NOT import from
+# mlpstorage_py.rules.*. tests/unit/test_no_import_cycles.py locks this
+# invariant.
+# -----------------------------------------------------------------------------
+_MANPAGE_SYNC_ALLOWLIST = frozenset({
+    'PATH',              # stdlib-convention exempt per D-11
+    'USER',              # POSIX identity plumbing per D-10 (read at environment/systemd_ipc.py:104, 156)
+    'LOGNAME',           # POSIX identity plumbing per D-10 (read at environment/systemd_ipc.py:104, 157)
+    'MLPERF_SYSTEMNAME',   # migration-detection only per D-05, removal target v1.2
+    'MLPERF_RESULTS_DIR',  # migration-detection only per D-05, removal target v1.2
+    'MLPERF_DATA_DIR',     # migration-detection only per D-05 (read at cli/training_args.py:309)
+    'MLPERF_ORGNAME',      # migration-detection only per D-05, removal target v1.2
+})
+
+MANPAGE_ENV_VAR_TIERS = {
+    # -- Owned (7) --
+    'MLPSTORAGE_RESULTS_DIR': 'owned',
+    'MLPSTORAGE_SYSTEMNAME': 'owned',
+    'MLPSTORAGE_ORGNAME': 'owned',
+    'MLPSTORAGE_DATA_DIR': 'owned',
+    'MLPSTORAGE_CHECKPOINT_FOLDER': 'owned',
+    'MLPSTORAGE_CHECKPOINT_URI_SCHEME': 'owned',      # dual-role: primary Owned; internal-write sub-tag in ManPage prose per D-12/D-13.
+    'KVCACHE_SELECTED_WORKLOADS': 'owned',            # functional shell-wrapper contract per D-09.
+
+    # -- MPI-borrowed (4) --
+    'MPI_RUN_BIN': 'mpi-borrowed',
+    'MPI_EXEC_BIN': 'mpi-borrowed',
+    'OMPI_COMM_WORLD_RANK': 'mpi-borrowed',           # SC-4 tag requirement.
+    'PMI_RANK': 'mpi-borrowed',                       # SC-4 tag requirement.
+
+    # -- AWS-borrowed (5) --
+    'AWS_ACCESS_KEY_ID': 'aws-borrowed',
+    'AWS_SECRET_ACCESS_KEY': 'aws-borrowed',
+    'AWS_REGION': 'aws-borrowed',
+    'AWS_CA_BUNDLE': 'aws-borrowed',
+    'AWS_ENDPOINT_URL': 'aws-borrowed',               # dual-role: primary AWS-borrowed; internal-write cross-ref in ManPage prose per D-13 (write at s3dlio_writer.py:168).
+
+    # -- Storage-borrowed (8) --
+    'BUCKET': 'storage-borrowed',
+    'STORAGE_LIBRARY': 'storage-borrowed',
+    'STORAGE_URI_SCHEME': 'storage-borrowed',
+    'S3_LOAD_BALANCE_STRATEGY': 'storage-borrowed',
+    'S3_ENDPOINT_URIS': 'storage-borrowed',           # s3dlio-owned endpoint fallback chain per D-08.
+    'S3_ENDPOINT_TEMPLATE': 'storage-borrowed',
+    'S3_ENDPOINT_FILE': 'storage-borrowed',
+    'S3_ENDPOINT': 'storage-borrowed',
+
+    # -- Internal-write (1 primary) --
+    'DLIO_DROP_CACHES_TIMEOUT': 'internal-write',     # write-only site at benchmarks/dlio.py:629; also read via `in os.environ` at dlio.py:602.
+
+    # Note: no 'diagnostic' primary entries in the current inventory.
+    # The Diagnostic tier header exists in the ManPage (Plan C) but is
+    # populated by prose only — no var uniquely lives in this tier today.
+}
+
 
 # -----------------------------------------------------------------------------
 # ENV_FALLBACK_* module-level constants — resolved-at-import-time env-var
