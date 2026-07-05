@@ -228,9 +228,17 @@ class TestReportGeneratorGenerateReports:
             with patch.object(ReportGenerator, 'print_results'):
                 gen = ReportGenerator(str(results_dir), validate_structure=False)
 
-        # Add mock run results
+        # Add mock run results AND workload results. Under Phase 6's
+        # bottom-up build (D-02), `generate_reports` iterates
+        # `self.workload_results` — the aggregated-per-workload source
+        # of truth — rather than `self.run_results`. Fixture populates
+        # both so the model-folder resolution AND the per-model /
+        # top-level writer emission fire.
         mock_run = MagicMock()
         mock_run.result_dir = str(leaf)
+        mock_run.model = 'unet3d'
+        mock_run.accelerator = 'h100'
+        mock_run.parameters = {}
         mock_run.as_dict.return_value = {
             'run_id': 'test_run',
             'benchmark_type': 'training',
@@ -248,6 +256,21 @@ class TestReportGeneratorGenerateReports:
                 issues=[],
                 category=PARAM_VALIDATION.CLOSED,
                 metrics={'throughput': 100.0}
+            )
+        }
+        # D-05 5-tuple workload key. Empty leading (category, orgname,
+        # systemname) slots — the printer / row builder does not
+        # depend on the leading slots being populated.
+        gen.workload_results = {
+            ('', '', '', 'unet3d', 'h100'): Result(
+                multi=True,
+                benchmark_type=BENCHMARK_TYPES.training,
+                benchmark_command='run',
+                benchmark_model='unet3d',
+                benchmark_run=[mock_run],
+                issues=[],
+                category=PARAM_VALIDATION.CLOSED,
+                metrics={'train_mean_of_throughput': 100.0}
             )
         }
         return gen
