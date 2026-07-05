@@ -12,6 +12,7 @@ import csv
 import json
 import os.path
 import pprint
+import statistics
 import sys
 
 from dataclasses import dataclass
@@ -968,36 +969,275 @@ class ReportGenerator:
             )
             return {}
 
+    # ------------------------------------------------------------------
+    # Workload identity derivation (D-05/D-07)
+    # ------------------------------------------------------------------
+    _CATEGORY_PATH_TOKENS = ("closed", "open", "whatif")
+
+    def _derive_category_from_path(self, benchmark_run: BenchmarkRun) -> Optional[str]:
+        """D-07 category derivation from the workload's on-disk path.
+
+        Returns one of ``'closed'``, ``'open'``, ``'whatif'`` when the
+        workload's absolute result_dir contains that segment. Returns
+        ``None`` when no segment matches — the caller then falls back
+        to the upstream :class:`BenchmarkVerifier` category value.
+        """
+        leaf = getattr(benchmark_run, 'result_dir', None) or ""
+        if not leaf:
+            return None
+        # Normalize to path segments; scan case-insensitively but return
+        # the lowercased canonical token so downstream string comparisons
+        # (D-29 ``category != 'whatif'``) are unambiguous.
+        parts = [p.lower() for p in os.path.abspath(leaf).split(os.sep) if p]
+        for token in self._CATEGORY_PATH_TOKENS:
+            if token in parts:
+                return token
+        return None
+
+    def _derive_orgname_from_path(self, benchmark_run: BenchmarkRun) -> str:
+        """D-07 orgname derivation.
+
+        Prefers ``benchmark_run.parameters['orgname']`` (when set at run
+        time); otherwise walks the workload's absolute result_dir looking
+        for the ``<division>/<orgname>/results/`` triplet that the
+        canonical submission tree produces (see
+        ``_resolve_effective_results_dir``). Returns an empty string when
+        the path shape does not match — never raises.
+        """
+        params = getattr(benchmark_run, 'parameters', None)
+        if isinstance(params, dict):
+            candidate = params.get('orgname')
+            if isinstance(candidate, str) and candidate:
+                return candidate
+        leaf = getattr(benchmark_run, 'result_dir', None) or ""
+        if not leaf:
+            return ""
+        parts = os.path.abspath(leaf).split(os.sep)
+        # Look for `<division>/<orgname>/results/` where division is
+        # `closed`, `open`, or `whatif`.
+        for idx in range(len(parts) - 2):
+            if (
+                parts[idx].lower() in self._CATEGORY_PATH_TOKENS
+                and parts[idx + 2] == "results"
+            ):
+                return parts[idx + 1]
+        return ""
+
+    def _derive_systemname_from_path(self, benchmark_run: BenchmarkRun) -> str:
+        """D-07 systemname derivation.
+
+        When ``self.args.systemname`` was supplied on the CLI, uses it.
+        Otherwise walks the workload's absolute path looking for
+        ``results/<systemname>/`` — the canonical submission tree shape.
+        Returns an empty string when the path shape does not match.
+        """
+        systemname = None
+        if self.args is not None:
+            systemname = getattr(self.args, 'systemname', None)
+        if systemname:
+            return str(systemname)
+        leaf = getattr(benchmark_run, 'result_dir', None) or ""
+        if not leaf:
+            return ""
+        parts = os.path.abspath(leaf).split(os.sep)
+        for idx in range(len(parts) - 1):
+            if parts[idx] == "results":
+                return parts[idx + 1]
+        return ""
+
+    def _derive_workload_key(
+        self,
+        benchmark_run: BenchmarkRun,
+        fallback_category: Optional[str] = None,
+    ) -> tuple:
+        """Return the per-benchmark-type grouping tuple (D-05/D-06).
+
+        - training / checkpointing: ``(category, orgname, systemname, model, accelerator)``
+        - vector_database:          ``(category, orgname, systemname, engine, index_type)``
+        - kv_cache:                 ``(category, orgname, systemname, model, performance_profile)``
+
+        ``category`` is derived from the workload's on-disk path segment
+        when possible (D-07); when the path does not match, falls back to
+        the caller-supplied ``fallback_category`` (typically the upstream
+        :class:`BenchmarkVerifier` category converted to string).
+        """
+        category = self._derive_category_from_path(benchmark_run)
+        if category is None:
+            category = fallback_category or ""
+        orgname = self._derive_orgname_from_path(benchmark_run)
+        systemname = self._derive_systemname_from_path(benchmark_run)
+        bt = benchmark_run.benchmark_type
+        raw_params = getattr(benchmark_run, 'parameters', None)
+        params = raw_params if isinstance(raw_params, dict) else {}
+
+        def _p(key: str) -> str:
+            """Return params[key] as a str only when it's a real string."""
+            v = params.get(key)
+            return v if isinstance(v, str) else ""
+
+        if bt == BENCHMARK_TYPES.vector_database:
+            return (category, orgname, systemname, _p('engine'), _p('index_type'))
+        if bt == BENCHMARK_TYPES.kv_cache:
+            model = str(benchmark_run.model or "")
+            return (category, orgname, systemname, model, _p('performance_profile'))
+        # training / checkpointing (and any other type) share the
+        # (category, orgname, systemname, model, accelerator) shape.
+        model = str(benchmark_run.model or "")
+        accelerator = str(benchmark_run.accelerator or "")
+        return (category, orgname, systemname, model, accelerator)
+
     def _process_workload_groups(self, benchmark_runs: List[BenchmarkRun]) -> None:
         """
         Group runs by workload and run submission-level validation.
 
-        Args:
-            benchmark_runs: List of all benchmark runs.
+        Grouping key is per-benchmark-type per D-05/D-06:
+
+        - training / checkpointing: ``(category, orgname, systemname, model, accelerator)``
+        - vector_database:          ``(category, orgname, systemname, engine, index_type)``
+        - kv_cache:                 ``(category, orgname, systemname, model, performance_profile)``
+
+        The aggregation dispatch (``_aggregate_workload_metrics``) sits
+        BELOW rules-strict INVALID gates (D-23/D-26/D-27) so that empty
+        metric lists never silently produce ``0.0`` and count/warmup
+        violations produce the D-24 verbatim message rather than a
+        computed-but-wrong value. ``whatif`` rows skip the rules-strict
+        gates entirely per D-29 (whatif is simulation, not submission).
         """
-        # Group by (model, accelerator) for training, (model,) for others
+        # Group by per-benchmark-type key (D-05). Category comes from
+        # path derivation when possible; the upstream verifier still runs
+        # for each group to produce issues + a fallback category.
         workload_runs: Dict[tuple, List[BenchmarkRun]] = {}
-
         for benchmark_run in benchmark_runs:
-            workload_key = (benchmark_run.model, benchmark_run.accelerator)
-            if workload_key not in workload_runs:
-                workload_runs[workload_key] = []
-            workload_runs[workload_key].append(benchmark_run)
+            workload_key = self._derive_workload_key(benchmark_run)
+            workload_runs.setdefault(workload_key, []).append(benchmark_run)
 
-        # Run workload-level verifiers
         for workload_key, runs in workload_runs.items():
-            model, accelerator = workload_key
             if not runs:
                 continue
 
             try:
+                # workload_key = (category, orgname, systemname, id1, id2)
+                category_str, orgname_str, systemname_str, ident1, ident2 = workload_key
                 self.logger.info(
-                    f'Running submission verifiers for model: {model}, '
-                    f'accelerator: {accelerator} ({len(runs)} runs)'
+                    f'Running submission verifiers for '
+                    f'{runs[0].benchmark_type.value if runs[0].benchmark_type else "?"} '
+                    f'({ident1}, {ident2}) — {len(runs)} runs'
                 )
                 verifier = BenchmarkVerifier(*runs, logger=self.logger)
-                category = verifier.verify()
-                issues = verifier.issues
+                verifier_category = verifier.verify()
+                issues = list(verifier.issues) if verifier.issues else []
+
+                # If path-based category derivation returned "", fall back
+                # to the upstream verifier's category value.
+                if not category_str and verifier_category is not None:
+                    try:
+                        category_str = verifier_category.value
+                    except AttributeError:
+                        category_str = str(verifier_category)
+
+                # ----------------------------------------------------------
+                # Rules-strict INVALID gates (D-23/D-26/D-27)
+                # ----------------------------------------------------------
+                # whatif rows SKIP these gates entirely per D-29 — whatif
+                # is a simulation, not a submission; INVALID semantics
+                # don't apply.
+                invalid_messages: List[str] = []
+                if category_str != 'whatif':
+                    bt = runs[0].benchmark_type
+                    if bt == BENCHMARK_TYPES.training:
+                        # D-27: training must be exactly 6 invocations
+                        # (1 warmup + 5 real per Rules.md §2.1.17).
+                        if len(runs) != 6:
+                            invalid_messages.append(
+                                _INVALID_MSG_TRAINING_COUNT.format(n=len(runs))
+                            )
+                        else:
+                            # D-26: warmup MUST have been detected for a
+                            # 6-invocation set. No lex-first-timestamp
+                            # fallback — loud INVALID over silent guess.
+                            warmup_present = any(
+                                os.path.abspath(r.result_dir or "") in self.warmup_result_dirs
+                                for r in runs
+                            )
+                            if not warmup_present:
+                                invalid_messages.append(
+                                    _INVALID_MSG_WARMUP_UNDETECTED
+                                )
+                    elif bt == BENCHMARK_TYPES.checkpointing:
+                        # D-20/D-24: each invocation's metric lists MUST
+                        # have exactly 10 entries (Rules.md §2.1.23).
+                        for run in runs:
+                            violated = False
+                            for _mkey, val in (run.metrics or {}).items():
+                                if isinstance(val, list) and len(val) != 10:
+                                    invalid_messages.append(
+                                        _INVALID_MSG_CHECKPOINT_COUNT.format(n=len(val))
+                                    )
+                                    violated = True
+                                    break  # one violation per run is enough
+                            if violated:
+                                break
+                    # vdb + kvcache SKIP rules-strict gates entirely per
+                    # the D-22 pass-through boundary — their INVALID
+                    # category (if any) is set by the upstream
+                    # BenchmarkVerifier, not by Phase 6.
+
+                # ----------------------------------------------------------
+                # Aggregation dispatch — inner try/except for
+                # StatisticsError (D-23 loud-failure path).
+                # ----------------------------------------------------------
+                aggregated_metrics: Dict[str, Any] = {}
+                if invalid_messages:
+                    # Rules-strict already failed — skip aggregation
+                    # entirely; the emitted row has no computed values.
+                    category_str = 'INVALID'
+                    aggregated_metrics = {}
+                else:
+                    try:
+                        aggregated_metrics = self._aggregate_workload_metrics(runs, self.warmup_result_dirs)  # noqa: E501
+                    except statistics.StatisticsError as se:
+                        # D-24 empty-metric template. Best-effort key /
+                        # basename extraction from the exception message —
+                        # the helper's raise-sites format the message as
+                        # "metric <key> is empty in invocation <basename>".
+                        category_str = 'INVALID'
+                        msg_text = str(se)
+                        parsed_key = "(unknown)"
+                        parsed_basename = "(unknown)"
+                        if msg_text.startswith("metric ") and " is empty in invocation " in msg_text:
+                            try:
+                                after_metric = msg_text[len("metric "):]
+                                parsed_key, rest = after_metric.split(
+                                    " is empty in invocation ", 1
+                                )
+                                parsed_basename = rest.strip()
+                            except ValueError:
+                                pass
+                        invalid_messages.append(
+                            _INVALID_MSG_EMPTY_METRIC.format(
+                                key=parsed_key, basename=parsed_basename
+                            )
+                        )
+                        aggregated_metrics = {}
+
+                # Merge rules-strict issues into the workload's Issue list.
+                # Preserve verbatim string (D-25 join happens at write
+                # time; Result.issues stays as a typed Issue list until
+                # then).
+                if invalid_messages:
+                    for msg in invalid_messages:
+                        issues.append(Issue(PARAM_VALIDATION.INVALID, msg))
+
+                # Resolve the Result.category. Path-derived 'whatif' and
+                # rules-strict 'INVALID' are strings; other paths use the
+                # verifier's PARAM_VALIDATION enum. Downstream writers
+                # coerce this to a string via ``.value`` when needed.
+                if category_str == 'INVALID':
+                    result_category: Union[PARAM_VALIDATION, str] = PARAM_VALIDATION.INVALID
+                elif category_str == 'whatif':
+                    result_category = 'whatif'
+                else:
+                    result_category = verifier_category
 
                 result = Result(
                     multi=True,
@@ -1006,8 +1246,8 @@ class ReportGenerator:
                     benchmark_command=runs[0].command,
                     benchmark_model=runs[0].model,
                     issues=issues,
-                    category=category,
-                    metrics={}  # TODO: Add function to aggregate metrics
+                    category=result_category,
+                    metrics=aggregated_metrics,
                 )
                 self.workload_results[workload_key] = result
 
@@ -1137,10 +1377,32 @@ class ReportGenerator:
         Print details for a workload submission.
 
         Args:
-            workload_key: Tuple of (model, accelerator).
+            workload_key: Per-benchmark-type workload identity tuple (D-05).
+                Shape depends on ``benchmark_type``:
+                  - training/checkpointing:
+                    ``(category, orgname, systemname, model, accelerator)``
+                  - vector_database:
+                    ``(category, orgname, systemname, engine, index_type)``
+                  - kv_cache:
+                    ``(category, orgname, systemname, model, performance_profile)``
+                Model / accelerator identity is read from
+                ``workload_result.benchmark_run[0]`` (D-05 recommendation)
+                so this method is decoupled from the key shape and works
+                unchanged if the tuple layout evolves.
             workload_result: The Result object for the workload.
         """
-        model, accelerator = workload_key
+        # Read identity from the first BenchmarkRun rather than unpacking
+        # the workload_key tuple — the tuple shape now varies by
+        # benchmark type (D-05) and unpacking a fixed shape would break
+        # for vdb/kvcache. This keeps the printer decoupled from key
+        # layout evolution.
+        first_run = (
+            workload_result.benchmark_run[0]
+            if isinstance(workload_result.benchmark_run, list)
+            else workload_result.benchmark_run
+        )
+        model = getattr(first_run, 'model', workload_result.benchmark_model)
+        accelerator = getattr(first_run, 'accelerator', '')
 
         # Determine workload type
         if workload_result.benchmark_model in LLM_MODELS:
