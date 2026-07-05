@@ -674,7 +674,7 @@ is better), and the **aggregate Storage Throughput in tokens/s**.
 A run is launched with `mlpstorage <closed|open|whatif> kvcache run [OPTIONS]`
 (the division is the first positional, post-PR #412 modal CLI). The results
 directory must first be initialised once with `mlpstorage init <orgname>
-<results-dir>`, and every run requires `--systemname` (or the `MLPERF_SYSTEMNAME`
+<results-dir>`, and every run requires `--systemname` (or the `MLPSTORAGE_SYSTEMNAME`
 environment variable). The command executes **all three Options sequentially**,
 each repeated `trials` times, by prefixing `mpirun` to `mlperf_wrapper.py`. The
 Option's parameters are built by `mlpstorage` (`_build_option_kvcache_args`) and

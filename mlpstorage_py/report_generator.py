@@ -613,6 +613,14 @@ class ReportGenerator:
                             for index_dir in model_dir.iterdir():
                                 if index_dir.is_dir():
                                     found.add(str(index_dir.resolve()))
+                        elif bt_dir.name == 'training':
+                            # Rules.md 2.1.16: model-group folder is
+                            # <model>/run/, not <model>/ — must match
+                            # _model_group_folder so _emit_empty_model_dirs
+                            # doesn't write a stray file at <model>/.
+                            run_dir = model_dir / 'run'
+                            if run_dir.is_dir():
+                                found.add(str(run_dir.resolve()))
                         else:
                             found.add(str(model_dir.resolve()))
             except (OSError, PermissionError) as e:
