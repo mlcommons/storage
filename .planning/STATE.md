@@ -4,8 +4,8 @@ milestone: v1.1
 milestone_name: Content-addressed code-image pool
 current_phase: 7
 status: completed
-stopped_at: Phase 7 context gathered — D-70..D-74 locked
-last_updated: "2026-07-05T21:15:57.054Z"
+stopped_at: Phase 8 context gathered — D-80..D-93 locked
+last_updated: "2026-07-05T21:57:59.880Z"
 last_activity: 2026-07-05
 last_activity_desc: Phase 7 marked complete
 progress:
@@ -66,10 +66,10 @@ Coverage: 18/18 v1 requirements mapped, each to exactly one phase.
 
 ## Session Continuity
 
-**Stopped at:** Phase 7 context gathered — D-70..D-74 locked
-**Resume file:** .planning/phases/07-one-shot-legacy-migration-hand-edit-detection/07-CONTEXT.md
+**Stopped at:** Phase 8 context gathered — D-80..D-93 locked
+**Resume file:** .planning/phases/08-submission-checker-per-image-verification/08-CONTEXT.md
 
-**Last session:** 2026-07-05T21:12:36.447Z
+**Last session:** 2026-07-05T21:57:59.875Z
 
 **Next action:** `/gsd-transition` to close Phase 6 and route to Phase 7 planning (one-shot legacy migration + hand-edit detection, MIG-01..03).
 
