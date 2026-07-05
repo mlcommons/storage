@@ -373,6 +373,12 @@ Every benchmark run writes:
 - **`results.json`** — aggregated summary across all timestamped run directories, used by `reportgen`.
 - **Command history** is appended to `<results-dir>/.history/` (consumed by `mlpstorage history`).
 
+### Aggregate Interpretation
+
+Aggregate columns are informational and NOT a leaderboard-input contract. External ranking pipelines MUST compute their own aggregates from per-invocation summary.json files.
+
+This framing applies uniformly to `train_mean_of_*`, `checkpoint_mean_of_*`, `vdb_*` pass-through, and `kvcache_aggregated_*` / `kvcache_option_*` columns emitted by `reportgen`. See the Rules.md §2.1.28 mechanical-shape specification for the aggregation math.
+
 ## VALIDATOR
 
 `mlpstorage` ships a layered validation system whose ultimate authority is `Rules.md` in the repository root.
