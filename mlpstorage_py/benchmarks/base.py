@@ -46,7 +46,13 @@ from typing import Tuple, Dict, Any, List, Optional, Callable, Set, TYPE_CHECKIN
 
 from functools import wraps
 
-from mlpstorage_py.config import PARAM_VALIDATION, DATETIME_STR, MLPS_DEBUG, EXEC_TYPE
+from mlpstorage_py.config import (
+    PARAM_VALIDATION,
+    DATETIME_STR,
+    MLPS_DEBUG,
+    EXEC_TYPE,
+    _S3DLIO_HIGH_RISK_ENV_VARS,
+)
 from mlpstorage_py.errors import ConfigurationError, ErrorCode, FileSystemError
 from mlpstorage_py.run_directory import (
     DEFAULT_COLLISION_BUMP_BUDGET,
@@ -991,6 +997,30 @@ class Benchmark(BenchmarkInterface, abc.ABC):
             f"_fs_separation_paths() for CAP-03"
         )
 
+    def _check_storage_backend_env(self) -> None:
+        """Warn when HIGH-risk s3dlio env vars are set (Phase 7.5 D-07, D-08).
+
+        Checks ``os.environ`` for entries in ``_S3DLIO_HIGH_RISK_ENV_VARS``
+        and emits a WARNING for each one found, but only when the active
+        storage library is s3dlio (``STORAGE_LIBRARY == 's3dlio'``).
+
+        Rationale for the STORAGE_LIBRARY guard (D-07): training-only
+        deployments that never use s3dlio should not see s3dlio warnings.
+        The guard avoids false positives without requiring per-var allowlists.
+
+        The warning uses the D-08 verbatim template so that automated tests
+        (test_d08_warning_prefix_in_benchmark_source) can lock the wording.
+        """
+        if os.environ.get('STORAGE_LIBRARY') != 's3dlio':
+            return
+        for var_name in sorted(_S3DLIO_HIGH_RISK_ENV_VARS):
+            if var_name in os.environ:
+                self.logger.warning(
+                    f"s3dlio env var '{var_name}' is set — this may alter measured benchmark results. "
+                    "Declare it in your config or submit as OPEN category. "
+                    "See ManPage §ENVIRONMENT → Storage-backend for impact."
+                )
+
     def _pre_execution_gate(self) -> None:
         """Run all pre-execution capacity/environment gates (CAP-01 in
         Slice 3; CAP-02 shared-FS verification is appended in Slice 4 of
@@ -1066,6 +1096,8 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         # design decision D-601-1). --skip-fs-separation-gate bypasses the
         # raise but still writes the sidecar so the validator gets telemetry.
         self._run_fs_separation_probe()
+        # Phase 7.5 D-07: warn when HIGH-risk s3dlio env vars are set.
+        self._check_storage_backend_env()
 
     def _run_fs_separation_probe(self) -> None:
         """Run the CAP-03 FS-separation probe and write the sidecar.
