@@ -2,30 +2,30 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Content-addressed code-image pool
-current_phase: 7
-status: completed
-stopped_at: Phase 8 context gathered — D-80..D-93 locked
-last_updated: "2026-07-05T21:57:59.880Z"
+current_phase: 8
+status: complete
+stopped_at: Phase 8 verified — CHECK-01..05 implemented and tested
+last_updated: "2026-07-05T23:30:00.000Z"
 last_activity: 2026-07-05
-last_activity_desc: Phase 7 marked complete
+last_activity_desc: Phase 8 verified
 progress:
   total_phases: 3
-  completed_phases: 2
-  total_plans: 8
-  completed_plans: 8
-  percent: 67
-current_phase_name: one-shot-legacy-migration-hand-edit-detection
-current_plan: 4
+  completed_phases: 3
+  total_plans: 11
+  completed_plans: 11
+  percent: 100
+current_phase_name: submission-checker-per-image-verification
+current_plan: 3
 ---
 
 # Project State
 
 ## Current Position
 
-Phase: 7 — COMPLETE
-Plan: 3 of 4
-Status: Phase 7 complete
-Last activity: 2026-07-05 — Phase 7 marked complete
+Phase: 8 — COMPLETE
+Plan: 3 of 3
+Status: Verified
+Last activity: 2026-07-05 — Phase 8 verified (CHECK-01..05 + 21 new tests)
 
 ## Milestone Snapshot
 
@@ -36,8 +36,8 @@ Three phases derived from the two-PR reference design (#651 comment 4871997634):
 | Phase | Name | REQ-IDs | Status |
 |-------|------|---------|--------|
 | 6 | Content-addressed pool + capture-or-verify rewrite | POOL-01..04, PTR-01..02, CAPVER-01..03, UX-01 | ✓ Verified |
-| 7 | One-shot legacy migration + hand-edit detection | MIG-01..03 | Not started |
-| 8 | Submission-checker per-image verification | CHECK-01..05 | Not started |
+| 7 | One-shot legacy migration + hand-edit detection | MIG-01..03 | ✓ Verified |
+| 8 | Submission-checker per-image verification | CHECK-01..05 | ✓ Verified |
 
 Coverage: 18/18 v1 requirements mapped, each to exactly one phase.
 
@@ -66,12 +66,11 @@ Coverage: 18/18 v1 requirements mapped, each to exactly one phase.
 
 ## Session Continuity
 
-**Stopped at:** Phase 8 context gathered — D-80..D-93 locked
-**Resume file:** .planning/phases/08-submission-checker-per-image-verification/08-CONTEXT.md
+**Stopped at:** Phase 8 verified — milestone v1.1 complete
 
-**Last session:** 2026-07-05T21:57:59.875Z
+**Last session:** 2026-07-05T23:30:00.000Z
 
-**Next action:** `/gsd-transition` to close Phase 6 and route to Phase 7 planning (one-shot legacy migration + hand-edit detection, MIG-01..03).
+**Next action:** `/gsd-complete-milestone` to archive v1.1 and prepare for next milestone, or `/gsd-ship` to create the PR.
 
 ## Performance Metrics
 
@@ -82,6 +81,9 @@ Coverage: 18/18 v1 requirements mapped, each to exactly one phase.
 | Phase 07 P01 | 742 | 3 tasks | 7 files |
 | Phase 07 P02 | 623 | 2 tasks | 3 files |
 | Phase 07 P03 | 10min | 4 tasks | 7 files |
+| Phase 08 P01 | 8min | 3 tasks | 6 files (new pool_structure_checks.py + 5 modified) |
+| Phase 08 P02 | 7min | 2 tasks | 3 files (helpers.py + training + vdb checks) |
+| Phase 08 P03 | 11min | 2 tasks | 2 new test files (13 unit + 8 integration tests) |
 
 ## Decisions
 
