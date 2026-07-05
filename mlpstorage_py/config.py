@@ -183,12 +183,13 @@ _LEGACY_ENVVAR_MAP = {
 # sentinels.
 #
 # MANPAGE_ENV_VAR_TIERS: maps every non-allowlisted env var mlpstorage reads
-# to exactly one PRIMARY tier string (D-13/D-14). Six allowed primary-tier
+# to exactly one PRIMARY tier string (D-13/D-14). Seven allowed primary-tier
 # values: 'owned', 'mpi-borrowed', 'aws-borrowed', 'storage-borrowed',
-# 'diagnostic', 'internal-write'. Dual-role vars (MLPSTORAGE_CHECKPOINT_URI_SCHEME,
-# AWS_ENDPOINT_URL) carry a single primary-tier value; their internal-write
-# cross-ref is ManPage prose only per D-13 (no tuple values — D-13 explicitly
-# rejects the tuple form in favour of prose cross-refs).
+# 'storage-backend', 'diagnostic', 'internal-write'. Dual-role vars
+# (MLPSTORAGE_CHECKPOINT_URI_SCHEME, AWS_ENDPOINT_URL) carry a single
+# primary-tier value; their internal-write cross-ref is ManPage prose only
+# per D-13 (no tuple values — D-13 explicitly rejects the tuple form in
+# favour of prose cross-refs).
 #
 # Import direction is one-way (D-11): config.py MUST NOT import from
 # mlpstorage_py.rules.*. tests/unit/test_no_import_cycles.py locks this
@@ -243,7 +244,93 @@ MANPAGE_ENV_VAR_TIERS = {
     # Note: no 'diagnostic' primary entries in the current inventory.
     # The Diagnostic tier header exists in the ManPage (Plan C) but is
     # populated by prose only — no var uniquely lives in this tier today.
+
+    # -- AWS-borrowed additions (3) — consumed by boto3/s3dlio, not Python code --
+    'AWS_SESSION_TOKEN': 'aws-borrowed',       # D-09: temporary STS session token.
+    'AWS_DEFAULT_REGION': 'aws-borrowed',      # D-09: fallback region when AWS_REGION is unset.
+    'AWS_S3_ADDRESSING_STYLE': 'aws-borrowed', # D-09: virtual-hosted vs. path-style S3.
+
+    # -- Storage-backend (22) — consumed exclusively by s3dlio Rust binary --
+    'S3DLIO_SKIP_HEAD': 'storage-backend',
+    'S3DLIO_ENABLE_RANGE_OPTIMIZATION': 'storage-backend',
+    'S3DLIO_RANGE_THRESHOLD_MB': 'storage-backend',
+    'S3DLIO_RANGE_CONCURRENCY': 'storage-backend',
+    'S3DLIO_CHUNK_SIZE': 'storage-backend',
+    'S3DLIO_H2C': 'storage-backend',
+    'S3DLIO_H2_ADAPTIVE_WINDOW': 'storage-backend',
+    'S3DLIO_H2_STREAM_WINDOW_MB': 'storage-backend',
+    'S3DLIO_H2_CONN_WINDOW_MB': 'storage-backend',
+    'S3DLIO_POOL_MAX_IDLE_PER_HOST': 'storage-backend',
+    'S3DLIO_POOL_IDLE_TIMEOUT_SECS': 'storage-backend',
+    'S3DLIO_PUT_VERIFY': 'storage-backend',
+    'S3DLIO_MPU_PUT_VERIFY': 'storage-backend',
+    'S3DLIO_MULTIPART_THRESHOLD_MB': 'storage-backend',
+    'S3DLIO_RT_THREADS': 'storage-backend',
+    'S3DLIO_MAX_RETRY_ATTEMPTS': 'storage-backend',
+    'S3DLIO_CONNECT_TIMEOUT_SECS': 'storage-backend',
+    'S3DLIO_OPERATION_TIMEOUT_SECS': 'storage-backend',
+    'S3DLIO_PUT_MAX_RETRIES': 'storage-backend',
+    'S3DLIO_PUT_RETRY_DELAY_MS': 'storage-backend',
+    'S3DLIO_MPU_MAX_RETRIES': 'storage-backend',
+    'S3DLIO_MPU_RETRY_DELAY_S': 'storage-backend',
 }
+
+# Documentation anchor — the s3dlio release this table targets.
+S3DLIO_PINNED_VERSION = 'v0.9.106'
+
+# Phase 7.5 D-03: vars that can swing measured throughput by >=10% or alter protocol.
+_S3DLIO_HIGH_RISK_ENV_VARS = frozenset({
+    'S3DLIO_SKIP_HEAD',
+    'S3DLIO_ENABLE_RANGE_OPTIMIZATION',
+    'S3DLIO_RANGE_THRESHOLD_MB',
+    'S3DLIO_RANGE_CONCURRENCY',
+    'S3DLIO_CHUNK_SIZE',
+    'S3DLIO_H2C',
+    'S3DLIO_H2_ADAPTIVE_WINDOW',
+    'S3DLIO_H2_STREAM_WINDOW_MB',
+    'S3DLIO_H2_CONN_WINDOW_MB',
+    'S3DLIO_POOL_MAX_IDLE_PER_HOST',
+    'S3DLIO_POOL_IDLE_TIMEOUT_SECS',
+    'S3DLIO_PUT_VERIFY',
+    'S3DLIO_MPU_PUT_VERIFY',
+    'S3DLIO_MULTIPART_THRESHOLD_MB',
+    'S3DLIO_RT_THREADS',
+})
+
+# Phase 7.5 D-02: env vars documented in ManPage but NOT read by
+# mlpstorage_py/ Python code (consumed by s3dlio Rust binary or boto3/s3dlio
+# backend init). The sync test subtracts this set from extra_in_docs so these
+# vars can be documented without triggering the symmetric-difference failure.
+MANPAGE_STORAGE_BACKEND_ENV_VARS = frozenset({
+    # 15 HIGH-risk S3DLIO_* vars (per D-03)
+    'S3DLIO_SKIP_HEAD',
+    'S3DLIO_ENABLE_RANGE_OPTIMIZATION',
+    'S3DLIO_RANGE_THRESHOLD_MB',
+    'S3DLIO_RANGE_CONCURRENCY',
+    'S3DLIO_CHUNK_SIZE',
+    'S3DLIO_H2C',
+    'S3DLIO_H2_ADAPTIVE_WINDOW',
+    'S3DLIO_H2_STREAM_WINDOW_MB',
+    'S3DLIO_H2_CONN_WINDOW_MB',
+    'S3DLIO_POOL_MAX_IDLE_PER_HOST',
+    'S3DLIO_POOL_IDLE_TIMEOUT_SECS',
+    'S3DLIO_PUT_VERIFY',
+    'S3DLIO_MPU_PUT_VERIFY',
+    'S3DLIO_MULTIPART_THRESHOLD_MB',
+    'S3DLIO_RT_THREADS',
+    # 7 MEDIUM-risk S3DLIO_* vars (per D-04)
+    'S3DLIO_MAX_RETRY_ATTEMPTS',
+    'S3DLIO_CONNECT_TIMEOUT_SECS',
+    'S3DLIO_OPERATION_TIMEOUT_SECS',
+    'S3DLIO_PUT_MAX_RETRIES',
+    'S3DLIO_PUT_RETRY_DELAY_MS',
+    'S3DLIO_MPU_MAX_RETRIES',
+    'S3DLIO_MPU_RETRY_DELAY_S',
+    # 3 missing AWS vars (per D-09) — consumed by boto3/s3dlio, no Python os.environ.get()
+    'AWS_SESSION_TOKEN',
+    'AWS_DEFAULT_REGION',
+    'AWS_S3_ADDRESSING_STYLE',
+})
 
 
 # -----------------------------------------------------------------------------
