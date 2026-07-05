@@ -232,8 +232,13 @@ class PoolStructureCheck(BaseCheck):
 
     @rule("CHECK-02", "poolImageSelfConsistency")
     def pool_image_self_consistency_check(self):
-        """CHECK-02: every pool image's contents must re-hash to the digest
-        recorded in its .code-hash.json.
+        """CHECK-02: every pool image's directory name must match its
+        .code-hash.json.hash (first 8 chars), AND its contents must re-hash
+        to the digest recorded in .code-hash.json.
+
+        Two-part check per the CHECK-02 spec:
+          1. Directory name matches .code-hash.json.hash (D-62 naming contract).
+          2. Contents re-hash to .code-hash.json.hash (content self-consistency).
 
         Uses verify_image_self_consistent from code_image.py. Also catches
         MissingHashFile / MalformedHashFile / CodeImageError / CodeTreeUnreadable.
@@ -249,6 +254,32 @@ class PoolStructureCheck(BaseCheck):
                 if not pool_dir.is_dir():
                     continue
                 try:
+                    # Part 1: verify directory name matches hash in .code-hash.json.
+                    # Read the hash file first so we can derive the expected name.
+                    try:
+                        hash_data = _read_hash_file(pool_dir, self.log)
+                        expected_dir_name = _pool_dir_name(hash_data["hash"])
+                        if pool_dir.name != expected_dir_name:
+                            self.log_violation(
+                                "CHECK-02", "poolImageSelfConsistency",
+                                str(pool_dir),
+                                "pool image directory name %r does not match expected %r "
+                                "(from .code-hash.json.hash %s)",
+                                pool_dir.name, expected_dir_name, hash_data["hash"][:8],
+                            )
+                            valid = False
+                            # Still run content self-consistency below for full diagnosis.
+                    except (MissingHashFile, MalformedHashFile) as e:
+                        # Part 2 also depends on this read; log and skip both.
+                        self.log_violation(
+                            "CHECK-02", "poolImageSelfConsistency",
+                            str(pool_dir),
+                            "%s", str(e),
+                        )
+                        valid = False
+                        continue
+
+                    # Part 2: content self-consistency.
                     ok = verify_image_self_consistent(pool_dir, self.log)
                     if not ok:
                         self.log_violation(
@@ -259,7 +290,7 @@ class PoolStructureCheck(BaseCheck):
                             str(pool_dir),
                         )
                         valid = False
-                except (MissingHashFile, MalformedHashFile, CodeImageError, CodeTreeUnreadable) as e:
+                except (CodeImageError, CodeTreeUnreadable) as e:
                     self.log_violation(
                         "CHECK-02", "poolImageSelfConsistency",
                         str(pool_dir),
