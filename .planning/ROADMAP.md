@@ -80,7 +80,19 @@
   4. Placing a `code-<hash8>/` directory in the pool that is not referenced by any run leaf's pointer file causes `mlpstorage validate` to fail with an orphan-image error naming that image; symmetrically, leaving any legacy unhashed `code/` directory anywhere in the submission tree causes `mlpstorage validate` to fail with a specific "legacy layout detected" error.
   5. §3.6.1 / §5.6.1 reference-checksum verification, when it runs for a given run leaf, is scoped to the specific pool image that leaf's pointer resolves to (and to that image's recorded `mlpstorage_version`) — verifiable by a submission tree with two runs at two mlpstorage versions where checksum comparison correctly succeeds for both.
 
-**Plans:** TBD
+**Plans:** 3 plans
+
+**Wave 1**
+
+- [ ] 08-01-PLAN.md — PoolStructureCheck class (CHECK-01..04) + remove STRUCT-06 + remove --reference-checksum + wire into main.py pre-loop (D-80..D-91, D-83..D-85, D-88)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 08-02-PLAN.md — resolve_run_pool_image helper + retarget TrainingCheck/VdbCheck CHECK-05 to per-image pool walk (D-86..D-89, D-92..D-93)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 08-03-PLAN.md — Unit tests for PoolStructureCheck (CHECK-01..04) + integration tests for all 5 ROADMAP success criteria (SC-1..SC-5)
 
 ## Progress
 
