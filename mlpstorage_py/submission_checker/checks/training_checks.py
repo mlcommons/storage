@@ -4,11 +4,22 @@ from ..constants import *
 from ..configuration.configuration import Config
 from ..loader import SubmissionLogs
 from ..rule_registry import rule
+from pathlib import Path
+
 from .helpers import (
     _check_filesystem_separation,
     _check_code_image_layered,
     read_fs_separation_sidecar,
+    resolve_run_pool_image,
 )
+from ..tools.code_image import (
+    verify_image_self_consistent,
+    PointerMalformed,
+    MissingHashFile,
+    MalformedHashFile,
+)
+from ..tools.code_checksum import compute_code_tree_md5
+from ..constants import REFERENCE_CHECKSUMS
 
 # Shared with the in-process verifier (mlpstorage_py.rules.run_checkers.training)
 # so both checkers stay in lockstep about which dotted-keys the mlpstorage
@@ -659,32 +670,127 @@ class TrainingCheck(BaseCheck):
 
     @rule("3.6.1", "trainingClosedSubmissionChecksum")
     def closed_submission_checksum(self):
-        """For CLOSED submissions, verify code directory MD5 checksum.
+        """For CLOSED training submissions, verify per-image code checksum (D-89, CHECK-05).
 
         (Rules.md 3.6.1)
 
-        Phase 4 CD-04: delegates to the shared
-        ``helpers._check_code_image_layered`` helper so the §3.6.1 and §5.6.1
-        rules enforce an identical layered model (self-consistency +
-        upstream-identity) without duplicating the implementation across
-        check classes. STRUCT-06 (§2.1.6) keeps its own inline implementation
-        because it has additional surrounding logic (per-leaf walker, the
-        ``expected is None`` warning) that does not belong in the helper.
+        Phase 8 Plan 02: replaces the legacy code/-walk with the full D-89
+        per-image pool-walk. For each run leaf, reads ``.mlps-code-image`` to
+        resolve the pool image, runs self-consistency verification, then looks up
+        ``REFERENCE_CHECKSUMS[mlpstorage_version]`` for upstream-identity check.
 
-        Walk-up: ``self.path`` is the per-leaf training path
-        (``<root>/closed/<orgname>/results/<system>/training/<model>``). The
-        CLOSED ``code/`` lives at ``<root>/closed/<orgname>/code/``, four
-        levels above ``self.path`` (model → type → system → results →
-        ``<orgname>``). Missing ``code/`` is NOT logged here — STRUCT-06
-        already owns the VALS-01 missing-code/ violation under §2.1.6, so
-        re-firing under §3.6.1 would double-count.
+        Walk-up: ``self.path`` is
+        ``<root>/closed/<orgname>/results/<system>/training/<model>``.
+        Run leaves live at ``self.run_path/<datetime>/``. From a datetime leaf:
+          parents[5] → ``<orgname>``  (submitter_path)
+          parents[7] → ``<root>``     (results_dir / pool root parent)
         """
-        # TODO(Phase8-Plan2): replaced in Plan 08-02 with per-image pool-image
-        # lookup (D-89). The legacy code/ walk and get_reference_checksum() call
-        # are removed; Plan 08-02 implements the full CHECK-05 flow using
-        # _read_pointer → pool image resolution → verify_image_self_consistent
-        # → REFERENCE_CHECKSUMS[mlpstorage_version] per-image lookup.
-        return True  # TODO(Phase8-Plan2): replaced in Plan 08-02
+        if self.mode != "training":
+            return True
+        if self.submissions_logs.loader_metadata.division != "closed":
+            return True
+
+        valid = True
+        # D-87: emit the "unknown version" warning at most once per pool image.
+        if not hasattr(self, "_warned_pool_images"):
+            self._warned_pool_images: set[str] = set()
+
+        for _summary, _metadata, ts in self.submissions_logs.run_files:
+            run_leaf = Path(self.run_path) / ts
+
+            # Determine submitter_path and root_path by walking up from run_leaf.
+            # run_leaf depth from root: <root>/closed/<orgname>/results/<sys>/training/<model>/run/<ts>
+            #   parents[5] = <orgname>  parents[7] = <root>
+            run_leaf_path = Path(run_leaf)
+            try:
+                submitter_path = run_leaf_path.parents[5]
+                root_path = run_leaf_path.parents[7]
+            except IndexError:
+                self.log_violation(
+                    "3.6.1", "trainingClosedSubmissionChecksum", str(run_leaf),
+                    "unexpected directory depth; cannot resolve pool root",
+                )
+                valid = False
+                continue
+
+            orgname = submitter_path.name
+
+            # Steps 1-4 (D-89): resolve run leaf → pool image + hash data.
+            try:
+                pool_image_path, hash_data = resolve_run_pool_image(
+                    run_leaf_path, root_path, orgname, self.log,
+                )
+            except FileNotFoundError:
+                self.log_violation(
+                    "3.6.1", "trainingClosedSubmissionChecksum", str(run_leaf),
+                    "run leaf %s has no .mlps-code-image pointer.",
+                    run_leaf,
+                )
+                valid = False
+                continue
+            except PointerMalformed as e:
+                self.log_violation(
+                    "3.6.1", "trainingClosedSubmissionChecksum", str(run_leaf),
+                    "%s", str(e),
+                )
+                valid = False
+                continue
+            except (MissingHashFile, MalformedHashFile) as e:
+                self.log_violation(
+                    "3.6.1", "trainingClosedSubmissionChecksum", str(run_leaf),
+                    "%s", str(e),
+                )
+                valid = False
+                continue
+
+            # Step 5 (D-89): self-consistency check on pool image.
+            try:
+                self_ok = verify_image_self_consistent(pool_image_path, self.log)
+            except Exception as e:
+                self.log_violation(
+                    "3.6.1", "trainingClosedSubmissionChecksum", str(pool_image_path),
+                    "%s", str(e),
+                )
+                valid = False
+                continue
+            if not self_ok:
+                self.log_violation(
+                    "3.6.1", "trainingClosedSubmissionChecksum", str(pool_image_path),
+                    "pool image %s: self-consistency check failed",
+                    pool_image_path,
+                )
+                valid = False
+                continue
+
+            # Step 6 (D-89): version-keyed upstream-identity check (D-86/D-87).
+            mlpstorage_version = hash_data.get("mlpstorage_version")
+            expected = REFERENCE_CHECKSUMS.get(mlpstorage_version)
+
+            if expected is None:
+                # D-87: warn once per pool image, then pass.
+                pool_key = str(pool_image_path)
+                if pool_key not in self._warned_pool_images:
+                    self._warned_pool_images.add(pool_key)
+                    self.warn_violation(
+                        "3.6.1", "trainingClosedSubmissionChecksum", str(pool_image_path),
+                        "mlpstorage_version %s not in REFERENCE_CHECKSUMS; "
+                        "upstream-identity check skipped (self-consistency still ran).",
+                        mlpstorage_version,
+                    )
+                continue
+
+            # Step 7: compute tree MD5 and compare against reference.
+            digest = compute_code_tree_md5(str(pool_image_path), self.log)
+            if digest != expected:
+                self.log_violation(
+                    "3.6.1", "trainingClosedSubmissionChecksum", str(pool_image_path),
+                    "pool image %s: MD5 %s does not match "
+                    "REFERENCE_CHECKSUMS[%s] = %s",
+                    pool_image_path, digest, mlpstorage_version, expected,
+                )
+                valid = False
+
+        return valid
     
     @rule("3.6.2", "trainingClosedSubmissionParameters")
     def closed_submission_parameters(self):

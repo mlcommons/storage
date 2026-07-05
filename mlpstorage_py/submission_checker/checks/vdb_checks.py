@@ -28,6 +28,7 @@ real checks fire.
 """
 
 import os
+from pathlib import Path
 
 from .base import BaseCheck
 from ..configuration.configuration import Config
@@ -37,7 +38,16 @@ from .helpers import (
     _check_code_image_layered,
     _check_filesystem_separation,
     read_fs_separation_sidecar,
+    resolve_run_pool_image,
 )
+from ..tools.code_image import (
+    verify_image_self_consistent,
+    PointerMalformed,
+    MissingHashFile,
+    MalformedHashFile,
+)
+from ..tools.code_checksum import compute_code_tree_md5
+from ..constants import REFERENCE_CHECKSUMS
 from mlpstorage_py.config import VDB_INDEX_TYPES_CLOSED
 
 
@@ -747,29 +757,127 @@ class VdbCheck(BaseCheck):
 
     @rule("5.6.1", "vdbClosedSubmissionChecksum")
     def vdb_closed_submission_checksum(self):
-        """For CLOSED submissions, verify the code-image self-consistency +
-        upstream-identity via the shared layered helper. (Rules.md 5.6.1)
+        """For CLOSED VDB submissions, verify per-image code checksum (D-89, CHECK-05).
 
-        Phase 4 D-06 / CD-04: delegates to
-        ``helpers._check_code_image_layered`` — the SAME helper
-        ``TrainingCheck.3.6.1`` calls — so the layered model is implemented
-        once and attributed under the caller's rule ID/name.
+        (Rules.md 5.6.1)
 
-        Walk-up: ``self.path`` is the per-leaf vdb path
-        (``<root>/closed/<orgname>/results/<system>/vector_database/<DisplayIndex>``).
-        The CLOSED ``code/`` lives at ``<root>/closed/<orgname>/code/``,
-        four levels above ``self.path`` (DisplayIndex → vector_database → system
-        → results → ``<orgname>``).
+        Phase 8 Plan 02: replaces the legacy code/-walk with the full D-89
+        per-image pool-walk. For each run leaf, reads ``.mlps-code-image`` to
+        resolve the pool image, runs self-consistency verification, then looks up
+        ``REFERENCE_CHECKSUMS[mlpstorage_version]`` for upstream-identity check.
 
-        Missing ``code/`` is NOT logged here — STRUCT-06 (§2.1.6) owns the
-        VALS-01 missing-code/ violation; re-firing here would double-count.
+        Walk-up: ``self.path`` is
+        ``<root>/closed/<orgname>/results/<system>/vector_database/<engine>/<index>``.
+        Run leaves live at ``self.run_path/<datetime>/``. From a datetime leaf:
+          parents[6] → ``<orgname>``  (submitter_path)
+          parents[8] → ``<root>``     (results_dir / pool root parent)
         """
-        # TODO(Phase8-Plan2): replaced in Plan 08-02 with per-image pool-image
-        # lookup (D-89). The legacy code/ walk and get_reference_checksum() call
-        # are removed; Plan 08-02 implements the full CHECK-05 flow using
-        # _read_pointer → pool image resolution → verify_image_self_consistent
-        # → REFERENCE_CHECKSUMS[mlpstorage_version] per-image lookup.
-        return True  # TODO(Phase8-Plan2): replaced in Plan 08-02
+        if self.mode != "vector_database":
+            return True
+        if self.division != "closed":
+            return True
+
+        valid = True
+        # D-87: emit the "unknown version" warning at most once per pool image.
+        if not hasattr(self, "_warned_pool_images"):
+            self._warned_pool_images: set[str] = set()
+
+        for _summary, _metadata, ts in self._iter_run_files():
+            run_leaf = Path(self.run_path) / ts
+
+            # Determine submitter_path and root_path by walking up from run_leaf.
+            # run_leaf depth: <root>/closed/<orgname>/results/<sys>/vector_database/<engine>/<index>/run/<ts>
+            #   parents[6] = <orgname>  parents[8] = <root>
+            run_leaf_path = Path(run_leaf)
+            try:
+                submitter_path = run_leaf_path.parents[6]
+                root_path = run_leaf_path.parents[8]
+            except IndexError:
+                self.log_violation(
+                    "5.6.1", "vdbClosedSubmissionChecksum", str(run_leaf),
+                    "unexpected directory depth; cannot resolve pool root",
+                )
+                valid = False
+                continue
+
+            orgname = submitter_path.name
+
+            # Steps 1-4 (D-89): resolve run leaf → pool image + hash data.
+            try:
+                pool_image_path, hash_data = resolve_run_pool_image(
+                    run_leaf_path, root_path, orgname, self.log,
+                )
+            except FileNotFoundError:
+                self.log_violation(
+                    "5.6.1", "vdbClosedSubmissionChecksum", str(run_leaf),
+                    "run leaf %s has no .mlps-code-image pointer.",
+                    run_leaf,
+                )
+                valid = False
+                continue
+            except PointerMalformed as e:
+                self.log_violation(
+                    "5.6.1", "vdbClosedSubmissionChecksum", str(run_leaf),
+                    "%s", str(e),
+                )
+                valid = False
+                continue
+            except (MissingHashFile, MalformedHashFile) as e:
+                self.log_violation(
+                    "5.6.1", "vdbClosedSubmissionChecksum", str(run_leaf),
+                    "%s", str(e),
+                )
+                valid = False
+                continue
+
+            # Step 5 (D-89): self-consistency check on pool image.
+            try:
+                self_ok = verify_image_self_consistent(pool_image_path, self.log)
+            except Exception as e:
+                self.log_violation(
+                    "5.6.1", "vdbClosedSubmissionChecksum", str(pool_image_path),
+                    "%s", str(e),
+                )
+                valid = False
+                continue
+            if not self_ok:
+                self.log_violation(
+                    "5.6.1", "vdbClosedSubmissionChecksum", str(pool_image_path),
+                    "pool image %s: self-consistency check failed",
+                    pool_image_path,
+                )
+                valid = False
+                continue
+
+            # Step 6 (D-89): version-keyed upstream-identity check (D-86/D-87).
+            mlpstorage_version = hash_data.get("mlpstorage_version")
+            expected = REFERENCE_CHECKSUMS.get(mlpstorage_version)
+
+            if expected is None:
+                # D-87: warn once per pool image, then pass.
+                pool_key = str(pool_image_path)
+                if pool_key not in self._warned_pool_images:
+                    self._warned_pool_images.add(pool_key)
+                    self.warn_violation(
+                        "5.6.1", "vdbClosedSubmissionChecksum", str(pool_image_path),
+                        "mlpstorage_version %s not in REFERENCE_CHECKSUMS; "
+                        "upstream-identity check skipped (self-consistency still ran).",
+                        mlpstorage_version,
+                    )
+                continue
+
+            # Step 7: compute tree MD5 and compare against reference.
+            digest = compute_code_tree_md5(str(pool_image_path), self.log)
+            if digest != expected:
+                self.log_violation(
+                    "5.6.1", "vdbClosedSubmissionChecksum", str(pool_image_path),
+                    "pool image %s: MD5 %s does not match "
+                    "REFERENCE_CHECKSUMS[%s] = %s",
+                    pool_image_path, digest, mlpstorage_version, expected,
+                )
+                valid = False
+
+        return valid
 
     @rule("5.6.2", "vdbClosedDatabaseBackend")
     def vdb_closed_database_backend(self):
