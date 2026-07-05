@@ -35,7 +35,11 @@ import re
 import pathlib
 import pytest
 
-from mlpstorage_py.config import _MANPAGE_SYNC_ALLOWLIST, MANPAGE_ENV_VAR_TIERS
+from mlpstorage_py.config import (
+    _MANPAGE_SYNC_ALLOWLIST,
+    MANPAGE_ENV_VAR_TIERS,
+    MANPAGE_STORAGE_BACKEND_ENV_VARS,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -268,7 +272,7 @@ class TestEnvVarInventorySync:
         docs_mentions = set(_parse_manpage_env_vars(_MANPAGE).keys())
 
         missing_in_docs = code_reads - _MANPAGE_SYNC_ALLOWLIST - docs_mentions
-        extra_in_docs = docs_mentions - _MANPAGE_SYNC_ALLOWLIST - code_reads
+        extra_in_docs = docs_mentions - _MANPAGE_SYNC_ALLOWLIST - MANPAGE_STORAGE_BACKEND_ENV_VARS - code_reads
 
         assert missing_in_docs == set() and extra_in_docs == set(), (
             "Env-var inventory out of sync (SC-3 / DOC-05).\n\n"
@@ -563,4 +567,70 @@ class TestMlperfRenameGate:
             "Offending lines:\n"
             + "\n".join(offenders)
             + "\n\nFix: rename to MLPSTORAGE_* equivalents throughout docs/."
+        )
+
+
+# ===========================================================================
+# Test Class 5: Storage-backend env var carve-out (Phase 7.5 D-02, D-08)
+# ===========================================================================
+
+
+class TestStorageBackendEnvVars:
+    """Phase 7.5 D-02: MANPAGE_STORAGE_BACKEND_ENV_VARS carve-out assertions.
+
+    Verifies that:
+      1. Every entry in MANPAGE_STORAGE_BACKEND_ENV_VARS appears in ManPage.md
+         under the tier declared in MANPAGE_ENV_VAR_TIERS.
+      2. MANPAGE_STORAGE_BACKEND_ENV_VARS and _MANPAGE_SYNC_ALLOWLIST are disjoint
+         (backend vars are DOCUMENTED; allowlist vars are NOT).
+      3. The D-08 verbatim warning prefix appears in benchmark source.
+    """
+
+    def test_backend_vars_appear_in_manpage(self):
+        """Every entry in MANPAGE_STORAGE_BACKEND_ENV_VARS is in ManPage under its declared tier."""
+        manpage_tiers = _parse_manpage_env_vars(_MANPAGE)
+        missing = []
+        wrong_tier = []
+        for var_name in MANPAGE_STORAGE_BACKEND_ENV_VARS:
+            declared_tier = MANPAGE_ENV_VAR_TIERS.get(var_name)
+            actual_tier = manpage_tiers.get(var_name)
+            if actual_tier is None:
+                missing.append(var_name)
+            elif declared_tier is not None and actual_tier != declared_tier:
+                wrong_tier.append(
+                    f"  {var_name!r}: expected={declared_tier!r}, got={actual_tier!r}"
+                )
+        assert not missing and not wrong_tier, (
+            "MANPAGE_STORAGE_BACKEND_ENV_VARS integrity failure (Phase 7.5 D-02):\n"
+            + (f"\nNot found in ManPage:\n  {sorted(missing)}" if missing else "")
+            + ("\nWrong tier in ManPage:\n" + "\n".join(wrong_tier) if wrong_tier else "")
+        )
+
+    def test_backend_vars_disjoint_from_allowlist(self):
+        """MANPAGE_STORAGE_BACKEND_ENV_VARS must not overlap with _MANPAGE_SYNC_ALLOWLIST.
+
+        Backend vars are DOCUMENTED in ManPage tier tables (they have a tier entry).
+        Allowlist vars are NOT documented (they are intentionally excluded).
+        Overlap means a var is simultaneously 'documented but not read by Python'
+        AND 'exempt from documentation' — a contradiction.
+        """
+        overlap = MANPAGE_STORAGE_BACKEND_ENV_VARS & _MANPAGE_SYNC_ALLOWLIST
+        assert not overlap, (
+            "MANPAGE_STORAGE_BACKEND_ENV_VARS and _MANPAGE_SYNC_ALLOWLIST overlap "
+            f"(Phase 7.5 D-02/D-05 disjoint invariant violated):\n  {sorted(overlap)}\n\n"
+            "Backend vars are documented; allowlist vars are not. They must be disjoint."
+        )
+
+    def test_d08_warning_prefix_in_benchmark_source(self):
+        """D-08 verbatim warning prefix must appear in mlpstorage_py/benchmarks/base.py.
+
+        Locks the warn-and-continue check added by Phase 7.5 Plan 02 Task 1.
+        If the method is removed or the string is paraphrased, this test fails.
+        """
+        base_src = (_MLPSTORAGE_PY / "benchmarks" / "base.py").read_text()
+        assert "s3dlio env var '" in base_src, (
+            "D-08 verbatim warning prefix \"s3dlio env var '\" not found in "
+            "mlpstorage_py/benchmarks/base.py.\n\n"
+            "Fix: ensure _check_storage_backend_env() in base.py uses the verbatim "
+            "template from Phase 7.5 D-08 (do not paraphrase)."
         )
