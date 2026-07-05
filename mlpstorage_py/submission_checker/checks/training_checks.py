@@ -2,6 +2,7 @@
 from .base import BaseCheck
 from ..constants import *
 from ..configuration.configuration import Config
+from ..dlio_summary_helpers import cluster_total_host_memory_gb
 from ..loader import SubmissionLogs
 from ..rule_registry import rule
 from .helpers import (
@@ -165,7 +166,12 @@ class TrainingCheck(BaseCheck):
                 # From summary
                 num_accelerators = summary.get("num_accelerators", 1)
                 num_hosts = summary.get("num_hosts", 1)
-                host_memory_gb = summary.get("host_memory_GB", [0])[0]
+                # storage#669: DLIO's host_memory_GB array is populated by an
+                # MPI SUM-Reduce keyed on self.MPI.node(). On multi-rank-per-
+                # host clusters where MPI.node() doesn't map monotonically to
+                # 0..nnodes-1, some slots are doubled and some are zero. sum()
+                # is authoritative; array[0] * num_hosts is not.
+                total_host_memory = cluster_total_host_memory_gb(summary)
 
                 if record_length == 0:
                     self.log_violation(
@@ -180,8 +186,8 @@ class TrainingCheck(BaseCheck):
                                         num_files_train * num_samples_per_file // (batch_size * num_accelerators))
                 min_samples_steps = num_steps_per_epoch * batch_size * num_accelerators
 
-                # Calculate min samples from host memory
-                total_host_memory = num_hosts * host_memory_gb
+                # Calculate min samples from host memory. total_host_memory
+                # was aggregated via cluster_total_host_memory_gb above.
                 min_samples_memory = (total_host_memory * HOST_MEMORY_MULTIPLIER *
                                     1024 * 1024 * 1024 / record_length)
 

@@ -25,6 +25,7 @@ from pathlib import Path
 
 from .base import BaseCheck
 from ..configuration.configuration import Config
+from ..dlio_summary_helpers import per_host_memory_gb
 from ..rule_registry import rule
 from ..tools.code_checksum import compute_code_tree_md5
 from ..tools.code_image import (
@@ -800,7 +801,7 @@ class SubmissionStructureCheck(BaseCheck):
                 )
                 valid = False
 
-        # Cross-check 2 — per-host memory (index-aligned when possible)
+        # Cross-check 2 — mean per-host memory vs system YAML nameplate.
         # ``memory_capacity`` in the system YAML is nameplate (GB) while
         # ``host_memory_GB`` in summary.json is the usable amount the OS
         # sees (GiB after DDR overhead, kernel reserve, BIOS-reserved
@@ -810,32 +811,37 @@ class SubmissionStructureCheck(BaseCheck):
         # Use a ±10% band: catches genuine config mismatches (e.g., a
         # 256 GB rig reporting against a 768 GB YAML — ~3x off) while
         # letting nameplate-vs-usable through.
+        #
+        # storage#669: prior versions iterated positionally over
+        # host_memory_GB[i], which is unreliable — DLIO's SUM-Reduce
+        # populates that array in slots keyed on self.MPI.node() and on
+        # multi-rank-per-host clusters some slots are doubled and some
+        # are zero. Only sum(array) is authoritative. We compare the
+        # cluster-mean per-host memory against the nameplate; that
+        # collapses the per-host granularity that the original check
+        # advertised, but that granularity was already fictional given
+        # the array shape.
         MEMORY_TOLERANCE = 0.10
-        host_memory_list = summary.get("host_memory_GB")
+        mean_per_host_memory = per_host_memory_gb(summary)
         if (
-            host_memory_list is not None
+            mean_per_host_memory is not None
+            and mean_per_host_memory > 0
             and expected_memory_per_host is not None
-            and isinstance(host_memory_list, list)
         ):
-            for i, mem in enumerate(host_memory_list):
-                try:
-                    mem_int = int(mem)
-                except (TypeError, ValueError):
-                    continue
-                lower = expected_memory_per_host * (1 - MEMORY_TOLERANCE)
-                upper = expected_memory_per_host * (1 + MEMORY_TOLERANCE)
-                if not (lower <= mem_int <= upper):
-                    self.log_violation(
-                        "2.1.9", "identicalSystemConfig",
-                        summary_path,
-                        "host_memory_GB[%d] mismatch: summary.json has %s GiB, "
-                        "system YAML client chassis.memory_capacity is %s GiB "
-                        "(outside ±%d%% tolerance)",
-                        i, mem_int, expected_memory_per_host,
-                        int(MEMORY_TOLERANCE * 100),
-                    )
-                    valid = False
-                    break  # one violation per summary.json per field is sufficient
+            lower = expected_memory_per_host * (1 - MEMORY_TOLERANCE)
+            upper = expected_memory_per_host * (1 + MEMORY_TOLERANCE)
+            if not (lower <= mean_per_host_memory <= upper):
+                self.log_violation(
+                    "2.1.9", "identicalSystemConfig",
+                    summary_path,
+                    "cluster-mean host memory mismatch: "
+                    "sum(summary.json host_memory_GB) / num_hosts = %.1f GiB, "
+                    "system YAML client chassis.memory_capacity is %s GiB "
+                    "(outside ±%d%% tolerance)",
+                    mean_per_host_memory, expected_memory_per_host,
+                    int(MEMORY_TOLERANCE * 100),
+                )
+                valid = False
 
         # Cross-check 3 — multi_host capability vs. num_hosts > 1
         if (

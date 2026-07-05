@@ -2,6 +2,7 @@
 from .base import BaseCheck
 from ..constants import *
 from ..configuration.configuration import Config
+from ..dlio_summary_helpers import per_host_memory_gb
 from ..loader import SubmissionLogs
 from ..rule_registry import rule
 from .helpers import (
@@ -130,7 +131,10 @@ class CheckpointingCheck(BaseCheck):
 
         for summary, metadata, _ in self._iter_valid_files():
             checkpoint_size_gb = summary.get("metric", {}).get("checkpoint_size_GB", 0)
-            host_memory_gb = summary.get("host_memory_GB", [0])[0]
+            # storage#669: use sum(host_memory_GB) / num_hosts rather than
+            # host_memory_GB[0]. DLIO's array is positionally malformed on
+            # multi-rank-per-host clusters; only the sum is authoritative.
+            host_memory_gb = per_host_memory_gb(summary) or 0.0
             num_hosts = summary.get("num_hosts", 1)
 
             if checkpoint_size_gb == 0 or host_memory_gb == 0:
