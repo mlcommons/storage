@@ -701,32 +701,12 @@ class TrainingCheck(BaseCheck):
         already owns the VALS-01 missing-code/ violation under §2.1.6, so
         re-firing under §3.6.1 would double-count.
         """
-        if self.mode != "training":
-            return True
-
-        # OPEN handled at STRUCT-06 self-consistency loop, not here.
-        if self.submissions_logs.loader_metadata.division != "closed":
-            return True
-
-        # Walk up from <root>/closed/<orgname>/results/<system>/training/<model>
-        # to <root>/closed/<orgname>, then append "code".
-        submitter_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(self.path))))
-        code_path = os.path.join(submitter_path, "code")
-
-        # STRUCT-06 owns missing-code/ under §2.1.6; do not duplicate the violation here.
-        if not os.path.isdir(code_path):
-            return True
-
-        expected = self.config.get_reference_checksum()
-        return _check_code_image_layered(
-            code_path,
-            "closed",
-            expected,
-            self.log,
-            self.log_violation,
-            "3.6.1",
-            "trainingClosedSubmissionChecksum",
-        )
+        # TODO(Phase8-Plan2): replaced in Plan 08-02 with per-image pool-image
+        # lookup (D-89). The legacy code/ walk and get_reference_checksum() call
+        # are removed; Plan 08-02 implements the full CHECK-05 flow using
+        # _read_pointer → pool image resolution → verify_image_self_consistent
+        # → REFERENCE_CHECKSUMS[mlpstorage_version] per-image lookup.
+        return True  # TODO(Phase8-Plan2): replaced in Plan 08-02
     
     @rule("3.6.2", "trainingClosedSubmissionParameters")
     def closed_submission_parameters(self):

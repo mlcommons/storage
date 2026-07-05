@@ -5,11 +5,10 @@ from ..constants import *
 
 
 class Config:
-    def __init__(self, version, submitters, skip_output_file=False, reference_checksum_override=None):
+    def __init__(self, version, submitters, skip_output_file=False):
         self.version = version
         self.submitters = submitters
         self.skip_output_file = skip_output_file
-        self.reference_checksum_override = reference_checksum_override
         self._parallelism_cache: dict[str, tuple[int, int]] = {}  # lazy-load cache for get_model_parallelism
         
     def check_submitter(self, submitter):
@@ -44,27 +43,10 @@ class Config:
         # See get_num_train_files: .get over [] for None-on-miss semantics.
         return CHECKPOINT_FILE_MAP.get(model)
 
-    def get_reference_checksum(self, cli_override=None):
-        """Resolve the reference MD5 for the current version.
-
-        Precedence: cli_override > self.reference_checksum_override >
-        REFERENCE_CHECKSUMS[self.version] > None.
-
-        ``None`` means "not pinned" — the caller emits a warning via
-        ``warn_violation`` and treats the check as passing (D-12).
-
-        Args:
-            cli_override: Optional hex MD5 string passed from the CLI
-                ``--reference-checksum`` flag. Takes highest precedence.
-
-        Returns:
-            str | None: The resolved reference checksum, or None if not pinned.
-        """
-        if cli_override is not None:
-            return cli_override
-        if self.reference_checksum_override is not None:
-            return self.reference_checksum_override
-        return REFERENCE_CHECKSUMS.get(self.version)
+    # NOTE: get_reference_checksum() was removed in Phase 8 (D-88).
+    # Per-image mlpstorage_version lookup (D-86) via REFERENCE_CHECKSUMS is now
+    # the only path — see CHECK-05 in Plan 08-02. REFERENCE_CHECKSUMS constant
+    # is retained in constants.py for that lookup.
 
     def get_model_parallelism(self, model_size: str) -> tuple[int, int]:
         """Return (tensor_parallelism, pipeline_parallelism) for the given model size.

@@ -16,6 +16,7 @@ from .loader import Loader
 from .checks.checkpointing_checks import CheckpointingCheck
 from .checks.directory_checks import DirectoryCheck
 from .checks.kvcache_checks import KVCacheCheck
+from .checks.pool_structure_checks import PoolStructureCheck
 from .checks.submission_structure_checks import SubmissionStructureCheck
 from .checks.system_yaml_schema_checks import SystemYamlSchemaCheck
 from .checks.training_checks import TrainingCheck
@@ -94,11 +95,6 @@ def get_args():
         action="store_true",
         help="Skip check output file"
     )
-    parser.add_argument(
-        "--reference-checksum",
-        default=None,
-        help="MD5 checksum for the code/ tree (overrides REFERENCE_CHECKSUMS)",
-    )
     args = parser.parse_args()
     return args
 
@@ -140,7 +136,6 @@ def run(args):
         version=args.version,
         submitters=submitters,
         skip_output_file=args.skip_output_file,
-        reference_checksum_override=args.reference_checksum,
     )
 
     loader = Loader(args.input, args.version, config)
@@ -164,6 +159,14 @@ def run(args):
     # workload). Failures accumulated into `errors` but do NOT abort the loop.
     schema_check = SystemYamlSchemaCheck(log, config, args.input)
     if not schema_check():
+        errors.append(args.input)
+
+    # Per Phase 8 D-82: CHECK-01..04 run as pre-loop checks, same pattern as
+    # SubmissionStructureCheck and SystemYamlSchemaCheck. Verifies v1.1 pool
+    # layout: pointer resolution, self-consistency, orphan detection, legacy
+    # detection. Failures accumulated into errors but do NOT abort the loop.
+    pool_check = PoolStructureCheck(log, config, args.input)
+    if not pool_check():
         errors.append(args.input)
 
     # Main loop over all the submissions
