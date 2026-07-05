@@ -4,17 +4,17 @@ milestone: v1.1
 milestone_name: Content-addressed code-image pool
 current_phase: 6
 current_phase_name: Content-addressed pool + capture-or-verify rewrite
-status: executing
-stopped_at: Completed Phase 6 Plan 04 (integration coverage for pool + pointer flow)
-last_updated: "2026-07-05T02:57:01Z"
+status: verified
+stopped_at: Phase 6 verification PASS — 10/10 REQ-IDs verified
+last_updated: "2026-07-05T03:04:00Z"
 last_activity: 2026-07-05
-last_activity_desc: "Phase 6 Plan 04 landed: integration coverage for SC-1..SC-5 + D-66 + UX-01 negative-grep across six test_pool_*.py files (15 tests total, 11 added this session). All 35 pool-layout integration tests pass in 0.57s; no production code modified (tests-only plan)."
+last_activity_desc: "Phase 6 verification PASS. gsd-verifier confirmed all 10 REQ-IDs (POOL-01..04, PTR-01..02, CAPVER-01..03, UX-01) delivered against codebase evidence. Structural gates D-60/D-63/D-65/D-66 verified. Test suite: mlpstorage_py/tests 839 passed, tests/integration/test_pool_*.py 15 passed. Zero BLOCKER/WARNING findings. VERIFICATION.md at .planning/phases/06-.../VERIFICATION.md. Ready for /gsd-transition to Phase 7."
 progress:
   total_phases: 3
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 4
   completed_plans: 4
-  percent: 0
+  percent: 33
 current_plan: 4
 ---
 
@@ -24,8 +24,8 @@ current_plan: 4
 
 Phase: 6 — Content-addressed pool + capture-or-verify rewrite
 Plan: 4 of 4 complete — integration coverage for pool + pointer flow
-Status: Phase 6 code work complete; ready for `/gsd-transition` (or Phase 7 planning)
-Last activity: 2026-07-05 — Phase 6 Plan 04 landed: integration coverage for SC-1..SC-5 + D-66 + UX-01 negative-grep across six test_pool_*.py files (15 tests total, 11 added this session). All 35 pool-layout integration tests pass in 0.57s; no production code modified (tests-only plan).
+Status: **Verification PASS — 10/10 REQ-IDs delivered.** Ready for `/gsd-transition` to Phase 7.
+Last activity: 2026-07-05 — Phase 6 verification PASS. gsd-verifier confirmed all 10 REQ-IDs (POOL-01..04, PTR-01..02, CAPVER-01..03, UX-01). Structural gates D-60/D-63/D-65/D-66 verified. Test suite green: mlpstorage_py/tests 839 passed; tests/integration/test_pool_*.py 15 passed. No BLOCKER or WARNING findings.
 
 ## Milestone Snapshot
 
@@ -35,7 +35,7 @@ Three phases derived from the two-PR reference design (#651 comment 4871997634):
 
 | Phase | Name | REQ-IDs | Status |
 |-------|------|---------|--------|
-| 6 | Content-addressed pool + capture-or-verify rewrite | POOL-01..04, PTR-01..02, CAPVER-01..03, UX-01 | Not started |
+| 6 | Content-addressed pool + capture-or-verify rewrite | POOL-01..04, PTR-01..02, CAPVER-01..03, UX-01 | ✓ Verified |
 | 7 | One-shot legacy migration + hand-edit detection | MIG-01..03 | Not started |
 | 8 | Submission-checker per-image verification | CHECK-01..05 | Not started |
 
