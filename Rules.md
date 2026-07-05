@@ -54,6 +54,10 @@ The `mlpstorage` tool must be used to run the benchmarks, submitters are not all
 
 1.1. **mlpstorageGeneratesHierarchy** -- The `mlpstorage` command must obtain (somehow) the pathname of the output file directory hierarchy and directly create and/or append to the files within that hierarchy to successively build out the submission folder.  We don't want the submitter to manually create anything in that hierarchy except for the SystemDescription.* files (if we can help it).
 
+1.2. **storageBackendEnvVarDeclaration** -- Submitters MUST NOT set any documented s3dlio-side env var (§ENVIRONMENT → Storage-backend in ManPage.md) during the timed run unless the run's configuration file explicitly declares it. Results from runs with undeclared storage-backend env vars MUST be submitted as OPEN category. mlpstorage warns at run start when HIGH-risk vars are detected.
+
+For cloud-specific credential and endpoint env vars consumed by s3dlio for Azure or GCS backends, see s3dlio's [Environment_Variables.md](https://github.com/mlcommons/s3dlio/blob/main/docs/Environment_Variables.md).
+
 # 2. Core/Common Rules for All Submissions
 
 ## 2.1. Core/Common POSIX API Rules
