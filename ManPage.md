@@ -147,10 +147,10 @@ Run `mlpstorage init <orgname> <path>` first.
 
 ### Systemname resolution
 
-`--systemname <name>` / `-sn <name>` is required on every emitting subcommand (`run`, `datagen`, `configview`, `reportgen`, `history rerun`, etc.). Resolution priority is:
+`--systemname <name>` / `-sn <name>` is required on every emitting subcommand (`run`, `datagen`, `configview`, `history rerun`, etc.). Resolution priority is:
 
 1. The CLI flag if supplied.
-2. The `MLPERF_SYSTEMNAME` environment variable.
+2. The `MLPSTORAGE_SYSTEMNAME` environment variable.
 3. Otherwise empty string (which fails the required-on-emitting-commands check, surfacing as a parser error).
 
 Because systemname is per-run, the same results-dir can host runs from many different systems-under-test. The canonical results path includes both `<orgname>` (from sentinel) and `<systemname>` (from CLI/env) so cross-system results never collide.
@@ -476,7 +476,7 @@ The `init` subcommand takes no flags — universal flags such as `--results-dir`
   Root directory for all written artifacts. Required for any command that writes results. Defaults to `$MLPERF_RESULTS_DIR` if set. Must already be initialized with `mlpstorage init`; commands that consult the orgname-resolution gate refuse to run otherwise.
 
 - **`--systemname <name>`, `-sn <name>`**
-  System-under-test identifier for the current run. Required on every emitting subcommand (`run`, `datagen`, `configview`, `reportgen`, `history rerun`). Defaults to `$MLPERF_SYSTEMNAME`. Each mode (closed/open/whatif) owns its own `<systemname>.yaml` under the per-mode `systems/` directory, so the same name across modes is fine.
+  System-under-test identifier for the current run. Required on every emitting subcommand (`run`, `datagen`, `configview`, `history rerun`). Defaults to `$MLPSTORAGE_SYSTEMNAME`. Each mode (closed/open/whatif) owns its own `<systemname>.yaml` under the per-mode `systems/` directory, so the same name across modes is fine. See the Reports subsection for reportgen's optional-systemname multi-system-fallback behavior.
 
 - **`--config-file <path>`, `-c <path>`**
   YAML file of argument overrides merged in *after* CLI parsing. Useful for keeping repeatable closed-submission knob settings in one place.
