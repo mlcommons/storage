@@ -9,7 +9,7 @@
 ## Phases
 
 - [ ] **Phase 6: Content-addressed pool + capture-or-verify rewrite** — Fresh `--results-dir` runs write under `<results_dir>/<orgname>/code-<hash8>/` with a `.mlps-code-image` pointer in each run leaf; hash mismatch means "new image needed," not "reject."
-- [ ] **Phase 7: One-shot legacy migration + hand-edit detection** — First run of new mlpstorage against an existing (v1.0-layout) `--results-dir` auto-migrates every legacy `code/` into the pool, gated by a per-org `.mlps-image-pool` sentinel, aborting cleanly on any hand-edited image.
+- [x] **Phase 7: One-shot legacy migration + hand-edit detection** — First run of new mlpstorage against an existing (v1.0-layout) `--results-dir` auto-migrates every legacy `code/` into the pool, gated by a per-org `.mlps-image-pool` sentinel, aborting cleanly on any hand-edited image. (completed 2026-07-05)
 - [ ] **Phase 8: Submission-checker per-image verification** — `mlpstorage validate` (and the submission checker) verifies every pointer resolves, every pool image is self-consistent, no orphan images, no leftover legacy `code/`, and reference-checksum comparisons run against the correct image per run.
 
 ## Phase Details
@@ -53,7 +53,19 @@
   3. Simulating a crash mid-migration (e.g. by SIGKILL after some pool images are materialized but before the sentinel is written) leaves the tree in a state where a subsequent invocation resumes cleanly: any already-materialized pool image is re-used (dedup), remaining legacy `code/` trees are discovered, and the sentinel is written on completion. No run leaf ends up without a pointer.
   4. If any legacy `code/` on disk does not re-hash to its own `.code-hash.json.hash` (i.e. was hand-edited after capture), migration aborts before modifying any files, emits an error naming both the offending path and the phrase "hand-edited code image detected," and leaves the `.mlps-image-pool` sentinel absent so the submitter can fix and re-run.
 
-**Plans:** TBD
+**Plans:** 4/4 plans complete
+**Wave 0**
+
+- [x] 07-01-PLAN.md — Wave-0 test scaffolding: `legacy_tree_factory` fixture (training/checkpointing/vector_database + hand-edit variants) + xfail-stubs for 6 test files (MIG-01/02/03)
+
+**Wave 1** *(blocked on Wave 0 completion)*
+
+- [x] 07-02-PLAN.md — `HandEditedCodeImage(CodeImageError)` in code_image.py + `legacy_migration.py` core module (pass 1 verifier, pass 2 orchestration, sentinel writer/reader, run-leaf enumerator for 3 benchmark shapes, pre-check helper) (D-70/D-71/D-72/D-73/D-74)
+
+**Wave 2** *(blocked on Wave 1 completion; 07-03 + 07-04 run in parallel — zero files_modified overlap)*
+
+- [x] 07-03-PLAN.md — main.py:224 wiring (D-70) + structural tests + unit tests + MIG-01 behavioral + MIG-03 hand-edit abort + D-70 multi-org isolation
+- [x] 07-04-PLAN.md — MIG-02 idempotency (sentinel short-circuit) + MIG-02 crash-resume (4 D-71 checkpoints via monkeypatch fault injection)
 
 ### Phase 8: Submission-checker per-image verification
 
@@ -75,7 +87,7 @@
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 6. Content-addressed pool + capture-or-verify rewrite | 4/4 | Complete |  |
-| 7. One-shot legacy migration + hand-edit detection | 0/TBD | Not started | — |
+| 7. One-shot legacy migration + hand-edit detection | 4/4 | Complete   | 2026-07-05 |
 | 8. Submission-checker per-image verification | 0/TBD | Not started | — |
 
 ## Coverage Matrix

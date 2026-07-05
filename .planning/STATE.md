@@ -2,19 +2,19 @@
 gsd_state_version: 1.0
 milestone: v1.1
 milestone_name: Content-addressed code-image pool
-current_phase: 6
-current_phase_name: Content-addressed pool + capture-or-verify rewrite
-status: verified
-stopped_at: Phase 6 verification PASS — 10/10 REQ-IDs verified
-last_updated: "2026-07-05T03:04:00Z"
+current_phase: 7
+status: completed
+stopped_at: Phase 7 context gathered — D-70..D-74 locked
+last_updated: "2026-07-05T21:15:57.054Z"
 last_activity: 2026-07-05
-last_activity_desc: "Phase 6 verification PASS. gsd-verifier confirmed all 10 REQ-IDs (POOL-01..04, PTR-01..02, CAPVER-01..03, UX-01) delivered against codebase evidence. Structural gates D-60/D-63/D-65/D-66 verified. Test suite: mlpstorage_py/tests 839 passed, tests/integration/test_pool_*.py 15 passed. Zero BLOCKER/WARNING findings. VERIFICATION.md at .planning/phases/06-.../VERIFICATION.md. Ready for /gsd-transition to Phase 7."
+last_activity_desc: Phase 7 marked complete
 progress:
   total_phases: 3
-  completed_phases: 1
-  total_plans: 4
-  completed_plans: 4
-  percent: 33
+  completed_phases: 2
+  total_plans: 8
+  completed_plans: 8
+  percent: 67
+current_phase_name: one-shot-legacy-migration-hand-edit-detection
 current_plan: 4
 ---
 
@@ -22,10 +22,10 @@ current_plan: 4
 
 ## Current Position
 
-Phase: 6 — Content-addressed pool + capture-or-verify rewrite
-Plan: 4 of 4 complete — integration coverage for pool + pointer flow
-Status: **Verification PASS — 10/10 REQ-IDs delivered.** Ready for `/gsd-transition` to Phase 7.
-Last activity: 2026-07-05 — Phase 6 verification PASS. gsd-verifier confirmed all 10 REQ-IDs (POOL-01..04, PTR-01..02, CAPVER-01..03, UX-01). Structural gates D-60/D-63/D-65/D-66 verified. Test suite green: mlpstorage_py/tests 839 passed; tests/integration/test_pool_*.py 15 passed. No BLOCKER or WARNING findings.
+Phase: 7 — COMPLETE
+Plan: 3 of 4
+Status: Phase 7 complete
+Last activity: 2026-07-05 — Phase 7 marked complete
 
 ## Milestone Snapshot
 
@@ -66,10 +66,10 @@ Coverage: 18/18 v1 requirements mapped, each to exactly one phase.
 
 ## Session Continuity
 
-**Stopped at:** Completed Phase 6 Plan 04 (integration coverage for pool + pointer flow)
-**Resume file:** None
+**Stopped at:** Phase 7 context gathered — D-70..D-74 locked
+**Resume file:** .planning/phases/07-one-shot-legacy-migration-hand-edit-detection/07-CONTEXT.md
 
-**Last session:** 2026-07-05T02:57:01Z
+**Last session:** 2026-07-05T21:12:36.447Z
 
 **Next action:** `/gsd-transition` to close Phase 6 and route to Phase 7 planning (one-shot legacy migration + hand-edit detection, MIG-01..03).
 
@@ -79,6 +79,9 @@ Coverage: 18/18 v1 requirements mapped, each to exactly one phase.
 |-------|------|----------|-------|
 | Phase 6 P3 | 6 min | 2 tasks | 5 files |
 | Phase 6 P4 | 12 min | 6 tasks | 6 files created (5 test + 1 summary); +11 integration tests, +0.13s runtime |
+| Phase 07 P01 | 742 | 3 tasks | 7 files |
+| Phase 07 P02 | 623 | 2 tasks | 3 files |
+| Phase 07 P03 | 10min | 4 tasks | 7 files |
 
 ## Decisions
 
@@ -88,3 +91,5 @@ Coverage: 18/18 v1 requirements mapped, each to exactly one phase.
 - [Phase ?]: [06-04] Patched `mlpstorage_py.rules.utils.DATETIME_STR` (not `time.sleep`) for multi-call reuse/dedup tests — `DATETIME_STR` is module-load constant, so sleeping does not re-evaluate `datetime.now()`. Deterministic + sub-millisecond.
 - [Phase ?]: [06-04] Concurrent D-66 test uses `multiprocessing.get_context('fork')` + in-subprocess re-patch of `find_source_root` (parent's monkeypatch does not survive fork); 5-iteration stability loop confirms invariant holds every scheduling outcome.
 - [Phase ?]: [06-04] Concurrent test allows 1 OR 2 pointer files (workers may share `DATETIME_STR` and land in same run leaf); the D-66 invariant is on the POOL image, not the run leaf pointer.
+- [Phase ?]: D-70 explicit-pre-check wired at main.py:224: _check_and_migrate_legacy_layout called before capture_or_verify_code_image inside same progress_context block, no exception control flow
+- [Phase ?]: test_main_precheck.py uses 4 structural inspect.getsource assertions instead of complex mock-based dynamic test — simpler, equivalent coverage, more resilient to internal restructuring
