@@ -489,7 +489,9 @@ def _detect_metric_type(host: str, port: str, collection_name: str) -> str:
     try:
         from pymilvus import Collection, connections
 
-        connections.connect(alias="metric_detect", host=host, port=str(port))
+        from vdbbench.connection import open_connection
+
+        open_connection(alias="metric_detect", host=host, port=str(port))
         collection = Collection(collection_name, using="metric_detect")
 
         if collection.has_index():

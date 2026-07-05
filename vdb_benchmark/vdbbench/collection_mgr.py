@@ -21,6 +21,8 @@ import numpy as np
 from pymilvus import Collection, connections, utility, DataType
 from tabulate import tabulate
 
+from vdbbench.connection import open_connection
+
 METRICS_PORT = 9091       # override with --metrics-port if needed
 
 ###############################################################################
@@ -31,7 +33,7 @@ def connect(host: str, port: int) -> bool:
     """Connect to Milvus server with error handling"""
     try:
         if not connections.has_connection("default"):
-            connections.connect("default", host=host, port=port)
+            open_connection("default", host=host, port=port)
         return True
     except Exception as e:
         print(f"❌ Connection failed: {e}")
