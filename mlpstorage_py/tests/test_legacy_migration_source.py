@@ -99,20 +99,21 @@ def test_sentinel_writer_uses_write_tmp_and_os_rename():
     )
 
 
-@pytest.mark.xfail(strict=True, reason="Wave 0 scaffold — implementation in Plan 07-02/07-03/07-04", raises=NotImplementedError)
 def test_HandEditedCodeImage_subclasses_CodeImageError():
-    """HandEditedCodeImage(CodeImageError) declaration exists in code_image.py (D-73).
+    """HandEditedCodeImage(CodeImageError) exists in code_image.py and is importable (D-73).
 
-    Assert that the literal string ``class HandEditedCodeImage(CodeImageError):``
-    appears in mlpstorage_py/submission_checker/tools/code_image.py.
-
-    This structural test ensures the exception is placed in the correct module
-    (alongside LegacyLayoutDetected, PoolCorruption, etc.) so main.py's
-    existing exit-code mapping continues to work without a new handler.
+    Asserts:
+    - HandEditedCodeImage is importable from code_image.
+    - issubclass(HandEditedCodeImage, CodeImageError) is True.
+    - Instantiation + str round-trip works.
     """
-    raise NotImplementedError(
-        "Wave 0 stub — Plan 07-03 (structural) or Plan 07-04 (unit) populates"
+    from mlpstorage_py.submission_checker.tools.code_image import (
+        HandEditedCodeImage,
+        CodeImageError,
     )
+    assert issubclass(HandEditedCodeImage, CodeImageError) is True
+    e = HandEditedCodeImage("hand-edited code image detected at 'x'")
+    assert str(e) == "hand-edited code image detected at 'x'"
 
 
 @pytest.mark.xfail(strict=True, reason="Wave 0 scaffold — implementation in Plan 07-02/07-03/07-04", raises=NotImplementedError)
