@@ -26,6 +26,7 @@ Refs: Phase 6 06-04-PLAN.md SC#7, SC#12.
 
 from __future__ import annotations
 
+import json
 from argparse import Namespace
 from pathlib import Path
 
@@ -211,3 +212,128 @@ def pool_dirs(org_root: Path) -> list[Path]:
     if not org_root.is_dir():
         return []
     return sorted(org_root.glob("code-*"))
+
+
+# ---------------------------------------------------------------------------
+# Legacy v1.0-layout tree factory — Phase 7 migration test staging
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def legacy_tree_factory(tmp_path):
+    """Return a callable that plants a v1.0-layout legacy tree under `tmp_path`.
+
+    Signature of the returned callable::
+
+        _build(
+            orgname: str = "Acme",
+            mode: str = "closed",            # 'closed' | 'open'
+            n_run_leaves: int = 3,
+            hand_edit: bool = False,
+            benchmark_shape: str = "training",  # 'training' | 'checkpointing' | 'vector_database'
+        ) -> Path
+
+    Produced tree shape (rooted at ``tmp_path / 'results'``, returned as ``rd``):
+
+    * Legacy code dir at ``rd/<mode>/<orgname>/code/`` containing
+      ``pyproject.toml`` + ``file1.py``, with a valid ``.code-hash.json``
+      stamped via ``compute_code_tree_md5`` (algorithm ``md5-tree-v2``,
+      matching the schema ``_read_hash_file`` expects in
+      ``code_image.py``: ``hash``, ``algorithm``, ``captured_at``,
+      ``mlpstorage_version``, ``git_sha``).
+    * ``n_run_leaves`` datetime run-leaf directories under a shape-dependent
+      base (see below). Each leaf gets an ``output.txt`` file.
+    * If ``hand_edit=True`` the fixture overwrites ``file1.py`` AFTER writing
+      ``.code-hash.json`` so a re-hash disagrees with the stored digest —
+      this simulates D-73's tamper detection case.
+
+    Only the legacy ``code/`` directory carries a ``.code-hash.json``; the
+    run-leaf directories do NOT. That mirrors the v1.0 on-disk shape Phase 7
+    migrates away from.
+
+    Run-leaf base per ``benchmark_shape``:
+
+    * ``training`` — ``rd/<mode>/<org>/results/sys1/training/unet3d/run/``
+      (5-level: ``results/<sys>/<bench>/<model>/<command>/<datetime>/``)
+    * ``checkpointing`` — ``rd/<mode>/<org>/results/sys1/checkpointing/llama3-8b/``
+      (4-level: ``results/<sys>/<bench>/<model>/<datetime>/`` — no command)
+    * ``vector_database`` — ``rd/<mode>/<org>/results/sys1/vector_database/diskann/HNSW/run/``
+      (6-level: ``results/<sys>/<bench>/<engine>/<index>/<command>/<datetime>/``)
+
+    Any other ``benchmark_shape`` raises ``ValueError``. Any ``mode`` other
+    than ``closed`` / ``open`` raises ``ValueError``.
+
+    Refs: Phase 7 D-70/D-73, RESEARCH §7 three-shape enumeration,
+    PATTERNS §legacy_tree_factory.
+    """
+    from mlpstorage_py.submission_checker.tools.code_checksum import (
+        compute_code_tree_md5,
+    )
+
+    def _build(
+        orgname: str = "Acme",
+        mode: str = "closed",
+        n_run_leaves: int = 3,
+        hand_edit: bool = False,
+        benchmark_shape: str = "training",
+    ) -> Path:
+        if mode not in {"closed", "open"}:
+            raise ValueError(f"unknown mode: {mode!r}")
+
+        rd = tmp_path / "results"
+        rd.mkdir(exist_ok=True)
+
+        # 1. Legacy code dir with two source files.
+        legacy = rd / mode / orgname / "code"
+        legacy.mkdir(parents=True)
+        (legacy / "pyproject.toml").write_text("[project]\nname='x'\n")
+        (legacy / "file1.py").write_text("X = 1\n")
+
+        # 2. Hash the legacy dir and stamp .code-hash.json (matches
+        # _read_hash_file schema in code_image.py:497-517).
+        h = compute_code_tree_md5(str(legacy), MockLogger())
+        (legacy / ".code-hash.json").write_text(
+            json.dumps(
+                {
+                    "hash": h,
+                    "algorithm": "md5-tree-v2",
+                    "captured_at": "2026-01-01T00:00:00Z",
+                    "mlpstorage_version": "1.0.0",
+                    "git_sha": None,
+                }
+            )
+        )
+
+        # 3. Optional D-73 tamper: mutate AFTER hash write so re-hash disagrees.
+        if hand_edit:
+            (legacy / "file1.py").write_text("X = 2\n")
+
+        # 4. Shape-dependent run-leaf base (per RESEARCH §7 / D-70 canonical
+        # shapes documented in rules/utils.py:generate_output_location).
+        if benchmark_shape == "training":
+            base = (
+                rd / mode / orgname / "results" / "sys1"
+                / "training" / "unet3d" / "run"
+            )
+        elif benchmark_shape == "checkpointing":
+            base = (
+                rd / mode / orgname / "results" / "sys1"
+                / "checkpointing" / "llama3-8b"
+            )
+        elif benchmark_shape == "vector_database":
+            base = (
+                rd / mode / orgname / "results" / "sys1"
+                / "vector_database" / "diskann" / "HNSW" / "run"
+            )
+        else:
+            raise ValueError(f"unknown benchmark_shape: {benchmark_shape!r}")
+
+        # 5. Plant N run-leaf datetime directories with an output.txt each.
+        for i in range(n_run_leaves):
+            leaf = base / f"20260101_1200{i:02d}"
+            leaf.mkdir(parents=True)
+            (leaf / "output.txt").write_text(f"run {i}\n")
+
+        return rd
+
+    return _build
