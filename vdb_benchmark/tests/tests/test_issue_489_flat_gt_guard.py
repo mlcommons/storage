@@ -243,10 +243,14 @@ class TestCoverageGuard:
             metric_type="COSINE",
         )
 
-        assert result is False, (
+        # create_flat_collection now returns a FlatSetupResult (issue #572).
+        # An insufficient-coverage abort must set ok=False so the caller renders
+        # an "invalid" verdict and exits non-zero.
+        assert result.ok is False, (
             "create_flat_collection must abort when the FLAT ground-truth "
             "collection covers ~0% of the source (issue #489)."
         )
+        assert result.coverage < 0.99
         # The empty FLAT collection must never reach index construction.
         flat_coll.create_index.assert_not_called()
 
