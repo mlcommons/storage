@@ -30,6 +30,21 @@ except ImportError:
     sys.exit(1)
 
 try:
+    from vdbbench.connection import MAX_GRPC_MESSAGE_LENGTH, open_connection
+except ImportError:  # pragma: no cover - allow running as a bare script
+    MAX_GRPC_MESSAGE_LENGTH = 514_983_574
+
+    def open_connection(alias="default", host="127.0.0.1", port="19530",
+                        *, max_message_length=MAX_GRPC_MESSAGE_LENGTH):
+        connections.connect(
+            alias=alias,
+            host=host,
+            port=str(port),
+            max_receive_message_length=max_message_length,
+            max_send_message_length=max_message_length,
+        )
+
+try:
     from tabulate import tabulate
 except ImportError:
     logger.error("Error: tabulate package not found. Please install it with 'pip install tabulate'")
@@ -49,11 +64,7 @@ def parse_args():
 def connect_to_milvus(host, port):
     """Connect to Milvus server"""
     try:
-        connections.connect(
-            alias="default", 
-            host=host, 
-            port=port
-        )
+        open_connection(alias="default", host=host, port=port)
         logger.info(f"Connected to Milvus server at {host}:{port}")
         return True
     except Exception as e:
