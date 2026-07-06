@@ -3,7 +3,22 @@
 **Date:** 2026-07-06
 **Covers:** Versions 3.0.3 through 3.0.34 (May 28 – July 6, 2026)
 
-Each entry lists significant bugs fixed in that release, organized into three categories:
+---
+
+## Source Size Code For Versions 3.0.3 – 3.0.9 (May 28 – June 14, 2026)
+
+| Subtree | May 29 (excl. tests) | May 29 (tests only) | HEAD (excl. tests) | HEAD (tests only) |
+|---|---:|---:|---:|---:|
+| `mlpstorage_py` | 22,222 | 2,995 | 39,309 | 16,395 |
+| `training` + `checkpointing` (DLIO) | 20,746 | 3,389 | 18,226 | 8,552 |
+| `vdb_benchmark` | 11,346 | 5,632 | 14,424 | 6,964 |
+| `kv_cache_benchmark` | 6,424 | 4,013 | 6,413 | 4,112 |
+| **Subtotal** | **60,738** | **16,029** | **78,372** | **36,023** |
+| **Total (all code)** | **76,767** | | **114,395** | |
+
+---
+
+Each section below lists significant bugs fixed in that release, organized into three categories:
 
 - **Score-Affecting** — bugs that alter measured throughput, latency, recall, or pass/fail outcome
 - **Invocation** — bugs that prevented the benchmark from starting or completing a run
