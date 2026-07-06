@@ -80,15 +80,15 @@
   4. Placing a `code-<hash8>/` directory in the pool that is not referenced by any run leaf's pointer file causes `mlpstorage validate` to fail with an orphan-image error naming that image; symmetrically, leaving any legacy unhashed `code/` directory anywhere in the submission tree causes `mlpstorage validate` to fail with a specific "legacy layout detected" error.
   5. §3.6.1 / §5.6.1 reference-checksum verification, when it runs for a given run leaf, is scoped to the specific pool image that leaf's pointer resolves to (and to that image's recorded `mlpstorage_version`) — verifiable by a submission tree with two runs at two mlpstorage versions where checksum comparison correctly succeeds for both.
 
-**Plans:** 3 plans
+**Plans:** 2/3 plans executed
 
 **Wave 1**
 
-- [ ] 08-01-PLAN.md — PoolStructureCheck class (CHECK-01..04) + remove STRUCT-06 + remove --reference-checksum + wire into main.py pre-loop (D-80..D-91, D-83..D-85, D-88)
+- [x] 08-01-PLAN.md — PoolStructureCheck class (CHECK-01..04) + remove STRUCT-06 + remove --reference-checksum + wire into main.py pre-loop (D-80..D-91, D-83..D-85, D-88)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 08-02-PLAN.md — resolve_run_pool_image helper + retarget TrainingCheck/VdbCheck CHECK-05 to per-image pool walk (D-86..D-89, D-92..D-93)
+- [x] 08-02-PLAN.md — resolve_run_pool_image helper + retarget TrainingCheck/VdbCheck CHECK-05 to per-image pool walk (D-86..D-89, D-92..D-93)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -100,7 +100,7 @@
 |-------|----------------|--------|-----------|
 | 6. Content-addressed pool + capture-or-verify rewrite | 4/4 | Complete |  |
 | 7. One-shot legacy migration + hand-edit detection | 4/4 | Complete   | 2026-07-05 |
-| 8. Submission-checker per-image verification | 0/TBD | Not started | — |
+| 8. Submission-checker per-image verification | 2/3 | In Progress|  |
 
 ## Coverage Matrix
 
