@@ -415,6 +415,7 @@ Estimated total: 798.72 GB
 - The `--config` argument refers to YAML files in `configs/vectordbbench/` without the `.yaml` extension.
 - The `--force` flag drops and recreates the collection if it already exists.
 - See [Dimension Consistency](#dimension-consistency) for important rules about keeping dimensions aligned between load and run.
+- If a distributed load fails with `rate limit exceeded[rate=0.1]`, see [Troubleshooting](#12-troubleshooting) — this is Milvus's per-collection flush rate limiter (issue #705), handled automatically by current benchmark versions.
 
 ---
 
@@ -1940,6 +1941,47 @@ Expected files:
 ### `vector dimension mismatch`
 
 The dimension used for load and run does not match. Use the same config for both `datagen` and `run`, or update the config to match the dimension passed to `datagen`.
+
+### `rate limit exceeded[rate=0.1]` during datagen
+
+Symptom (typically at high rank counts, e.g. `--npernode 4` across many hosts):
+
+```text
+pymilvus.exceptions.MilvusException: <MilvusException: (code=8, message=...
+failed to flush collection: ... rate limit exceeded[rate=0.1], request is
+rejected by grpc RateLimiter middleware, please retry later)>
+```
+
+Milvus 2.4+ ships a per-collection flush rate limiter enabled by default:
+
+```yaml
+quotaAndLimits:
+  flushRate:
+    collection:
+      max: 0.1   # one flush() per 10 seconds per collection
+```
+
+Older benchmark versions called `flush()` once per MPI rank on the same
+collection, so many concurrent ranks exhausted the pymilvus retry budget
+(~210 seconds) and failed with the error above, while smaller rank counts
+squeaked through. Since issue #705 was fixed, `datagen` flushes each
+collection exactly once (from rank 0, after all ranks finish inserting) and
+retries any rate-limited flush while respecting the limiter period, so no
+Milvus configuration change is needed.
+
+If you still hit this error:
+
+1. Update to a benchmark version that includes the issue #705 fix. The load
+   summary of a fixed version contains a top-level `collection_flush_seconds`
+   field.
+2. If external tooling flushes the benchmark collections concurrently, raise
+   or disable the limiter via `stacks/milvus/user.yaml.example` (MinIO stack,
+   mounted as `/milvus/configs/user.yaml`) or the commented
+   `QUOTAANDLIMITS_FLUSHRATE_COLLECTION_MAX` environment variable (S3 stack).
+
+The Milvus configuration is part of the system under test: keep the defaults
+for official submissions unless the rules state otherwise, and record any
+override in your system description.
 
 ### MPI launches only on one host
 
