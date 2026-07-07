@@ -212,6 +212,41 @@ checkpoint.save('s3://bucket/key', total_size)
 checkpoint.save('/nvme/checkpoint.pt', total_size)
 ```
 
+### Writer subprocess start method (`fork` vs `forkserver`)
+
+The streaming writer runs in a subprocess. The multiprocessing **start
+method** used to create it is selectable, with a **backend-aware default**:
+
+| Target | `'auto'` default | Rationale |
+|---|---|---|
+| POSIX file (`backend='file'`, or a scheme-less / `file://` path) | `fork` | The parent never starts s3dlio's Tokio runtime, so `fork` is safe **and** ~40% faster — it keeps the parent's copy-on-write warm state and CPU/NUMA locality with the shared-memory buffers ([#682](https://github.com/mlcommons/storage/issues/682)). |
+| Object storage (`s3dlio`, `direct_fs`, `s3torchconnector`, `minio`, or any `s3://`/`az://`/`gs://`/`direct://` URI) | `forkserver` | The parent has a live s3dlio Tokio runtime (via `ObjStoreLibStorage._preflight()`) by the time the writer is created; `fork()` copies that mutex state and the writer futex-deadlocks ([#642](https://github.com/mlcommons/storage/issues/642)). `forkserver` gets a clean interpreter without `spawn`'s `__main__` re-import (which hangs MPI ranks). |
+
+Leave `mp_start_method='auto'` (the default) and each backend gets the right
+method automatically. To override:
+
+```python
+# Constructor argument (highest precedence)
+checkpoint = StreamingCheckpointing(
+    backend='file',
+    mp_start_method='forkserver',   # 'auto' | 'fork' | 'forkserver' | 'spawn'
+)
+```
+
+```bash
+# Or via environment variable (constructor arg wins if both are set)
+export MLPS_CHECKPOINT_MP_START_METHOD=fork
+```
+
+Notes:
+- Requesting `mp_start_method='fork'` on an **object-storage** target raises a
+  `ValueError` (citing #642) rather than deadlocking.
+- If the platform lacks the requested method (e.g. no `fork`/`forkserver` on
+  Windows/macOS), it degrades gracefully: `fork` → `forkserver` → `spawn`.
+- `save()` logs the resolved method, e.g.
+  `[Main] Writer start method: fork (policy='auto', backend=file)`, so each run
+  records which method produced its result.
+
 ## Feature 4: Multi-Endpoint Load Balancing
 
 ### What It Does

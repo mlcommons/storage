@@ -60,37 +60,111 @@ def _local_ranks_per_node(env=None):
     return 1
 
 
-def _writer_mp_context():
+# Selecting the streaming-checkpoint writer subprocess start method.
+#
+# The right method depends on the backend, so it is a *choice* with a
+# backend-aware default (issues #642 and #682):
+#
+#   * POSIX file backend (``backend='file'`` or a scheme-less / ``file://``
+#     path): the parent never starts s3dlio's Tokio runtime, so ``fork`` is
+#     safe *and* ~40% faster — it keeps the parent's copy-on-write warm state
+#     and CPU/NUMA locality with the shared-memory buffers (#682). Default:
+#     ``fork``.
+#   * Object-storage / s3dlio path (``s3dlio``, ``direct_fs``,
+#     ``s3torchconnector``, ``minio``, or any remote-scheme URI): the parent
+#     has already started s3dlio's Tokio runtime via
+#     ``ObjStoreLibStorage._preflight()`` → ``s3dlio.list()`` by the time the
+#     writer is created. ``fork()`` copies that mutex state without the
+#     threads holding the mutexes and the writer futex-deadlocks the first
+#     time it re-enters s3dlio (#642). Default: ``forkserver`` — the clean
+#     "no live Tokio" property of ``spawn`` without ``spawn``'s ``__main__``
+#     re-import (``spawn`` also hangs MPI ranks re-joining the OpenMPI
+#     communicator, the historical reason fork was chosen originally).
+#
+# Users may override the default with the ``mp_start_method`` constructor
+# argument or the ``MLPS_CHECKPOINT_MP_START_METHOD`` environment variable
+# (constructor arg wins). Explicitly requesting ``fork`` on the object-storage
+# path is refused rather than silently honored, because it deadlocks (#642).
+MP_START_METHOD_ENV = "MLPS_CHECKPOINT_MP_START_METHOD"
+_VALID_MP_START_METHODS = ("auto", "fork", "forkserver", "spawn")
+
+
+def _is_posix_file_backend(backend=None, uri_or_path=None):
+    """True when the writer targets a local POSIX file — the only path where
+    forking the writer is safe (no parent-side s3dlio Tokio runtime).
+
+    Mirrors ``StorageWriterFactory``'s own resolution: an explicit
+    ``backend='file'`` is POSIX; with no explicit backend, a scheme-less or
+    ``file://`` path auto-detects to the local file writer, anything else
+    (``s3://``, ``az://``, ``gs://``, ``direct://``, …) is object storage.
+    """
+    if backend:
+        return backend == "file"
+    uri = uri_or_path or ""
+    if "://" not in uri:
+        return True
+    return uri.startswith("file://")
+
+
+def _resolve_mp_start_method(start_method="auto", *, backend=None, uri_or_path=None):
+    """Resolve a requested start method to a concrete ``fork`` / ``forkserver``
+    / ``spawn``, applying the backend-aware default and the #642 guardrail.
+
+    ``start_method='auto'`` (the default) picks ``fork`` on the POSIX file
+    backend and ``forkserver`` on the object-storage path. An explicit value
+    is honored, except ``fork`` on the object-storage path which raises rather
+    than deadlock.
+    """
+    method = (start_method or "auto").lower()
+    if method not in _VALID_MP_START_METHODS:
+        raise ValueError(
+            f"invalid checkpoint writer start method {start_method!r}; choose "
+            f"one of {_VALID_MP_START_METHODS[1:]} or 'auto' "
+            f"(via mp_start_method= or ${MP_START_METHOD_ENV})"
+        )
+
+    posix_file = _is_posix_file_backend(backend, uri_or_path)
+
+    if method == "auto":
+        return "fork" if posix_file else "forkserver"
+
+    if method == "fork" and not posix_file:
+        raise ValueError(
+            f"checkpoint writer start method 'fork' is unsafe on the "
+            f"object-storage backend ({(backend or uri_or_path)!r}): fork() "
+            f"after s3dlio's Tokio runtime is live deadlocks the writer "
+            f"(issue #642). Use 'forkserver' (the default there) or 'auto'."
+        )
+    return method
+
+
+def _mp_availability_fallback(method):
+    """Platform-availability fallback order for a resolved method (NOT a policy
+    choice): degrade only when the OS can't provide the requested context —
+    fork→forkserver→spawn, forkserver→spawn, spawn→spawn."""
+    if method == "fork":
+        return ("fork", "forkserver", "spawn")
+    if method == "forkserver":
+        return ("forkserver", "spawn")
+    return ("spawn",)
+
+
+def _writer_mp_context(start_method="auto", *, backend=None, uri_or_path=None):
     """Return the multiprocessing context for the streaming-checkpoint writer.
 
-    Prefers ``forkserver`` — children fork from a clean, early-started
-    interpreter with no live Tokio runtime — falling back to ``spawn``
-    only on platforms without ``forkserver`` (Windows/macOS). ``fork``
-    is intentionally never used.
-
-    Issue #642: before this fix, ``save()`` used ``mp.get_context('fork')``.
-    On the s3dlio object-storage path the parent has already started
-    s3dlio's Tokio runtime via ``ObjStoreLibStorage._preflight()`` →
-    ``s3dlio.list()`` by the time the writer subprocess is created;
-    ``fork()`` then copies the parent's mutex state without the threads
-    holding those mutexes and the writer futex-deadlocks the first time
-    it re-enters s3dlio. The old code comment claimed fork was safe
-    "because the writer child creates fresh StorageWriter instances after
-    fork so Tokio/Rayon are initialized cleanly in the child" — that
-    reasoning holds for what the child does, not for the mutex state the
-    child inherits.
-
-    ``spawn`` is a fallback rather than the primary choice because it
-    re-imports ``__main__`` and blocks MPI ranks re-joining the
-    OpenMPI communicator (the historical reason the pre-#642 code
-    picked ``fork`` over ``spawn`` in the first place). ``forkserver``
-    gets the "clean interpreter, no live Tokio" property of ``spawn``
-    without ``spawn``'s ``__main__`` re-import.
+    ``start_method`` selects the policy (see ``_resolve_mp_start_method``);
+    the resolved method then degrades gracefully if the platform cannot
+    provide it (e.g. no ``fork``/``forkserver`` on Windows/macOS).
     """
-    try:
-        return mp.get_context('forkserver')
-    except ValueError:
-        return mp.get_context('spawn')
+    method = _resolve_mp_start_method(
+        start_method, backend=backend, uri_or_path=uri_or_path
+    )
+    for candidate in _mp_availability_fallback(method):
+        try:
+            return mp.get_context(candidate)
+        except ValueError:
+            continue
+    return mp.get_context("spawn")
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import shared_memory
 from typing import Optional, Dict, Any
@@ -150,6 +224,7 @@ class StreamingCheckpointing:
         fadvise_mode: str = 'none',
         num_parallel_readers: int = 8,
         read_chunk_size: Optional[int] = None,
+        mp_start_method: Optional[str] = None,
         **backend_kwargs
     ):
         """Initialize streaming checkpoint configuration.
@@ -165,6 +240,13 @@ class StreamingCheckpointing:
             read_chunk_size: Chunk size for read range-GETs in bytes (default: 4 × chunk_size).
                              Larger values reduce per-request HTTP overhead at the cost of
                              more RAM per reader thread (peak = num_parallel_readers × read_chunk_size).
+            mp_start_method: Writer subprocess start method — 'auto' (default),
+                             'fork', 'forkserver', or 'spawn'. 'auto' picks 'fork'
+                             on the POSIX file backend (fast, #682) and 'forkserver'
+                             on the object-storage / s3dlio path (fork deadlocks
+                             there, #642). Overrides the ``MLPS_CHECKPOINT_MP_START_METHOD``
+                             environment variable; if both are None, defaults to 'auto'.
+                             Requesting 'fork' on the object-storage path is refused.
             **backend_kwargs: Additional backend-specific options
         """
         self.chunk_size = chunk_size
@@ -175,6 +257,14 @@ class StreamingCheckpointing:
         self.fadvise_mode = fadvise_mode
         self.num_parallel_readers = num_parallel_readers
         self.read_chunk_size = read_chunk_size if read_chunk_size is not None else chunk_size * 4
+        # Writer start-method policy: explicit arg > env var > 'auto'
+        # (backend-aware). Resolved to a concrete method at save() time, when
+        # the target filepath/backend is known. See _writer_mp_context.
+        self.mp_start_method = (
+            mp_start_method
+            or os.environ.get(MP_START_METHOD_ENV)
+            or "auto"
+        )
         self.backend_kwargs = backend_kwargs
         
         # dgen-py is REQUIRED if no custom generator will be provided
@@ -254,11 +344,14 @@ class StreamingCheckpointing:
         if self.use_direct_io:
             print(f"[Main] ⚠ Disabling O_DIRECT (shared_memory buffers not page-aligned)")
         
-        # Writer subprocess context — see `_writer_mp_context` at module
-        # scope for the forkserver-over-fork rationale (#642: fork after
-        # live s3dlio Tokio deadlocks; forkserver avoids re-importing
-        # __main__, which is what makes spawn hang MPI ranks re-joining
-        # the OpenMPI communicator).
+        # Writer subprocess context — see the module-scope helpers for the
+        # backend-aware default: 'fork' on the POSIX file backend (fast, #682),
+        # 'forkserver' on the object-storage / s3dlio path (fork after live
+        # Tokio deadlocks, #642). self.mp_start_method (constructor arg or
+        # $MLPS_CHECKPOINT_MP_START_METHOD) overrides the default; 'fork' on
+        # the object-storage path is refused rather than silently deadlocked.
+        # The backend is resolved from self.backend, falling back to the
+        # target filepath's URI scheme when backend is auto-detect (None).
         #
         # CRITICAL: IPC objects (Queue, Event) MUST be created from the SAME
         # context as the child process — mixing contexts (e.g. fork-context
@@ -266,7 +359,11 @@ class StreamingCheckpointing:
         #   RuntimeError: A SemLock created in a fork context is being shared
         #                 with a process in a spawn context.
         # Always create IPC objects from ctx BEFORE ctx.Process().
-        ctx = _writer_mp_context()
+        ctx = _writer_mp_context(
+            self.mp_start_method, backend=self.backend, uri_or_path=filepath
+        )
+        print(f"[Main] Writer start method: {ctx.get_start_method()} "
+              f"(policy={self.mp_start_method!r}, backend={self.backend or 'auto'})")
 
         # Setup IPC using the same context as the child process.
         buffer_queue = ctx.Queue(maxsize=self.num_buffers)
