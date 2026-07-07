@@ -132,7 +132,21 @@ are not tracked here.
 
 ## Versions 3.0.21 – 3.0.22 (June 25 – 26, 2026)
 
-DLIO dependency updates (DLIO PRs #29 and #36). No new mlpstorage-level significant bug fixes above 3.0.20.
+No new mlpstorage-level significant bug fixes in this range. DLIO was updated from the PR #27 pin through PR #36, pulling in the following DLIO-layer fixes (PR #37 is test-only and excluded).
+
+**Score-Affecting**
+- DLIO: slow kernel flush misread as sudo refused — page-cache drops silently disabled for the run, inflating throughput. (#487; DLIO PR #28)
+- DLIO: unset S3 endpoint caused s3torchconnector to silently route to real AWS — benchmarks measured the wrong storage. (#472; DLIO PR #32)
+
+**Invocation**
+- DLIO: `skip_listing` not copied from Hydra config to `args` — mlpstorage auto-injection had no effect; full object-storage listing always ran. (#504; DLIO PR #30)
+- DLIO: failed S3 uploads continued queuing BytesIO payloads until OOM — pipeline did not stop on first upload error. (#504; DLIO PR #31)
+- DLIO: PyTorch shm-reap `RuntimeError` from `RemoveIPC=yes` surfaced as bare traceback with no actionable guidance. (#528; DLIO PR #34)
+- DLIO: flat-directory listing double-allocated all URIs — ~8.8 GB peak RAM on rank 0 before training started at 50 M files. (#466; DLIO PR #35)
+- DLIO: `direct://` and `file://` schemes skipped path-existence and writability checks — misconfigured paths not caught before ranks started. (#507; DLIO PR #36)
+
+**Other Significant**
+- DLIO: drop_caches timeout warnings silenced after first occurrence — per-epoch retry status not visible in logs. (#487; DLIO PR #29)
 
 ---
 
@@ -151,7 +165,10 @@ DLIO dependency updates (DLIO PRs #29 and #36). No new mlpstorage-level signific
 
 ## Versions 3.0.24 – 3.0.25 (June 28, 2026)
 
-DLIO dependency updates (DLIO PRs #37 and #38). No new mlpstorage-level significant bug fixes above 3.0.23.
+No new mlpstorage-level significant bug fixes in this range. DLIO was updated from the PR #36 pin to include PRs #37 and #38; PR #37 is test-only and excluded.
+
+**Invocation**
+- DLIO: no `direct_fs` storage type existed — `--o-direct` routed reads and writes to the S3 library on local storage, using the wrong I/O path. (#538; DLIO PR #38)
 
 ---
 
