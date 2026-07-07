@@ -9,6 +9,57 @@ import time
 import multiprocessing as mp
 
 
+# Per-node MPI rank count, used to size the dgen-py generator's thread pool.
+#
+# Issue #689: dgen-py's threads must be throttled so that N ranks sharing a
+# node don't each spin up threads = os.cpu_count() and oversubscribe the
+# host. The throttle divisor must be the number of ranks sharing THIS node
+# (local size) — os.cpu_count() is already a per-node figure. Dividing it by
+# the GLOBAL world size instead (the bug prior to this fix) starves
+# generation on any multi-node run: e.g. 192 local CPUs / 64 global ranks
+# (16 nodes x 4 ranks/node) = 3 threads/rank, when only 4 ranks actually
+# share the node and 192 / 4 = 48 threads/rank is correct. That exact
+# 3-thread figure is what issue #689's profiling observed, with generation
+# throughput consequently landing close to the storage write rate instead
+# of comfortably ahead of it.
+#
+# This mirrors DLIO_local_changes' storage#671 fix, which hit the identical
+# global-vs-local mismatch for per-node accounting (there, OpenMPI's
+# COMM_TYPE_SHARED split collapsing to size 1 on remote nodes; here, using
+# the wrong env var entirely) and fixed it the same way: prefer the
+# launcher's LOCAL size env var over any global/world figure.
+_LOCAL_SIZE_ENV_VARS = (
+    'OMPI_COMM_WORLD_LOCAL_SIZE',   # OpenMPI
+    'MPI_LOCALNRANKS',              # MPICH / Hydra
+    'MV2_COMM_WORLD_LOCAL_SIZE',    # MVAPICH2
+)
+
+
+def _local_ranks_per_node(env=None):
+    """Return the number of MPI ranks sharing this node (>= 1).
+
+    Checks the launcher-specific LOCAL size env vars in ``_LOCAL_SIZE_ENV_VARS``
+    (first present, parseable, positive value wins). Falls back to 1 — i.e.
+    "assume this rank has the node to itself" — when none are set (single-node
+    / non-MPI launches) or all are malformed. 1 is deliberately the safe
+    default: it never reproduces the #689 under-threading bug, and a rank
+    that turns out not to be alone simply shares CPU time with its
+    node-mates rather than being starved down to a handful of threads.
+    """
+    if env is None:
+        env = os.environ
+    for _env_var in _LOCAL_SIZE_ENV_VARS:
+        _v = env.get(_env_var)
+        if _v:
+            try:
+                parsed = int(_v)
+            except (TypeError, ValueError):
+                continue
+            if parsed >= 1:
+                return parsed
+    return 1
+
+
 def _writer_mp_context():
     """Return the multiprocessing context for the streaming-checkpoint writer.
 
@@ -303,20 +354,13 @@ class StreamingCheckpointing:
             )
         
         # Throttle dgen-py threads when running under MPI to avoid
-        # overloading the host with 8 ranks × N-all-CPU threads simultaneously.
-        # Detect MPI world size from common env vars (OpenMPI, MPICH, MVAPICH).
-        mpi_world_size = 1
-        for _env_var in ('OMPI_COMM_WORLD_SIZE', 'PMI_SIZE', 'MV2_COMM_WORLD_SIZE'):
-            _v = os.environ.get(_env_var)
-            if _v:
-                try:
-                    mpi_world_size = max(1, int(_v))
-                    break
-                except ValueError:
-                    pass
+        # overloading the host with N ranks x all-CPU threads simultaneously.
+        # Divide by the ranks sharing THIS node (#689), not the global world
+        # size — see _local_ranks_per_node for why that distinction matters.
+        local_ranks = _local_ranks_per_node()
         total_cpus = os.cpu_count() or 4
-        max_threads = max(1, total_cpus // mpi_world_size)
-        print(f"[Main] Initializing dgen-py (MPI world_size={mpi_world_size}, threads={max_threads}/{total_cpus} CPUs)...")
+        max_threads = max(1, total_cpus // local_ranks)
+        print(f"[Main] Initializing dgen-py (local_ranks_per_node={local_ranks}, threads={max_threads}/{total_cpus} CPUs)...")
         try:
             generator = dgen_py.Generator(
                 size=total_size_bytes,
@@ -324,7 +368,7 @@ class StreamingCheckpointing:
                 dedup_ratio=1.0,
                 compress_ratio=1.0,
                 numa_mode="auto",
-                max_threads=max_threads,  # Throttled by MPI world size
+                max_threads=max_threads,  # Throttled by local ranks-per-node (#689)
             )
             print(f"[Main] Generator ready")
             return generator
