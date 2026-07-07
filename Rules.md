@@ -341,10 +341,6 @@ root_folder (or any name you prefer)
 			├──system-name-2.yaml
 			└──system-name-2.pdf
 ```
-2.1.28. **aggregateResultsFile** --  Reportgen assembles one top-level results file per invocation at `<results-dir>/results.{csv,json}` by walking each per-workload directory in the tree, computing that workload's aggregated row, writing the per-model `<...>/<model>/results.{csv,json}` files first, and then collecting those per-model rows into the top-level file (bottom-up build; the top-level file is a collection step, not an aggregation step).  Each row in the top-level file represents ONE workload (submitter parlance: "run") of any benchmark type — training, checkpointing, vdb, or kvcache — with no per-invocation raw rows and no per-row discriminator column.  Every reportgen invocation rebuilds these files from scratch, so deleted run directories disappear from the next report; empty model directories still emit a header-only CSV and an empty-list JSON.
-
-The row layout has a fixed 6-column prefix in this exact order: `category`, `orgname`, `systemname`, `benchmark_type`, `model`, `accelerator`.  After the prefix, columns are grouped by benchmark type in the fixed order training → checkpointing → vdb → kvcache, with every column in a group carrying that group's prefix (`train_`, `checkpoint_`, `vdb_`, `kvcache_`).  Within each group, columns are alphabetical.  The trailing column is always `issues` — variable-length text carrying verbatim `Result.issues` messages joined by `; ` per §2.1.17 and §2.1.23 validation contracts.  The `category` column takes one of four values: `closed`, `open`, `whatif`, or `INVALID`; the `INVALID` value is emitted when a workload violates the rules-strict counts described in §2.1.17 (training must be exactly 6 invocations, 1 warmup + 5 real) and §2.1.23 (checkpointing must have exactly 10 checkpoint operations per invocation).  `whatif` rows are simulation output and skip the rules-strict INVALID gates entirely.
-
 2.29. **dlioLog** --  Since the "dlio_log" subdirectory has a similar structure in all cases, it is describe pictorially just below:
 ```
 └── YYYYMMDD_HHmmss
