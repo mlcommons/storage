@@ -228,9 +228,17 @@ class TestReportGeneratorGenerateReports:
             with patch.object(ReportGenerator, 'print_results'):
                 gen = ReportGenerator(str(results_dir), validate_structure=False)
 
-        # Add mock run results
+        # Add mock run results AND workload results. Under Phase 6's
+        # bottom-up build (D-02), `generate_reports` iterates
+        # `self.workload_results` — the aggregated-per-workload source
+        # of truth — rather than `self.run_results`. Fixture populates
+        # both so the model-folder resolution AND the per-model /
+        # top-level writer emission fire.
         mock_run = MagicMock()
         mock_run.result_dir = str(leaf)
+        mock_run.model = 'unet3d'
+        mock_run.accelerator = 'h100'
+        mock_run.parameters = {}
         mock_run.as_dict.return_value = {
             'run_id': 'test_run',
             'benchmark_type': 'training',
@@ -248,6 +256,21 @@ class TestReportGeneratorGenerateReports:
                 issues=[],
                 category=PARAM_VALIDATION.CLOSED,
                 metrics={'throughput': 100.0}
+            )
+        }
+        # D-05 5-tuple workload key. Empty leading (category, orgname,
+        # systemname) slots — the printer / row builder does not
+        # depend on the leading slots being populated.
+        gen.workload_results = {
+            ('', '', '', 'unet3d', 'h100'): Result(
+                multi=True,
+                benchmark_type=BENCHMARK_TYPES.training,
+                benchmark_command='run',
+                benchmark_model='unet3d',
+                benchmark_run=[mock_run],
+                issues=[],
+                category=PARAM_VALIDATION.CLOSED,
+                metrics={'train_mean_of_throughput': 100.0}
             )
         }
         return gen
@@ -452,8 +475,12 @@ class TestReportGeneratorPrintResults:
             )
         }
 
+        # D-05 5-tuple: (category, orgname, systemname, model, accelerator).
+        # Fills the leading three slots with empty strings — the printer
+        # reads model/accelerator identity from
+        # ``benchmark_run[0]`` rather than unpacking the key tuple.
         generator.workload_results = {
-            ('unet3d', 'h100'): Result(
+            ('', '', '', 'unet3d', 'h100'): Result(
                 multi=True,
                 benchmark_type=BENCHMARK_TYPES.training,
                 benchmark_command='run',
@@ -508,11 +535,22 @@ class TestReportGeneratorAccumulateResults:
         assert only_result.category == PARAM_VALIDATION.CLOSED
 
     def test_groups_by_workload(self, tmp_path):
-        """Should group runs by workload (model, accelerator)."""
+        """Should group runs by the D-05 per-benchmark-type key.
+
+        For training/checkpointing the key is
+        ``(category, orgname, systemname, model, accelerator)``. This
+        test verifies both grouping (only ONE workload_results entry for
+        two runs sharing model+accelerator) AND that the (model,
+        accelerator) tail of the tuple is populated correctly.
+        """
         results_dir = tmp_path / "results"
         results_dir.mkdir()
 
-        # Create two mock runs with same workload
+        # Create two mock runs with same workload. ``parameters`` and
+        # ``result_dir`` are set to real values (not MagicMock defaults)
+        # so path-based orgname/systemname/category derivation is
+        # deterministic and both runs land under the same D-05 key.
+        run_leaf = str(results_dir / "training" / "unet3d" / "run" / "20260101_000001")
         mock_run1 = MagicMock()
         mock_run1.run_id = "run1"
         mock_run1.benchmark_type = BENCHMARK_TYPES.training
@@ -520,6 +558,8 @@ class TestReportGeneratorAccumulateResults:
         mock_run1.model = 'unet3d'
         mock_run1.accelerator = 'h100'
         mock_run1.metrics = {}
+        mock_run1.parameters = {}
+        mock_run1.result_dir = run_leaf
 
         mock_run2 = MagicMock()
         mock_run2.run_id = "run2"
@@ -528,6 +568,8 @@ class TestReportGeneratorAccumulateResults:
         mock_run2.model = 'unet3d'
         mock_run2.accelerator = 'h100'
         mock_run2.metrics = {}
+        mock_run2.parameters = {}
+        mock_run2.result_dir = run_leaf
 
         with patch('mlpstorage_py.report_generator.get_runs_files', return_value=[mock_run1, mock_run2]):
             with patch('mlpstorage_py.report_generator.BenchmarkVerifier') as mock_verifier_class:
@@ -539,8 +581,16 @@ class TestReportGeneratorAccumulateResults:
                 with patch.object(ReportGenerator, 'print_results'):
                     generator = ReportGenerator(str(results_dir), validate_structure=False)
 
-        # Should have workload result for (unet3d, h100)
-        assert ('unet3d', 'h100') in generator.workload_results
+        # Two runs sharing (model, accelerator) MUST collapse into a
+        # single workload_results entry (D-05 grouping contract).
+        assert len(generator.workload_results) == 1
+        # The tuple's tail (model, accelerator) is the stable identity
+        # slice — that's what changed shape from Phase 5's 2-tuple. The
+        # leading (category, orgname, systemname) fields are path-
+        # derived and depend on tmp_path segments, so we only assert
+        # the tail here.
+        the_key, = generator.workload_results.keys()
+        assert the_key[-2:] == ('unet3d', 'h100'), the_key
 
 
 class TestReportGeneratorIntegration:

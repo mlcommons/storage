@@ -1,0 +1,30 @@
+{
+  "start": "2026-07-06 10:15:00",
+  "end": "2026-07-06 10:15:00",
+  "num_accelerators": 8,
+  "num_hosts": 1,
+  "host_memory_GB": [
+    256
+  ],
+  "host_cpu_count": [
+    64
+  ],
+  "workload": "unet3d_h100_beta_corp",
+  "metric": {
+    "train_au_percentage": [
+      95.0,
+      94.8,
+      95.1
+    ],
+    "train_throughput_samples_per_second": [
+      1250.0,
+      1248.0,
+      1252.0
+    ],
+    "train_io_throughput_MB_per_second": [
+      4500.0,
+      4480.0,
+      4520.0
+    ]
+  }
+}

@@ -1,0 +1,21 @@
+{
+  "benchmark_type": "kv_cache",
+  "model": "llama3-8b",
+  "command": "run",
+  "run_datetime": "20260704_140000",
+  "num_processes": 8,
+  "parameters": {
+    "model": {
+      "name": "llama3-8b"
+    },
+    "kvcache": {
+      "performance_profile": "balanced",
+      "trials": 3
+    },
+    "workflow": {
+      "generate_data": false,
+      "train": false
+    }
+  },
+  "override_parameters": {}
+}
