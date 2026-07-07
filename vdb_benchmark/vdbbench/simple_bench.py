@@ -30,6 +30,7 @@ import os
 import signal
 import sys
 import time
+from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
@@ -38,6 +39,7 @@ import numpy as np
 from tabulate import tabulate
 
 from vdbbench.config_loader import load_config, merge_config_with_args
+from vdbbench.connection import open_connection
 from vdbbench.list_collections import get_collection_info
 
 try:
@@ -56,6 +58,117 @@ except ImportError:
 
 
 STAGGER_INTERVAL_SEC = 0.1
+
+# Minimum fraction of source vectors the FLAT ground-truth collection must
+# contain for recall to be considered valid (issue #489 / #572).
+MIN_FLAT_COVERAGE = 0.99
+
+
+@dataclass
+class FlatSetupResult:
+    """
+    Outcome of FLAT ground-truth setup, used to render an explicit end-of-run
+    validity verdict (issue #572).
+
+    ok:
+        True if a usable FLAT collection was produced (coverage >= threshold).
+    coverage:
+        Fraction of source vectors present in the FLAT collection (0.0-1.0).
+    total_vectors / copied_vectors:
+        Absolute counts behind ``coverage``.
+    had_recoverable_error:
+        True if a gRPC / iterator error was caught mid-setup and the code fell
+        back to another copy path. The run may still be valid, but this must be
+        surfaced in the final verdict rather than swallowed silently.
+    reason:
+        Human-readable explanation when ``ok`` is False (empty otherwise).
+    reused:
+        True if an existing, fully-covering FLAT collection was reused.
+    """
+
+    ok: bool
+    coverage: float = 0.0
+    total_vectors: int = 0
+    copied_vectors: int = 0
+    had_recoverable_error: bool = False
+    reason: str = ""
+    reused: bool = False
+
+    def to_dict(self) -> dict:
+        return {
+            "ok": self.ok,
+            "coverage": self.coverage,
+            "total_vectors": self.total_vectors,
+            "copied_vectors": self.copied_vectors,
+            "had_recoverable_error": self.had_recoverable_error,
+            "reason": self.reason,
+            "reused": self.reused,
+        }
+
+
+def emit_result_verdict(
+    output_dir: str,
+    *,
+    flat_result: Optional["FlatSetupResult"],
+    num_queries_evaluated: int,
+) -> str:
+    """
+    Emit a single unambiguous validity verdict for the whole run.
+
+    Writes a ``result_verdict.json`` file, prints exactly one ``RESULT:`` line
+    to stdout, and returns the verdict string ("valid" / "degraded: ..." /
+    "invalid: ..."). Callers exit non-zero on any non-"valid" verdict.
+
+    The verdict is keyed on *coverage completeness*, not merely on whether an
+    exception was caught: a query_iterator failure that the pk-cursor fallback
+    fully recovers (100% coverage) is still a clean run. The states we must
+    distinguish (issue #572):
+
+      * valid    - full coverage and queries actually evaluated.
+      * degraded - coverage >= MIN_FLAT_COVERAGE but < 100% (recall computed on
+                   an incomplete ground truth; numbers are not trustworthy).
+      * invalid  - no queries evaluated, or a caught error left coverage below
+                   the minimum threshold.
+    """
+    if num_queries_evaluated <= 0:
+        verdict = "invalid: 0 queries had valid ground truth"
+    elif flat_result is None:
+        # No FLAT setup ran in this process (e.g. --no-create-flat worker that
+        # only validated a pre-existing collection). Coverage was checked
+        # elsewhere; treat a non-zero evaluated-query count as valid.
+        verdict = "valid"
+    elif not flat_result.ok:
+        verdict = f"invalid: {flat_result.reason or 'FLAT ground-truth setup failed'}"
+    elif flat_result.coverage < 1.0:
+        detail = (
+            f"FLAT ground-truth coverage {flat_result.coverage * 100:.2f}% "
+            f"({flat_result.copied_vectors}/{flat_result.total_vectors}); "
+            f"recall computed on an incomplete ground truth"
+        )
+        verdict = f"degraded: {detail}"
+    elif flat_result.had_recoverable_error:
+        # Full coverage was recovered after a caught error. Report valid, but
+        # note the recovery so the user knows the mid-run error was benign.
+        verdict = "valid (recovered from a caught gRPC error during GT setup)"
+    else:
+        verdict = "valid"
+
+    payload = {
+        "result": verdict,
+        "valid": verdict.startswith("valid"),
+        "num_queries_evaluated": int(num_queries_evaluated),
+        "flat_setup": flat_result.to_dict() if flat_result else None,
+    }
+    try:
+        with open(
+            os.path.join(output_dir, "result_verdict.json"), "w", encoding="utf-8"
+        ) as f:
+            json.dump(payload, f, indent=2)
+    except Exception as exc:  # pragma: no cover - diagnostics only
+        print(f"WARNING: could not write result_verdict.json: {exc}")
+
+    print(f"RESULT: {verdict}")
+    return verdict
 
 # Global flag for graceful shutdown.
 shutdown_flag = mp.Value("i", 0)
@@ -215,7 +328,7 @@ def validate_existing_flat_collection(
     conn_alias = "flat_validate"
 
     try:
-        connections.connect(alias=conn_alias, host=host, port=port)
+        open_connection(alias=conn_alias, host=host, port=port)
     except Exception as exc:
         print(f"Failed to connect for FLAT collection validation: {exc}")
         return False
@@ -277,21 +390,28 @@ def create_flat_collection(
     flat_collection_name: str,
     vector_dim: int,
     metric_type: str = "COSINE",
-) -> bool:
+) -> FlatSetupResult:
     """
     Create a duplicate collection with a FLAT index for ground truth.
 
     FLAT performs brute-force exact search. The FLAT collection preserves the
     source collection's primary key values, so FLAT result IDs match ANN result
     IDs from the source collection.
+
+    Returns a :class:`FlatSetupResult` describing coverage and whether a
+    recoverable gRPC error was caught during setup, so the caller can render an
+    explicit validity verdict (issue #572).
     """
     conn_alias = "flat_setup"
+    had_recoverable_error = False
 
     try:
-        connections.connect(alias=conn_alias, host=host, port=port)
+        open_connection(alias=conn_alias, host=host, port=port)
     except Exception as exc:
         print(f"Failed to connect for FLAT collection setup: {exc}")
-        return False
+        return FlatSetupResult(
+            ok=False, reason=f"could not connect to Milvus for FLAT setup: {exc}"
+        )
 
     try:
         if utility.has_collection(flat_collection_name, using=conn_alias):
@@ -306,7 +426,13 @@ def create_flat_collection(
                     f"with {flat_coll.num_entities} vectors, reusing it."
                 )
                 flat_coll.load()
-                return True
+                return FlatSetupResult(
+                    ok=True,
+                    coverage=1.0,
+                    total_vectors=source_coll.num_entities,
+                    copied_vectors=flat_coll.num_entities,
+                    reused=True,
+                )
 
             print(
                 f"FLAT collection exists but has {flat_coll.num_entities} vs "
@@ -329,7 +455,11 @@ def create_flat_collection(
                 f"ERROR: Source collection '{source_collection_name}' "
                 f"reports 0 vectors after flush. Cannot create ground truth."
             )
-            return False
+            return FlatSetupResult(
+                ok=False,
+                total_vectors=0,
+                reason=f"source collection '{source_collection_name}' has 0 vectors",
+            )
 
         src_pk_field, src_vec_field, src_pk_dtype = _detect_schema_fields(source_coll)
 
@@ -411,6 +541,7 @@ def create_flat_collection(
                     f"  query_iterator failed ({iter_err}), "
                     f"falling back to pk-cursor pagination..."
                 )
+                had_recoverable_error = True
                 use_iterator = False
                 copied = 0
 
@@ -572,18 +703,27 @@ def create_flat_collection(
         # source collection cannot produce valid recall. Without this guard the
         # function would build an empty FLAT index, return True, and let the
         # benchmark report a "successful" run with recall.num_queries_evaluated=0
-        # (see issue #489). Abort here so the caller's `if not flat_ok` fires.
+        # (see issue #489). Abort here so the caller's verdict fires.
         final_count = flat_coll.num_entities
         coverage = (final_count / total_vectors) if total_vectors else 0.0
-        MIN_COVERAGE = 0.99
-        if coverage < MIN_COVERAGE:
+        if coverage < MIN_FLAT_COVERAGE:
             print(
                 f"ERROR: FLAT ground-truth collection covers only "
                 f"{final_count}/{total_vectors} ({coverage * 100:.2f}%) of the "
-                f"source collection (minimum required: {MIN_COVERAGE * 100:.0f}%). "
+                f"source collection (minimum required: {MIN_FLAT_COVERAGE * 100:.0f}%). "
                 f"Cannot compute valid recall — aborting FLAT setup."
             )
-            return False
+            return FlatSetupResult(
+                ok=False,
+                coverage=coverage,
+                total_vectors=total_vectors,
+                copied_vectors=final_count,
+                had_recoverable_error=had_recoverable_error,
+                reason=(
+                    f"FLAT ground-truth coverage {coverage * 100:.2f}% is below the "
+                    f"{MIN_FLAT_COVERAGE * 100:.0f}% minimum"
+                ),
+            )
 
         print("Building FLAT index...")
         flat_coll.create_index(
@@ -601,14 +741,24 @@ def create_flat_collection(
             f"{flat_coll.num_entities} vectors."
         )
 
-        return True
+        return FlatSetupResult(
+            ok=True,
+            coverage=coverage,
+            total_vectors=total_vectors,
+            copied_vectors=final_count,
+            had_recoverable_error=had_recoverable_error,
+        )
 
     except Exception as exc:
         print(f"Error creating FLAT collection: {exc}")
         import traceback
 
         traceback.print_exc()
-        return False
+        return FlatSetupResult(
+            ok=False,
+            had_recoverable_error=had_recoverable_error,
+            reason=f"unhandled error during FLAT setup: {exc}",
+        )
 
     finally:
         try:
@@ -633,7 +783,7 @@ def precompute_ground_truth(
     conn_alias = "gt_compute"
 
     try:
-        connections.connect(alias=conn_alias, host=host, port=port)
+        open_connection(alias=conn_alias, host=host, port=port)
     except Exception as exc:
         print(f"Failed to connect for ground truth computation: {exc}")
         return {}
@@ -826,7 +976,7 @@ def generate_random_vector(dim: int) -> List[float]:
 def connect_to_milvus(host: str, port: str):
     """Establish connection to Milvus server."""
     try:
-        connections.connect(alias="default", host=host, port=port)
+        open_connection(alias="default", host=host, port=port)
         return connections
     except Exception as exc:
         print(f"Failed to connect to Milvus: {exc}")
@@ -1599,14 +1749,24 @@ def main():
     print(f"\nSetting up FLAT collection: {gt_collection_name}")
 
     if args.no_create_flat:
-        flat_ok = validate_existing_flat_collection(
+        validate_ok = validate_existing_flat_collection(
             host=args.host,
             port=args.port,
             source_collection_name=args.collection_name,
             flat_collection_name=gt_collection_name,
         )
+        # The validate-only worker path does not recompute coverage here; a
+        # successful validation means a pre-existing full FLAT collection was
+        # found. Represent it as a FlatSetupResult so the verdict logic is
+        # uniform. ok=False leaves reason blank; verdict will mark it invalid.
+        flat_result = FlatSetupResult(
+            ok=validate_ok,
+            coverage=1.0 if validate_ok else 0.0,
+            reused=validate_ok,
+            reason="" if validate_ok else "pre-existing FLAT collection validation failed",
+        )
     else:
-        flat_ok = create_flat_collection(
+        flat_result = create_flat_collection(
             host=args.host,
             port=args.port,
             source_collection_name=args.collection_name,
@@ -1615,8 +1775,13 @@ def main():
             metric_type=metric_type,
         )
 
-    if not flat_ok:
+    if not flat_result.ok:
         print("ERROR: FLAT collection setup failed. Cannot compute recall.")
+        emit_result_verdict(
+            output_dir,
+            flat_result=flat_result,
+            num_queries_evaluated=0,
+        )
         sys.exit(1)
 
     ground_truth = precompute_ground_truth(
@@ -1789,14 +1954,38 @@ def main():
     with open(recall_output_file, "w", encoding="utf-8") as f:
         json.dump(recall_stats, f, indent=2)
 
+    num_queries_evaluated = recall_stats.get("num_queries_evaluated", 0)
+
     # A run in which zero queries had valid ground truth produced no measurable
     # recall, so its QPS/latency numbers must not be reported as a successful
     # benchmark. recall_stats.json is written above for diagnostics, then we
     # abort with a non-zero exit code (issue #489).
-    if recall_stats.get("num_queries_evaluated", 0) == 0:
+    if num_queries_evaluated == 0:
         print(
             "ERROR: 0 queries had valid ground truth; recall is invalid. "
             "Marking run as FAILED (see recall_stats.json for details)."
+        )
+        emit_result_verdict(
+            output_dir,
+            flat_result=flat_result,
+            num_queries_evaluated=0,
+        )
+        sys.exit(1)
+
+    # Loud-failure verdict (issue #572): render a single, unambiguous validity
+    # line to stdout + JSON. "degraded" coverage (below 100% but above the
+    # abort threshold) means recall was computed on an incomplete ground truth,
+    # which is not a trustworthy result — exit non-zero so it cannot be mistaken
+    # for a clean run.
+    verdict = emit_result_verdict(
+        output_dir,
+        flat_result=flat_result,
+        num_queries_evaluated=num_queries_evaluated,
+    )
+    if not verdict.startswith("valid"):
+        print(
+            "ERROR: run marked invalid/degraded; results are not trustworthy. "
+            "See result_verdict.json and re-run."
         )
         sys.exit(1)
 
