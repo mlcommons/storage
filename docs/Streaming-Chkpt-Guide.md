@@ -382,6 +382,21 @@ generator = dgen_py.Generator(
 )
 ```
 
+**Generator thread count under MPI** ([#689](https://github.com/mlcommons/storage/issues/689)):
+`StreamingCheckpointing` throttles dgen-py's `max_threads` to
+`os.cpu_count() // <ranks sharing this node>`, so that N ranks on one host
+don't each spin up a thread per core and oversubscribe it. The divisor is
+the **local** rank count (`OMPI_COMM_WORLD_LOCAL_SIZE` / `MPI_LOCALNRANKS` /
+`MV2_COMM_WORLD_LOCAL_SIZE`, first one present), not the global MPI world
+size — dividing a per-node CPU count by a cluster-wide rank count starves
+generation on multi-node runs (e.g. 192 CPUs / 64 global ranks = 3
+threads, when only 4 ranks actually share that node and 192 / 4 = 48 is
+correct). If generation is showing up as the pipeline bottleneck
+(`bottleneck: "Generation"` in `save()`'s results, or a low
+`throughput_ratio`), check the reported `local_ranks_per_node` in the
+`[Main] Initializing dgen-py (...)` log line against how many ranks are
+actually launched per host.
+
 ### StreamingCheckpointing Tuning
 
 **Chunk Size**:
