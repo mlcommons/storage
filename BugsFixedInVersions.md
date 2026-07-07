@@ -264,3 +264,15 @@ No new mlpstorage-level significant bug fixes in this range. DLIO was updated fr
 
 **Invocation**
 - gRPC 256 MB default message limit caused `RESOURCE_EXHAUSTED` for large VDB datasets — large-scale VDB runs failed. (#572, #685)
+
+---
+
+## Version 3.0.35 (July 7, 2026)
+
+**Score-Affecting**
+- Checkpoint-save throughput ~41% lower on `file`/`local_fs` backends — unconditional `forkserver` start method lost copy-on-write warm state and CPU/NUMA locality vs `fork`. (#682, #700; DLIO PR #44 unaffected — write path was already correct)
+- Checkpoint datagen under-threaded on multi-node runs — dgen-py thread count divided per-node CPU count by global rank count; e.g. 192 vCPUs / 64 global ranks = 3 threads instead of ~48, bottlenecking on client CPU rather than storage. (#689, #702)
+
+**Invocation**
+- Object-storage checkpoint reads always found 0 checkpoints and aborted — `checkpoint_folder` path double-prepended bucket name (`s3://bucket/bucket/prefix`); writes succeeded but reads never started. (#690; DLIO PR #44)
+- Multi-host shared-filesystem checkpoint runs crashed with `FileExistsError` despite `exist_ok=True` — stale negative dentry cache on networked FS (NFS/GPFS/Lustre) caused `isdir()` recheck to fail within the brief convergence window. (#699; DLIO PR #45)
