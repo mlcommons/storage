@@ -276,3 +276,14 @@ No new mlpstorage-level significant bug fixes in this range. DLIO was updated fr
 **Invocation**
 - Object-storage checkpoint reads always found 0 checkpoints and aborted — `checkpoint_folder` path double-prepended bucket name (`s3://bucket/bucket/prefix`); writes succeeded but reads never started. (#690; DLIO PR #44)
 - Multi-host shared-filesystem checkpoint runs crashed with `FileExistsError` despite `exist_ok=True` — stale negative dentry cache on networked FS (NFS/GPFS/Lustre) caused `isdir()` recheck to fail within the brief convergence window. (#699; DLIO PR #45)
+
+---
+
+## Version 3.0.36 (July 7, 2026)
+
+**Other Significant**
+- `reportgen` output rows contained no computed metric values — the per-workload aggregation function was a stub (`metrics={}`) since reportgen was introduced; every row in every `results.{csv,json}` file was missing all throughput, latency, and recall columns. (#707)
+- `reportgen` grouped workloads by `(model, accelerator)` regardless of benchmark type — VDB workloads were keyed on non-existent fields instead of `(engine, index_type)`; KVCache workloads omitted `performance_profile`; multi-org submissions merged all orgs into a single incorrect aggregate row. (#707)
+- `reportgen` did not set `INVALID` for invocation count violations — training runs with a count other than 6 (1 warmup + 5 real per §2.1.17) and checkpointing runs with op lists other than 10 (per §2.1.23) were silently aggregated with the wrong category. (#707)
+- `reportgen` applied INVALID gates to `whatif` rows — simulation output was incorrectly marked INVALID when invocation counts did not meet submission requirements; `whatif` is not a submission and should bypass all rules-strict gates. (#707)
+- Training per-model rollup written to `<model>/run/` but empty-dir scan walked to `<model>/` — path mismatch caused a stray empty `results.{csv,json}` to be written at `training/<model>/` on every `reportgen` invocation. (#707)
