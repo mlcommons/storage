@@ -5,7 +5,7 @@
 
 ---
 
-## Source Size Code For Versions 3.0.3 – 3.0.9 (May 28 – June 14, 2026)
+## Source Code Size For Versions 3.0.3 – 3.0.9 (May 28 – June 14, 2026)
 
 | Subtree | May 29 (excl. tests) | May 29 (tests only) | HEAD (excl. tests) | HEAD (tests only) |
 |---|---:|---:|---:|---:|
