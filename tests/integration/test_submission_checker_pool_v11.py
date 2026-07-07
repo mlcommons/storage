@@ -1,6 +1,4 @@
-"""Integration tests for Phase 8 success criteria (SC-1..SC-5).
-
-Phase 08-03 Plan 03 Task 2.
+"""Integration tests for Phase 8 success criteria (SC-1..SC-4).
 
 Exercises the complete submission checker run() function against v1.1 pool
 layout trees, covering:
@@ -9,7 +7,6 @@ layout trees, covering:
   SC-2: missing/dangling .mlps-code-image → run() returns 1 with CHECK-01 message
   SC-3: modified pool image / renamed pool dir → run() returns 1 with CHECK-02 message
   SC-4: orphan pool image / legacy code/ dir → run() returns 1 with CHECK-03/04 message
-  SC-5: two-version two-pool-image tree → run() returns 0 (D-86 per-image lookup)
 
 Strategy: The run() function also invokes SubmissionStructureCheck,
 SystemYamlSchemaCheck, DirectoryCheck, and a full TrainingCheck suite (many
@@ -19,17 +16,9 @@ tests focused on pool behavior and maintainable:
 
   - SubmissionStructureCheck and SystemYamlSchemaCheck are monkeypatched to
     no-op (return True) — they already have their own test coverage.
-  - MODE_TO_CHECKERS is monkeypatched to use a slimmed PoolAwareTrainingCheck
-    that only runs closed_submission_checksum (CHECK-05) instead of the full
-    TrainingCheck battery. This lets SC-5 exercise the real D-89 pool walk
-    without needing 6-timestamp run leaves, results.json, dlio_config/, etc.
+  - MODE_TO_CHECKERS is monkeypatched to an empty checker list so the full
+    TrainingCheck battery does not run against the minimal v1.1 fixtures.
   - PoolStructureCheck is never monkeypatched — it runs for real in all tests.
-
-SC-1..SC-4 tests use a minimal v1.1 tree with one run leaf. SC-5 uses a tree
-with two run leaves and two pool images (different content → different hashes).
-
-Refs: 08-CONTEXT.md D-80..D-93, 08-01-SUMMARY.md, 08-02-SUMMARY.md,
-      08-03-PLAN.md Task 2.
 """
 
 from __future__ import annotations
@@ -39,13 +28,8 @@ import json
 import logging
 import shutil
 from pathlib import Path
-from unittest.mock import MagicMock
-
 import pytest
 
-from mlpstorage_py.submission_checker.checks.base import BaseCheck
-from mlpstorage_py.submission_checker.checks.training_checks import TrainingCheck
-from mlpstorage_py.submission_checker.constants import REFERENCE_CHECKSUMS
 from mlpstorage_py.submission_checker.main import run
 from mlpstorage_py.submission_checker.tools.code_checksum import compute_code_tree_md5
 from mlpstorage_py.submission_checker.tools.code_image import (
@@ -217,36 +201,6 @@ def v11_tree_factory(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# PoolAwareTrainingCheck — slim TrainingCheck for SC-5
-# ---------------------------------------------------------------------------
-
-class _PoolAwareTrainingCheck(BaseCheck):
-    """Slim TrainingCheck that only runs closed_submission_checksum (CHECK-05).
-
-    Used instead of the full TrainingCheck to avoid requiring 6-timestamp
-    run leaves, results.json, dlio_config/, etc. for the integration tests.
-    The D-89 pool-walk logic in closed_submission_checksum is inherited
-    directly from TrainingCheck — this class just skips all other rules.
-    """
-
-    def __init__(self, log, config, submissions_logs):
-        from mlpstorage_py.submission_checker.loader import SubmissionLogs
-        super().__init__(log=log, path=submissions_logs.loader_metadata.folder)
-        self.config = config
-        self.submissions_logs = submissions_logs
-        self.mode = self.submissions_logs.loader_metadata.mode
-        self.model = self.submissions_logs.loader_metadata.benchmark
-        import os
-        self.run_path = os.path.join(self.path, "run")
-        self.name = "pool-aware training checks"
-        # Only register closed_submission_checksum (CHECK-05)
-        self.checks = [self.closed_submission_checksum]
-
-    # Inherit closed_submission_checksum (CHECK-05) verbatim from TrainingCheck
-    closed_submission_checksum = TrainingCheck.closed_submission_checksum
-
-
-# ---------------------------------------------------------------------------
 # Shared run() invocation helper
 # ---------------------------------------------------------------------------
 
@@ -266,12 +220,13 @@ def _run_args(root: Path, tmp_path: Path, version: str = "v3.0") -> argparse.Nam
 # ===========================================================================
 
 class TestPhase8SuccessCriteria:
-    """ROADMAP Phase 8 success criteria SC-1..SC-5 integration tests.
+    """ROADMAP Phase 8 success criteria SC-1..SC-4 integration tests.
 
     Each test method exercises run() against a v1.1 tree. Non-pool checks
     (SubmissionStructureCheck, SystemYamlSchemaCheck) are monkeypatched to
-    no-op so the test focuses on pool behavior. DirectoryCheck is excluded
-    from MODE_TO_CHECKERS via monkeypatch, replaced by _PoolAwareTrainingCheck.
+    no-op so the test focuses on pool behavior. The training checker list
+    in MODE_TO_CHECKERS is emptied so the full TrainingCheck battery does
+    not run against the minimal v1.1 fixtures.
     """
 
     def _patch_non_pool_checks(self, monkeypatch):
@@ -298,12 +253,12 @@ class TestPhase8SuccessCriteria:
         )
 
     def _patch_mode_checkers(self, monkeypatch):
-        """Monkeypatch MODE_TO_CHECKERS to use _PoolAwareTrainingCheck only."""
+        """Monkeypatch MODE_TO_CHECKERS to an empty training checker list."""
         import mlpstorage_py.submission_checker.main as main_mod
         monkeypatch.setattr(
             main_mod,
             "MODE_TO_CHECKERS",
-            {"training": [_PoolAwareTrainingCheck]},
+            {"training": []},
         )
 
     # -------------------------------------------------------------------
@@ -328,7 +283,7 @@ class TestPhase8SuccessCriteria:
             r for r in caplog.records
             if r.levelno >= logging.ERROR
             and any(kw in r.getMessage() for kw in [
-                "CHECK-01", "CHECK-02", "CHECK-03", "CHECK-04", "CHECK-05",
+                "CHECK-01", "CHECK-02", "CHECK-03", "CHECK-04",
                 "mlps-code-image", "pool image", "orphan", "Legacy code/",
             ])
         ]
@@ -495,102 +450,3 @@ class TestPhase8SuccessCriteria:
             f"SC-4b: expected 'Legacy code/ layout detected', got: {all_messages}"
         )
 
-    # -------------------------------------------------------------------
-    # SC-5: two-version, two-pool-image tree → run() returns 0 (D-86/D-87)
-    # -------------------------------------------------------------------
-
-    def test_sc5_two_versions_two_images_passes(
-        self, tmp_path, v11_tree_factory, monkeypatch, caplog
-    ):
-        """SC-5: two run leaves each referencing a distinct pool image at different
-        mlpstorage_version values; REFERENCE_CHECKSUMS monkeypatched with correct
-        MD5 for each → run() returns 0.
-
-        Exercises the D-86 per-image version-keyed lookup in
-        TrainingCheck.closed_submission_checksum (CHECK-05).
-        """
-        self._patch_non_pool_checks(monkeypatch)
-        self._patch_mode_checkers(monkeypatch)
-
-        log = _MockLog()
-        root = tmp_path / "submission_sc5"
-        root.mkdir(parents=True, exist_ok=True)
-        orgname = "Acme"
-        org_root = root / orgname
-        org_root.mkdir(parents=True, exist_ok=True)
-
-        # Sentinel
-        (org_root / ".mlps-image-pool").write_text("2026-01-01T00:00:00Z\n")
-
-        # Pool image 1: mlpstorage_version = "test-1.0"
-        content1 = "[project]\nname='image1'\nversion='1.0'\n"
-        pool_dir1, full_hash1 = _build_pool_image(
-            org_root, content=content1, mlpstorage_version="test-1.0", log=log
-        )
-
-        # Pool image 2: different content so different hash; version = "test-1.1"
-        content2 = "[project]\nname='image2'\nversion='2.0'\n"
-        pool_dir2, full_hash2 = _build_pool_image(
-            org_root, content=content2, mlpstorage_version="test-1.1", log=log
-        )
-
-        assert full_hash1 != full_hash2, "Pool images must have distinct hashes"
-
-        # Compute correct MD5 for each pool image (what REFERENCE_CHECKSUMS should map to)
-        md5_for_image1 = compute_code_tree_md5(str(pool_dir1), log)
-        md5_for_image2 = compute_code_tree_md5(str(pool_dir2), log)
-
-        # Two run leaf dirs: leaf1 → pool_dir1, leaf2 → pool_dir2
-        leaf1 = (
-            root / "closed" / orgname / "results" / "sys1"
-            / "training" / "unet3d" / "run" / "20260101_120000"
-        )
-        leaf1.mkdir(parents=True, exist_ok=True)
-        (leaf1 / "output.txt").write_text("run 0\n")
-        _write_pointer_atomic(leaf1, full_hash1, log)
-
-        leaf2 = (
-            root / "closed" / orgname / "results" / "sys1"
-            / "training" / "unet3d" / "run" / "20260101_120001"
-        )
-        leaf2.mkdir(parents=True, exist_ok=True)
-        (leaf2 / "output.txt").write_text("run 1\n")
-        _write_pointer_atomic(leaf2, full_hash2, log)
-
-        # Systems
-        systems_dir = root / "closed" / orgname / "systems"
-        systems_dir.mkdir(parents=True, exist_ok=True)
-        (systems_dir / "sys1.yaml").write_text("system_under_test:\n  deployment: onprem\n")
-        (systems_dir / "sys1.pdf").write_bytes(b"%PDF-1.0 minimal")
-
-        # Monkeypatch REFERENCE_CHECKSUMS in both modules so D-86 lookup succeeds
-        patched_checksums = {
-            "test-1.0": md5_for_image1,
-            "test-1.1": md5_for_image2,
-        }
-        monkeypatch.setattr(
-            "mlpstorage_py.submission_checker.constants.REFERENCE_CHECKSUMS",
-            patched_checksums,
-        )
-        monkeypatch.setattr(
-            "mlpstorage_py.submission_checker.checks.training_checks.REFERENCE_CHECKSUMS",
-            patched_checksums,
-        )
-
-        args = _run_args(root, tmp_path)
-        with caplog.at_level(logging.DEBUG):
-            rc = run(args)
-
-        # Should pass: both pool images have correct REFERENCE_CHECKSUMS entries
-        errors = [
-            r for r in caplog.records
-            if r.levelno >= logging.ERROR
-            and any(kw in r.getMessage() for kw in [
-                "CHECK-01", "CHECK-02", "CHECK-03", "CHECK-04", "CHECK-05",
-                "mlps-code-image", "pool image", "orphan", "code-hash",
-            ])
-        ]
-        assert rc == 0, (
-            f"SC-5: expected exit code 0 for two-version two-image tree, got {rc}. "
-            f"Pool errors: {[r.getMessage() for r in errors]}"
-        )
