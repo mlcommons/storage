@@ -157,12 +157,14 @@ class VdbCheck(BaseCheck):
     def _iter_run_files(self):
         """Yield run-summary tuples or empty iterable when the loader did not populate them.
 
-        Phase 4 land time: ``Loader.load()`` only fills ``run_files`` /
-        ``datagen_files`` for ``mode == "training"``; the ``else`` branch
-        fills ``checkpoint_files`` for everything else. For ``vector_database``
-        leaves this means ``run_files`` is ``None`` (the dataclass default).
-        Rule methods consume this iterator instead of touching ``run_files``
-        directly so they degrade to an empty walk without crashing.
+        Post-#612: ``Loader.load()`` fills ``run_files`` / ``datagen_files``
+        for ``mode == "vector_database"`` (loader.py:224-225) and for
+        ``mode == "kv_cache"`` (loader.py:198-199). This guard remains as a
+        defensive walk in case a future loader path or a test-time
+        ``SubmissionLogs`` fake leaves the field ``None`` (the dataclass
+        default) — rule methods can then consume this iterator instead of
+        touching ``run_files`` directly and degrade to an empty walk
+        without crashing.
         """
         run_files = self.submissions_logs.run_files
         if not run_files:

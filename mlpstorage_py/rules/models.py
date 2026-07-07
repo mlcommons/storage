@@ -586,20 +586,55 @@ class ClusterInformation:
 
     @classmethod
     def from_dlio_summary_json(cls, summary, logger) -> Optional['ClusterInformation']:
-        """Create ClusterInformation from DLIO summary.json data."""
+        """Create ClusterInformation from DLIO summary.json data.
+
+        storage#669: DLIO's ``host_memory_GB`` and ``host_cpu_count``
+        arrays are populated via MPI SUM-Reduce keyed on
+        ``self.MPI.node()``. On multi-rank-per-host clusters where
+        ``MPI.node()`` doesn't map monotonically to
+        ``0..nnodes-1`` slots, some slots are doubled and some are
+        zero. Only the sums are authoritative; positional access is
+        not. We compute cluster-mean per-host values from the sums
+        and use ``num_hosts`` (which DLIO reports separately, correctly)
+        as the record count.
+        """
+        # Import lazily to avoid a top-level circular between
+        # rules/models.py and submission_checker/dlio_summary_helpers.py.
+        from mlpstorage_py.submission_checker.dlio_summary_helpers import (
+            cluster_total_host_memory_gb,
+        )
+
         host_memories = summary.get("host_memory_GB")
         host_cpus = summary.get("host_cpu_count")
         if host_memories is None or host_cpus is None:
             return None
 
+        num_hosts = int(summary.get("num_hosts", 0) or 0)
+        if num_hosts <= 0:
+            # Fall back to array length only when DLIO didn't report
+            # num_hosts. Length may be wrong (equals nnodes rather than
+            # unique physical hosts) but it's the best we have.
+            num_hosts = len(host_memories) if host_memories else 0
+        if num_hosts <= 0:
+            return None
+
+        total_memory_gb = cluster_total_host_memory_gb(summary)
+        per_host_memory_gb_ = total_memory_gb / num_hosts
+        # host_cpu_count uses the same SUM-Reduce pattern; the sum is
+        # authoritative but positional access is not.
+        try:
+            total_cpu_count = sum(int(c) for c in host_cpus if c is not None)
+        except (TypeError, ValueError):
+            total_cpu_count = 0
+        per_host_cpu_count = total_cpu_count // num_hosts if num_hosts else 0
+
         host_info_list = []
-        num_hosts = len(host_memories)
         for i in range(num_hosts):
-            memory_bytes = int(host_memories[i] * 1024 * 1024 * 1024)
+            memory_bytes = int(per_host_memory_gb_ * 1024 * 1024 * 1024)
             host_info = HostInfo(
                 hostname=f"host_{i}",
                 memory=HostMemoryInfo.from_total_mem_int(memory_bytes),
-                cpu=HostCPUInfo(num_cores=host_cpus[i]) if i < len(host_cpus) else None,
+                cpu=HostCPUInfo(num_cores=per_host_cpu_count) if per_host_cpu_count else None,
             )
             host_info_list.append(host_info)
 

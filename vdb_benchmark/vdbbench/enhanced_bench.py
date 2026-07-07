@@ -85,11 +85,29 @@ except ImportError:  # pragma: no cover - optional dependency
 
 try:
     from vdbbench.config_loader import load_config, merge_config_with_args
+    from vdbbench.connection import (
+        MAX_GRPC_MESSAGE_LENGTH,
+        open_connection,
+    )
     from vdbbench.list_collections import get_collection_info
 
     _VDBBENCH_PKG = True
 except ImportError:  # pragma: no cover - package import optional for direct runs
     _VDBBENCH_PKG = False
+
+    # Fallback so enhanced_bench still works when run as a bare script outside
+    # the vdbbench package. Mirrors vdbbench/connection.py exactly.
+    MAX_GRPC_MESSAGE_LENGTH = 514_983_574
+
+    def open_connection(alias="default", host="127.0.0.1", port="19530",
+                        *, max_message_length=MAX_GRPC_MESSAGE_LENGTH):
+        connections.connect(
+            alias=alias,
+            host=host,
+            port=str(port),
+            max_receive_message_length=max_message_length,
+            max_send_message_length=max_message_length,
+        )
 
 
 STAGGER_INTERVAL_SEC = 0.1
@@ -645,7 +663,7 @@ def generate_random_vector(dim: int) -> List[float]:
 def connect_to_milvus(host: str, port: str):
     """Establish a default connection to Milvus."""
     try:
-        connections.connect(alias="default", host=host, port=port)
+        open_connection(alias="default", host=host, port=port)
         return connections
     except Exception as e:
         print(f"Failed to connect to Milvus: {e}")
@@ -734,7 +752,7 @@ def validate_existing_flat_collection(
     conn_alias = f"flat_validate_{uuid.uuid4().hex[:8]}"
 
     try:
-        connections.connect(alias=conn_alias, host=host, port=port)
+        open_connection(alias=conn_alias, host=host, port=port)
     except Exception as exc:
         print(f"Failed to connect for FLAT collection validation: {exc}")
         return False
@@ -800,7 +818,7 @@ def create_flat_collection(
     conn_alias = f"flat_setup_{uuid.uuid4().hex[:8]}"
 
     try:
-        connections.connect(alias=conn_alias, host=host, port=port)
+        open_connection(alias=conn_alias, host=host, port=port)
     except Exception as e:
         print(f"Failed to connect for FLAT collection setup: {e}")
         return False
@@ -869,8 +887,18 @@ def create_flat_collection(
 
         if use_iterator:
             try:
+                # Cap the iterator batch size so a single gRPC response stays
+                # well under Milvus' default 256MB max-message limit. For wide
+                # vectors (e.g. 1536-dim float32 ~= 6KB/row) a 5000-row batch
+                # can exceed the limit and trigger RESOURCE_EXHAUSTED, forcing
+                # the fragile pk-cursor fallback. ~24MB/batch is a safe ceiling.
+                # (Ported from simple_bench.py; see issue #572 / PR #516.)
+                bytes_per_row = max(vector_dim * 4, 1)
+                safe_rows = max(1, (24 * 1024 * 1024) // bytes_per_row)
+                iter_batch_size = min(copy_batch_size, safe_rows, 16384)
+
                 iterator = source_coll.query_iterator(
-                    batch_size=copy_batch_size,
+                    batch_size=iter_batch_size,
                     output_fields=[src_pk_field, src_vec_field],
                 )
 
@@ -909,18 +937,32 @@ def create_flat_collection(
                 DataType.INT16,
                 DataType.INT8,
             )
-            last_pk: Union[int, str] = -(2**63) if is_int_pk else ""
+            # NOTE: do NOT initialize the int cursor at -2**63. The expression
+            # "pk > -9223372036854775808" makes Milvus parse the operand
+            # 9223372036854775808 (magnitude, before the sign) as int64, which
+            # overflows INT64_MAX by one and raises a parse error, breaking the
+            # copy loop with 0 vectors. Benchmark IDs are >= 0, so -1 is a safe
+            # in-range sentinel that yields the valid first-page expr "pk > -1".
+            # (Ported from simple_bench.py; see issue #489 / PR #516.)
+            last_pk: Union[int, str] = -1 if is_int_pk else ""
+            first_page = True
             page_limit = min(copy_batch_size, 16384)
 
             dummy_vec = np.random.random(vector_dim).astype(np.float32)
             dummy_vec = (dummy_vec / np.linalg.norm(dummy_vec)).tolist()
 
             while copied < total_vectors:
-                expr = (
-                    f"{src_pk_field} > {last_pk}"
-                    if is_int_pk
-                    else f'{src_pk_field} > "{last_pk}"'
-                )
+                if is_int_pk:
+                    expr = f"{src_pk_field} > {last_pk}"
+                else:
+                    # First page for VARCHAR PKs uses a closed lower bound so an
+                    # empty-string sentinel does not skip valid keys; subsequent
+                    # pages advance with a strict cursor on the last seen key.
+                    if first_page:
+                        expr = f'{src_pk_field} >= ""'
+                    else:
+                        expr = f'{src_pk_field} > "{last_pk}"'
+                first_page = False
 
                 try:
                     pk_batch = source_coll.query(
@@ -1060,7 +1102,7 @@ def precompute_ground_truth(
     conn_alias = f"gt_compute_{uuid.uuid4().hex[:8]}"
 
     try:
-        connections.connect(alias=conn_alias, host=host, port=port)
+        open_connection(alias=conn_alias, host=host, port=port)
     except Exception as e:
         print(f"Failed to connect for ground truth computation: {e}")
         return {}
@@ -1647,7 +1689,7 @@ def _worker_mp(
 ) -> None:
     alias = f"w{worker_id}_{uuid.uuid4().hex[:8]}"
     try:
-        connections.connect(alias=alias, host=host, port=port)
+        open_connection(alias=alias, host=host, port=port)
         col = Collection(collection_name, using=alias)
         col.load()
         params = make_search_params_full(metric_type, algo_params)
@@ -2890,7 +2932,7 @@ def main() -> None:
     # =========================================================================
     gt_cache_dir = Path(args.gt_cache_dir) if args.gt_cache_dir else None
 
-    connections.connect("default", host=args.host, port=args.port)
+    open_connection("default", host=args.host, port=args.port)
     if not utility.has_collection(args.collection):
         raise SystemExit(f"Collection not found: {args.collection}")
 
@@ -2935,7 +2977,7 @@ def main() -> None:
         if not flat_ok:
             raise SystemExit("Existing FLAT GT collection validation failed.")
 
-        connections.connect("default", host=args.host, port=args.port)
+        open_connection("default", host=args.host, port=args.port)
         col = Collection(args.collection)
         col.load()
 
@@ -2955,7 +2997,7 @@ def main() -> None:
             raise SystemExit("FLAT GT collection creation failed.")
 
         args.gt_collection = auto_gt_name
-        connections.connect("default", host=args.host, port=args.port)
+        open_connection("default", host=args.host, port=args.port)
         col = Collection(args.collection)
         col.load()
 

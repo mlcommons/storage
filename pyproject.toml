@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlpstorage"
-version = "3.0.28"
+version = "3.0.37"
 description = "MLPerf Storage Benchmark Suite"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -23,7 +23,7 @@ dependencies = [
     "minio>=7.2.20",
     "s3torchconnector>=1.5.0",
     "python-dotenv>=1.0.0",
-    "s3dlio>=0.9.102",
+    "s3dlio>=0.9.106",
 ]
 
 [project.optional-dependencies]
@@ -79,7 +79,10 @@ vectordb-elasticsearch = [
 packages = {find = {include = ["mlpstorage_py*", "vdbbench*"]}}
 
 [tool.setuptools.package-data]
-"mlpstorage_py" = ["../configs/dlio/workload/*.yaml"]
+"mlpstorage_py" = [
+    "../configs/dlio/workload/*.yaml",
+    "system_description/sysctl_allowlist.txt",
+]
 
 [project.scripts]
 mlpstorage = 'mlpstorage_py.main:main'
@@ -129,6 +132,19 @@ torchaudio = [{ index = "pytorch-cpu" }]
 # Pinned to a specific commit for reproducibility; bump by updating `rev` and
 # re-running `uv lock --upgrade-package dlio-benchmark`.
 # Commit history (most recent first):
+#   - DLIO PR #45 fix for storage #699: os.makedirs(exist_ok=True) race on
+#     multi-host checkpoint runs — exponential-backoff retry in
+#     _makedirs_race_safe(); applied to FileStorage, ObjStoreLibStorage,
+#     and SimpleStreamingCheckpointing
+#   - DLIO PR #44 fix for storage #690: checkpoint read double-prepends bucket
+#     for object storage — affects llama3-* checkpointing on S3/GCS/Azure
+#   - DLIO PR #43 fix for storage #671: env-var fallback for OpenMPI
+#     COMM_TYPE_SHARED collapse — prevents num_hosts = MPI-rank-count on
+#     Ubuntu 24.04 / kernel 6.8+ / OpenMPI 4.1.6
+#   - DLIO PR #42 fix for storage #667: _checkpoint LIST once on rank 0
+#     and broadcast the count — prevents SlowDown/503 storms and spurious
+#     "0 checkpoints available" aborts at scale (llama3-405b, 512 ranks
+#     on S3). Also fixes a latent missing-f-string on the failure Exception.
 #   - DLIO PR #41 fix for storage #593: write integrity for obj_store_lib —
 #     opt-in verification, s3dlio 0.9.106
 #   - DLIO PR #39 fix for storage #567: O_DIRECT path triggers on
@@ -147,7 +163,7 @@ torchaudio = [{ index = "pytorch-cpu" }]
 #   - DLIO PR #23 fix for storage #391 part 2 (sudo -n + warn-once for drop_caches)
 #   - DLIO PR #22 fix for storage #415 (mpi4py auto-init in spawn workers)
 #   - DLIO PR #21 fix for storage #391 part 1 (TorchIterableDatasetSimple gating)
-dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "f6796ed281e39ccc83a450e2b1f21b9c909d8fd0" }
+dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "24b13d7630a12e3d08624e5db254694a09f71599" }
 
 [dependency-groups]
 dev = [

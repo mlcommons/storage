@@ -1,0 +1,43 @@
+{
+  "schema_version": "1.0",
+  "run_datetime": "20260704_140000",
+  "npernode": 8,
+  "host_count": 1,
+  "total_ranks": 8,
+  "trials": 3,
+  "aggregated_read_bandwidth_gbps": 45.2,
+  "aggregated_write_bandwidth_gbps": 38.1,
+  "aggregated_avg_throughput_tokens_per_sec": 12500.0,
+  "aggregated_storage_throughput_tokens_per_sec": 12300.0,
+  "aggregated_p95_latency_ms": 18.4,
+  "performance_profile": "balanced",
+  "model": "llama3-8b",
+  "options": {
+    "profile_a": {
+      "option": "profile_a",
+      "aggregated_read_bandwidth_gbps": 42.0,
+      "aggregated_write_bandwidth_gbps": 0.0,
+      "aggregated_avg_throughput_tokens_per_sec": 11000.0,
+      "aggregated_storage_throughput_tokens_per_sec": 10900.0,
+      "aggregated_p95_latency_ms": 20.1,
+      "rank_count": 8,
+      "trial_count": 3,
+      "partial_failure": false,
+      "missing_files": [],
+      "cpu_tier_ranks": []
+    },
+    "profile_b": {
+      "option": "profile_b",
+      "aggregated_read_bandwidth_gbps": 48.5,
+      "aggregated_write_bandwidth_gbps": 41.2,
+      "aggregated_avg_throughput_tokens_per_sec": 14000.0,
+      "aggregated_storage_throughput_tokens_per_sec": 13700.0,
+      "aggregated_p95_latency_ms": 16.8,
+      "rank_count": 8,
+      "trial_count": 3,
+      "partial_failure": false,
+      "missing_files": [],
+      "cpu_tier_ranks": []
+    }
+  }
+}

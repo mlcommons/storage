@@ -47,11 +47,13 @@ log = logging.getLogger("rules_coverage")
 
 
 # D-A3: locked regex for Rules.md §2/§3/§4/§5/§6 ID enumeration.
-# §5 covers vectordb (VdbCheck, Phase 4); §6 reserved for kvcache rules
-# landing soon. Extending the character class preemptively avoids
-# repeating Phase 4's miss where the regex shipped behind the actual
-# Rules.md scope.
-_RULE_ID_PATTERN = re.compile(r"^([23456]\.\d+\.\d+)\.\s+\*\*([a-zA-Z][a-zA-Z0-9]+)\*\*")
+# §5 covers vectordb (VdbCheck, Phase 4); §6 covers kvcache (PR #602),
+# which introduces 4-part IDs (e.g. 6.3.1.1, 6.3.4.5). The dotted-tail
+# group `(?:\.\d+)+` accepts 3-, 4-, or deeper nested IDs; all consumers
+# (STUB_COVERAGE lookup, unmapped-set membership, CLI table rendering)
+# treat the ID as an opaque string, so the relaxation is a strict
+# superset of the prior 3-part-only behavior. See storage#653.
+_RULE_ID_PATTERN = re.compile(r"^([23456]\.\d+(?:\.\d+)+)\.\s+\*\*([a-zA-Z][a-zA-Z0-9]+)\*\*")
 
 
 def _default_rules_md_path() -> str:

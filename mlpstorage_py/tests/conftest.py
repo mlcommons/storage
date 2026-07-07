@@ -105,13 +105,6 @@ _CHKPT_TIMESTAMPS = [
     "20250112_110001",
 ]
 
-# Stable 3-file code/ tree content (binary-stable, deterministic)
-_CODE_FILES = {
-    "mod.py": b"# mod\ndef hello():\n    return 'hello'\n",
-    "helper.py": b"# helper\ndef util():\n    return 42\n",
-    "README.md": b"# Submission Code\n\nThis is the reference implementation.\n",
-}
-
 # Default summary.json content per run timestamp (feeds STRUCT-09)
 _DEFAULT_SUMMARY = {
     "num_hosts": 2,
@@ -256,10 +249,6 @@ def build_submission(tmp_path, **overrides) -> Path:
         tmp_path/
           closed/
             Acme/
-              code/
-                mod.py
-                helper.py
-                README.md
               systems/
                 acme-storage-v1.yaml   (schema-valid)
                 acme-storage-v1.pdf    (1-byte placeholder)
@@ -288,12 +277,8 @@ def build_submission(tmp_path, **overrides) -> Path:
     * ``open_mismatches_closed`` (bool)     — adds open/ missing one subdir
     * ``wrong_submitter_in_closed`` (bool)  — closed/OtherAcme/ instead
     * ``multiple_submitters_in_closed`` (bool) — two submitter dirs under closed/
-    * ``missing_required_subdir`` (str)     — removes code/results/systems
+    * ``missing_required_subdir`` (str)     — removes results/systems
     * ``extra_submitter_subdir`` (str)      — adds a stray dir under submitter
-    * ``mutate_code`` (bool)                — adds extra file → hash differs
-    * ``set_reference_checksum`` (str)      — unused in tree; caller passes to Config
-    * ``code_with_symlink`` (bool)          — adds a symlink in code/
-    * ``code_with_pycache`` (bool)          — adds code/pkg/__pycache__/mod.pyc
     * ``unpaired_yaml`` (bool)              — systems/ yaml without pdf
     * ``extra_systems_file`` (str)          — adds a stray file in systems/
     * ``unpaired_results_system`` (bool)    — adds results/no-yaml-for-this/
@@ -388,10 +373,6 @@ def build_submission(tmp_path, **overrides) -> Path:
     multiple_submitters_in_closed = overrides.pop("multiple_submitters_in_closed", False)
     missing_required_subdir = overrides.pop("missing_required_subdir", None)
     extra_submitter_subdir = overrides.pop("extra_submitter_subdir", None)
-    mutate_code = overrides.pop("mutate_code", False)
-    set_reference_checksum = overrides.pop("set_reference_checksum", None)  # caller uses this
-    code_with_symlink = overrides.pop("code_with_symlink", False)
-    code_with_pycache = overrides.pop("code_with_pycache", False)
     unpaired_yaml = overrides.pop("unpaired_yaml", False)
     extra_systems_file = overrides.pop("extra_systems_file", None)
     unpaired_results_system = overrides.pop("unpaired_results_system", False)
@@ -429,6 +410,15 @@ def build_submission(tmp_path, **overrides) -> Path:
     chkpt_summary_checkpoint_size_GB = overrides.pop("chkpt_summary_checkpoint_size_GB", None)
     run_data_dir = overrides.pop("run_data_dir", None)
     run_results_dir = overrides.pop("run_results_dir", None)
+
+    # storage#655: DoD fixture-coverage kwargs for vector_database + kv_cache.
+    # * include_vdb (bool)                       — adds vector_database/milvus/DISKANN/…
+    # * include_kv_cache (bool)                  — adds kv_cache/llama3.1-8b/…
+    # * vdb_missing_metric_field (str | None)    — pops the named field from the
+    #   vdb run summary.json to trip 5.3.4 vdbMetricsReported (bad-fixture knob).
+    include_vdb = overrides.pop("include_vdb", False)
+    include_kv_cache = overrides.pop("include_kv_cache", False)
+    vdb_missing_metric_field = overrides.pop("vdb_missing_metric_field", None)
 
     # Sealed-enum guard — any leftover key is unknown
     if overrides:
@@ -473,8 +463,9 @@ def build_submission(tmp_path, **overrides) -> Path:
         if multiple_submitters_in_closed:
             (div_path / "AlsoAcme").mkdir()
 
-        # Required subdirectories
-        required_subdirs = {"code", "results", "systems"}
+        # Required subdirectories — v1.1 pool layout: code/ lives in
+        # <root>/<division>/pool/code-images/<hash>/, not per-submitter.
+        required_subdirs = {"results", "systems"}
         if missing_required_subdir:
             required_subdirs.discard(missing_required_subdir)
 
@@ -484,31 +475,8 @@ def build_submission(tmp_path, **overrides) -> Path:
         if extra_submitter_subdir:
             (sub_path / extra_submitter_subdir).mkdir()
 
-        code_path = sub_path / "code"
         results_path = sub_path / "results"
         systems_path = sub_path / "systems"
-
-        # ---------------------------------------------------------------
-        # code/ tree
-        # ---------------------------------------------------------------
-        if code_path.exists():
-            for fname, content in _CODE_FILES.items():
-                (code_path / fname).write_bytes(content)
-
-            if mutate_code:
-                (code_path / "extra_unexpected.py").write_bytes(b"# extra\n")
-
-            if code_with_symlink:
-                target = code_path / "mod.py"
-                link = code_path / "link_to_mod.py"
-                os.symlink(str(target), str(link))
-
-            if code_with_pycache:
-                pkg_dir = code_path / "pkg"
-                pkg_dir.mkdir()
-                pycache_dir = pkg_dir / "__pycache__"
-                pycache_dir.mkdir()
-                (pycache_dir / "mod.pyc").write_bytes(b"\x00\x00\x00\x00")
 
         # ---------------------------------------------------------------
         # systems/ directory
@@ -787,6 +755,137 @@ def build_submission(tmp_path, **overrides) -> Path:
 
             if wrong_checkpointing_workload:
                 (chkpt_path / wrong_checkpointing_workload).mkdir()
+
+            # ---------------------------------------------------------------
+            # vector_database/<engine>/<index>/{datagen,run}/<ts>/  (storage#655)
+            # ---------------------------------------------------------------
+            #
+            # Loader shape per loader.py:207-238 — yields one SubmissionLogs
+            # per (engine, index) pair with LoaderMetadata.folder pointing at
+            # the index dir. VdbCheck's rule methods consume the resulting
+            # run_files / datagen_files iterators.
+            #
+            # Content is §5-conformant per test_vdb_checks.py::_summary_run
+            # and ::_summary_datagen so the good-fixture assertion (no §5
+            # rule tripped) holds.  vdb_missing_metric_field pops a named
+            # field from run summary.json to engineer 5.3.4 vdbMetricsReported.
+            if include_vdb:
+                vdb_path = sys_results / "vector_database"
+                vdb_path.mkdir()
+                engine_path = vdb_path / "milvus"
+                engine_path.mkdir()
+                index_path = engine_path / "DISKANN"
+                index_path.mkdir()
+
+                vdb_run_summary = {
+                    "num_vectors": 1_000_000,
+                    "dimension": 128,
+                    "index_type": "DISKANN",
+                    "recall": 0.95,
+                    "throughput_qps": 1000.0,
+                    "total_time_seconds": 60.0,
+                    "query_count": 60_000,
+                    "mean_latency_ms": 1.0,
+                    "p95_latency_ms": 2.0,
+                    "p99_latency_ms": 3.0,
+                    "p999_latency_ms": 4.0,
+                    "database": {"database": "milvus"},
+                }
+                if vdb_missing_metric_field is not None:
+                    vdb_run_summary.pop(vdb_missing_metric_field, None)
+
+                vdb_datagen_summary = {
+                    "num_vectors": 1_000_000,
+                    "dimension": 128,
+                    "index_type": "DISKANN",
+                    "inserted_vectors": 1_000_000,
+                }
+                vdb_meta = {
+                    "benchmark_type": "vector_database",
+                    "model": "DISKANN",
+                    "args": {
+                        "storage_root": "/vdb/data",
+                        "results_dir": "/vdb/results",
+                        "model": "DISKANN",
+                    },
+                    "override_parameters": {},
+                }
+
+                vdb_datagen_dir = index_path / "datagen"
+                vdb_datagen_dir.mkdir()
+                vdb_dg_ts = vdb_datagen_dir / "20250113_130000"
+                vdb_dg_ts.mkdir()
+                (vdb_dg_ts / "summary.json").write_text(
+                    json.dumps(vdb_datagen_summary), encoding="utf-8"
+                )
+                (vdb_dg_ts / "metadata.json").write_text(
+                    json.dumps(vdb_meta), encoding="utf-8"
+                )
+
+                # 5.3.1 vdbRunCount requires exactly 5 run timestamps.
+                # 5.4.2 vdbFilesystemCheck reads a CAP-03 fs_separation.json
+                # sidecar per timestamp (falls back to df-block parsing);
+                # the sidecar is the simpler path for a synthetic fixture.
+                vdb_run_dir = index_path / "run"
+                vdb_run_dir.mkdir()
+                for i in range(5):
+                    vdb_run_ts = vdb_run_dir / f"2025011{3 + i}_140000"
+                    vdb_run_ts.mkdir()
+                    (vdb_run_ts / "summary.json").write_text(
+                        json.dumps(vdb_run_summary), encoding="utf-8"
+                    )
+                    (vdb_run_ts / "metadata.json").write_text(
+                        json.dumps(vdb_meta), encoding="utf-8"
+                    )
+                    (vdb_run_ts / "fs_separation.json").write_text(
+                        json.dumps({"same_filesystem": False}), encoding="utf-8"
+                    )
+
+            # ---------------------------------------------------------------
+            # kv_cache/<model>/{datagen,run}/<ts>/  (storage#655)
+            # ---------------------------------------------------------------
+            #
+            # Loader shape per loader.py:191-205. KVCacheCheck is a stub
+            # (zero @rule bindings) so a valid subtree suffices to prove
+            # the loader recognizes the kv_cache mode without tripping
+            # [2.1.10 workloadCategories]. Once PR #602 gives §6 real
+            # bindings, a kv_cache_missing_field knob can mirror
+            # vdb_missing_metric_field above.
+            if include_kv_cache:
+                kv_path = sys_results / "kv_cache"
+                kv_path.mkdir()
+                kv_model_path = kv_path / "llama3.1-8b"
+                kv_model_path.mkdir()
+
+                kv_summary = {"aggregated_read_bandwidth_gbps": 12.5}
+                kv_meta = {
+                    "benchmark_type": "kv_cache",
+                    "model": "llama3.1-8b",
+                    "args": {"model": "llama3.1-8b"},
+                    "override_parameters": {},
+                }
+
+                kv_datagen_dir = kv_model_path / "datagen"
+                kv_datagen_dir.mkdir()
+                kv_dg_ts = kv_datagen_dir / "20250113_130000"
+                kv_dg_ts.mkdir()
+                (kv_dg_ts / "summary.json").write_text(
+                    json.dumps(kv_summary), encoding="utf-8"
+                )
+                (kv_dg_ts / "metadata.json").write_text(
+                    json.dumps(kv_meta), encoding="utf-8"
+                )
+
+                kv_run_dir = kv_model_path / "run"
+                kv_run_dir.mkdir()
+                kv_run_ts = kv_run_dir / "20250113_140000"
+                kv_run_ts.mkdir()
+                (kv_run_ts / "summary.json").write_text(
+                    json.dumps(kv_summary), encoding="utf-8"
+                )
+                (kv_run_ts / "metadata.json").write_text(
+                    json.dumps(kv_meta), encoding="utf-8"
+                )
 
             if unpaired_results_system:
                 (results_path / "no-yaml-for-this").mkdir(parents=True)

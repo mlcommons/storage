@@ -656,11 +656,17 @@ class TestTrainingBenchmarkRequiredBytes:
 
 
 class TestCheckpointingBenchmarkRequiredBytes:
-    """A7 destination join + sum(rank_gb) * GiB * num_checkpoints_write."""
+    """Destination join + sum(rank_gb) * GiB * num_checkpoints_write.
+
+    The per-rank size math itself is covered by
+    ``tests/unit/test_checkpoint_capacity_gate_subset.py`` (issue #644);
+    this test only exercises the aggregation step at the
+    ``required_bytes_for_capacity_gate`` seam.
+    """
 
     def test_returns_sum_rank_gb_times_gib_times_num_checkpoints_write(self):
         from mlpstorage_py.benchmarks.dlio import CheckpointingBenchmark
-        from mlpstorage_py.config import LLM_ALLOWED_VALUES, LLM_SIZE_BY_RANK
+        from mlpstorage_py.config import LLM_SIZE_BY_RANK
 
         bm = MagicMock(spec=CheckpointingBenchmark)
         bm.args = SimpleNamespace(
@@ -670,10 +676,16 @@ class TestCheckpointingBenchmarkRequiredBytes:
             checkpoint_folder="/cp",
         )
         bm.logger = MagicMock()
+        # Delegate the per-rank helper to the real class method so the
+        # aggregation contract is exercised end-to-end (spec=... would
+        # otherwise stub _checkpoint_gb_per_rank to an empty iterable).
+        bm._checkpoint_gb_per_rank = (
+            lambda: CheckpointingBenchmark._checkpoint_gb_per_rank(bm)
+        )
 
-        # llama3-8b: ZeroLevel=3 (sharded across all ranks), model=15, optimizer=90
-        # rank_gb[i] = (15 + 90) / 8 = 13.125 for each of 8 ranks
-        # sum = 105.0; expected = int(105.0 * 1024**3 * 3) = 338368201523 (approx)
+        # llama3-8b: ClosedGPUs=8, num_processes=8 (full mode) so
+        # per_rank = (model + optimizer) / ClosedGPUs is unaffected by
+        # #644's subset fix. Expected = sum(per_rank) * 1024**3 * 3.
         model_gb, optimizer_gb = LLM_SIZE_BY_RANK["llama3-8b"]
         per_rank = (model_gb + optimizer_gb) / 8
         expected = int(per_rank * 8 * 1024**3 * 3)

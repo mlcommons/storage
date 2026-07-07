@@ -2,6 +2,7 @@
 from .base import BaseCheck
 from ..constants import *
 from ..configuration.configuration import Config
+from ..dlio_summary_helpers import cluster_total_host_memory_gb
 from ..loader import SubmissionLogs
 from ..rule_registry import rule
 from pathlib import Path
@@ -176,7 +177,12 @@ class TrainingCheck(BaseCheck):
                 # From summary
                 num_accelerators = summary.get("num_accelerators", 1)
                 num_hosts = summary.get("num_hosts", 1)
-                host_memory_gb = summary.get("host_memory_GB", [0])[0]
+                # storage#669: DLIO's host_memory_GB array is populated by an
+                # MPI SUM-Reduce keyed on self.MPI.node(). On multi-rank-per-
+                # host clusters where MPI.node() doesn't map monotonically to
+                # 0..nnodes-1, some slots are doubled and some are zero. sum()
+                # is authoritative; array[0] * num_hosts is not.
+                total_host_memory = cluster_total_host_memory_gb(summary)
 
                 if record_length == 0:
                     self.log_violation(
@@ -191,8 +197,8 @@ class TrainingCheck(BaseCheck):
                                         num_files_train * num_samples_per_file // (batch_size * num_accelerators))
                 min_samples_steps = num_steps_per_epoch * batch_size * num_accelerators
 
-                # Calculate min samples from host memory
-                total_host_memory = num_hosts * host_memory_gb
+                # Calculate min samples from host memory. total_host_memory
+                # was aggregated via cluster_total_host_memory_gb above.
                 min_samples_memory = (total_host_memory * HOST_MEMORY_MULTIPLIER *
                                     1024 * 1024 * 1024 / record_length)
 
@@ -359,7 +365,7 @@ class TrainingCheck(BaseCheck):
                 # 2.1.19 already flags missing summary; do not double-fire here.
                 continue
 
-            run_num_files_train = summary.get("num_files_train")
+            run_num_files_train = self._to_int(summary.get("num_files_train"))
             run_num_files_eval = summary.get("num_files_eval")
             run_data_dir = metadata.get("args", {}).get("data_dir")
 
@@ -416,6 +422,22 @@ class TrainingCheck(BaseCheck):
         return valid
 
     @staticmethod
+    def _to_int(v):
+        """Coerce v to int; return None if v is None or non-numeric.
+
+        JSON/YAML round-tripping can serialise integer values as strings
+        (e.g. ``"68090280"``). Using bare ``>`` / ``<`` between an int
+        and a str raises TypeError (issue #681), so callers must coerce
+        before comparing.
+        """
+        if v is None:
+            return None
+        try:
+            return int(v)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
     def _group_datasize_by_data_dir(datasize_files):
         """Group loaded datasize tuples by ``args.data_dir`` value.
 
@@ -431,7 +453,7 @@ class TrainingCheck(BaseCheck):
             data_dir = metadata.get("args", {}).get("data_dir")
             params = metadata.get("parameters", {}) or {}
             dataset_params = params.get("dataset", {}) or {}
-            num_files_train = dataset_params.get("num_files_train")
+            num_files_train = TrainingCheck._to_int(dataset_params.get("num_files_train"))
             grouped.setdefault(data_dir, []).append((num_files_train, ts))
         return grouped
 
@@ -455,7 +477,7 @@ class TrainingCheck(BaseCheck):
             return None, None
         params = latest_metadata.get("parameters", {}) or {}
         dataset_params = params.get("dataset", {}) or {}
-        num_files_train = dataset_params.get("num_files_train")
+        num_files_train = TrainingCheck._to_int(dataset_params.get("num_files_train"))
         data_dir = latest_metadata.get("args", {}).get("data_dir")
         return num_files_train, data_dir
 

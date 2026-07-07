@@ -50,6 +50,10 @@ services:
       ETCD_ENDPOINTS: ${ETCD_ENDPOINTS}
     volumes:
       - "${MILVUS_DATA_DIR}:/var/lib/milvus"
+      # Optional Milvus config overrides (see stacks/milvus/user.yaml.example,
+      # e.g. the flush rate limiter discussed in issue #705). Uncomment after
+      # copying user.yaml.example to user.yaml:
+      # - "../../user.yaml:/milvus/configs/user.yaml:ro"
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:${MILVUS_HTTP_PORT}/healthz"]
       interval: 30s

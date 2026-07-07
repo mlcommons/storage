@@ -211,7 +211,7 @@ def _add_kvcache_cache_arguments(parser, mode):
             autoscaler_mode='qos',
             seed=42,
             trials=3,
-            inter_option_delay=20,
+            inter_option_delay=90,
             allow_invalid_params=False,
             params='',
             max_concurrent_allocs=None,

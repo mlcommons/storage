@@ -430,6 +430,7 @@ root_folder (or any name you prefer)
 | *Storage parameters*         |                                                                                                                                     |          |
 | storage.storage_root         | The storage root directory                                                                                                          | ./       |
 | storage.storage_type         | The storage type                                                                                                                    | local_fs |
+| storage.storage_options.prefetch_window | Client-side s3dlio prefetch depth for object-storage runs. Same class of knob as `reader.read_threads`: tunes client I/O concurrency, not workload semantics (same bytes, same access pattern, same AU rule). Object-storage-only: on POSIX, prefetch flows through the reclaimable page cache and imposes no whole-record host-memory pressure; on object storage each prefetch slot pins a whole record until consumed, so the closed default may leave no valid operating point for large-record models. Uncapped, matching `reader.read_threads`. | s3dlio default |
 
 3.6.3. **trainingOpenSubmissionParameters** -- For OPEN submissions of this benchmark, only a few additional parameters can be modified over those allowed in CLOSED, and those additional parameters are listed in the table below.  Any other parameters being modified must generate a message and fail the validation.
 
@@ -655,8 +656,159 @@ System:
 
 ## 6.3. KVCache Run Options
 
+The KVCache benchmark drives a fixed per-client workload (a fixed number of
+simulated users at a fixed per-client I/O concurrency) and lets the submitter
+add or remove client processes (MPI ranks) to load the storage system. A
+submission is scored, per Option, on the **aggregate Storage Read Bandwidth**
+(higher is better), the **aggregate device read- and write-latency P95** (lower
+is better), and the **aggregate Storage Throughput in tokens/s**.
+
+A run is launched with `mlpstorage <closed|open|whatif> kvcache run [OPTIONS]`
+(the division is the first positional, post-PR #412 modal CLI). The results
+directory must first be initialised once with `mlpstorage init <orgname>
+<results-dir>`, and every run requires `--systemname` (or the `MLPERF_SYSTEMNAME`
+environment variable). The command executes **all three Options sequentially**,
+each repeated `trials` times, by prefixing `mpirun` to `mlperf_wrapper.py`. The
+Option's parameters are built by `mlpstorage` (`_build_option_kvcache_args`) and
+forwarded through the wrapper to `kv-cache.py`; the wrapper itself encodes no
+workload parameters and only writes each rank's results to an isolated
+`rank_<N>/` directory.
+
+*Enforcement status: the per-Option / per-rank CLOSED checks in this section are
+normative requirements for the submission validator. The kvcache submission
+checker is currently a stub, so today these are enforced by the run-time CLI
+locks (6.3.2.1) and by manual review until the checker is implemented.*
+
+### 6.3.1. Sanctioned workload Options
+
+6.3.1.1. **kvcacheFixedWorkloadPerOption** -- A CLOSED submission runs the three sanctioned MLPerf v3.0 KVCache workload Options of Table KVCache-1 via `mlpstorage closed kvcache run`. The per-Option parameters `model`, `num-users` (per client), `duration`, `gpu-mem-gb`, `cpu-mem-gb`, `max-concurrent-allocs`, and `generation-mode` are **immutable** and are emitted verbatim from `WORKLOAD_PARAMS` in `mlpstorage_py/benchmarks/kvcache.py`; in CLOSED no user CLI flag can reach `kv-cache.py`. The *submission validator* must fail the run if any recorded value differs from Table KVCache-1.
+
+**Table KVCache-1: MLPerf v3.0 KVCache CLOSED workload Options**
+
+| Option | Name                | model                  | num-users (per client) | duration (s) | gpu-mem-gb | cpu-mem-gb | max-concurrent-allocs | generation-mode |
+|--------|---------------------|------------------------|------------------------|--------------|------------|------------|-----------------------|-----------------|
+| 1      | Max Storage Stress  | llama3.1-8b            | 200                    | 300          | 0          | 0          | 16                    | none            |
+| 2      | Storage Throughput  | llama3.1-8b            | 100                    | 300          | 0          | 4          | 16                    | none            |
+| 3      | Large Model (70B)   | llama3.1-70b-instruct  | 70                     | 300          | 0          | 0          | 4                     | none            |
+
+  * `gpu-mem-gb = 0` removes the GPU cache tier so all KV traffic is forced onto the storage tier under test. In Options 1 and 3 `cpu-mem-gb = 0` forces every object to NVMe; Option 2 allows a small (4 GiB) CPU tier.
+  * `generation-mode = none` removes the simulated per-token compute delay so 100% of the measured latency is storage I/O.
+  * `num-users` is **per client** (per MPI rank); the aggregate offered load is `num_clients × num-users` (see 6.3.3).
+
+### 6.3.2. CLOSED sequence locks
+
+6.3.2.1. **kvcacheClosedSequenceLocks** -- For CLOSED submissions the sequence parameters are fixed and the benchmark hard-fails on any override: `--seed` = 42, `--trials` = 3 (scored repeats per Option), `--inter-option-delay` = 90 s, and `--config` is not permitted. The *submission validator* must confirm these values in the run metadata.
+
+6.3.2.2. **kvcacheAutoscalingProhibited** -- For CLOSED submissions, `--enable-autoscaling` must not be set. (Rationale: the runtime autoscaler does not add or remove worker threads — the worker pool is fixed at run start — so it cannot serve as a fair scaling mechanism.)
+
+### 6.3.3. Client scaling (scaling up and scaling down)
+
+6.3.3.1. **kvcacheClientDefinition** -- A *client* is one MPI process (rank). The cluster rank layout is resolved from `--num-processes` (total ranks across the cluster), `--npernode` (ranks per host), and `--hosts`: if only `--num-processes` is given, `npernode = num-processes / len(hosts)` (must divide evenly); if only `--npernode` is given, `total_ranks = npernode × len(hosts)`; if both are given they must be consistent; if neither, one rank per host. Each client runs one independent `kv-cache.py` instance with the Option's fixed per-client `--num-users`.
+
+6.3.3.2. **kvcacheScaleUpModel** -- Submitters scale the number of clients **up or down** through the `mpirun` rank/host count. Each client runs the **full** per-client `num-users` of the Option, so the aggregate offered load is `num_clients × num-users` — adding clients **increases** total load (and aggregate in-flight concurrency `num_clients × max-concurrent-allocs`). There is no per-client load reduction: a storage system demonstrates scalability by sustaining higher aggregate read bandwidth at an acceptable device P95 as clients are added, until it saturates. The per-client parameters in Table KVCache-1, including `max-concurrent-allocs`, are immutable regardless of client count.
+
+6.3.3.3. **kvcachePerClientIsolation** -- Each client writes its results JSON to, and uses a cache subdirectory under, a path unique to that client: `<results>/.../option_<O>/trial_<T>/rank_<N>/kvcache_results_*.json` and `<cache-dir>/rank_<N>/` (provided by `mlperf_wrapper.py` via its `--rank-output-base`/`--rank-cache-base` arguments). The *submission validator* must fail any multi-client run in which two clients share an output file or cache directory.
+
+6.3.3.4. **kvcacheSharedResultsDir** -- For multi-host runs, `--results-dir` must be on a filesystem visible at the same path on every host in `--hosts`, so the controller can aggregate every rank's result file. `mlpstorage` probes this before running and fails fast (issue #521) if the results directory is not shared.
+
+### 6.3.4. Result aggregation
+
+`mlpstorage` aggregates the per-rank result files for each Option into a single
+`kvcache_run_summary.json` (`options[<O>]`), as follows.
+
+6.3.4.1. **kvcacheAggregateBandwidth** -- Within each trial, the per-rank `cache_stats.tier_storage_read_bandwidth_gbps` (resp. write) are **summed** across ranks; across trials, the per-trial sums are reduced by **mean** (`fmean`). The result is `aggregated_read_bandwidth_gbps` / `aggregated_write_bandwidth_gbps`.
+
+6.3.4.2. **kvcacheAggregateThroughput** -- The aggregate **Storage Throughput (tokens/s)** is computed the same way (sum across ranks within a trial, mean across trials) from `summary.storage_throughput_tokens_per_sec` (`aggregated_storage_throughput_tokens_per_sec`).
+
+6.3.4.3. **kvcacheAggregateDeviceLatency** -- The aggregate **device read-latency P95** is the **maximum**, across all ranks and trials, of `cache_stats.storage_read_device_p95_ms` (`aggregated_device_read_p95_ms`); the aggregate **device write-latency P95** is the maximum of `cache_stats.storage_write_device_p95_ms` (`aggregated_device_write_p95_ms`). Two properties must be stated in the result:
+  * This is the **max of per-rank P95s** (a conservative, worst-client bound), **not** a pooled population percentile. Each per-rank P95 is itself `np.percentile` over that client's per-read device samples.
+  * "Device" latency is the storage-tier I/O span: for reads the `np.load()` span on a page-cache-dropped file, for writes the `fsync` span. It excludes the GPU/CPU tiers, the simulated generation delay, and (per PR #287) the redundant host copy; it is **storage-tier latency**, not raw hardware queue latency, because the read span still includes the one host copy intrinsic to `np.load`.
+
+6.3.4.4. **kvcacheLatencyValidity** -- The device-latency score is meaningful only when storage reads actually occur. A rank that served its working set entirely from the CPU tier (`cache_stats.storage_entries == 0`) contributes `0.0` (the key is absent and defaults to `0.0`) and is recorded in `cpu_tier_ranks`. The *submission validator* must fail (or flag OPEN-only) any Option whose ranks are **all** CPU-tier. This cannot occur for Options 1 and 3 (`cpu-mem-gb = 0`).
+
+6.3.4.5. **kvcacheHeadlineResult** -- The headline result for an Option is *(aggregate Storage Read Bandwidth, aggregate device read-latency P95, aggregate device write-latency P95, aggregate Storage Throughput)* reported with the client configuration `total_ranks` (= `num_processes`, or `npernode × hosts`).
+
+### 6.3.5. Example invocations
+
+`--cache-dir` must be on the storage system under test; `--results-dir` must be
+on a **different** filesystem (6.4) and initialised once with `mlpstorage init`.
+
+```
+# one-time, per results directory
+mlpstorage init <orgname> /results/kv
+
+# CLOSED, 1 client: runs Options 1,2,3 × 3 trials
+mlpstorage closed kvcache run --systemname <name> \
+  --cache-dir /mnt/nvme/kvcache --results-dir /results/kv
+
+# CLOSED, 4 clients on one host (4 ranks):
+mlpstorage closed kvcache run --systemname <name> --npernode 4 \
+  --cache-dir /mnt/nvme/kvcache --results-dir /results/kv
+
+# CLOSED, 4 clients across 4 hosts (1 rank each):
+mlpstorage closed kvcache run --systemname <name> --hosts node1 node2 node3 node4 \
+  --cache-dir /mnt/nvme/kvcache --results-dir /results/kv
+
+# CLOSED, 8 clients via total count (must divide evenly across hosts):
+mlpstorage closed kvcache run --systemname <name> --hosts node1 node2 --num-processes 8 \
+  --cache-dir /mnt/nvme/kvcache --results-dir /results/kv
+```
+
+NFS backing — `--cache-dir` points at the NFS client mount (present on every
+client host); the storage-tier metrics are measured at the application's POSIX
+boundary over NFS (see 6.4):
+
+```
+mlpstorage closed kvcache run --systemname <name> --hosts node1 node2 node3 node4 \
+  --cache-dir /mnt/nfs_kv/kvcache --results-dir /results/kv
+```
+
+S3 / object backing — `kv-cache.py` has no native object backend, so object
+storage is accessed through a POSIX-presenting gateway (s3fs, rclone, or
+Mountpoint-S3) and `--cache-dir` points at that mount (see 6.5):
+
+```
+mlpstorage closed kvcache run --systemname <name> --hosts node1 node2 node3 node4 \
+  --cache-dir /mnt/s3_kv/kvcache --results-dir /results/kv
+```
+
 ## 6.4. KVCache Access Via POSIX API Options
+
+6.4.1. **kvcachePosixCacheDir** -- `--cache-dir` (the NVMe/storage cache tier) and `--results-dir` (logs and result JSON) must both be set and must resolve to **different** filesystems, so that result/log I/O does not perturb the storage system under test. (This is a submission requirement; unlike Training/VDB, the kvcache checker does not yet auto-verify it — the only kvcache filesystem probe is the multi-host shared-results-dir check of 6.3.3.4.)
+
+6.4.2. **kvcachePosixIoModel** -- Over the POSIX API, `kv-cache.py` stores each KV object as a `.npy` file written with `np.save` + `fsync` and read back with `np.load` after a `POSIX_FADV_DONTNEED` page-cache drop. The storage-tier device latency (6.3.4.3) is therefore the cold-read `np.load` span and the `fsync` span at the POSIX boundary.
 
 ## 6.5. KVCache Access Via Object API Options
 
+6.5.1. **kvcacheObjectViaGateway** -- `kv-cache.py` has no native object-storage backend; all storage access is POSIX file I/O against `--cache-dir`. An object-storage (S3) submission must therefore present the bucket as a POSIX filesystem via a gateway/mount (s3fs, rclone, or Mountpoint-S3) and point `--cache-dir` at it. NFS submissions point `--cache-dir` at the NFS client mount.
+
+6.5.2. **kvcacheObjectLatencyScope** -- For object/gateway and NFS backings, the storage-tier device latency and bandwidth are measured at the application's POSIX boundary through the gateway/mount, not at a block device. The optional block-layer device tracer (`--enable-latency-tracing`, OPEN only) cannot observe this I/O — the cache directory's `st_dev` is synthetic — so it falls back to the VFS request sizes / NFS transport chunk. The submission must record the gateway/client software and configuration (e.g. s3fs/rclone version and mount options, NFS `vers`/`rsize`/`wsize`).
+
 ## 6.6. KVCache OPEN versus CLOSED Options
+
+6.6.1. **kvcacheClosedImmutable** -- In CLOSED (`mlpstorage closed kvcache run`), only the following may vary: `--systemname`, `--cache-dir`, `--results-dir`, and the client topology (`--hosts`, `--npernode`, `--num-processes`, `--mpi-params`). Everything else is fixed: the three Options of Table KVCache-1 with their immutable per-Option parameters and the sequence locks of 6.3.2.1 (seed 42, trials 3, inter-option-delay 90 s, no `--config`). The *submission validator* must fail a CLOSED run that sets any other parameter.
+
+6.6.2. **kvcacheOpenAllowances** -- OPEN submissions (`mlpstorage open kvcache run`) may, in addition, modify the workload to characterise it more broadly. In OPEN, user CLI flags supersede `WORKLOAD_PARAMS[option]` one key at a time (`max-concurrent-allocs` is not exposed and always comes from `WORKLOAD_PARAMS`). **Caveat:** the supersede cannot tell a user-set value from an argparse default, so a CLI default (`--gpu-mem-gb 16`, `--cpu-mem-gb 32`, `--model tiny-1b`) overrides the Option's value even when the submitter did not set it. An OPEN run that does not explicitly pass `--gpu-mem-gb 0 --cpu-mem-gb 0` (and a model) may keep the whole working set in the GPU/CPU tiers and never touch storage, producing zero storage bandwidth and device latency. OPEN submissions intended to stress storage must set the memory-tier sizes explicitly. OPEN allowances include:
+  * a custom `--config <config.yaml>` (e.g. different `user_templates`, `qos_profiles`, `eviction`, or RAG settings);
+  * **RAG** retrieval-augmented workloads (`--enable-rag`, `--rag-num-docs`);
+  * **BurstGPT** trace-driven request arrivals (`--use-burst-trace`, `--burst-trace-path`);
+  * **block-layer latency tracing** (`--enable-latency-tracing`), which captures device latency histograms and emits a distilled `fio` workload for independent replay;
+  * changed `--seed`, `--trials`, `--inter-option-delay`, `--num-users`, `--duration`, `--generation-mode`, and the cache-tier sizes.
+  * For more options / invocation examples for open submissions,please refer to the Design document:  https://github.com/mlcommons/storage/blob/main/kv_cache_benchmark/DESIGN.md and the proposal document [https://github.com/mlcommons/storage/blob/main/kv_cache_benchmark/docs/MLperf_v3_KV_cache_proposal.md][def]
+
+
+6.6.3. **kvcacheOpenInvocationNote** -- The `mlpstorage kvcache run` path passes `--config`/`--seed` plus the per-option workload args to `mlperf_wrapper.py`, and consumes `--trials`/`--inter-option-delay` itself (the trial loop and inter-option delay). RAG, BurstGPT, and latency tracing reach `kv-cache.py` only when exposed by the OPEN CLI or via a `--config` file (RAG has a `rag:` config section); otherwise they are exercised by invoking `kv-cache.py` directly. An OPEN submission using these must record the exact invocation. Example (direct, single client, with latency tracing — requires `sudo` for `bpftrace`):
+
+```
+sudo python kv-cache.py --config config.yaml \
+  --model llama3.1-8b --num-users 200 --duration 300 \
+  --gpu-mem-gb 0 --cpu-mem-gb 0 --max-concurrent-allocs 16 \
+  --generation-mode none --seed 42 --performance-profile throughput \
+  --cache-dir /mnt/nvme/kvcache --enable-latency-tracing \
+  --enable-rag --rag-num-docs 10 \
+  --output /results/kv_open/run.json
+# add --use-burst-trace --burst-trace-path BurstGPT/data/BurstGPT_1.csv for trace-driven arrivals
+```
+
+
+[def]: https://github.com/mlcommons/storage/blob/main/kv_cache_benchmark/docs/MLperf_v3_KV_cache_proposal.md

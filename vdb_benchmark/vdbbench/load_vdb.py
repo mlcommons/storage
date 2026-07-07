@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 import argparse
 import logging
+import random
 import sys
 import os
 import time
 import numpy as np
-from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility
+from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility, MilvusException
+
+from vdbbench.connection import open_connection
 
 # Add the parent directory to sys.path to import config_loader
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -44,8 +47,8 @@ def parse_args():
     # Index parameters
     parser.add_argument("--index-type", type=str, default="DISKANN", help="Index type")
     parser.add_argument("--metric-type", type=str, default="COSINE", help="Metric type for index")
-    parser.add_argument("--max-degree", type=int, default=16, help="DiskANN MaxDegree parameter")
-    parser.add_argument("--search-list-size", type=int, default=200, help="DiskANN SearchListSize parameter")
+    parser.add_argument("--max-degree", type=int, default=16, help="DiskANN max_degree build parameter")
+    parser.add_argument("--search-list-size", type=int, default=200, help="DiskANN search_list_size build parameter")
     parser.add_argument("--M", type=int, default=16, help="HNSW M parameter")
     parser.add_argument("--ef-construction", type=int, default=200, help="HNSW efConstruction parameter")
     parser.add_argument("--inline-pq", type=int, default=16, help="AISAQ inline_pq parameter, performance(max_degree) vs scale(0) mode")
@@ -133,13 +136,7 @@ def connect_to_milvus(host, port):
     """Connect to Milvus server"""
     try:
         logger.debug(f"Connecting to Milvus server at {host}:{port}")
-        connections.connect(
-            "default", 
-            host=host, 
-            port=port,
-            max_receive_message_length=514_983_574,
-            max_send_message_length=514_983_574
-        )
+        open_connection("default", host=host, port=port)
         logger.info(f"Connected to Milvus server at {host}:{port}")
         return True
 
@@ -258,12 +255,58 @@ def insert_data(collection, vectors, batch_size=10000, start_id=0):
     return total_inserted, time.time() - start_time
 
 
-def flush_collection(collection):
-    # Flush the collection
+# Milvus 2.4+ ships quotaAndLimits.flushRate.collection.max: 0.1 by default,
+# i.e. one flush() per 10 seconds per collection (issue #705). pymilvus does
+# retry on the resulting RateLimit (code 8) responses, but its default budget
+# (retry_times=75, back-off capped at 3 s => ~210 s) is exhausted when many
+# concurrent clients flush the same collection. This limiter period must be
+# respected between our own retries.
+MILVUS_FLUSH_LIMITER_PERIOD_S = 10.0
+
+
+def _is_rate_limit_error(exc: Exception) -> bool:
+    """True if exc is Milvus's RateLimit rejection (error code 8)."""
+    code = getattr(exc, "code", None)
+    compatible = getattr(exc, "compatible_code", None)
+    if code == 8 or compatible == 8:
+        return True
+    return "rate limit" in str(exc).lower()
+
+
+def flush_collection(collection, max_wait_s=900.0):
+    """Flush the collection, tolerating Milvus's per-collection flush
+    rate limiter (default 0.1 qps => one flush per 10 s per collection).
+
+    Passing timeout= to collection.flush() switches pymilvus's internal
+    retry loop from a fixed 75-attempt budget to a time budget; the outer
+    loop additionally waits out the limiter period between our own retries
+    so many concurrent flushers eventually all succeed (issue #705).
+
+    Returns the total flush wall time in seconds.
+    """
     flush_start = time.time()
-    collection.flush()
+    deadline = flush_start + max_wait_s
+    attempt = 0
+
+    while True:
+        attempt += 1
+        try:
+            collection.flush(timeout=max(30.0, deadline - time.time()))
+            break
+        except MilvusException as e:
+            if not _is_rate_limit_error(e) or time.time() >= deadline:
+                raise
+            sleep_s = MILVUS_FLUSH_LIMITER_PERIOD_S + random.uniform(0.0, 5.0)
+            logger.warning(
+                f"Flush attempt {attempt} rejected by Milvus flush rate "
+                f"limiter; retrying in {sleep_s:.1f} s "
+                f"(deadline in {deadline - time.time():.0f} s)"
+            )
+            time.sleep(sleep_s)
+
     flush_time = time.time() - flush_start
     logger.info(f"Flush completed in {flush_time:.2f} seconds")
+    return flush_time
 
 
 def create_index(collection, index_params):
@@ -329,9 +372,12 @@ def main():
             "efConstruction": args.ef_construction
         }
     elif args.index_type == "DISKANN":
+        # knowhere's DiskANN config reads snake_case keys (max_degree,
+        # search_list_size); CamelCase keys are silently ignored and the
+        # index is built with server defaults (issue #590).
         index_params["params"] = {
-            "MaxDegree": args.max_degree,
-            "SearchListSize": args.search_list_size
+            "max_degree": args.max_degree,
+            "search_list_size": args.search_list_size
         }
     elif args.index_type == "AISAQ":
         index_params["params"] = {

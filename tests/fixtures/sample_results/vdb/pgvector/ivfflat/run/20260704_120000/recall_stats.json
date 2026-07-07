@@ -1,0 +1,15 @@
+{
+  "recall": 0.975,
+  "recall_at_k": 0.975,
+  "num_queries_evaluated": 10000,
+  "k": 10,
+  "min_recall": 0.85,
+  "max_recall": 1.0,
+  "mean_recall": 0.975,
+  "median_recall": 0.98,
+  "p5_recall": 0.9,
+  "p95_recall": 1.0,
+  "p99_recall": 1.0,
+  "per_query_recall": [],
+  "recall_by_query": {}
+}

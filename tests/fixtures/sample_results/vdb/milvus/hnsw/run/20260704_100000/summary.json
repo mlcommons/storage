@@ -1,0 +1,13 @@
+{
+  "throughput_qps": 1250.5,
+  "mean_latency_ms": 12.3,
+  "p95_latency_ms": 18.7,
+  "p99_latency_ms": 25.4,
+  "p999_latency_ms": 41.2,
+  "recall": 0.982,
+  "engine": "milvus",
+  "index_type": "hnsw",
+  "workload": "milvus_hnsw",
+  "start": "2026-07-04 10:00:00",
+  "end": "2026-07-04 10:15:00"
+}

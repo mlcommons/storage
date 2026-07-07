@@ -212,12 +212,33 @@ class TestReportGeneratorGenerateReports:
         results_dir = tmp_path / "results"
         results_dir.mkdir()
 
+        # Per-model rollup: one results.{json,csv} inside the training
+        # `<model>/run/` folder, covering every timestamp for that model.
+        # Rules.md 2.1.16 (runResultsJson) mandates the file live "within
+        # the 'run' phase directory within the 'training' directory
+        # hierarchy" — one level below `<model>/`. The mock leaf lives
+        # under `<results>/training/<model>/run/<ts>/`; the grouping
+        # helper walks up ONE level to land at `<model>/run/`.
+        self._model_folder = results_dir / "training" / "unet3d"
+        self._run_folder = self._model_folder / "run"
+        leaf = self._run_folder / "20250111_120000"
+        leaf.mkdir(parents=True)
+
         with patch.object(ReportGenerator, 'accumulate_results'):
             with patch.object(ReportGenerator, 'print_results'):
                 gen = ReportGenerator(str(results_dir), validate_structure=False)
 
-        # Add mock run results
+        # Add mock run results AND workload results. Under Phase 6's
+        # bottom-up build (D-02), `generate_reports` iterates
+        # `self.workload_results` — the aggregated-per-workload source
+        # of truth — rather than `self.run_results`. Fixture populates
+        # both so the model-folder resolution AND the per-model /
+        # top-level writer emission fire.
         mock_run = MagicMock()
+        mock_run.result_dir = str(leaf)
+        mock_run.model = 'unet3d'
+        mock_run.accelerator = 'h100'
+        mock_run.parameters = {}
         mock_run.as_dict.return_value = {
             'run_id': 'test_run',
             'benchmark_type': 'training',
@@ -237,6 +258,21 @@ class TestReportGeneratorGenerateReports:
                 metrics={'throughput': 100.0}
             )
         }
+        # D-05 5-tuple workload key. Empty leading (category, orgname,
+        # systemname) slots — the printer / row builder does not
+        # depend on the leading slots being populated.
+        gen.workload_results = {
+            ('', '', '', 'unet3d', 'h100'): Result(
+                multi=True,
+                benchmark_type=BENCHMARK_TYPES.training,
+                benchmark_command='run',
+                benchmark_model='unet3d',
+                benchmark_run=[mock_run],
+                issues=[],
+                category=PARAM_VALIDATION.CLOSED,
+                metrics={'train_mean_of_throughput': 100.0}
+            )
+        }
         return gen
 
     def test_returns_success(self, generator):
@@ -245,16 +281,45 @@ class TestReportGeneratorGenerateReports:
         assert result == EXIT_CODE.SUCCESS
 
     def test_creates_json_file(self, generator):
-        """Should create results.json."""
+        """Should create results.json inside the <model>/run/ folder
+        (Rules.md 2.1.16 runResultsJson)."""
         generator.generate_reports()
-        json_file = os.path.join(generator.results_dir, 'results.json')
-        assert os.path.exists(json_file)
+        json_file = os.path.join(str(self._run_folder), 'results.json')
+        assert os.path.exists(json_file), (
+            f"Expected per-model rollup at {json_file} "
+            "(Rules.md 2.1.16 runResultsJson)"
+        )
+        # Belt-and-braces: the pre-fix location one level up must NOT
+        # be written — otherwise a checker seeing the file at both
+        # `<model>/` and `<model>/run/` would let the bug regress
+        # silently while the run/ assertion still passes.
+        stray = os.path.join(str(self._model_folder), 'results.json')
+        assert not os.path.exists(stray), (
+            f"Unexpected stray rollup at {stray}; Rules.md 2.1.16 "
+            "requires results.json inside run/ only."
+        )
 
     def test_creates_csv_file(self, generator):
-        """Should create results.csv."""
+        """Should create results.csv inside the <model>/run/ folder."""
         generator.generate_reports()
-        csv_file = os.path.join(generator.results_dir, 'results.csv')
-        assert os.path.exists(csv_file)
+        csv_file = os.path.join(str(self._run_folder), 'results.csv')
+        assert os.path.exists(csv_file), (
+            f"Expected per-model rollup at {csv_file}"
+        )
+
+    def test_creates_global_summary_files(self, generator):
+        """Should also emit the global <results-dir>/results.{json,csv}
+        summary alongside the per-model rollups. Preserves the
+        pre-model-rollup contract downstream tooling relies on."""
+        generator.generate_reports()
+        global_json = os.path.join(generator.results_dir, 'results.json')
+        global_csv = os.path.join(generator.results_dir, 'results.csv')
+        assert os.path.exists(global_json), (
+            f"Expected global summary at {global_json}"
+        )
+        assert os.path.exists(global_csv), (
+            f"Expected global summary at {global_csv}"
+        )
 
 
 class TestReportGeneratorPrintResults:
@@ -374,11 +439,21 @@ class TestReportGeneratorPrintResults:
         mock_runs = [MagicMock(), MagicMock()]
         mock_runs[0].run_id = "run1"
         mock_runs[0].accelerator = "h100"
+        # result_dir + benchmark_type are consumed by _system_scope_key
+        # (called from _print_workload_details' warmup badge lookup).
+        # Explicit strings prevent MagicMock's auto-attribute machinery
+        # from producing unpredictable paths.
+        mock_runs[0].result_dir = "/results/training/unet3d/run/20250101_000001"
+        mock_runs[0].benchmark_type = BENCHMARK_TYPES.training
         mock_runs[1].run_id = "run2"
         mock_runs[1].accelerator = "h100"
+        mock_runs[1].result_dir = "/results/training/unet3d/run/20250101_000002"
+        mock_runs[1].benchmark_type = BENCHMARK_TYPES.training
 
+        # Both leaves walk up 4 dirs from `/results/training/unet3d/run/<ts>/`
+        # to `/results`, so both share scope '/results'.
         generator.run_results = {
-            'run1': Result(
+            ('/results', 'run1'): Result(
                 multi=False,
                 benchmark_type=BENCHMARK_TYPES.training,
                 benchmark_command='run',
@@ -388,7 +463,7 @@ class TestReportGeneratorPrintResults:
                 category=PARAM_VALIDATION.CLOSED,
                 metrics={}
             ),
-            'run2': Result(
+            ('/results', 'run2'): Result(
                 multi=False,
                 benchmark_type=BENCHMARK_TYPES.training,
                 benchmark_command='run',
@@ -400,8 +475,12 @@ class TestReportGeneratorPrintResults:
             )
         }
 
+        # D-05 5-tuple: (category, orgname, systemname, model, accelerator).
+        # Fills the leading three slots with empty strings — the printer
+        # reads model/accelerator identity from
+        # ``benchmark_run[0]`` rather than unpacking the key tuple.
         generator.workload_results = {
-            ('unet3d', 'h100'): Result(
+            ('', '', '', 'unet3d', 'h100'): Result(
                 multi=True,
                 benchmark_type=BENCHMARK_TYPES.training,
                 benchmark_command='run',
@@ -446,15 +525,32 @@ class TestReportGeneratorAccumulateResults:
                 with patch.object(ReportGenerator, 'print_results'):
                     generator = ReportGenerator(str(results_dir), validate_structure=False)
 
-        assert 'test_run' in generator.run_results
-        assert generator.run_results['test_run'].category == PARAM_VALIDATION.CLOSED
+        # run_results is keyed by (system_scope, run_id) tuple so that
+        # identical run_ids from different systems don't collide as
+        # warmups. There's exactly one entry here; extract it via .values()
+        # rather than depending on the exact scope-key string, which is
+        # derived from the MagicMock's .result_dir attribute path.
+        assert len(generator.run_results) == 1
+        (only_result,) = generator.run_results.values()
+        assert only_result.category == PARAM_VALIDATION.CLOSED
 
     def test_groups_by_workload(self, tmp_path):
-        """Should group runs by workload (model, accelerator)."""
+        """Should group runs by the D-05 per-benchmark-type key.
+
+        For training/checkpointing the key is
+        ``(category, orgname, systemname, model, accelerator)``. This
+        test verifies both grouping (only ONE workload_results entry for
+        two runs sharing model+accelerator) AND that the (model,
+        accelerator) tail of the tuple is populated correctly.
+        """
         results_dir = tmp_path / "results"
         results_dir.mkdir()
 
-        # Create two mock runs with same workload
+        # Create two mock runs with same workload. ``parameters`` and
+        # ``result_dir`` are set to real values (not MagicMock defaults)
+        # so path-based orgname/systemname/category derivation is
+        # deterministic and both runs land under the same D-05 key.
+        run_leaf = str(results_dir / "training" / "unet3d" / "run" / "20260101_000001")
         mock_run1 = MagicMock()
         mock_run1.run_id = "run1"
         mock_run1.benchmark_type = BENCHMARK_TYPES.training
@@ -462,6 +558,8 @@ class TestReportGeneratorAccumulateResults:
         mock_run1.model = 'unet3d'
         mock_run1.accelerator = 'h100'
         mock_run1.metrics = {}
+        mock_run1.parameters = {}
+        mock_run1.result_dir = run_leaf
 
         mock_run2 = MagicMock()
         mock_run2.run_id = "run2"
@@ -470,6 +568,8 @@ class TestReportGeneratorAccumulateResults:
         mock_run2.model = 'unet3d'
         mock_run2.accelerator = 'h100'
         mock_run2.metrics = {}
+        mock_run2.parameters = {}
+        mock_run2.result_dir = run_leaf
 
         with patch('mlpstorage_py.report_generator.get_runs_files', return_value=[mock_run1, mock_run2]):
             with patch('mlpstorage_py.report_generator.BenchmarkVerifier') as mock_verifier_class:
@@ -481,8 +581,16 @@ class TestReportGeneratorAccumulateResults:
                 with patch.object(ReportGenerator, 'print_results'):
                     generator = ReportGenerator(str(results_dir), validate_structure=False)
 
-        # Should have workload result for (unet3d, h100)
-        assert ('unet3d', 'h100') in generator.workload_results
+        # Two runs sharing (model, accelerator) MUST collapse into a
+        # single workload_results entry (D-05 grouping contract).
+        assert len(generator.workload_results) == 1
+        # The tuple's tail (model, accelerator) is the stable identity
+        # slice — that's what changed shape from Phase 5's 2-tuple. The
+        # leading (category, orgname, systemname) fields are path-
+        # derived and depend on tmp_path segments, so we only assert
+        # the tail here.
+        the_key, = generator.workload_results.keys()
+        assert the_key[-2:] == ('unet3d', 'h100'), the_key
 
 
 class TestReportGeneratorIntegration:
@@ -493,6 +601,14 @@ class TestReportGeneratorIntegration:
         results_dir = tmp_path / "results"
         results_dir.mkdir()
 
+        # Per-model rollup lands at `<...>/training/<model>/run/`
+        # (Rules.md 2.1.16 runResultsJson). The mock leaf lives under
+        # the canonical layout so _model_group_folder() resolves correctly.
+        model_folder = results_dir / "training" / "unet3d"
+        run_folder = model_folder / "run"
+        leaf = run_folder / "20250111_120000"
+        leaf.mkdir(parents=True)
+
         # Create mock benchmark run
         mock_run = MagicMock()
         mock_run.run_id = "training_run_20250111"
@@ -500,6 +616,7 @@ class TestReportGeneratorIntegration:
         mock_run.command = 'run'
         mock_run.model = 'unet3d'
         mock_run.accelerator = 'h100'
+        mock_run.result_dir = str(leaf)
         mock_run.metrics = {
             'train_throughput_samples_per_second': 1250.5,
             'train_au_percentage': 95.2
@@ -525,9 +642,12 @@ class TestReportGeneratorIntegration:
         result = generator.generate_reports()
         assert result == EXIT_CODE.SUCCESS
 
-        # Check files were created
-        assert os.path.exists(os.path.join(results_dir, 'results.json'))
-        assert os.path.exists(os.path.join(results_dir, 'results.csv'))
+        # Per-model rollup lands inside <model>/run/ (Rules.md 2.1.16).
+        assert os.path.exists(os.path.join(str(run_folder), 'results.json'))
+        assert os.path.exists(os.path.join(str(run_folder), 'results.csv'))
+        # Global summary is preserved at the results_dir root alongside it.
+        assert os.path.exists(os.path.join(str(results_dir), 'results.json'))
+        assert os.path.exists(os.path.join(str(results_dir), 'results.csv'))
 
 
 # ---------------------------------------------------------------------------
@@ -687,3 +807,174 @@ class TestIssue599CanonicalTreeAccepted:
                             validate_structure=True)
 
         assert seen_scan_roots == [str(tmp_path)]
+
+
+class TestGlobalSummaryLocation:
+    """The global results.{json,csv} rollup must NOT land inside the
+    per-system slice when a canonical submission tree is in use. It
+    belongs one level up, in the `<sentinel>/<div>/<org>/results/`
+    directory that is the parent of every `<system>/` subfolder, so a
+    submitter sees a single aggregate alongside each per-system slice
+    instead of an aggregate buried under one system's directory."""
+
+    def test_global_summary_dir_is_results_parent_under_canonical_tree(
+        self, tmp_path
+    ):
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysA")
+        args = Namespace(
+            debug=False, output_dir=None,
+            orgname="Acme", systemname="sysA",
+        )
+
+        with patch('mlpstorage_py.report_generator.get_runs_files',
+                   return_value=[]), \
+             patch.object(ReportGenerator, 'print_results'):
+            gen = ReportGenerator(str(tmp_path), args=args,
+                                  validate_structure=True)
+
+        # results_dir is rebound to the per-system slice…
+        assert gen.results_dir == str(
+            tmp_path / "closed" / "Acme" / "results" / "sysA"
+        )
+        # …but the global summary lands in the org's results/ parent.
+        assert gen.global_summary_dir == str(
+            tmp_path / "closed" / "Acme" / "results"
+        )
+        # And critically, the global summary dir is NOT the system slice.
+        assert gen.global_summary_dir != gen.results_dir
+        assert "sysA" not in os.path.basename(gen.global_summary_dir)
+
+    def test_global_summary_dir_equals_results_dir_for_flat_layout(
+        self, tmp_path
+    ):
+        """Flat layout (no canonical rebind): global summary dir stays
+        equal to results_dir — preserves the pre-canonical-tree
+        contract."""
+        run_dir = tmp_path / "training" / "unet3d" / "run" / "20260123_120000"
+        run_dir.mkdir(parents=True)
+        (run_dir / "training_unet3d_metadata.json").write_text("{}")
+        (run_dir / "summary.json").write_text("{}")
+
+        with patch('mlpstorage_py.report_generator.get_runs_files',
+                   return_value=[]), \
+             patch.object(ReportGenerator, 'print_results'):
+            gen = ReportGenerator(str(tmp_path), args=None,
+                                  validate_structure=True)
+
+        assert gen.global_summary_dir == gen.results_dir == str(tmp_path)
+
+
+class TestOptionalSystemnameForReportgen:
+    """Systemname is OPTIONAL for reports reportgen. Omitting it aggregates
+    a global summary across every system present under the org's canonical
+    ``<sentinel>/<div>/<orgname>/results/`` folder, with the aggregate
+    written into that ``results/`` folder itself (per-model rollups still
+    land in each system's own subtree, unchanged)."""
+
+    def test_no_systemname_multi_system_walks_all_systems(self, tmp_path):
+        """discover_scan_roots must return every system slice under the
+        canonical results/ folder when --systemname is omitted."""
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysA")
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysB")
+
+        args = Namespace(
+            debug=False, output_dir=None,
+            orgname="Acme", systemname="",  # empty = not supplied
+        )
+
+        seen_scan_roots = []
+        def fake_get_runs(path, logger=None):
+            seen_scan_roots.append(path)
+            return []
+
+        with patch('mlpstorage_py.report_generator.get_runs_files',
+                   side_effect=fake_get_runs), \
+             patch.object(ReportGenerator, 'print_results'):
+            gen = ReportGenerator(str(tmp_path), args=args,
+                                  validate_structure=True)
+
+        # Both systems must be walked — this is the aggregation contract.
+        assert sorted(seen_scan_roots) == sorted([
+            str(tmp_path / "closed" / "Acme" / "results" / "sysA"),
+            str(tmp_path / "closed" / "Acme" / "results" / "sysB"),
+        ])
+        assert sorted(gen.scan_roots) == sorted(seen_scan_roots)
+
+    def test_no_systemname_global_summary_dir_is_org_results_folder(
+        self, tmp_path
+    ):
+        """Without --systemname, the global summary lands in the org's
+        canonical results/ folder itself (not inside any system slice)."""
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysA")
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysB")
+
+        args = Namespace(
+            debug=False, output_dir=None,
+            orgname="Acme", systemname="",
+        )
+
+        with patch('mlpstorage_py.report_generator.get_runs_files',
+                   return_value=[]), \
+             patch.object(ReportGenerator, 'print_results'):
+            gen = ReportGenerator(str(tmp_path), args=args,
+                                  validate_structure=True)
+
+        expected_results_folder = str(
+            tmp_path / "closed" / "Acme" / "results"
+        )
+        # results_dir is rebound to the org's results/ folder itself…
+        assert gen.results_dir == expected_results_folder
+        # …and the global summary target is that same folder.
+        assert gen.global_summary_dir == expected_results_folder
+        # Sanity: never lands inside any system slice.
+        assert "sysA" not in gen.global_summary_dir
+        assert "sysB" not in gen.global_summary_dir
+
+    def test_no_systemname_both_modes_walked(self, tmp_path):
+        """When both closed/ and open/ trees exist, every system in both
+        modes is walked."""
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysA")
+        _write_canonical_run(tmp_path, "open", "Acme", "sysB")
+
+        args = Namespace(
+            debug=False, output_dir=None,
+            orgname="Acme", systemname="",
+        )
+
+        seen = []
+        with patch('mlpstorage_py.report_generator.get_runs_files',
+                   side_effect=lambda p, logger=None: seen.append(p) or []), \
+             patch.object(ReportGenerator, 'print_results'):
+            ReportGenerator(str(tmp_path), args=args,
+                            validate_structure=True)
+
+        assert sorted(seen) == sorted([
+            str(tmp_path / "closed" / "Acme" / "results" / "sysA"),
+            str(tmp_path / "open" / "Acme" / "results" / "sysB"),
+        ])
+
+    def test_systemname_still_narrows_to_single_system(self, tmp_path):
+        """Regression: supplying --systemname must still narrow the scan
+        to that one system, ignoring the other system's runs."""
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysA")
+        _write_canonical_run(tmp_path, "closed", "Acme", "sysB")
+
+        args = Namespace(
+            debug=False, output_dir=None,
+            orgname="Acme", systemname="sysA",
+        )
+
+        seen = []
+        with patch('mlpstorage_py.report_generator.get_runs_files',
+                   side_effect=lambda p, logger=None: seen.append(p) or []), \
+             patch.object(ReportGenerator, 'print_results'):
+            gen = ReportGenerator(str(tmp_path), args=args,
+                                  validate_structure=True)
+
+        assert seen == [
+            str(tmp_path / "closed" / "Acme" / "results" / "sysA")
+        ]
+        # And the global summary still lands at the results/ parent.
+        assert gen.global_summary_dir == str(
+            tmp_path / "closed" / "Acme" / "results"
+        )

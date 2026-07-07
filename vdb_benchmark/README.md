@@ -1,18 +1,17 @@
 # Vector Database Benchmark Tool
 
-Benchmarks and compares vector database performance for MLPerf Storage. Currently
-supports Milvus with DiskANN, HNSW, AISAQ, FLAT, and IVF-style indexes.
+Benchmarks and compares vector database performance for MLPerf Storage. Currently supports Milvus with DiskANN, HNSW, AISAQ, FLAT, and IVF-style indexes.
 
 The benchmark can be run in two ways:
 
 1. Directly with the scripts in `vdb_benchmark/vdbbench/`
-2. Through the MLPerf Storage CLI with `./mlpstorage vectordb`
+2. Through the MLPerf Storage CLI with `./mlpstorage <closed|open|whatif> vectordb`
 
 The `mlpstorage` path is recommended for standard benchmark workflows.
 
 > The modular backend-agnostic runner is currently a standalone preview.
 > It is invoked with `python -m vdbbench.benchmark`.
-> The existing `./mlpstorage vectordb` command continues to use the Milvus-oriented scripts until the modular runner is integrated.
+> The existing `./mlpstorage <closed|open|whatif> vectordb` command continues to use the Milvus-oriented scripts until the modular runner is integrated.
 
 ---
 
@@ -81,8 +80,8 @@ The `mlpstorage` path is recommended for standard benchmark workflows.
 | `pyyaml` | ≥ 6.0 | YAML config support |
 | `tabulate` | ≥ 0.9.0 | Collection info table display |
 
-The `datasize` command does not require Milvus or `pymilvus`. Load and run
-commands require a running Milvus server.
+The `datasize` command does not require Milvus or `pymilvus`.
+Load and run commands require a running Milvus server.
 
 ### Clone the Repository
 
@@ -95,9 +94,7 @@ cd storage
 
 ## 2. Deploy Milvus
 
-A running Milvus instance is required for all load (`datagen`) and benchmark
-(`run`) commands. This section applies to both the mlpstorage CLI and direct
-script paths.
+A running Milvus instance is required for all load (`datagen`) and benchmark (`run`) commands. This section applies to both the mlpstorage CLI and direct script paths.
 
 Standalone Milvus stacks are available in the `vdb_benchmark/stacks` directory:
 
@@ -114,8 +111,7 @@ vdb_benchmark/stacks/
             └── docker-compose-s3.yml
 ```
 
-For each specific instance, copy the `.env.example` file to `.env` and update
-the values as needed.
+For each specific instance, copy the `.env.example` file to `.env` and update the values as needed.
 
 ### Option A: Local Storage with MinIO
 
@@ -124,9 +120,7 @@ cp vdb_benchmark/stacks/milvus/standalone/minio/.env.example \
    vdb_benchmark/stacks/milvus/standalone/minio/.env
 ```
 
-The compose file uses `/mnt/vdb` as the root directory for Docker volumes. Set
-`DOCKER_VOLUME_DIRECTORY` in the `.env` file or edit the compose file to point to
-your target storage location.
+The compose file uses `/mnt/vdb` as the root directory for Docker volumes. Set `DOCKER_VOLUME_DIRECTORY` in the `.env` file or edit the compose file to point to your target storage location.
 
 The stack creates three containers:
 
@@ -173,8 +167,7 @@ docker-compose -f vdb_benchmark/stacks/milvus/standalone/s3/docker-compose-s3.ym
 docker ps -a
 ```
 
-All three containers (`milvus-etcd`, `milvus-minio`, `milvus-standalone`) should
-show healthy/running.
+All three containers (`milvus-etcd`, `milvus-minio`, `milvus-standalone`) should show healthy/running.
 
 The default Milvus endpoint is:
 
@@ -184,10 +177,9 @@ The default Milvus endpoint is:
 
 ---
 
-## 3. Quick Start 
+## 3. Quick Start — First Benchmark in 10 Minutes
 
-This section gets you from zero to a working benchmark result on a standalone-system.
-Assumes Milvus is set up as per section #2 instructions. 
+This section gets you from zero to a working benchmark result on a standalone-system. Assumes Milvus is set up as per section #2 instructions.
 
 ### Step 1 — Install
 
@@ -200,7 +192,7 @@ uv pip install -e ./vdb_benchmark
 Verify:
 
 ```bash
-./mlpstorage vectordb --help
+./mlpstorage open vectordb --help
 ```
 
 ### Step 2 — Start Milvus
@@ -218,15 +210,22 @@ Wait for healthy status:
 docker ps -a
 ```
 
-All three containers (`milvus-etcd`, `milvus-minio`, `milvus-standalone`) should
-show healthy/running. The default endpoint is `127.0.0.1:19530`.
+All three containers (`milvus-etcd`, `milvus-minio`, `milvus-standalone`) should show healthy/running.
 
-### Step 3 — Load 50K vectors (smoke test)
+The default endpoint is `127.0.0.1:19530`.
+
+### Step 3 — Initialize the results directory
 
 ```bash
-./mlpstorage vectordb datagen \
-  --file \
-  --open \
+./mlpstorage init MLCommons /tmp/vdb_results
+```
+
+### Step 4 — Load 50K vectors (smoke test)
+
+```bash
+./mlpstorage open vectordb datagen file \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 127.0.0.1 \
   --port 19530 \
   --config default \
@@ -235,27 +234,29 @@ show healthy/running. The default endpoint is `127.0.0.1:19530`.
   --dimension 1536 \
   --num-shards 1 \
   --force \
+  --systemname vdb_smoke_system \
   --results-dir /tmp/vdb_results
 ```
 
-### Step 4 — Run a 30-second benchmark
+### Step 5 — Run a 30-second benchmark
 
 ```bash
-./mlpstorage vectordb run \
-  --file \
-  --open \
+./mlpstorage open vectordb run file \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 127.0.0.1 \
   --port 19530 \
   --config default \
   --collection mlps_smoke \
-  --mode timed \
+  --benchmark-mode timed \
   --runtime 30 \
   --num-query-processes 2 \
   --batch-size 10 \
+  --systemname vdb_smoke_system \
   --results-dir /tmp/vdb_results
 ```
 
-### Step 5 — Check results
+### Step 6 — Check results
 
 ```bash
 python - <<'PY'
@@ -263,10 +264,11 @@ import json
 from pathlib import Path
 
 stats_files = sorted(
-    Path("/tmp/vdb_results").glob("**/vectordb/simple/statistics.json")
+    Path("/tmp/vdb_results").glob(
+        "**/vector_database/milvus/DISKANN/run/**/statistics.json"
+    )
 )
 assert stats_files, "No statistics.json found"
-
 stats = json.loads(stats_files[-1].read_text())
 print(f"Throughput: {stats['throughput_qps']:.1f} QPS")
 print(f"P95 latency: {stats['p95_latency_ms']:.2f} ms")
@@ -274,15 +276,15 @@ print(f"Total queries: {stats['total_queries']}")
 PY
 ```
 
-If you see QPS and latency numbers, your setup is working. Continue to
-[Section 4](#4-recommended-path-mlpstorage-cli) for full documentation.
+If you see QPS and latency numbers, your setup is working.
+
+Continue to [Section 4](#4-recommended-path-mlpstorage-cli) for full documentation.
 
 ---
 
 ## 4. Recommended Path: mlpstorage CLI
 
-This section covers the complete workflow using the `mlpstorage` CLI. This is the
-recommended approach for standard benchmark workflows.
+This section covers the complete workflow using the `mlpstorage` CLI. This is the recommended approach for standard benchmark workflows.
 
 ### 4.1 Installation
 
@@ -301,10 +303,18 @@ uv pip install -e ./vdb_benchmark
 This makes the following commands available:
 
 ```bash
-./mlpstorage vectordb --help
-./mlpstorage vectordb datasize --help
-./mlpstorage vectordb datagen --help
-./mlpstorage vectordb run --help
+./mlpstorage open vectordb --help
+./mlpstorage open vectordb datasize --help
+./mlpstorage open vectordb datagen --help
+./mlpstorage open vectordb run --help
+./mlpstorage closed vectordb run --help
+./mlpstorage whatif vectordb run --help
+```
+
+Before running commands that write benchmark output, initialize the results directory once:
+
+```bash
+./mlpstorage init MLCommons /tmp/vdb_results
 ```
 
 The distributed VectorDB launcher additionally provides:
@@ -327,16 +337,14 @@ uv run vdb-aggregate --help
 
 ### 4.2 Estimate Storage (datasize)
 
-This step is optional. It is pure math and does not require a running Milvus
-instance.
+This step is optional. It is pure math and does not require a running Milvus instance.
 
 ```bash
-./mlpstorage vectordb datasize \
-  --file \
-  --open \
+./mlpstorage open vectordb datasize \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --dimension 1536 \
   --num-vectors 10000000 \
-  --index-type DISKANN \
   --num-shards 10
 ```
 
@@ -357,37 +365,39 @@ Estimated total: 798.72 GB
 #### Load using the default config (1M vectors)
 
 ```bash
-./mlpstorage vectordb datagen \
-  --file \
-  --open \
+./mlpstorage open vectordb datagen file \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 127.0.0.1 \
   --port 19530 \
   --config default \
   --collection mlps_1m_1536dim_uniform_diskann \
   --force \
+  --systemname vdb_system \
   --results-dir /tmp/vdb_results
 ```
 
 #### Load using the 10M config
 
 ```bash
-./mlpstorage vectordb datagen \
-  --file \
-  --open \
+./mlpstorage open vectordb datagen file \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 127.0.0.1 \
   --port 19530 \
   --config 10m \
   --collection mlps_10m_1536dim_uniform_diskann \
   --force \
+  --systemname vdb_system \
   --results-dir /tmp/vdb_results
 ```
 
 #### Override vector count for quick testing
 
 ```bash
-./mlpstorage vectordb datagen \
-  --file \
-  --open \
+./mlpstorage open vectordb datagen file \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 127.0.0.1 \
   --port 19530 \
   --config default \
@@ -396,27 +406,24 @@ Estimated total: 798.72 GB
   --dimension 1536 \
   --num-shards 1 \
   --force \
+  --systemname vdb_system \
   --results-dir /tmp/vdb_results
 ```
 
 #### Notes
 
-- The `--config` argument refers to YAML files in `configs/vectordbbench/`
-  without the `.yaml` extension.
+- The `--config` argument refers to YAML files in `configs/vectordbbench/` without the `.yaml` extension.
 - The `--force` flag drops and recreates the collection if it already exists.
-- See [Dimension Consistency](#dimension-consistency) for important rules about
-  keeping dimensions aligned between load and run.
+- See [Dimension Consistency](#dimension-consistency) for important rules about keeping dimensions aligned between load and run.
+- If a distributed load fails with `rate limit exceeded[rate=0.1]`, see [Troubleshooting](#12-troubleshooting) — this is Milvus's per-collection flush rate limiter (issue #705), handled automatically by current benchmark versions.
 
 ---
 
 ### 4.4 Compact
 
-The load script performs compaction automatically when enabled in the config or
-when `--compact` is passed.
+The load script performs compaction automatically when enabled in the config or when `--compact` is passed. Compaction runs as part of the `datagen` workflow. No separate command is needed unless the load command exits early.
 
-Compaction runs as part of the `datagen` workflow. No separate command is needed
-unless the load command exits early. See
-[Section 5.3](#53-compact) for manual compaction if needed.
+See [Section 5.3](#53-compact) for manual compaction if needed.
 
 ---
 
@@ -424,44 +431,46 @@ unless the load command exits early. See
 
 #### Simple benchmark modes
 
-| `mlpstorage` mode | Script | Purpose |
-|-------------------|--------|---------|
+| `--benchmark-mode` value | Script | Purpose |
+|--------------------------|--------|---------|
 | `timed` | `vdbbench` | Run for a fixed duration |
 | `query_count` | `vdbbench` | Run exactly N total queries |
 
 ##### Timed mode
 
 ```bash
-./mlpstorage vectordb run \
-  --file \
-  --open \
+./mlpstorage open vectordb run file \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 127.0.0.1 \
   --port 19530 \
   --config default \
   --collection mlps_1m_1536dim_uniform_diskann \
-  --mode timed \
+  --benchmark-mode timed \
   --runtime 120 \
   --num-query-processes 4 \
   --batch-size 10 \
   --report-count 100 \
+  --systemname vdb_system \
   --results-dir /tmp/vdb_results
 ```
 
 ##### Query-count mode
 
 ```bash
-./mlpstorage vectordb run \
-  --file \
-  --open \
+./mlpstorage open vectordb run file \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 127.0.0.1 \
   --port 19530 \
   --config default \
   --collection mlps_1m_1536dim_uniform_diskann \
-  --mode query_count \
+  --benchmark-mode query_count \
   --queries 10000 \
   --num-query-processes 4 \
   --batch-size 10 \
   --report-count 100 \
+  --systemname vdb_system \
   --results-dir /tmp/vdb_results
 ```
 
@@ -475,19 +484,20 @@ Use enhanced mode for:
 * richer disk and memory reporting
 * comparing index/search configurations
 
-Enhanced mode is selected with `--mode sweep`:
+Enhanced mode is selected with `--benchmark-mode sweep`:
 
 ```bash
-./mlpstorage vectordb run \
-  --file \
-  --open \
+./mlpstorage open vectordb run file \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 127.0.0.1 \
   --port 19530 \
   --config default \
   --collection mlps_1m_1536dim_uniform_diskann \
-  --mode sweep \
+  --benchmark-mode sweep \
   --queries 10000 \
   --num-query-processes 4 \
+  --systemname vdb_system \
   --results-dir /tmp/vdb_results
 ```
 
@@ -503,8 +513,7 @@ Enhanced mode is selected with `--mode sweep`:
 
 ## 5. Alternative Path: Direct Scripts
 
-This section covers the complete workflow using the Python scripts directly,
-without the `mlpstorage` CLI wrapper.
+This section covers the complete workflow using the Python scripts directly, without the `mlpstorage` CLI wrapper.
 
 ### 5.1 Installation
 
@@ -530,16 +539,13 @@ uv run vdbbench --help
 uv run enhanced-bench --help
 ```
 
-**Note:** You still need a running Milvus instance. Follow the Docker setup
-in [Section 2](#2-deploy-milvus).
+**Note:** You still need a running Milvus instance. Follow the Docker setup in [Section 2](#2-deploy-milvus).
 
 ---
 
 ### 5.2 Load Vectors
 
-> **Working directory:** All `python vdbbench/...` commands in this section
-> assume you are in `storage/vdb_benchmark/`. Console scripts (`uv run load-vdb`,
-> etc.) work from any directory.
+> **Working directory:** All `python vdbbench/...` commands in this section assume you are in `storage/vdb_benchmark/`. Console scripts (`uv run load-vdb`, etc.) work from any directory.
 
 #### Load using a YAML config
 
@@ -581,9 +587,9 @@ Direct script configs live in `vdbbench/configs/` (relative to `storage/vdb_benc
 
 ```text
 vdbbench/configs/
-├── 10m_diskann.yaml       (10M vectors, 10 shards, 1536 dim)
+├── 10m_diskann.yaml      (10M vectors, 10 shards, 1536 dim)
 ├── 10m_hnsw.yaml
-├── 1m_diskann.yaml        (1M vectors, 1 shard, 1536 dim)
+├── 1m_diskann.yaml       (1M vectors, 1 shard, 1536 dim)
 ├── 1m_diskann_512dim.yaml
 ├── 1m_hnsw.yaml
 └── 1m_aisaq_512dim.yaml
@@ -593,8 +599,7 @@ vdbbench/configs/
 
 ### 5.3 Compact
 
-The load script performs compaction automatically when enabled in the config or
-when `--compact` is passed.
+The load script performs compaction automatically when enabled in the config or when `--compact` is passed.
 
 If the load command exits early, run compaction manually:
 
@@ -655,8 +660,7 @@ uv run enhanced-bench \
   --out-dir /tmp/vdbbench_results
 ```
 
-See [Section 9](#9-enhanced-benchmark-full-reference) for full parameter
-reference and execution paths.
+See [Section 9](#9-enhanced-benchmark-full-reference) for full parameter reference and execution paths.
 
 ---
 
@@ -665,25 +669,32 @@ reference and execution paths.
 ### Available Commands
 
 ```bash
-./mlpstorage vectordb --help
-./mlpstorage vectordb datasize --help
-./mlpstorage vectordb datagen --help
-./mlpstorage vectordb run --help
+./mlpstorage open vectordb --help
+./mlpstorage open vectordb datasize --help
+./mlpstorage open vectordb datagen --help
+./mlpstorage open vectordb run --help
+./mlpstorage closed vectordb run --help
+./mlpstorage whatif vectordb run --help
 ```
 
 ### Important Terminology
 
 VectorDB uses two similar-looking host flags with different meanings.
 
-| Flag | Meaning |
-|------|---------|
+| Flag / positional | Meaning |
+|-------------------|---------|
+| `open`, `closed`, `whatif` | Top-level benchmark mode before `vectordb` |
+| `file` / `object` | Positional storage mode selector for `datagen` and `run` |
+| `--vdb-engine` | Vector database engine identity; currently `milvus` |
+| `--vdb-index` | Result identity index family, for example `DISKANN`, `HNSW`, or `AISAQ` |
+| `--index-type` | Milvus implementation index type for `datasize` and `datagen`; defaults to `--vdb-index` when omitted |
 | `--host` / `-s` | Milvus database endpoint host |
 | `--port` / `-p` | Milvus database endpoint port |
 | `--hosts` | Benchmark client hosts used by MPI |
 | `--npernode` | MPI ranks to start on each benchmark client host |
 | `--num-query-processes` | Local Python query workers inside each MPI rank |
-| `--file` | POSIX/file storage mode selector for `mlpstorage` |
-| `--open` | Acknowledge OPEN category execution |
+| `--benchmark-mode` | VectorDB run mode: `timed`, `query_count`, or `sweep` |
+| `--systemname` | System-under-test directory name under `results/` |
 | `--results-dir` | Root directory for benchmark output |
 
 **Do not confuse `--host` and `--hosts`.**
@@ -696,16 +707,13 @@ VectorDB uses two similar-looking host flags with different meanings.
 Effective distributed query workers:
 
 ```text
-effective_workers =
-  len(--hosts) * --npernode * --num-query-processes
+effective_workers = len(--hosts) * --npernode * --num-query-processes
 ```
 
 Example:
 
 ```text
---hosts node01 node02
---npernode 2
---num-query-processes 4
+--hosts node01 node02 --npernode 2 --num-query-processes 4
 ```
 
 starts:
@@ -749,12 +757,9 @@ Custom configs can be added to the same directory.
 
 The vector dimension must be consistent between data loading and benchmarking.
 
-If you override `--dimension` during `datagen`, the config YAML used for `run`
-must specify the same dimension. Otherwise, Milvus will reject queries with a
-vector dimension mismatch.
+If you override `--dimension` during `datagen`, the config YAML used for `run` must specify the same dimension. Otherwise, Milvus will reject queries with a vector dimension mismatch.
 
-The safest approach is to use the same `--config` for both `datagen` and `run`,
-or create a dedicated config YAML for non-default dimensions.
+The safest approach is to use the same `--config` for both `datagen` and `run`, or create a dedicated config YAML for non-default dimensions.
 
 ---
 
@@ -764,15 +769,14 @@ or create a dedicated config YAML for non-default dimensions.
 
 For multi-node runs:
 
-1. Run `./mlpstorage vectordb ...` from one launcher host.
+1. Run `./mlpstorage open vectordb ...` from one launcher host.
 2. The launcher host participates in the benchmark.
 3. Passwordless SSH must work from the launcher to all hosts listed in `--hosts`.
 4. The repository path must be identical on every benchmark client host.
 5. The same `uv` environment must be installed on every benchmark client host.
 6. `mpiexec` must be installed and available on every benchmark client host.
 7. The `--results-dir` path must be visible at the same path from every host.
-8. The Milvus endpoint given by `--host` and `--port` must be reachable from
-   every benchmark client host.
+8. The Milvus endpoint given by `--host` and `--port` must be reachable from every benchmark client host.
 
 #### Install on every benchmark client host
 
@@ -806,8 +810,13 @@ mpiexec -n 2 -hosts node01,node02 \
 
 ### 7.2 Distributed Load
 
-Distributed load uses MPI to start one or more VectorDB loader ranks across
-benchmark client hosts.
+Distributed load uses MPI to start one or more VectorDB loader ranks across benchmark client hosts.
+
+Before using `/shared/vdb_results`, initialize it once:
+
+```bash
+./mlpstorage init MLCommons /shared/vdb_results
+```
 
 #### Rank behavior
 
@@ -833,14 +842,14 @@ rank 0:
 #### Command
 
 ```bash
-./mlpstorage vectordb datagen \
-  --file \
-  --open \
+./mlpstorage open vectordb datagen file \
   --distributed \
   --mpi-impl mpich \
   --mpi-bin mpiexec \
   --hosts node01 node02 \
   --npernode 1 \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 10.0.0.10 \
   --port 19530 \
   --config default \
@@ -853,20 +862,21 @@ rank 0:
   --batch-size 1000 \
   --chunk-size 10000 \
   --force \
+  --systemname vdb_multinode_system \
   --results-dir /shared/vdb_results
 ```
 
 #### Example with two MPI ranks per host
 
 ```bash
-./mlpstorage vectordb datagen \
-  --file \
-  --open \
+./mlpstorage open vectordb datagen file \
   --distributed \
   --mpi-impl mpich \
   --mpi-bin mpiexec \
   --hosts node01 node02 \
   --npernode 2 \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 10.0.0.10 \
   --port 19530 \
   --config default \
@@ -877,16 +887,16 @@ rank 0:
   --batch-size 1000 \
   --chunk-size 10000 \
   --force \
+  --systemname vdb_multinode_system \
   --results-dir /shared/vdb_results
 ```
 
-With `--hosts node01 node02` and `--npernode 2`, the distributed load starts
-four MPI ranks.
+With `--hosts node01 node02` and `--npernode 2`, the distributed load starts four MPI ranks.
 
 #### Output structure
 
 ```text
-/shared/vdb_results/<run_id>/vectordb/load/
+/shared/vdb_results/open/MLCommons/results/vdb_multinode_system/vector_database/milvus/DISKANN/datagen/<timestamp>/
 ├── load_statistics.json
 ├── vdb_multi_node_summary.json
 ├── rank_0/
@@ -926,31 +936,32 @@ vectors_per_second = inserted_vectors / total_time_seconds
 ### 7.3 Distributed Simple Benchmark
 
 Distributed simple benchmark mode starts one `vdbbench` instance per MPI rank.
-Each rank writes rank-local CSV, recall, and statistics files. The launcher then
-aggregates the rank outputs.
+
+Each rank writes rank-local CSV, recall, and statistics files. The launcher then aggregates the rank outputs.
 
 #### Timed mode
 
 In timed mode, every MPI rank runs for the requested runtime.
 
 ```bash
-./mlpstorage vectordb run \
-  --file \
-  --open \
+./mlpstorage open vectordb run file \
   --distributed \
   --mpi-impl mpich \
   --mpi-bin mpiexec \
   --hosts node01 node02 \
   --npernode 2 \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 10.0.0.10 \
   --port 19530 \
   --config default \
   --collection mlps_1m_1536dim_uniform_diskann \
-  --mode timed \
+  --benchmark-mode timed \
   --runtime 120 \
   --num-query-processes 2 \
   --batch-size 10 \
   --report-count 100 \
+  --systemname vdb_multinode_system \
   --results-dir /shared/vdb_results
 ```
 
@@ -962,44 +973,42 @@ This starts:
 
 #### Query-count mode
 
-In query-count mode, `--queries` is interpreted as the global query count. The
-MPI wrapper splits the query count across ranks.
+In query-count mode, `--queries` is interpreted as the global query count. The MPI wrapper splits the query count across ranks.
 
 For example:
 
 ```text
---queries 100000
---hosts node01 node02
---npernode 2
+--queries 100000 --hosts node01 node02 --npernode 2
 ```
 
 starts four MPI ranks, and each rank receives approximately 25,000 queries.
 
 ```bash
-./mlpstorage vectordb run \
-  --file \
-  --open \
+./mlpstorage open vectordb run file \
   --distributed \
   --mpi-impl mpich \
   --mpi-bin mpiexec \
   --hosts node01 node02 \
   --npernode 2 \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 10.0.0.10 \
   --port 19530 \
   --config default \
   --collection mlps_1m_1536dim_uniform_diskann \
-  --mode query_count \
+  --benchmark-mode query_count \
   --queries 100000 \
   --num-query-processes 2 \
   --batch-size 10 \
   --report-count 100 \
+  --systemname vdb_multinode_system \
   --results-dir /shared/vdb_results
 ```
 
 #### Output structure
 
 ```text
-/shared/vdb_results/<run_id>/vectordb/simple/
+/shared/vdb_results/open/MLCommons/results/vdb_multinode_system/vector_database/milvus/DISKANN/run/<timestamp>/
 ├── statistics.json
 ├── vdb_multi_node_summary.json
 ├── rank_0/
@@ -1066,49 +1075,49 @@ recall_by_query
 
 ### 7.4 Distributed Enhanced / Sweep Benchmark
 
-Distributed enhanced benchmark mode starts one `enhanced-bench` instance per MPI
-rank. Each rank writes enhanced-bench output under a rank-local output directory.
-The launcher then groups and aggregates rank outputs by parameter set.
+Distributed enhanced benchmark mode starts one `enhanced-bench` instance per MPI rank. Each rank writes enhanced-bench output under a rank-local output directory. The launcher then groups and aggregates rank outputs by parameter set.
 
 #### Command
 
 ```bash
-./mlpstorage vectordb run \
-  --file \
-  --open \
+./mlpstorage open vectordb run file \
   --distributed \
   --mpi-impl mpich \
   --mpi-bin mpiexec \
   --hosts node01 node02 \
   --npernode 1 \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 10.0.0.10 \
   --port 19530 \
   --config default \
   --collection mlps_1m_1536dim_uniform_diskann \
-  --mode sweep \
+  --benchmark-mode sweep \
   --queries 10000 \
   --num-query-processes 4 \
+  --systemname vdb_multinode_system \
   --results-dir /shared/vdb_results
 ```
 
 #### Example with four total MPI ranks
 
 ```bash
-./mlpstorage vectordb run \
-  --file \
-  --open \
+./mlpstorage open vectordb run file \
   --distributed \
   --mpi-impl mpich \
   --mpi-bin mpiexec \
   --hosts node01 node02 \
   --npernode 2 \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 10.0.0.10 \
   --port 19530 \
   --config default \
   --collection mlps_1m_1536dim_uniform_diskann \
-  --mode sweep \
+  --benchmark-mode sweep \
   --queries 20000 \
   --num-query-processes 2 \
+  --systemname vdb_multinode_system \
   --results-dir /shared/vdb_results
 ```
 
@@ -1121,7 +1130,7 @@ With `--hosts node01 node02`, `--npernode 2`, and `--num-query-processes 2`:
 #### Output structure
 
 ```text
-/shared/vdb_results/<run_id>/vectordb/enhanced/
+/shared/vdb_results/open/MLCommons/results/vdb_multinode_system/vector_database/milvus/DISKANN/run/<timestamp>/
 ├── enhanced_statistics.json
 ├── vdb_multi_node_summary.json
 ├── rank_0/
@@ -1174,32 +1183,26 @@ p99_latency_ms = max(rank p99_latency_ms)
 recall_mean = query-count-weighted mean, or exact when per-query recall is present
 ```
 
-For simple-bench, p95/p99 latency percentiles are exact because raw per-batch CSV
-rows are available. For enhanced-bench, p95/p99 are conservative max-rank values
-unless raw latency samples are also emitted by the enhanced output.
+For simple-bench, p95/p99 latency percentiles are exact because raw per-batch CSV rows are available. For enhanced-bench, p95/p99 are conservative max-rank values unless raw latency samples are also emitted by the enhanced output.
 
 ---
 
 ### 7.5 Metrics Aggregation
 
-Distributed VectorDB runs use rank-local output directories and a final
-aggregation step.
-
-The aggregation script is:
+Distributed VectorDB runs use rank-local output directories and a final aggregation step. The aggregation script is:
 
 ```bash
 uv run vdb-aggregate
 ```
 
-It is normally invoked automatically by `./mlpstorage vectordb`. It can also be
-run manually.
+It is normally invoked automatically by `./mlpstorage open vectordb`. It can also be run manually.
 
 #### Manual load aggregation
 
 ```bash
 uv run vdb-aggregate \
   --phase load \
-  --base-output-dir /shared/vdb_results/<run_id>/vectordb/load \
+  --base-output-dir /shared/vdb_results/open/MLCommons/results/vdb_multinode_system/vector_database/milvus/DISKANN/datagen/<timestamp> \
   --expected-ranks 2
 ```
 
@@ -1208,7 +1211,7 @@ uv run vdb-aggregate \
 ```bash
 uv run vdb-aggregate \
   --phase simple \
-  --base-output-dir /shared/vdb_results/<run_id>/vectordb/simple \
+  --base-output-dir /shared/vdb_results/open/MLCommons/results/vdb_multinode_system/vector_database/milvus/DISKANN/run/<timestamp> \
   --expected-ranks 2
 ```
 
@@ -1217,7 +1220,7 @@ uv run vdb-aggregate \
 ```bash
 uv run vdb-aggregate \
   --phase enhanced \
-  --base-output-dir /shared/vdb_results/<run_id>/vectordb/enhanced \
+  --base-output-dir /shared/vdb_results/open/MLCommons/results/vdb_multinode_system/vector_database/milvus/DISKANN/run/<timestamp> \
   --expected-ranks 2
 ```
 
@@ -1225,12 +1228,9 @@ uv run vdb-aggregate \
 
 ### 7.6 Disk I/O Deduplication
 
-Disk I/O counters are node-local. If multiple MPI ranks run on the same host,
-summing every rank's `/proc/diskstats` delta would double-count that host's disk
-I/O.
+Disk I/O counters are node-local. If multiple MPI ranks run on the same host, summing every rank's `/proc/diskstats` delta would double-count that host's disk I/O.
 
-Distributed aggregation counts disk I/O only once per benchmark client host,
-using the rank where:
+Distributed aggregation counts disk I/O only once per benchmark client host, using the rank where:
 
 ```text
 local_rank == 0
@@ -1242,28 +1242,24 @@ The aggregated `disk_io` field records this policy.
 
 ### 7.7 Ground Truth and Recall
 
-Recall is computed outside the timed query loop so it does not inflate latency
-measurements.
+Recall is computed outside the timed query loop so it does not inflate latency measurements.
 
-The benchmark uses a FLAT ground-truth collection for exact nearest-neighbor
-results.
+The benchmark uses a FLAT ground-truth collection for exact nearest-neighbor results.
 
 Recommended ground-truth collection name:
 
 ```text
-<collection>_flat_gt
+_flat_gt
 ```
 
-Distributed wrappers should avoid multiple ranks racing to create/drop the same
-FLAT ground-truth collection. The orchestration flow is:
+Distributed wrappers should avoid multiple ranks racing to create/drop the same FLAT ground-truth collection.
+
+The orchestration flow is:
 
 ```text
-rank 0:
-  create or validate FLAT ground-truth collection
-
-non-rank-0:
-  validate existing FLAT ground-truth collection
-  run with --no-create-flat
+rank 0: create or validate FLAT ground-truth collection
+non-rank-0: validate existing FLAT ground-truth collection
+run with --no-create-flat
 ```
 
 Rank-local recall files include:
@@ -1287,8 +1283,7 @@ per_query_recall
 recall_by_query
 ```
 
-The `per_query_recall` and `recall_by_query` fields are used for exact
-multi-rank recall aggregation.
+The `per_query_recall` and `recall_by_query` fields are used for exact multi-rank recall aggregation.
 
 ---
 
@@ -1311,45 +1306,47 @@ Open MPI can be selected with:
 Example:
 
 ```bash
-./mlpstorage vectordb run \
-  --file \
-  --open \
+./mlpstorage open vectordb run file \
   --distributed \
   --mpi-impl openmpi \
   --mpi-bin mpirun \
   --hosts node01 node02 \
   --npernode 1 \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 10.0.0.10 \
   --port 19530 \
   --config default \
   --collection mlps_1m_1536dim_uniform_diskann \
-  --mode timed \
+  --benchmark-mode timed \
   --runtime 120 \
   --num-query-processes 2 \
   --batch-size 10 \
+  --systemname vdb_multinode_system \
   --results-dir /shared/vdb_results
 ```
 
 Additional MPI arguments can be passed with `--mpi-params`:
 
 ```bash
-./mlpstorage vectordb run \
-  --file \
-  --open \
+./mlpstorage open vectordb run file \
   --distributed \
   --mpi-impl mpich \
   --mpi-bin mpiexec \
   --hosts node01 node02 \
   --npernode 1 \
-  --mpi-params -env UCX_TLS tcp \
+  --mpi-params="-env UCX_TLS tcp" \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 10.0.0.10 \
   --port 19530 \
   --config default \
   --collection mlps_1m_1536dim_uniform_diskann \
-  --mode query_count \
+  --benchmark-mode query_count \
   --queries 10000 \
   --num-query-processes 2 \
   --batch-size 10 \
+  --systemname vdb_multinode_system \
   --results-dir /shared/vdb_results
 ```
 
@@ -1360,50 +1357,55 @@ Additional MPI arguments can be passed with `--mpi-params`:
 ### Single-Node Example
 
 ```bash
+# Initialize output root once.
+./mlpstorage init MLCommons ~/vdb_results
+
 # 1. Estimate storage.
-./mlpstorage vectordb datasize \
-  --file \
-  --open \
+./mlpstorage open vectordb datasize \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --dimension 1536 \
-  --num-vectors 1000000 \
-  --index-type DISKANN
+  --num-vectors 1000000
 
 # 2. Load vectors.
-./mlpstorage vectordb datagen \
-  --file \
-  --open \
+./mlpstorage open vectordb datagen file \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 127.0.0.1 \
   --port 19530 \
   --config default \
   --collection mlps_single_1m \
   --force \
+  --systemname vdb_single_system \
   --results-dir ~/vdb_results
 
 # 3. Run simple benchmark.
-./mlpstorage vectordb run \
-  --file \
-  --open \
+./mlpstorage open vectordb run file \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 127.0.0.1 \
   --port 19530 \
   --config default \
   --collection mlps_single_1m \
-  --mode timed \
+  --benchmark-mode timed \
   --num-query-processes 2 \
   --runtime 60 \
   --batch-size 10 \
+  --systemname vdb_single_system \
   --results-dir ~/vdb_results
 
 # 4. Run enhanced benchmark.
-./mlpstorage vectordb run \
-  --file \
-  --open \
+./mlpstorage open vectordb run file \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 127.0.0.1 \
   --port 19530 \
   --config default \
   --collection mlps_single_1m \
-  --mode sweep \
+  --benchmark-mode sweep \
   --queries 10000 \
   --num-query-processes 2 \
+  --systemname vdb_single_system \
   --results-dir ~/vdb_results
 
 # 5. View history.
@@ -1416,15 +1418,18 @@ Additional MPI arguments can be passed with `--mpi-params`:
 # 1. Verify MPI.
 mpiexec -n 2 -hosts node01,node02 hostname
 
-# 2. Load vectors across two benchmark client hosts.
-./mlpstorage vectordb datagen \
-  --file \
-  --open \
+# 2. Initialize output root once.
+./mlpstorage init MLCommons /shared/vdb_results
+
+# 3. Load vectors across two benchmark client hosts.
+./mlpstorage open vectordb datagen file \
   --distributed \
   --mpi-impl mpich \
   --mpi-bin mpiexec \
   --hosts node01 node02 \
   --npernode 1 \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 10.0.0.10 \
   --port 19530 \
   --config default \
@@ -1433,43 +1438,46 @@ mpiexec -n 2 -hosts node01,node02 hostname
   --dimension 1536 \
   --num-shards 4 \
   --force \
+  --systemname vdb_dist_system \
   --results-dir /shared/vdb_results
 
-# 3. Run distributed simple benchmark.
-./mlpstorage vectordb run \
-  --file \
-  --open \
+# 4. Run distributed simple benchmark.
+./mlpstorage open vectordb run file \
   --distributed \
   --mpi-impl mpich \
   --mpi-bin mpiexec \
   --hosts node01 node02 \
   --npernode 1 \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 10.0.0.10 \
   --port 19530 \
   --config default \
   --collection mlps_dist_1m \
-  --mode timed \
+  --benchmark-mode timed \
   --runtime 120 \
   --num-query-processes 2 \
   --batch-size 10 \
+  --systemname vdb_dist_system \
   --results-dir /shared/vdb_results
 
-# 4. Run distributed enhanced benchmark.
-./mlpstorage vectordb run \
-  --file \
-  --open \
+# 5. Run distributed enhanced benchmark.
+./mlpstorage open vectordb run file \
   --distributed \
   --mpi-impl mpich \
   --mpi-bin mpiexec \
   --hosts node01 node02 \
   --npernode 1 \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 10.0.0.10 \
   --port 19530 \
   --config default \
   --collection mlps_dist_1m \
-  --mode sweep \
+  --benchmark-mode sweep \
   --queries 10000 \
   --num-query-processes 2 \
+  --systemname vdb_dist_system \
   --results-dir /shared/vdb_results
 ```
 
@@ -1477,12 +1485,9 @@ mpiexec -n 2 -hosts node01,node02 hostname
 
 ## 9. Enhanced Benchmark Full Reference
 
-> **Working directory:** All commands below assume you are in
-> `storage/vdb_benchmark/`.
+> **Working directory:** All commands below assume you are in `storage/vdb_benchmark/`.
 
-`enhanced_bench.py` merges the operational features of `simple_bench.py` with
-advanced features for parameter sweeps, warm/cold cache regimes, budget mode,
-YAML config, and memory estimation.
+`enhanced_bench.py` merges the operational features of `simple_bench.py` with advanced features for parameter sweeps, warm/cold cache regimes, budget mode, YAML config, and memory estimation.
 
 ### Two Execution Paths
 
@@ -1495,8 +1500,7 @@ The script automatically selects the path based on the flags provided.
 
 ### Path A — Runtime / Query-Count Mode
 
-This path mimics `simple_bench.py`. It runs workers for a fixed duration or query
-count, writes per-process CSV files, and aggregates latency and recall stats.
+This path mimics `simple_bench.py`. It runs workers for a fixed duration or query count, writes per-process CSV files, and aggregates latency and recall stats.
 
 Create the FLAT ground-truth collection (first run only):
 
@@ -1604,7 +1608,7 @@ python vdbbench/enhanced_bench.py \
 | `--search-ef` | `200` | Search parameter override |
 | `--num-query-vectors` | `1000` | Pre-generated query vectors for recall |
 | `--recall-k` | `--search-limit` | k for recall@k |
-| `--gt-collection` | `<collection>_flat_gt` | FLAT GT collection name |
+| `--gt-collection` | `_flat_gt` | FLAT GT collection name |
 | `--auto-create-flat` | `False` | Auto-create FLAT GT collection from source |
 | `--no-create-flat` | `False` | Validate and reuse existing FLAT GT collection |
 | `--vector-dim` | `1536` | Vector dimension |
@@ -1631,9 +1635,9 @@ statistics.json
 #### Sweep path
 
 ```text
-combined_bench_<tag>.json
-combined_bench_<tag>.csv
-combined_bench_<tag>.sweep.csv
+combined_bench_.json
+combined_bench_.csv
+combined_bench_.sweep.csv
 ```
 
 ---
@@ -1642,11 +1646,9 @@ combined_bench_<tag>.sweep.csv
 
 ### Recall Measurement
 
-Recall is computed outside the timed benchmark loop so it does not inflate
-latency measurements.
+Recall is computed outside the timed benchmark loop so it does not inflate latency measurements.
 
-The benchmark uses a FLAT ground-truth collection for exact nearest-neighbor
-results.
+The benchmark uses a FLAT ground-truth collection for exact nearest-neighbor results.
 
 Simple benchmark output includes:
 
@@ -1670,13 +1672,11 @@ per_query_recall
 recall_by_query
 ```
 
-The `per_query_recall` and `recall_by_query` fields are used for exact
-multi-rank aggregation.
+The `per_query_recall` and `recall_by_query` fields are used for exact multi-rank aggregation.
 
 ### Disk I/O Metrics
 
-Disk I/O is measured by reading `/proc/diskstats` before and after each
-benchmark run.
+Disk I/O is measured by reading `/proc/diskstats` before and after each benchmark run.
 
 Fields include:
 
@@ -1689,8 +1689,7 @@ read_iops
 write_iops
 ```
 
-In distributed mode, disk I/O is aggregated once per benchmark client host to
-avoid double-counting multiple MPI ranks on the same host.
+In distributed mode, disk I/O is aggregated once per benchmark client host to avoid double-counting multiple MPI ranks on the same host.
 
 ---
 
@@ -1725,26 +1724,33 @@ MpiContext(rank=1, world_size=2, local_rank=0, hostname='node02')
 
 ### 3. `mlpstorage` dry run
 
-Use `--what-if` to inspect the generated command without running it.
+Initialize the shared results directory once:
 
 ```bash
-./mlpstorage vectordb run \
-  --file \
-  --open \
-  --what-if \
+./mlpstorage init MLCommons /shared/vdb_results
+```
+
+Use top-level `whatif` plus `--dry-run` to inspect the generated command without running it:
+
+```bash
+./mlpstorage whatif vectordb run file \
+  --dry-run \
   --distributed \
   --mpi-impl mpich \
   --mpi-bin mpiexec \
   --hosts node01 node02 \
   --npernode 1 \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 10.0.0.10 \
   --port 19530 \
   --config default \
   --collection mlps_smoke \
-  --mode query_count \
+  --benchmark-mode query_count \
   --queries 100 \
   --num-query-processes 1 \
   --batch-size 10 \
+  --systemname vdb_smoke_system \
   --results-dir /shared/vdb_results
 ```
 
@@ -1753,14 +1759,16 @@ Use `--what-if` to inspect the generated command without running it.
 This uses MPI on localhost and is useful before testing multiple nodes.
 
 ```bash
-./mlpstorage vectordb datagen \
-  --file \
-  --open \
+./mlpstorage init MLCommons /tmp/vdb_results
+
+./mlpstorage open vectordb datagen file \
   --distributed \
   --mpi-impl mpich \
   --mpi-bin mpiexec \
   --hosts localhost \
   --npernode 2 \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 127.0.0.1 \
   --port 19530 \
   --config default \
@@ -1771,28 +1779,31 @@ This uses MPI on localhost and is useful before testing multiple nodes.
   --batch-size 500 \
   --chunk-size 1000 \
   --force \
+  --systemname vdb_smoke_system \
   --results-dir /tmp/vdb_results
 ```
 
 Then run a query-count benchmark:
 
 ```bash
-./mlpstorage vectordb run \
-  --file \
-  --open \
+./mlpstorage open vectordb run file \
   --distributed \
   --mpi-impl mpich \
   --mpi-bin mpiexec \
   --hosts localhost \
   --npernode 2 \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 127.0.0.1 \
   --port 19530 \
   --config default \
   --collection mlps_smoke_10k \
-  --mode query_count \
+  --benchmark-mode query_count \
   --queries 200 \
+  --vector-dim 128 \
   --num-query-processes 1 \
   --batch-size 10 \
+  --systemname vdb_smoke_system \
   --results-dir /tmp/vdb_results
 ```
 
@@ -1804,29 +1815,37 @@ import json
 from pathlib import Path
 
 stats_files = sorted(
-    Path("/tmp/vdb_results").glob("**/vectordb/simple/statistics.json")
+    Path("/tmp/vdb_results").glob(
+        "**/vector_database/milvus/DISKANN/run/**/statistics.json"
+    )
 )
 assert stats_files, "No distributed statistics.json found"
-
 stats = json.loads(stats_files[-1].read_text())
 assert stats["total_queries"] == 200
 assert stats["mpi"]["partial_failure"] is False
-
 print(json.dumps(stats, indent=2)[:2000])
 PY
 ```
 
 ### 5. Multi-node load test
 
+Initialize the shared results directory once:
+
 ```bash
-./mlpstorage vectordb datagen \
-  --file \
-  --open \
+./mlpstorage init MLCommons /shared/vdb_results
+```
+
+Load data:
+
+```bash
+./mlpstorage open vectordb datagen file \
   --distributed \
   --mpi-impl mpich \
   --mpi-bin mpiexec \
   --hosts node01 node02 \
   --npernode 1 \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 10.0.0.10 \
   --port 19530 \
   --config default \
@@ -1837,6 +1856,7 @@ PY
   --batch-size 1000 \
   --chunk-size 10000 \
   --force \
+  --systemname vdb_multinode_system \
   --results-dir /shared/vdb_results
 ```
 
@@ -1848,14 +1868,14 @@ import json
 from pathlib import Path
 
 load_files = sorted(
-    Path("/shared/vdb_results").glob("**/vectordb/load/load_statistics.json")
+    Path("/shared/vdb_results").glob(
+        "**/vector_database/milvus/DISKANN/datagen/**/load_statistics.json"
+    )
 )
 assert load_files, "No load_statistics.json found"
-
 stats = json.loads(load_files[-1].read_text())
 assert stats["inserted_vectors"] == 1000000
 assert stats["mpi"]["partial_failure"] is False
-
 print(json.dumps(stats, indent=2)[:2000])
 PY
 ```
@@ -1863,53 +1883,55 @@ PY
 ### 6. Multi-node simple benchmark test
 
 ```bash
-./mlpstorage vectordb run \
-  --file \
-  --open \
+./mlpstorage open vectordb run file \
   --distributed \
   --mpi-impl mpich \
   --mpi-bin mpiexec \
   --hosts node01 node02 \
   --npernode 1 \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 10.0.0.10 \
   --port 19530 \
   --config default \
   --collection mlps_multinode_1m \
-  --mode timed \
+  --benchmark-mode timed \
   --runtime 120 \
   --num-query-processes 2 \
   --batch-size 10 \
+  --systemname vdb_multinode_system \
   --results-dir /shared/vdb_results
 ```
 
 ### 7. Multi-node enhanced benchmark test
 
 ```bash
-./mlpstorage vectordb run \
-  --file \
-  --open \
+./mlpstorage open vectordb run file \
   --distributed \
   --mpi-impl mpich \
   --mpi-bin mpiexec \
   --hosts node01 node02 \
   --npernode 1 \
+  --vdb-engine milvus \
+  --vdb-index DISKANN \
   --host 10.0.0.10 \
   --port 19530 \
   --config default \
   --collection mlps_multinode_1m \
-  --mode sweep \
+  --benchmark-mode sweep \
   --queries 10000 \
   --num-query-processes 2 \
+  --systemname vdb_multinode_system \
   --results-dir /shared/vdb_results
 ```
 
 Expected files:
 
 ```text
-/shared/vdb_results/<run_id>/vectordb/load/load_statistics.json
-/shared/vdb_results/<run_id>/vectordb/simple/statistics.json
-/shared/vdb_results/<run_id>/vectordb/enhanced/enhanced_statistics.json
-/shared/vdb_results/<run_id>/vectordb/*/vdb_multi_node_summary.json
+/shared/vdb_results/open/MLCommons/results/vdb_multinode_system/vector_database/milvus/DISKANN/datagen/<timestamp>/load_statistics.json
+/shared/vdb_results/open/MLCommons/results/vdb_multinode_system/vector_database/milvus/DISKANN/run/<timestamp>/statistics.json
+/shared/vdb_results/open/MLCommons/results/vdb_multinode_system/vector_database/milvus/DISKANN/run/<timestamp>/enhanced_statistics.json
+/shared/vdb_results/open/MLCommons/results/vdb_multinode_system/vector_database/milvus/DISKANN/run/<timestamp>/vdb_multi_node_summary.json
 ```
 
 ---
@@ -1918,10 +1940,48 @@ Expected files:
 
 ### `vector dimension mismatch`
 
-The dimension used for load and run does not match.
+The dimension used for load and run does not match. Use the same config for both `datagen` and `run`, or update the config to match the dimension passed to `datagen`.
 
-Use the same config for both `datagen` and `run`, or update the config to match
-the dimension passed to `datagen`.
+### `rate limit exceeded[rate=0.1]` during datagen
+
+Symptom (typically at high rank counts, e.g. `--npernode 4` across many hosts):
+
+```text
+pymilvus.exceptions.MilvusException: <MilvusException: (code=8, message=...
+failed to flush collection: ... rate limit exceeded[rate=0.1], request is
+rejected by grpc RateLimiter middleware, please retry later)>
+```
+
+Milvus 2.4+ ships a per-collection flush rate limiter enabled by default:
+
+```yaml
+quotaAndLimits:
+  flushRate:
+    collection:
+      max: 0.1   # one flush() per 10 seconds per collection
+```
+
+Older benchmark versions called `flush()` once per MPI rank on the same
+collection, so many concurrent ranks exhausted the pymilvus retry budget
+(~210 seconds) and failed with the error above, while smaller rank counts
+squeaked through. Since issue #705 was fixed, `datagen` flushes each
+collection exactly once (from rank 0, after all ranks finish inserting) and
+retries any rate-limited flush while respecting the limiter period, so no
+Milvus configuration change is needed.
+
+If you still hit this error:
+
+1. Update to a benchmark version that includes the issue #705 fix. The load
+   summary of a fixed version contains a top-level `collection_flush_seconds`
+   field.
+2. If external tooling flushes the benchmark collections concurrently, raise
+   or disable the limiter via `stacks/milvus/user.yaml.example` (MinIO stack,
+   mounted as `/milvus/configs/user.yaml`) or the commented
+   `QUOTAANDLIMITS_FLUSHRATE_COLLECTION_MAX` environment variable (S3 stack).
+
+The Milvus configuration is part of the system under test: keep the defaults
+for official submissions unless the rules state otherwise, and record any
+override in your system description.
 
 ### MPI launches only on one host
 
@@ -1931,8 +1991,7 @@ Check:
 mpiexec -n 2 -hosts node01,node02 hostname
 ```
 
-If both lines show the same host, inspect the MPICH/Hydra host configuration and
-SSH setup.
+If both lines show the same host, inspect the MPICH/Hydra host configuration and SSH setup.
 
 ### Rank output is missing
 
@@ -1954,8 +2013,9 @@ partial_failure
 
 ### Distributed aggregation cannot find files
 
-Ensure `--results-dir` is visible at the same path from all benchmark client
-hosts. For example, use a shared filesystem path such as:
+Ensure `--results-dir` is visible at the same path from all benchmark client hosts.
+
+For example, use a shared filesystem path such as:
 
 ```text
 /shared/vdb_results
@@ -1963,8 +2023,7 @@ hosts. For example, use a shared filesystem path such as:
 
 ### Recall is zero
 
-Check that the FLAT ground-truth collection exists and contains the same vectors
-as the ANN collection.
+Check that the FLAT ground-truth collection exists and contains the same vectors as the ANN collection.
 
 Also check that rank-local `recall_stats.json` files contain non-empty:
 
@@ -2006,11 +2065,11 @@ uv run vdb-aggregate --help
 
 ## 13. Contributing
 
-Contributions are welcome. Pull requests that add or modify distributed
-VectorDB behavior should include:
+Contributions are welcome. Pull requests that add or modify distributed VectorDB behavior should include:
 
 * implementation changes
 * unit tests
 * single-host MPI smoke test results
 * multi-node test results when applicable
 * README updates
+

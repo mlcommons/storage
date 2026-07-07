@@ -7,6 +7,164 @@ by isolating data generation from storage operations using shared memory buffers
 import os
 import time
 import multiprocessing as mp
+
+
+# Per-node MPI rank count, used to size the dgen-py generator's thread pool.
+#
+# Issue #689: dgen-py's threads must be throttled so that N ranks sharing a
+# node don't each spin up threads = os.cpu_count() and oversubscribe the
+# host. The throttle divisor must be the number of ranks sharing THIS node
+# (local size) — os.cpu_count() is already a per-node figure. Dividing it by
+# the GLOBAL world size instead (the bug prior to this fix) starves
+# generation on any multi-node run: e.g. 192 local CPUs / 64 global ranks
+# (16 nodes x 4 ranks/node) = 3 threads/rank, when only 4 ranks actually
+# share the node and 192 / 4 = 48 threads/rank is correct. That exact
+# 3-thread figure is what issue #689's profiling observed, with generation
+# throughput consequently landing close to the storage write rate instead
+# of comfortably ahead of it.
+#
+# This mirrors DLIO_local_changes' storage#671 fix, which hit the identical
+# global-vs-local mismatch for per-node accounting (there, OpenMPI's
+# COMM_TYPE_SHARED split collapsing to size 1 on remote nodes; here, using
+# the wrong env var entirely) and fixed it the same way: prefer the
+# launcher's LOCAL size env var over any global/world figure.
+_LOCAL_SIZE_ENV_VARS = (
+    'OMPI_COMM_WORLD_LOCAL_SIZE',   # OpenMPI
+    'MPI_LOCALNRANKS',              # MPICH / Hydra
+    'MV2_COMM_WORLD_LOCAL_SIZE',    # MVAPICH2
+)
+
+
+def _local_ranks_per_node(env=None):
+    """Return the number of MPI ranks sharing this node (>= 1).
+
+    Checks the launcher-specific LOCAL size env vars in ``_LOCAL_SIZE_ENV_VARS``
+    (first present, parseable, positive value wins). Falls back to 1 — i.e.
+    "assume this rank has the node to itself" — when none are set (single-node
+    / non-MPI launches) or all are malformed. 1 is deliberately the safe
+    default: it never reproduces the #689 under-threading bug, and a rank
+    that turns out not to be alone simply shares CPU time with its
+    node-mates rather than being starved down to a handful of threads.
+    """
+    if env is None:
+        env = os.environ
+    for _env_var in _LOCAL_SIZE_ENV_VARS:
+        _v = env.get(_env_var)
+        if _v:
+            try:
+                parsed = int(_v)
+            except (TypeError, ValueError):
+                continue
+            if parsed >= 1:
+                return parsed
+    return 1
+
+
+# Selecting the streaming-checkpoint writer subprocess start method.
+#
+# The right method depends on the backend, so it is a *choice* with a
+# backend-aware default (issues #642 and #682):
+#
+#   * POSIX file backend (``backend='file'`` or a scheme-less / ``file://``
+#     path): the parent never starts s3dlio's Tokio runtime, so ``fork`` is
+#     safe *and* ~40% faster — it keeps the parent's copy-on-write warm state
+#     and CPU/NUMA locality with the shared-memory buffers (#682). Default:
+#     ``fork``.
+#   * Object-storage / s3dlio path (``s3dlio``, ``direct_fs``,
+#     ``s3torchconnector``, ``minio``, or any remote-scheme URI): the parent
+#     has already started s3dlio's Tokio runtime via
+#     ``ObjStoreLibStorage._preflight()`` → ``s3dlio.list()`` by the time the
+#     writer is created. ``fork()`` copies that mutex state without the
+#     threads holding the mutexes and the writer futex-deadlocks the first
+#     time it re-enters s3dlio (#642). Default: ``forkserver`` — the clean
+#     "no live Tokio" property of ``spawn`` without ``spawn``'s ``__main__``
+#     re-import (``spawn`` also hangs MPI ranks re-joining the OpenMPI
+#     communicator, the historical reason fork was chosen originally).
+#
+# Users may override the default with the ``mp_start_method`` constructor
+# argument or the ``MLPS_CHECKPOINT_MP_START_METHOD`` environment variable
+# (constructor arg wins). Explicitly requesting ``fork`` on the object-storage
+# path is refused rather than silently honored, because it deadlocks (#642).
+MP_START_METHOD_ENV = "MLPS_CHECKPOINT_MP_START_METHOD"
+_VALID_MP_START_METHODS = ("auto", "fork", "forkserver", "spawn")
+
+
+def _is_posix_file_backend(backend=None, uri_or_path=None):
+    """True when the writer targets a local POSIX file — the only path where
+    forking the writer is safe (no parent-side s3dlio Tokio runtime).
+
+    Mirrors ``StorageWriterFactory``'s own resolution: an explicit
+    ``backend='file'`` is POSIX; with no explicit backend, a scheme-less or
+    ``file://`` path auto-detects to the local file writer, anything else
+    (``s3://``, ``az://``, ``gs://``, ``direct://``, …) is object storage.
+    """
+    if backend:
+        return backend == "file"
+    uri = uri_or_path or ""
+    if "://" not in uri:
+        return True
+    return uri.startswith("file://")
+
+
+def _resolve_mp_start_method(start_method="auto", *, backend=None, uri_or_path=None):
+    """Resolve a requested start method to a concrete ``fork`` / ``forkserver``
+    / ``spawn``, applying the backend-aware default and the #642 guardrail.
+
+    ``start_method='auto'`` (the default) picks ``fork`` on the POSIX file
+    backend and ``forkserver`` on the object-storage path. An explicit value
+    is honored, except ``fork`` on the object-storage path which raises rather
+    than deadlock.
+    """
+    method = (start_method or "auto").lower()
+    if method not in _VALID_MP_START_METHODS:
+        raise ValueError(
+            f"invalid checkpoint writer start method {start_method!r}; choose "
+            f"one of {_VALID_MP_START_METHODS[1:]} or 'auto' "
+            f"(via mp_start_method= or ${MP_START_METHOD_ENV})"
+        )
+
+    posix_file = _is_posix_file_backend(backend, uri_or_path)
+
+    if method == "auto":
+        return "fork" if posix_file else "forkserver"
+
+    if method == "fork" and not posix_file:
+        raise ValueError(
+            f"checkpoint writer start method 'fork' is unsafe on the "
+            f"object-storage backend ({(backend or uri_or_path)!r}): fork() "
+            f"after s3dlio's Tokio runtime is live deadlocks the writer "
+            f"(issue #642). Use 'forkserver' (the default there) or 'auto'."
+        )
+    return method
+
+
+def _mp_availability_fallback(method):
+    """Platform-availability fallback order for a resolved method (NOT a policy
+    choice): degrade only when the OS can't provide the requested context —
+    fork→forkserver→spawn, forkserver→spawn, spawn→spawn."""
+    if method == "fork":
+        return ("fork", "forkserver", "spawn")
+    if method == "forkserver":
+        return ("forkserver", "spawn")
+    return ("spawn",)
+
+
+def _writer_mp_context(start_method="auto", *, backend=None, uri_or_path=None):
+    """Return the multiprocessing context for the streaming-checkpoint writer.
+
+    ``start_method`` selects the policy (see ``_resolve_mp_start_method``);
+    the resolved method then degrades gracefully if the platform cannot
+    provide it (e.g. no ``fork``/``forkserver`` on Windows/macOS).
+    """
+    method = _resolve_mp_start_method(
+        start_method, backend=backend, uri_or_path=uri_or_path
+    )
+    for candidate in _mp_availability_fallback(method):
+        try:
+            return mp.get_context(candidate)
+        except ValueError:
+            continue
+    return mp.get_context("spawn")
 from concurrent.futures import ThreadPoolExecutor
 from multiprocessing import shared_memory
 from typing import Optional, Dict, Any
@@ -66,6 +224,7 @@ class StreamingCheckpointing:
         fadvise_mode: str = 'none',
         num_parallel_readers: int = 8,
         read_chunk_size: Optional[int] = None,
+        mp_start_method: Optional[str] = None,
         **backend_kwargs
     ):
         """Initialize streaming checkpoint configuration.
@@ -81,6 +240,13 @@ class StreamingCheckpointing:
             read_chunk_size: Chunk size for read range-GETs in bytes (default: 4 × chunk_size).
                              Larger values reduce per-request HTTP overhead at the cost of
                              more RAM per reader thread (peak = num_parallel_readers × read_chunk_size).
+            mp_start_method: Writer subprocess start method — 'auto' (default),
+                             'fork', 'forkserver', or 'spawn'. 'auto' picks 'fork'
+                             on the POSIX file backend (fast, #682) and 'forkserver'
+                             on the object-storage / s3dlio path (fork deadlocks
+                             there, #642). Overrides the ``MLPS_CHECKPOINT_MP_START_METHOD``
+                             environment variable; if both are None, defaults to 'auto'.
+                             Requesting 'fork' on the object-storage path is refused.
             **backend_kwargs: Additional backend-specific options
         """
         self.chunk_size = chunk_size
@@ -91,6 +257,14 @@ class StreamingCheckpointing:
         self.fadvise_mode = fadvise_mode
         self.num_parallel_readers = num_parallel_readers
         self.read_chunk_size = read_chunk_size if read_chunk_size is not None else chunk_size * 4
+        # Writer start-method policy: explicit arg > env var > 'auto'
+        # (backend-aware). Resolved to a concrete method at save() time, when
+        # the target filepath/backend is known. See _writer_mp_context.
+        self.mp_start_method = (
+            mp_start_method
+            or os.environ.get(MP_START_METHOD_ENV)
+            or "auto"
+        )
         self.backend_kwargs = backend_kwargs
         
         # dgen-py is REQUIRED if no custom generator will be provided
@@ -170,11 +344,14 @@ class StreamingCheckpointing:
         if self.use_direct_io:
             print(f"[Main] ⚠ Disabling O_DIRECT (shared_memory buffers not page-aligned)")
         
-        # Start writer process with fork context (Linux only).
-        # Uses 'fork' to inherit environment variables (AWS credentials, etc.)
-        # and to avoid MPI re-initialization deadlocks that occur with 'spawn'
-        # (spawned children inherit OMPI_COMM_WORLD_* and block trying to
-        # re-join the MPI communicator).
+        # Writer subprocess context — see the module-scope helpers for the
+        # backend-aware default: 'fork' on the POSIX file backend (fast, #682),
+        # 'forkserver' on the object-storage / s3dlio path (fork after live
+        # Tokio deadlocks, #642). self.mp_start_method (constructor arg or
+        # $MLPS_CHECKPOINT_MP_START_METHOD) overrides the default; 'fork' on
+        # the object-storage path is refused rather than silently deadlocked.
+        # The backend is resolved from self.backend, falling back to the
+        # target filepath's URI scheme when backend is auto-detect (None).
         #
         # CRITICAL: IPC objects (Queue, Event) MUST be created from the SAME
         # context as the child process — mixing contexts (e.g. fork-context
@@ -182,15 +359,11 @@ class StreamingCheckpointing:
         #   RuntimeError: A SemLock created in a fork context is being shared
         #                 with a process in a spawn context.
         # Always create IPC objects from ctx BEFORE ctx.Process().
-        #
-        # Fork safety: the writer child does NOT call dgen-py or s3dlio from the
-        # parent's Rust runtimes — it creates fresh StorageWriter instances after
-        # fork, so Tokio/Rayon are initialized cleanly in the child.
-        try:
-            ctx = mp.get_context('fork')
-        except ValueError:
-            # Fork not available (Windows/macOS) — fall back to spawn.
-            ctx = mp.get_context('spawn')
+        ctx = _writer_mp_context(
+            self.mp_start_method, backend=self.backend, uri_or_path=filepath
+        )
+        print(f"[Main] Writer start method: {ctx.get_start_method()} "
+              f"(policy={self.mp_start_method!r}, backend={self.backend or 'auto'})")
 
         # Setup IPC using the same context as the child process.
         buffer_queue = ctx.Queue(maxsize=self.num_buffers)
@@ -278,20 +451,13 @@ class StreamingCheckpointing:
             )
         
         # Throttle dgen-py threads when running under MPI to avoid
-        # overloading the host with 8 ranks × N-all-CPU threads simultaneously.
-        # Detect MPI world size from common env vars (OpenMPI, MPICH, MVAPICH).
-        mpi_world_size = 1
-        for _env_var in ('OMPI_COMM_WORLD_SIZE', 'PMI_SIZE', 'MV2_COMM_WORLD_SIZE'):
-            _v = os.environ.get(_env_var)
-            if _v:
-                try:
-                    mpi_world_size = max(1, int(_v))
-                    break
-                except ValueError:
-                    pass
+        # overloading the host with N ranks x all-CPU threads simultaneously.
+        # Divide by the ranks sharing THIS node (#689), not the global world
+        # size — see _local_ranks_per_node for why that distinction matters.
+        local_ranks = _local_ranks_per_node()
         total_cpus = os.cpu_count() or 4
-        max_threads = max(1, total_cpus // mpi_world_size)
-        print(f"[Main] Initializing dgen-py (MPI world_size={mpi_world_size}, threads={max_threads}/{total_cpus} CPUs)...")
+        max_threads = max(1, total_cpus // local_ranks)
+        print(f"[Main] Initializing dgen-py (local_ranks_per_node={local_ranks}, threads={max_threads}/{total_cpus} CPUs)...")
         try:
             generator = dgen_py.Generator(
                 size=total_size_bytes,
@@ -299,7 +465,7 @@ class StreamingCheckpointing:
                 dedup_ratio=1.0,
                 compress_ratio=1.0,
                 numa_mode="auto",
-                max_threads=max_threads,  # Throttled by MPI world size
+                max_threads=max_threads,  # Throttled by local ranks-per-node (#689)
             )
             print(f"[Main] Generator ready")
             return generator
