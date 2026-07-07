@@ -37,6 +37,14 @@ services:
 
       # ---- Storage type ----
       COMMON_STORAGETYPE: "remote"
+
+      # ---- Optional: flush rate limiter override (issue #705) ----
+      # Milvus 2.4+ defaults quotaAndLimits.flushRate.collection.max to 0.1
+      # (one flush per 10 s per collection). The benchmark handles this
+      # limit; uncomment only if external tooling flushes the same
+      # collections concurrently. See stacks/milvus/user.yaml.example for
+      # details and the submission-comparability caveat.
+      # QUOTAANDLIMITS_FLUSHRATE_COLLECTION_MAX: "-1"
     ports:
       - "${MILVUS_GRPC_PORT}:${MILVUS_GRPC_PORT}"     # gRPC
       - "${MILVUS_HTTP_PORT}:${MILVUS_HTTP_PORT}"     # HTTP

@@ -1,0 +1,35 @@
+# user.yaml.example — optional Milvus configuration overrides.
+#
+# Milvus merges this file over its built-in milvus.yaml defaults when it is
+# mounted at /milvus/configs/user.yaml inside the container. To use it:
+#
+#   cp user.yaml.example user.yaml
+#   # then uncomment the user.yaml volume line in the standalone service of
+#   # stacks/milvus/standalone/minio/docker-compose.yml or
+#   # stacks/milvus/standalone/s3/docker-compose.yml and restart the stack.
+#
+# -----------------------------------------------------------------------------
+# Flush rate limiter (issue #705)
+# -----------------------------------------------------------------------------
+# Milvus 2.4+ ships quotaAndLimits.flushRate.collection.max: 0.1 by default,
+# i.e. it admits ONE flush() per 10 seconds per collection and rejects the
+# rest with:
+#
+#   MilvusException: (code=8, message=... rate limit exceeded[rate=0.1],
+#   request is rejected by grpc RateLimiter middleware, please retry later)
+#
+# The benchmark itself no longer needs this override: since issue #705 was
+# fixed, datagen flushes each collection exactly once (from MPI rank 0) and
+# retries any rate-limited flush while respecting the limiter period. Raise
+# or disable the limiter here ONLY if external tooling outside the benchmark
+# flushes the same collections concurrently.
+#
+# COMPARABILITY NOTE: the Milvus configuration is part of the system under
+# test. Official MLPerf Storage submissions should keep Milvus defaults
+# unless the submission rules explicitly state otherwise; record any override
+# you do apply in your submission's system description.
+#
+# quotaAndLimits:
+#   flushRate:
+#     collection:
+#       max: -1   # -1 disables the per-collection flush rate limit
