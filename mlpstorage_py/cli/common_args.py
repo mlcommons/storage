@@ -12,7 +12,7 @@ import argparse
 
 from mlpstorage_py.config import (
     CHECKPOINT_RANKS_STRINGS, MODELS, ACCELERATORS, ACCELERATORS_CLOSED, DEFAULT_HOSTS,
-    LLM_MODELS_STRINGS, MPI_CMDS, EXEC_TYPE, DEFAULT_RESULTS_DIR, DEFAULT_SYSTEMNAME,
+    LLM_MODELS_STRINGS, MPI_CMDS, EXEC_TYPE, ENV_FALLBACK_RESULTS_DIR, ENV_FALLBACK_SYSTEMNAME,
     VECTOR_DTYPES, DISTRIBUTIONS
 )
 
@@ -129,7 +129,10 @@ HELP_MESSAGES = {
     'reportgen': "Generate a report from the benchmark results.",
 
     # Checkpoint folder is used for training and checkpointing
-    'checkpoint_folder': "Location for checkpoint files for training or checkpointing workloads",
+    'checkpoint_folder': (
+        "Location for checkpoint files for training or checkpointing workloads. "
+        "Defaults to MLPSTORAGE_CHECKPOINT_FOLDER env var if set."
+    ),
 
     # Checkpointing help messages
     'checkpoint_run': "The checkpoint command executes checkpoint saves and restores for a given model.",
@@ -186,7 +189,7 @@ HELP_MESSAGES = {
     # System-under-test name (LAY-04 / D-10) — folder under results/ in canonical layout
     'systemname': (
         "System-under-test name (folder under results/). "
-        "Defaults to MLPERF_SYSTEMNAME env var if set."
+        "Defaults to MLPSTORAGE_SYSTEMNAME env var if set."
     ),
 
     # MPI help messages
@@ -219,15 +222,15 @@ PROGRAM_DESCRIPTIONS = {
 }
 
 
-def add_universal_arguments(parser, req_results, req_systemname=False):
+def add_universal_arguments(parser, req_results, req_systemname=False, req_checkpoint_folder=False):
     """Add arguments common to all benchmarks and commands.
 
     Args:
         parser: Argparse parser to add arguments to.
         req_results: Whether --results-dir is required. The requirement is
             enforced POST-PARSE (see ``check_universal_arguments_present``)
-            so the ``MLPERF_RESULTS_DIR`` env-var-sourced default counts as
-            satisfying it. Using ``required=True`` here would short-circuit
+            so the ``MLPSTORAGE_RESULTS_DIR`` env-var-sourced default counts
+            as satisfying it. Using ``required=True`` here would short-circuit
             argparse before the env-var default applies — that's the CR-02
             bug we fixed.
         req_systemname: Whether --systemname is required. Defaults to False
@@ -235,6 +238,18 @@ def add_universal_arguments(parser, req_results, req_systemname=False):
             opting in. Emitting commands (datagen/run/configview/datasize/
             reportgen/history) MUST opt in per CONTEXT.md D-10 / LAY-04.
             Same post-parse enforcement model as ``req_results``.
+        req_checkpoint_folder: Whether --checkpoint-folder is required for
+            this invocation. Defaults to False. When True, plumbs the
+            ``_mlps_req_checkpoint_folder`` marker onto the argparse namespace
+            via ``parser.set_defaults`` so the post-parse gate
+            (``cli_parser._check_universal_required_present``) can enforce
+            non-emptiness with the D-02 loud-error line. NOTE: the
+            ``--checkpoint-folder`` argument itself is registered in
+            ``mlpstorage_py/cli/checkpointing_args.py`` — NOT here — so no
+            other benchmark accidentally inherits it (see Phase 5 D-09). This
+            kwarg exists for symmetry with ``req_results`` / ``req_systemname``
+            and for defensive future callers; the checkpointing flow plumbs
+            the marker locally in its own arg builder.
     """
     standard_args = parser.add_argument_group("Standard Arguments")
     # NOTE on the env-var fallback (CR-02): argparse's ``required=True``
@@ -245,11 +260,12 @@ def add_universal_arguments(parser, req_results, req_systemname=False):
     # emitting subcommand. We drop ``required=True`` entirely and instead
     # stash a marker on the namespace (via an argparse.SUPPRESS-defaulted
     # action) that ``check_universal_arguments_present`` consumes at the
-    # post-parse validation layer to enforce non-emptiness.
+    # post-parse validation layer to enforce non-emptiness. Env-var names:
+    # MLPSTORAGE_RESULTS_DIR / MLPSTORAGE_SYSTEMNAME (see config.py D-10).
     standard_args.add_argument(
         '--results-dir', '-rd',
         type=str,
-        default=DEFAULT_RESULTS_DIR,
+        default=ENV_FALLBACK_RESULTS_DIR,
         help=HELP_MESSAGES['results_dir']
     )
     if req_results:
@@ -260,18 +276,28 @@ def add_universal_arguments(parser, req_results, req_systemname=False):
         parser.set_defaults(_mlps_req_results=True)
 
     # --systemname: required on emitting commands (Rules.md §2.1.8 systemname
-    # subdir), optional elsewhere. Default = DEFAULT_SYSTEMNAME = "" unless
-    # MLPERF_SYSTEMNAME env var is set. Same env-var-fallback bug as above:
-    # we keep argparse's ``required=False`` and gate emptiness post-parse.
+    # subdir), optional elsewhere. Default sourced from ENV_FALLBACK_SYSTEMNAME
+    # = "" unless the MLPSTORAGE_SYSTEMNAME env var is set. Same env-var-fallback
+    # bug as above: we keep argparse's ``required=False`` and gate emptiness
+    # post-parse.
     standard_args.add_argument(
         '--systemname', '-sn',
         type=str,
         required=False,
-        default=DEFAULT_SYSTEMNAME,
+        default=ENV_FALLBACK_SYSTEMNAME,
         help=HELP_MESSAGES['systemname']
     )
     if req_systemname:
         parser.set_defaults(_mlps_req_systemname=True)
+
+    # --checkpoint-folder marker: per D-09, the `--checkpoint-folder` argument
+    # is registered in checkpointing_args.py (NOT here). This branch only plumbs
+    # the ``_mlps_req_checkpoint_folder`` namespace marker for callers that
+    # prefer symmetric opt-in via ``add_universal_arguments``. The checkpointing
+    # flow instead plumbs this marker locally next to its arg definition to keep
+    # the flag and its enforcement gate co-located.
+    if req_checkpoint_folder:
+        parser.set_defaults(_mlps_req_checkpoint_folder=True)
 
     standard_args.add_argument(
         '--config-file', '-c',

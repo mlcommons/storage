@@ -6,11 +6,12 @@ including datasize, datagen, run, and configview commands.
 """
 
 import argparse
+import os
 import sys
 
 from mlpstorage_py.config import (
     MODELS, MODELS_CLOSED, MODELS_OPEN, ACCELERATORS, ACCELERATORS_CLOSED,
-    DEFAULT_HOSTS, EXEC_TYPE, EXIT_CODE
+    DEFAULT_HOSTS, EXEC_TYPE, EXIT_CODE, ENV_FALLBACK_DATA_DIR
 )
 
 from mlpstorage_py.cli.common_args import (
@@ -171,9 +172,11 @@ def _add_training_core_args(parser, command, accel_choices):
     parser.add_argument(
         '--data-dir', '-dd',
         type=str,
+        default=ENV_FALLBACK_DATA_DIR,
         help=(
             "Dataset location. For file storage, this is a filesystem path. "
-            "For object storage, this is an object key prefix or full object URI."
+            "For object storage, this is an object key prefix or full object URI. "
+            "Defaults to MLPSTORAGE_DATA_DIR env var if set."
         )
     )
 
@@ -293,14 +296,21 @@ def validate_training_arguments(args):
 
     # Object-mode --data-dir enforcement runs here (post-YAML) so --config-file
     # can populate data_dir for object workflows. File-mode enforcement happens
-    # earlier in cli_parser.parse_arguments via parser.error().
+    # earlier in cli_parser.parse_arguments via parser.error(). Message text is
+    # the D-02 verbatim template (Phase 5 D-02 / D-07) — do NOT paraphrase; it
+    # is pinned by loud-error tests.
     if command in ('datagen', 'run') and protocol == 'object' and not getattr(args, 'data_dir', None):
         print(
-            f"ERROR: --data-dir is required for training {command} with object storage.\n"
-            "  Specify --data-dir <key-prefix-or-URI> on the command line, or set\n"
-            "  'data_dir:' in the file passed via --config-file.",
+            f"error: --data-dir/-dd is required: pass it on the command line or set MLPSTORAGE_DATA_DIR",
             file=sys.stderr,
         )
+        # D-05 migration hint: fires only when the user set the legacy env var
+        # but not the new one — actionable at exactly the moment of failure.
+        if os.environ.get('MLPERF_DATA_DIR') and not os.environ.get('MLPSTORAGE_DATA_DIR'):
+            print(
+                f"hint: MLPERF_DATA_DIR is set but is no longer read; rename it to MLPSTORAGE_DATA_DIR",
+                file=sys.stderr,
+            )
         sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
 
     if getattr(args, 'o_direct', False) and protocol != 'file':

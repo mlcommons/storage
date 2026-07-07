@@ -2,7 +2,6 @@ import datetime
 import enum
 import os
 import pathlib
-import tempfile
 
 
 def check_env(setting, default_value=None):
@@ -144,40 +143,236 @@ ALLOW_RUN_AS_ROOT = True
 
 MAX_NUM_FILES_TRAIN = 128*1024
 
-def _resolve_default_results_dir() -> str:
-    """Resolve DEFAULT_RESULTS_DIR from MLPERF_RESULTS_DIR or tempdir.
+# -----------------------------------------------------------------------------
+# MLPSTORAGE_* env-var-name string constants — SINGLE SOURCE OF TRUTH (D-10).
+#
+# Every mlpstorage-owned environment-variable NAME lives here as a string
+# constant. Downstream modules (rules/utils.py, cli_parser.py, etc.) MUST
+# import these names from this module rather than redefining them locally.
+# Import direction is one-way (D-11): config.py MUST NOT import from
+# mlpstorage_py.rules.*; doing so would create a cycle at interpreter
+# startup. tests/unit/test_no_import_cycles.py locks this invariant.
+# -----------------------------------------------------------------------------
+MLPSTORAGE_ORGNAME_ENVVAR = "MLPSTORAGE_ORGNAME"
+MLPSTORAGE_SYSTEMNAME_ENVVAR = "MLPSTORAGE_SYSTEMNAME"
+MLPSTORAGE_RESULTS_DIR_ENVVAR = "MLPSTORAGE_RESULTS_DIR"
+MLPSTORAGE_DATA_DIR_ENVVAR = "MLPSTORAGE_DATA_DIR"
+MLPSTORAGE_CHECKPOINT_FOLDER_ENVVAR = "MLPSTORAGE_CHECKPOINT_FOLDER"
 
-    Extracted so tests can exercise the env-driven branch without
-    reloading this module — reload re-creates the PARAM_VALIDATION enum
-    class, which then fails `in`-checks against any pre-imported copy
-    held by other modules (notably the rules verifier).
-    """
-    return os.environ.get(
-        "MLPERF_RESULTS_DIR",
-        os.path.join(tempfile.gettempdir(), "mlperf_storage_results"),
-    )
+# _LEGACY_ENVVAR_MAP: new MLPSTORAGE_* env-var-name -> legacy MLPERF_*
+# predecessor. Consumed by the parse-time migration-hint emitter (Plan 05-02
+# D-04/D-05). MLPSTORAGE_CHECKPOINT_FOLDER_ENVVAR is intentionally absent —
+# per D-08 no MLPERF_CHECKPOINT_FOLDER ever existed, so the migration hint
+# never fires for that pair.
+_LEGACY_ENVVAR_MAP = {
+    MLPSTORAGE_SYSTEMNAME_ENVVAR: "MLPERF_SYSTEMNAME",
+    MLPSTORAGE_RESULTS_DIR_ENVVAR: "MLPERF_RESULTS_DIR",
+    MLPSTORAGE_DATA_DIR_ENVVAR: "MLPERF_DATA_DIR",
+    MLPSTORAGE_ORGNAME_ENVVAR: "MLPERF_ORGNAME",
+}
+
+# -----------------------------------------------------------------------------
+# ManPage sync symbols — SINGLE SOURCE OF TRUTH for the env-var sync test and
+# ManPage ENVIRONMENT section authoring (Phase 7 D-05/D-10/D-11).
+#
+# _MANPAGE_SYNC_ALLOWLIST: env-var names the sync test MUST skip because they
+# are either POSIX identity plumbing (USER/LOGNAME/PATH) or legacy MLPERF_*
+# migration-detection strings intentionally excluded from the ManPage (D-05).
+# Allow-list rationale: mlpstorage documents env vars it OWNS or BORROWS as
+# functional contracts — not system identity plumbing or deprecated migration
+# sentinels.
+#
+# MANPAGE_ENV_VAR_TIERS: maps every non-allowlisted env var mlpstorage reads
+# to exactly one PRIMARY tier string (D-13/D-14). Seven allowed primary-tier
+# values: 'owned', 'mpi-borrowed', 'aws-borrowed', 'storage-borrowed',
+# 'storage-backend', 'diagnostic', 'internal-write'. Dual-role vars
+# (MLPSTORAGE_CHECKPOINT_URI_SCHEME, AWS_ENDPOINT_URL) carry a single
+# primary-tier value; their internal-write cross-ref is ManPage prose only
+# per D-13 (no tuple values — D-13 explicitly rejects the tuple form in
+# favour of prose cross-refs).
+#
+# Import direction is one-way (D-11): config.py MUST NOT import from
+# mlpstorage_py.rules.*. tests/unit/test_no_import_cycles.py locks this
+# invariant.
+# -----------------------------------------------------------------------------
+_MANPAGE_SYNC_ALLOWLIST = frozenset({
+    'PATH',              # stdlib-convention exempt per D-11
+    'USER',              # POSIX identity plumbing per D-10 (read at environment/systemd_ipc.py:104, 156)
+    'LOGNAME',           # POSIX identity plumbing per D-10 (read at environment/systemd_ipc.py:104, 157)
+    'MLPERF_SYSTEMNAME',   # migration-detection only per D-05, removal target v1.2
+    'MLPERF_RESULTS_DIR',  # migration-detection only per D-05, removal target v1.2
+    'MLPERF_DATA_DIR',     # migration-detection only per D-05 (read at cli/training_args.py:309)
+    'MLPERF_ORGNAME',      # migration-detection only per D-05, removal target v1.2
+})
+
+MANPAGE_ENV_VAR_TIERS = {
+    # -- Owned (8) --
+    'MLPSTORAGE_RESULTS_DIR': 'owned',
+    'MLPSTORAGE_SYSTEMNAME': 'owned',
+    'MLPSTORAGE_ORGNAME': 'owned',
+    'MLPSTORAGE_DATA_DIR': 'owned',
+    'MLPSTORAGE_CHECKPOINT_FOLDER': 'owned',
+    'MLPSTORAGE_CHECKPOINT_URI_SCHEME': 'owned',      # dual-role: primary Owned; internal-write sub-tag in ManPage prose per D-12/D-13.
+    'KVCACHE_SELECTED_WORKLOADS': 'owned',            # functional shell-wrapper contract per D-09.
+    'MLPS_CHECKPOINT_MP_START_METHOD': 'owned',       # MP start method override for streaming checkpointing (#682).
+
+    # -- MPI-borrowed (4) --
+    'MPI_RUN_BIN': 'mpi-borrowed',
+    'MPI_EXEC_BIN': 'mpi-borrowed',
+    'OMPI_COMM_WORLD_RANK': 'mpi-borrowed',           # SC-4 tag requirement.
+    'PMI_RANK': 'mpi-borrowed',                       # SC-4 tag requirement.
+
+    # -- AWS-borrowed (5) --
+    'AWS_ACCESS_KEY_ID': 'aws-borrowed',
+    'AWS_SECRET_ACCESS_KEY': 'aws-borrowed',
+    'AWS_REGION': 'aws-borrowed',
+    'AWS_CA_BUNDLE': 'aws-borrowed',
+    'AWS_ENDPOINT_URL': 'aws-borrowed',               # dual-role: primary AWS-borrowed; internal-write cross-ref in ManPage prose per D-13 (write at s3dlio_writer.py:168).
+
+    # -- Storage-borrowed (8) --
+    'BUCKET': 'storage-borrowed',
+    'STORAGE_LIBRARY': 'storage-borrowed',
+    'STORAGE_URI_SCHEME': 'storage-borrowed',
+    'S3_LOAD_BALANCE_STRATEGY': 'storage-borrowed',
+    'S3_ENDPOINT_URIS': 'storage-borrowed',           # s3dlio-owned endpoint fallback chain per D-08.
+    'S3_ENDPOINT_TEMPLATE': 'storage-borrowed',
+    'S3_ENDPOINT_FILE': 'storage-borrowed',
+    'S3_ENDPOINT': 'storage-borrowed',
+
+    # -- Internal-write (1 primary) --
+    'DLIO_DROP_CACHES_TIMEOUT': 'internal-write',     # write-only site at benchmarks/dlio.py:629; also read via `in os.environ` at dlio.py:602.
+
+    # Note: no 'diagnostic' primary entries in the current inventory.
+    # The Diagnostic tier header exists in the ManPage (Plan C) but is
+    # populated by prose only — no var uniquely lives in this tier today.
+
+    # -- AWS-borrowed additions (3) — consumed by boto3/s3dlio, not Python code --
+    'AWS_SESSION_TOKEN': 'aws-borrowed',       # D-09: temporary STS session token.
+    'AWS_DEFAULT_REGION': 'aws-borrowed',      # D-09: fallback region when AWS_REGION is unset.
+    'AWS_S3_ADDRESSING_STYLE': 'aws-borrowed', # D-09: virtual-hosted vs. path-style S3.
+
+    # -- Storage-backend (22) — consumed exclusively by s3dlio Rust binary --
+    'S3DLIO_SKIP_HEAD': 'storage-backend',
+    'S3DLIO_ENABLE_RANGE_OPTIMIZATION': 'storage-backend',
+    'S3DLIO_RANGE_THRESHOLD_MB': 'storage-backend',
+    'S3DLIO_RANGE_CONCURRENCY': 'storage-backend',
+    'S3DLIO_CHUNK_SIZE': 'storage-backend',
+    'S3DLIO_H2C': 'storage-backend',
+    'S3DLIO_H2_ADAPTIVE_WINDOW': 'storage-backend',
+    'S3DLIO_H2_STREAM_WINDOW_MB': 'storage-backend',
+    'S3DLIO_H2_CONN_WINDOW_MB': 'storage-backend',
+    'S3DLIO_POOL_MAX_IDLE_PER_HOST': 'storage-backend',
+    'S3DLIO_POOL_IDLE_TIMEOUT_SECS': 'storage-backend',
+    'S3DLIO_PUT_VERIFY': 'storage-backend',
+    'S3DLIO_MPU_PUT_VERIFY': 'storage-backend',
+    'S3DLIO_MULTIPART_THRESHOLD_MB': 'storage-backend',
+    'S3DLIO_RT_THREADS': 'storage-backend',
+    'S3DLIO_MAX_RETRY_ATTEMPTS': 'storage-backend',
+    'S3DLIO_CONNECT_TIMEOUT_SECS': 'storage-backend',
+    'S3DLIO_OPERATION_TIMEOUT_SECS': 'storage-backend',
+    'S3DLIO_PUT_MAX_RETRIES': 'storage-backend',
+    'S3DLIO_PUT_RETRY_DELAY_MS': 'storage-backend',
+    'S3DLIO_MPU_MAX_RETRIES': 'storage-backend',
+    'S3DLIO_MPU_RETRY_DELAY_S': 'storage-backend',
+}
+
+# Documentation anchor — the s3dlio release this table targets.
+S3DLIO_PINNED_VERSION = 'v0.9.106'
+
+# Phase 7.5 D-03: vars that can swing measured throughput by >=10% or alter protocol.
+_S3DLIO_HIGH_RISK_ENV_VARS = frozenset({
+    'S3DLIO_SKIP_HEAD',
+    'S3DLIO_ENABLE_RANGE_OPTIMIZATION',
+    'S3DLIO_RANGE_THRESHOLD_MB',
+    'S3DLIO_RANGE_CONCURRENCY',
+    'S3DLIO_CHUNK_SIZE',
+    'S3DLIO_H2C',
+    'S3DLIO_H2_ADAPTIVE_WINDOW',
+    'S3DLIO_H2_STREAM_WINDOW_MB',
+    'S3DLIO_H2_CONN_WINDOW_MB',
+    'S3DLIO_POOL_MAX_IDLE_PER_HOST',
+    'S3DLIO_POOL_IDLE_TIMEOUT_SECS',
+    'S3DLIO_PUT_VERIFY',
+    'S3DLIO_MPU_PUT_VERIFY',
+    'S3DLIO_MULTIPART_THRESHOLD_MB',
+    'S3DLIO_RT_THREADS',
+})
+
+# Phase 7.5 D-02: env vars documented in ManPage but NOT read by
+# mlpstorage_py/ Python code (consumed by s3dlio Rust binary or boto3/s3dlio
+# backend init). The sync test subtracts this set from extra_in_docs so these
+# vars can be documented without triggering the symmetric-difference failure.
+MANPAGE_STORAGE_BACKEND_ENV_VARS = frozenset({
+    # 15 HIGH-risk S3DLIO_* vars (per D-03)
+    'S3DLIO_SKIP_HEAD',
+    'S3DLIO_ENABLE_RANGE_OPTIMIZATION',
+    'S3DLIO_RANGE_THRESHOLD_MB',
+    'S3DLIO_RANGE_CONCURRENCY',
+    'S3DLIO_CHUNK_SIZE',
+    'S3DLIO_H2C',
+    'S3DLIO_H2_ADAPTIVE_WINDOW',
+    'S3DLIO_H2_STREAM_WINDOW_MB',
+    'S3DLIO_H2_CONN_WINDOW_MB',
+    'S3DLIO_POOL_MAX_IDLE_PER_HOST',
+    'S3DLIO_POOL_IDLE_TIMEOUT_SECS',
+    'S3DLIO_PUT_VERIFY',
+    'S3DLIO_MPU_PUT_VERIFY',
+    'S3DLIO_MULTIPART_THRESHOLD_MB',
+    'S3DLIO_RT_THREADS',
+    # 7 MEDIUM-risk S3DLIO_* vars (per D-04)
+    'S3DLIO_MAX_RETRY_ATTEMPTS',
+    'S3DLIO_CONNECT_TIMEOUT_SECS',
+    'S3DLIO_OPERATION_TIMEOUT_SECS',
+    'S3DLIO_PUT_MAX_RETRIES',
+    'S3DLIO_PUT_RETRY_DELAY_MS',
+    'S3DLIO_MPU_MAX_RETRIES',
+    'S3DLIO_MPU_RETRY_DELAY_S',
+    # 3 missing AWS vars (per D-09) — consumed by boto3/s3dlio, no Python os.environ.get()
+    'AWS_SESSION_TOKEN',
+    'AWS_DEFAULT_REGION',
+    'AWS_S3_ADDRESSING_STYLE',
+})
 
 
-DEFAULT_RESULTS_DIR = _resolve_default_results_dir()
+# -----------------------------------------------------------------------------
+# ENV_FALLBACK_* module-level constants — resolved-at-import-time env-var
+# reads for the four universal path/name arguments. Every resolver returns
+# the empty string when its env var is unset (SC-3): never None, never a
+# tempdir path. The universal-args layer (add_universal_arguments) decides
+# required-vs-optional per subcommand; an empty fallback plus the parse-time
+# loud-error gate (Plan 05-02) makes "no --flag and no env var" fail at
+# parse time rather than silently producing malformed output paths (T-1-02).
+#
+# Resolvers are extracted from the module-level assignments so tests can
+# exercise the env-driven branch without reloading this module — reload
+# re-creates the PARAM_VALIDATION enum class, which then fails `in`-checks
+# against any pre-imported copy held by other modules (notably the rules
+# verifier). See LAY-04 for the same shape mirrored across all four.
+# -----------------------------------------------------------------------------
+def _resolve_env_fallback_results_dir() -> str:
+    """Return MLPSTORAGE_RESULTS_DIR or empty string (never a tempdir path)."""
+    return os.environ.get(MLPSTORAGE_RESULTS_DIR_ENVVAR, "")
 
-# DEFAULT_SYSTEMNAME mirrors DEFAULT_RESULTS_DIR (LAY-04): honor the
-# MLPERF_SYSTEMNAME env var if set, fall back to an empty string. The
-# universal-args layer (add_universal_arguments) decides required-vs-optional
-# per subcommand; an empty default plus required=True on emitting commands
-# makes "no --systemname and no env var" fail at parse time rather than
-# silently producing `<results-dir>/<mode>/<orgname>/results//...` (T-1-02).
-def _resolve_default_systemname() -> str:
-    """Resolve DEFAULT_SYSTEMNAME from MLPERF_SYSTEMNAME.
 
-    Extracted so tests can exercise the env-driven branch without
-    reloading this module — reload re-creates the PARAM_VALIDATION enum
-    class, which then fails `in`-checks against any pre-imported copy
-    held by other modules (notably the rules verifier).
-    """
-    return os.environ.get("MLPERF_SYSTEMNAME", "")
+def _resolve_env_fallback_systemname() -> str:
+    """Return MLPSTORAGE_SYSTEMNAME or empty string."""
+    return os.environ.get(MLPSTORAGE_SYSTEMNAME_ENVVAR, "")
 
 
-DEFAULT_SYSTEMNAME = _resolve_default_systemname()
+def _resolve_env_fallback_data_dir() -> str:
+    """Return MLPSTORAGE_DATA_DIR or empty string."""
+    return os.environ.get(MLPSTORAGE_DATA_DIR_ENVVAR, "")
+
+
+def _resolve_env_fallback_checkpoint_folder() -> str:
+    """Return MLPSTORAGE_CHECKPOINT_FOLDER or empty string."""
+    return os.environ.get(MLPSTORAGE_CHECKPOINT_FOLDER_ENVVAR, "")
+
+
+ENV_FALLBACK_RESULTS_DIR = _resolve_env_fallback_results_dir()
+ENV_FALLBACK_SYSTEMNAME = _resolve_env_fallback_systemname()
+ENV_FALLBACK_DATA_DIR = _resolve_env_fallback_data_dir()
+ENV_FALLBACK_CHECKPOINT_FOLDER = _resolve_env_fallback_checkpoint_folder()
 
 import enum
 

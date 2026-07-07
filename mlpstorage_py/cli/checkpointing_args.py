@@ -7,7 +7,10 @@ including datasize, run, and configview commands.
 
 import sys
 
-from mlpstorage_py.config import DEFAULT_HOSTS, EXEC_TYPE, LLM_MODELS, LLM_MODELS_CLOSED, EXIT_CODE
+from mlpstorage_py.config import (
+    DEFAULT_HOSTS, EXEC_TYPE, LLM_MODELS, LLM_MODELS_CLOSED, EXIT_CODE,
+    ENV_FALLBACK_CHECKPOINT_FOLDER,
+)
 from mlpstorage_py.cli.common_args import (
     HELP_MESSAGES,
     add_universal_arguments,
@@ -137,14 +140,27 @@ def _add_checkpointing_core_args(parser, command):
             ),
         )
 
-    # Checkpoint folder required for run only
+    # Checkpoint folder required for run only. The argparse-level required=True
+    # was replaced by post-parse enforcement (Phase 5 D-08 / D-09 / ENV-06) so
+    # the ENV_FALLBACK_CHECKPOINT_FOLDER default (sourced from
+    # MLPSTORAGE_CHECKPOINT_FOLDER env var) can satisfy the requirement. The
+    # loud-error gate lives in cli_parser._check_universal_required_present
+    # keyed off the _mlps_req_checkpoint_folder marker we set below. The
+    # --checkpoint-folder argument stays defined ONLY here (never in
+    # common_args.py) so no other benchmark inherits it.
     if command == "run":
         parser.add_argument(
             '--checkpoint-folder', '-cf',
             type=str,
-            required=True,
+            default=ENV_FALLBACK_CHECKPOINT_FOLDER,
             help=HELP_MESSAGES['checkpoint_folder']
         )
+        # Plumb the post-parse-gate marker locally, next to the arg definition,
+        # so the flag and its enforcement gate stay co-located (D-09). The
+        # symmetric req_checkpoint_folder kwarg on add_universal_arguments
+        # exists for defensive future callers; the checkpointing flow uses
+        # this local set_defaults.
+        parser.set_defaults(_mlps_req_checkpoint_folder=True)
 
     # num-checkpoints-read/write are available in all modes so closed submitters
     # can split write and read into two invocations (set =0 on one side) with a

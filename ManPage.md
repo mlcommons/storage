@@ -29,7 +29,7 @@ Where:
 - `<command>` is `datasize`, `datagen`, `run`, or `configview` (subset depending on benchmark)
 - `<storage>` is `file` or `object` — required by `datagen`, `run`, and `configview` for the benchmarks that touch storage
 - `<orgname>` is the submitter / organization name pinned to the results-dir by `mlpstorage init`; `[A-Za-z0-9._-]+`, case-sensitive
-- `<name>` (for `--systemname`) is the per-run system-under-test identifier; required on every emitting subcommand (`run`, `datagen`, `configview`, `reportgen`, `history`), and may be supplied via the `MLPERF_SYSTEMNAME` environment variable
+- `<name>` (for `--systemname`) is the per-run system-under-test identifier; required on every emitting subcommand (`run`, `datagen`, `configview`, `reportgen`, `history`), and may be supplied via the `MLPSTORAGE_SYSTEMNAME` environment variable
 
 Before any emitting subcommand can run, the `<results-dir>` must be initialized with `mlpstorage init`. The single bootstrap command `mlpstorage init <orgname> <path>` writes a `mlperf-results.yaml` sentinel that pins orgname to the directory; every later non-init command reads it as authoritative.
 
@@ -77,8 +77,8 @@ Mechanisms used:
 - **Benchmark and model as positionals.** Only models valid for the chosen mode appear as subparsers. A user cannot type `mlpstorage closed training cosmoflow ...` because `cosmoflow` only exists under `whatif`.
 - **Command as a positional.** `datasize`, `datagen`, `run`, and `configview` are distinct subparsers, so each command sees only the flags relevant to it. `datasize` does not accept storage-access flags; `datagen` and `run` do.
 - **Storage protocol as a positional.** Commands that touch storage require `file` or `object` as a positional after the command name, making the access path explicit at the call site and visible in command history.
-- **Orgname pinned to the results-dir by `mlpstorage init`.** There is no `--orgname` flag on any benchmark subcommand and no `MLPERF_ORGNAME` environment variable consulted by non-init commands. The results-dir is initialized exactly once with `mlpstorage init <orgname> <path>`, which atomically writes a `mlperf-results.yaml` sentinel. Every later command reads the sentinel; emitting subcommands invoked against an un-initialized results-dir refuse with a `ConfigurationError` directing the submitter to run `init` first. Re-initializing the same directory with the same orgname is idempotent; supplying a different orgname raises `DoubleInitError` rather than silently overwriting.
-- **Systemname is per-run.** The `--systemname`/`-sn` flag (defaulting to `$MLPERF_SYSTEMNAME` when set) is required on every emitting subcommand. Because each run names its own system, the same results-dir can host runs from multiple system-under-test configurations without cross-contamination.
+- **Orgname pinned to the results-dir by `mlpstorage init`.** There is no `--orgname` flag on any benchmark subcommand and no `MLPSTORAGE_ORGNAME` environment variable consulted by non-init commands. The results-dir is initialized exactly once with `mlpstorage init <orgname> <path>`, which atomically writes a `mlperf-results.yaml` sentinel. Every later command reads the sentinel; emitting subcommands invoked against an un-initialized results-dir refuse with a `ConfigurationError` directing the submitter to run `init` first. Re-initializing the same directory with the same orgname is idempotent; supplying a different orgname raises `DoubleInitError` rather than silently overwriting.
+- **Systemname is per-run.** The `--systemname`/`-sn` flag (defaulting to `$MLPSTORAGE_SYSTEMNAME` when set) is required on every emitting subcommand. Because each run names its own system, the same results-dir can host runs from multiple system-under-test configurations without cross-contamination.
 - **Mutually exclusive groups.** For example, VectorDB's `--runtime` and `--queries` are wired into an `add_mutually_exclusive_group()`, so only one can be supplied.
 - **Pinned defaults in closed.** Closed kvcache pins `--gpu-mem-gb`, `--cpu-mem-gb`, `--duration`, `--trials`, `--seed`, `--rag-num-docs`, and several boolean knobs to their rules-mandated values, with no flag exposed to change them. Closed training/checkpointing/vectordb pin `--loops=1`, an empty `--params`, and `--allow-invalid-params=False` as internal defaults (the flags themselves are not registered on the closed parsers).
 - **Post-parse validators.** What argparse cannot express (for example, "`--num-checkpoints-write` must be 10 or 0 in closed per Rules §4.7.1") is enforced by `validate_<benchmark>_arguments()` functions called immediately after parsing.
@@ -147,10 +147,10 @@ Run `mlpstorage init <orgname> <path>` first.
 
 ### Systemname resolution
 
-`--systemname <name>` / `-sn <name>` is required on every emitting subcommand (`run`, `datagen`, `configview`, `reportgen`, `history rerun`, etc.). Resolution priority is:
+`--systemname <name>` / `-sn <name>` is required on every emitting subcommand (`run`, `datagen`, `configview`, `history rerun`, etc.). Resolution priority is:
 
 1. The CLI flag if supplied.
-2. The `MLPERF_SYSTEMNAME` environment variable.
+2. The `MLPSTORAGE_SYSTEMNAME` environment variable.
 3. Otherwise empty string (which fails the required-on-emitting-commands check, surfacing as a parser error).
 
 Because systemname is per-run, the same results-dir can host runs from many different systems-under-test. The canonical results path includes both `<orgname>` (from sentinel) and `<systemname>` (from CLI/env) so cross-system results never collide.
@@ -261,7 +261,7 @@ VectorDB does not use `--data-dir`; vectors are loaded directly into the databas
 
 ## RESULTS DIRECTORY (`--results-dir`)
 
-The results directory accumulates every artifact produced by `mlpstorage` as each new invocation of `mlpstorage` executes. The default is `$MLPERF_RESULTS_DIR` if set, otherwise it must be supplied explicitly. Its layout follows the canonical Rules.md §2.1 shape from the moment `mlpstorage init` creates the sentinel:
+The results directory accumulates every artifact produced by `mlpstorage` as each new invocation of `mlpstorage` executes. The default is `$MLPSTORAGE_RESULTS_DIR` if set, otherwise it must be supplied explicitly. Its layout follows the canonical Rules.md §2.1 shape from the moment `mlpstorage init` creates the sentinel:
 
 ```
 <results-dir>/
@@ -271,7 +271,7 @@ The results directory accumulates every artifact produced by `mlpstorage` as eac
 │       ├── systems/
 │       │   └── <systemname>.yaml         auto-generated on first `run`; see SYSTEM DESCRIPTION
 │       └── results/
-│           └── <systemname>/             from --systemname / MLPERF_SYSTEMNAME
+│           └── <systemname>/             from --systemname / MLPSTORAGE_SYSTEMNAME
 │               └── <benchmark-specific tail>
 ```
 
@@ -373,6 +373,12 @@ Every benchmark run writes:
 - **`results.json`** — aggregated summary across all timestamped run directories, used by `reportgen`.
 - **Command history** is appended to `<results-dir>/.history/` (consumed by `mlpstorage history`).
 
+### Aggregate Interpretation
+
+Aggregate columns are informational and NOT a leaderboard-input contract. External ranking pipelines MUST compute their own aggregates from per-invocation summary.json files.
+
+This framing applies uniformly to `train_mean_of_*`, `checkpoint_mean_of_*`, `vdb_*` pass-through, and `kvcache_aggregated_*` / `kvcache_option_*` columns emitted by `reportgen`. See the Rules.md §2.1.28 mechanical-shape specification for the aggregation math.
+
 ## VALIDATOR
 
 `mlpstorage` ships a layered validation system whose ultimate authority is `Rules.md` in the repository root.
@@ -467,10 +473,10 @@ The `init` subcommand takes no flags — universal flags such as `--results-dir`
 ### Universal options (every non-init command)
 
 - **`--results-dir <path>`, `-rd <path>`**
-  Root directory for all written artifacts. Required for any command that writes results. Defaults to `$MLPERF_RESULTS_DIR` if set. Must already be initialized with `mlpstorage init`; commands that consult the orgname-resolution gate refuse to run otherwise.
+  Root directory for all written artifacts. Required for any command that writes results. Defaults to `$MLPSTORAGE_RESULTS_DIR` if set. Must already be initialized with `mlpstorage init`; commands that consult the orgname-resolution gate refuse to run otherwise.
 
 - **`--systemname <name>`, `-sn <name>`**
-  System-under-test identifier for the current run. Required on every emitting subcommand (`run`, `datagen`, `configview`, `reportgen`, `history rerun`). Defaults to `$MLPERF_SYSTEMNAME`. Each mode (closed/open/whatif) owns its own `<systemname>.yaml` under the per-mode `systems/` directory, so the same name across modes is fine.
+  System-under-test identifier for the current run. Required on every emitting subcommand (`run`, `datagen`, `configview`, `history rerun`). Defaults to `$MLPSTORAGE_SYSTEMNAME`. Each mode (closed/open/whatif) owns its own `<systemname>.yaml` under the per-mode `systems/` directory, so the same name across modes is fine. See the Reports subsection for reportgen's optional-systemname multi-system-fallback behavior.
 
 - **`--config-file <path>`, `-c <path>`**
   YAML file of argument overrides merged in *after* CLI parsing. Useful for keeping repeatable closed-submission knob settings in one place.
@@ -843,8 +849,8 @@ mlpstorage reports reportgen --results-dir <path> --systemname <name>
 - **`--results-dir <path>`, `-rd <path>`** (required)
   Results tree to summarize. Accepts either a flat benchmark-type root (legacy) or a canonical sentinel-bearing submission root; when the sentinel is detected, `reportgen` scopes to `<results-dir>/<mode>/<orgname>/results/<systemname>/` and walks only that slice, so a single results-dir hosting runs from multiple systems does not have its runs mashed into one report.
 
-- **`--systemname <name>`, `-sn <name>`** (required)
-  System-under-test identifier. Under the canonical tree this pins reportgen to a single `results/<systemname>/` slice; under a flat tree it tags the emitted report. Defaults to `$MLPERF_SYSTEMNAME` as everywhere else.
+- **`--systemname <name>`, `-sn <name>`** (optional)
+  System-under-test identifier. Under the canonical tree this pins reportgen to a single `results/<systemname>/` slice; under a flat tree it tags the emitted report. Defaults to `$MLPSTORAGE_SYSTEMNAME` as everywhere else. When omitted, reportgen operates on the entire results-dir tree and derives systemname per row from the workload dir's path segment (open/<org>/results/<systemname>/... or checkpointing/training/vdb/kvcache analog).
 
 `--output-dir` was removed in PR #617. The rollup outputs must land inside the submission tree so submitters cannot accidentally exclude the summary from what MLCommons reviews.
 
@@ -925,12 +931,99 @@ Reports which Rules.md IDs are referenced by `@rule(rule_id=...)`-decorated chec
 
 ## ENVIRONMENT
 
-- **`MLPERF_RESULTS_DIR`** — default value for `--results-dir` when the flag is not supplied. The path must still have been initialized with `mlpstorage init`.
-- **`MLPERF_SYSTEMNAME`** — default value for `--systemname` / `-sn` when the flag is not supplied. Emitting subcommands require systemname to be set via flag or env; an empty value is rejected at parse time.
-- **`MLPERF_DATA_DIR`** — fallback value for `--data-dir` for some commands.
-- **`MPI_RUN_BIN`** — overrides the path used when invoking `mpirun`.
+This section enumerates every environment variable mlpstorage reads or borrows, grouped by ownership tier. Seven tiers: Owned (mlpstorage authors the name), MPI-borrowed / AWS-borrowed / Storage-borrowed (third-party contracts mlpstorage consumes), Storage-backend (s3dlio Rust layer, not Python code), Diagnostic (mlpstorage internal reads surfaced for troubleshooting), and Internal-write (mlpstorage may overwrite user-set values during execution). An automated sync test (`tests/unit/test_env_var_manpage_sync.py`) asserts this section stays symmetric with the actual `os.environ` reads in the codebase.
 
-There is intentionally **no `MLPERF_ORGNAME` environment variable** and no `--orgname` flag on benchmark subcommands. Orgname is sourced exclusively from the `mlperf-results.yaml` sentinel written by `mlpstorage init`.
+### Owned
+
+| Env var | Read by | Default when unset | Notes |
+|---|---|---|---|
+| `MLPSTORAGE_RESULTS_DIR` | all emitting subcommands | none — CLI fails at parse time with loud error (see Phase 5 D-02 template) | Required on every emitting subcommand; path must already be initialized with `mlpstorage init`. |
+| `MLPSTORAGE_SYSTEMNAME` | all emitting subcommands | none — CLI fails at parse time with loud error (see Phase 5 D-02 template) | Required on every emitting subcommand; per-run system-under-test identifier. |
+| `MLPSTORAGE_DATA_DIR` | all emitting subcommands | [not set] | Optional fallback for `--data-dir`; if unset the flag must be supplied explicitly. |
+| `MLPSTORAGE_CHECKPOINT_FOLDER` | all emitting subcommands | [not set] | Optional fallback for `--checkpoint-folder`; if unset the flag must be supplied explicitly. |
+| `MLPSTORAGE_ORGNAME` | `mlpstorage init` at init time | [not set] | Read only by `init` subcommand; all other commands source orgname from the `mlperf-results.yaml` sentinel. |
+| `MLPSTORAGE_CHECKPOINT_URI_SCHEME` | `mlpstorage_py/checkpointing/storage_writers/__init__.py:44` (via `CHECKPOINT_URI_SCHEME_ENV` constant) | [not set] | Selects checkpoint storage backend (`s3`, `file`, etc.). `[internal-write]` — also written by `mlpstorage_py/benchmarks/dlio.py` during checkpointing setup. |
+| `KVCACHE_SELECTED_WORKLOADS` | `kv-cache-wrapper.sh` (shell dispatch layer); displayed by `run_summary.py:546` | [not set] | `[shell-wrapper-read]` — filters which kvcache workloads run; unset = run all. Functionally owned by mlpstorage; only the shell wrapper reads it. |
+| `MLPS_CHECKPOINT_MP_START_METHOD` | `mlpstorage_py/checkpointing/streaming_checkpoint.py` (`MP_START_METHOD_ENV` constant) | [not set] — backend-aware default used (`fork` for POSIX file, `forkserver` for object-storage) | Overrides the multiprocessing start method for the streaming checkpoint writer subprocess. Valid values: `auto`, `fork`, `forkserver`, `spawn`. `fork` is refused on object-storage paths (deadlocks Tokio runtime, #642); constructor `mp_start_method` arg wins if both are set. |
+
+### MPI-borrowed
+
+| Env var | Read by | Default when unset | Notes |
+|---|---|---|---|
+| `MPI_RUN_BIN` | `mlpstorage_py/utils.py` (MPI launcher resolution) | [not set] | Overrides the `mpirun` binary path; if unset mlpstorage searches `PATH` for `mpirun`. |
+| `MPI_EXEC_BIN` | `mlpstorage_py/utils.py` (MPI launcher resolution) | [not set] | Alternative override for `mpiexec`; consulted when `MPI_RUN_BIN` is also unset. |
+| `OMPI_COMM_WORLD_RANK` | `mlpstorage_py/cluster_collector.py` (rank detection) | [not set] | OpenMPI-injected rank index; read to identify rank-0 for sidecar writes. |
+| `PMI_RANK` | `mlpstorage_py/cluster_collector.py` (rank detection) | [not set] | PMI-injected rank index; fallback when `OMPI_COMM_WORLD_RANK` is absent (e.g. MPICH-derived launchers). |
+
+### AWS-borrowed
+
+| Env var | Read by | Default when unset | Notes |
+|---|---|---|---|
+| `AWS_ACCESS_KEY_ID` | boto3/s3dlio via storage backend init | [not set] | Read by boto3/s3dlio via storage backend init; consumed as-is. |
+| `AWS_SECRET_ACCESS_KEY` | boto3/s3dlio via storage backend init | [not set] | Read by boto3/s3dlio via storage backend init; consumed as-is. |
+| `AWS_REGION` | `mlpstorage_py/storage_config.py` | `'us-east-1'` | AWS region for S3 endpoint selection; defaults to `us-east-1` when unset. |
+| `AWS_CA_BUNDLE` | `mlpstorage_py/storage_config.py` | [not set] | Path to a custom CA bundle for TLS verification; unset uses the system default. |
+| `AWS_ENDPOINT_URL` | `mlpstorage_py/storage_config.py`; `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py:168` | [not set] | Custom S3-compatible endpoint URL. `[cross-ref → internal-write]` — also written at `s3dlio_writer.py:168` during multi-endpoint selection; see Internal-write cross-refs below. |
+| `AWS_SESSION_TOKEN` | boto3/s3dlio via storage backend init | [not set] | Temporary STS session token; consumed by boto3/s3dlio via storage backend init. |
+| `AWS_DEFAULT_REGION` | boto3/s3dlio via storage backend init | [not set] | Fallback region when `AWS_REGION` is unset; consumed by boto3/s3dlio. |
+| `AWS_S3_ADDRESSING_STYLE` | boto3/s3dlio via storage backend init | [not set] | Controls virtual-hosted vs. path-style S3 addressing; consumed by boto3/s3dlio. |
+
+### Storage-borrowed
+
+| Env var | Read by | Default when unset | Notes |
+|---|---|---|---|
+| `BUCKET` | `mlpstorage_py/storage_config.py` | [not set] | S3 bucket name for object-storage runs; required when `--storage object` is selected. |
+| `STORAGE_LIBRARY` | `mlpstorage_py/storage_config.py` | `'s3dlio'` | Storage client library selection; defaults to `s3dlio`. |
+| `STORAGE_URI_SCHEME` | `mlpstorage_py/storage_config.py` | `'s3'` | URI scheme for storage paths; defaults to `s3`. |
+| `S3_LOAD_BALANCE_STRATEGY` | `mlpstorage_py/storage_config.py` | `'round_robin'` | Load-balance strategy across S3 endpoints; defaults to `round_robin`. |
+| `S3_ENDPOINT_URIS` | `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py:44` | [not set] | Space-separated list of S3 endpoint URIs; part of the s3dlio endpoint fallback chain per D-08. |
+| `S3_ENDPOINT_TEMPLATE` | `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py` | [not set] | URI template for S3 endpoint construction; s3dlio endpoint fallback chain per D-08. |
+| `S3_ENDPOINT_FILE` | `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py` | [not set] | Path to a file containing S3 endpoint URIs; s3dlio endpoint fallback chain per D-08. |
+| `S3_ENDPOINT` | `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py` | [not set] | Single S3 endpoint URI; lowest-priority entry in the s3dlio endpoint fallback chain per D-08. |
+
+### Storage-backend
+
+The following table is anchored on s3dlio v0.9.106. The defaults for `S3DLIO_PUT_VERIFY` and `S3DLIO_MPU_PUT_VERIFY` changed in this release (from `true` to `false`); behavior may differ on earlier versions. For cloud-specific credential and endpoint env vars consumed by s3dlio for Azure or GCS backends, see s3dlio's [Environment_Variables.md](https://github.com/mlcommons/s3dlio/blob/main/docs/Environment_Variables.md).
+
+| Env var | Read by | Default when unset | Notes |
+|---|---|---|---|
+| `S3DLIO_SKIP_HEAD` | s3dlio Rust binary (not mlpstorage_py) | `false` | Skips HEAD requests for object existence checks. [high-risk: alters measured benchmark behavior] Enabling this removes per-read existence verification; can significantly increase throughput by reducing API call overhead. |
+| `S3DLIO_ENABLE_RANGE_OPTIMIZATION` | s3dlio Rust binary (not mlpstorage_py) | `false` | Enables multi-range read coalescing. [high-risk: alters measured benchmark behavior] Can substantially change read throughput for workloads with many small reads. |
+| `S3DLIO_RANGE_THRESHOLD_MB` | s3dlio Rust binary (not mlpstorage_py) | `8` | Minimum size threshold (MB) for range-read coalescing. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_RANGE_CONCURRENCY` | s3dlio Rust binary (not mlpstorage_py) | `4` | Number of concurrent range-read sub-requests. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_CHUNK_SIZE` | s3dlio Rust binary (not mlpstorage_py) | `8388608` | Read/write chunk size in bytes. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_H2C` | s3dlio Rust binary (not mlpstorage_py) | `false` | Enables HTTP/2 cleartext (H2C) transport. [high-risk: alters measured benchmark behavior] Switching transport protocol changes connection multiplexing and can alter throughput substantially. |
+| `S3DLIO_H2_ADAPTIVE_WINDOW` | s3dlio Rust binary (not mlpstorage_py) | `false` | Enables HTTP/2 adaptive flow-control window. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_H2_STREAM_WINDOW_MB` | s3dlio Rust binary (not mlpstorage_py) | `1` | HTTP/2 per-stream flow-control window size (MB). [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_H2_CONN_WINDOW_MB` | s3dlio Rust binary (not mlpstorage_py) | `1` | HTTP/2 per-connection flow-control window size (MB). [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_POOL_MAX_IDLE_PER_HOST` | s3dlio Rust binary (not mlpstorage_py) | `10` | Maximum idle connections per host in the connection pool. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_POOL_IDLE_TIMEOUT_SECS` | s3dlio Rust binary (not mlpstorage_py) | `90` | Time (seconds) before idle connections are evicted. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_PUT_VERIFY` | s3dlio Rust binary (not mlpstorage_py) | `false` | Enables checksum verification on PUT operations. Changed from `true` to `false` in v0.9.106. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_MPU_PUT_VERIFY` | s3dlio Rust binary (not mlpstorage_py) | `false` | Enables checksum verification on multipart PUT operations. Changed from `true` to `false` in v0.9.106. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_MULTIPART_THRESHOLD_MB` | s3dlio Rust binary (not mlpstorage_py) | `64` | Object size threshold (MB) above which multipart upload is used. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_RT_THREADS` | s3dlio Rust binary (not mlpstorage_py) | `1` | Number of Tokio runtime threads. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_MAX_RETRY_ATTEMPTS` | s3dlio Rust binary (not mlpstorage_py) | `3` | Maximum number of retry attempts on transient errors. [medium-risk: affects run stability, not throughput measurement] |
+| `S3DLIO_CONNECT_TIMEOUT_SECS` | s3dlio Rust binary (not mlpstorage_py) | `30` | TCP connection timeout in seconds. [medium-risk: affects run stability, not throughput measurement] |
+| `S3DLIO_OPERATION_TIMEOUT_SECS` | s3dlio Rust binary (not mlpstorage_py) | `300` | Per-operation timeout in seconds. [medium-risk: affects run stability, not throughput measurement] |
+| `S3DLIO_PUT_MAX_RETRIES` | s3dlio Rust binary (not mlpstorage_py) | `3` | Maximum retries for PUT operations. [medium-risk: affects run stability, not throughput measurement] |
+| `S3DLIO_PUT_RETRY_DELAY_MS` | s3dlio Rust binary (not mlpstorage_py) | `100` | Delay (ms) between PUT retries. [medium-risk: affects run stability, not throughput measurement] |
+| `S3DLIO_MPU_MAX_RETRIES` | s3dlio Rust binary (not mlpstorage_py) | `3` | Maximum retries for multipart upload operations. [medium-risk: affects run stability, not throughput measurement] |
+| `S3DLIO_MPU_RETRY_DELAY_S` | s3dlio Rust binary (not mlpstorage_py) | `1` | Delay (seconds) between multipart upload retries. [medium-risk: affects run stability, not throughput measurement] |
+
+### Diagnostic
+
+No environment variables are diagnostic-only under the current inventory (2026-07-04). This tier header is preserved so future diagnostic env vars have a home; the sync test in `tests/unit/test_env_var_manpage_sync.py` allows this tier to be empty.
+
+### Internal-write
+
+| Env var | Read by | Default when unset | Notes |
+|---|---|---|---|
+| `DLIO_DROP_CACHES_TIMEOUT` | `mlpstorage_py/benchmarks/dlio.py:629` (write), `:602` (read via `in os.environ`) | [not set] | mlpstorage writes this var before invoking DLIO to communicate the drop-caches timeout; also read to detect whether it has already been set. |
+
+- **Cross-ref:** `AWS_ENDPOINT_URL` is documented as AWS-borrowed (primary tier); mlpstorage overwrites it at `s3dlio_writer.py:168` during multi-endpoint selection. Not a duplicate `MANPAGE_ENV_VAR_TIERS` entry per D-13.
+- **Cross-ref:** `MLPSTORAGE_CHECKPOINT_URI_SCHEME` is documented as Owned (primary tier); mlpstorage writes it at `mlpstorage_py/benchmarks/dlio.py` during checkpointing setup. Not a duplicate `MANPAGE_ENV_VAR_TIERS` entry per D-12/D-13.
+
+There is intentionally no `MLPSTORAGE_ORGNAME` fallback consulted by non-init commands — orgname is sourced exclusively from the `mlperf-results.yaml` sentinel written by `mlpstorage init`. The row in the Owned table above documents where `mlpstorage init` reads the flag, not a runtime fallback path.
 
 ## EXIT STATUS
 
@@ -963,7 +1056,7 @@ mlpstorage init Acme /mnt/results
 Size, generate, and run UNet3D in closed mode against a POSIX storage target:
 
 ```
-export MLPERF_SYSTEMNAME=acme-prod-v1
+export MLPSTORAGE_SYSTEMNAME=acme-prod-v1
 
 mlpstorage closed training unet3d datasize \
     --accelerator-type b200 --max-accelerators 8 \

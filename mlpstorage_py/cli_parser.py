@@ -6,12 +6,21 @@ using modular argument builders from the cli package.
 """
 
 import argparse
+import os
 import re
 import shlex
 import sys
 
 from mlpstorage_py import VERSION
-from mlpstorage_py.config import LLM_MODELS, VECTORDB_DEFAULT_RUNTIME, EXIT_CODE
+from mlpstorage_py.config import (
+    LLM_MODELS,
+    VECTORDB_DEFAULT_RUNTIME,
+    EXIT_CODE,
+    MLPSTORAGE_RESULTS_DIR_ENVVAR,
+    MLPSTORAGE_SYSTEMNAME_ENVVAR,
+    MLPSTORAGE_CHECKPOINT_FOLDER_ENVVAR,
+    _LEGACY_ENVVAR_MAP,
+)
 
 # Import modular argument builders from cli package
 from mlpstorage_py.cli import (
@@ -35,6 +44,36 @@ from mlpstorage_py.cli import (
 # Backwards compatibility aliases
 help_messages = HELP_MESSAGES
 prog_descriptions = PROGRAM_DESCRIPTIONS
+
+
+# -----------------------------------------------------------------------------
+# _UNIVERSAL_REQUIRED_SPECS — declarative table for the parse-time
+# required-universal gate (Plan 05-02 D-09). Each row describes one universal
+# CLI flag that a subcommand may opt into as "required-with-env-fallback":
+#
+#   (marker_attr_name, arg_attr_name, envvar_name_constant,
+#    long_flag, short_flag, name_for_template)
+#
+# - marker_attr_name: the ``args._mlps_req_*`` attribute set by
+#   ``add_universal_arguments(..., req_<x>=True)`` on the opt-in subcommand.
+# - arg_attr_name: the resolved argparse dest whose value we check for
+#   truthiness (env-var-sourced defaults populate this if the CLI flag was
+#   omitted).
+# - envvar_name_constant: the ``MLPSTORAGE_*`` env-var-name string constant
+#   (single source of truth in ``mlpstorage_py.config``); also the lookup
+#   key into ``_LEGACY_ENVVAR_MAP`` for the D-05 migration hint.
+# - long_flag / short_flag / name_for_template: substituted verbatim into
+#   the D-02 error template and D-05 hint template.
+#
+# Declaration order pins emission order (results, systemname,
+# checkpoint-folder). Training's ``--data-dir`` is intentionally absent —
+# per D-07 it gates in ``training_args.py`` after YAML merge.
+# -----------------------------------------------------------------------------
+_UNIVERSAL_REQUIRED_SPECS = (
+    ("_mlps_req_results",           "results_dir",       MLPSTORAGE_RESULTS_DIR_ENVVAR,       "--results-dir",       "-rd", "RESULTS_DIR"),
+    ("_mlps_req_systemname",        "systemname",        MLPSTORAGE_SYSTEMNAME_ENVVAR,        "--systemname",        "-sn", "SYSTEMNAME"),
+    ("_mlps_req_checkpoint_folder", "checkpoint_folder", MLPSTORAGE_CHECKPOINT_FOLDER_ENVVAR, "--checkpoint-folder", "-cf", "CHECKPOINT_FOLDER"),
+)
 
 
 def _apply_formatter(parser):
@@ -285,38 +324,77 @@ def validate_args(args):
 
 
 def _check_universal_required_present(args):
-    """Enforce post-parse non-empty checks for --results-dir / --systemname.
+    """Enforce post-parse non-empty checks for the required universal flags.
 
-    Subcommands opt in to "required" via ``add_universal_arguments(..., req_results=True)``
-    and / or ``req_systemname=True``. That call seeds
-    ``args._mlps_req_results`` / ``args._mlps_req_systemname`` via
-    ``parser.set_defaults``. Here we just look at the resolved attribute
-    values; if the corresponding flag was required but the value is empty
-    (or None), exit with the same argparse-style error that argparse would
-    have emitted if ``required=True`` had been used directly.
+    Covers three universals per Plan 05-02 / D-09:
+      * ``--results-dir / -rd`` (marker: ``_mlps_req_results``)
+      * ``--systemname / -sn`` (marker: ``_mlps_req_systemname``)
+      * ``--checkpoint-folder / -cf`` (marker: ``_mlps_req_checkpoint_folder``)
 
-    The env-var-sourced defaults (``MLPERF_RESULTS_DIR`` /
-    ``MLPERF_SYSTEMNAME``) populate ``args.results_dir`` /
-    ``args.systemname`` for free if argparse used the default; this check
-    is precisely what makes the env-var fallback live again on emitting
-    subcommands.
+    Training's ``--data-dir`` does NOT flow through this gate — it is
+    checked in ``training_args.py`` AFTER YAML config merge (D-07), because
+    a ``--config-file`` may legitimately supply ``data_dir``.
+
+    Subcommands opt in to "required" via
+    ``add_universal_arguments(..., req_results=True, ...)`` and equivalents,
+    which set ``args._mlps_req_*`` markers via ``parser.set_defaults``. The
+    resolved argparse dest (``results_dir`` / ``systemname`` /
+    ``checkpoint_folder``) may be populated by an ``MLPSTORAGE_*`` env-var
+    fallback; we treat empty-string and ``None`` as missing.
+
+    Emission model (D-01 / D-02 / D-04 / D-05):
+      * One ``error:`` line PER missing flag, using the D-02 verbatim
+        template.
+      * Immediately BELOW each error line, if the corresponding legacy
+        ``MLPERF_*`` env var is set AND the new ``MLPSTORAGE_*`` is not,
+        an adjacent ``hint:`` line using the D-05 verbatim template.
+      * All missing universals are checked and reported BEFORE
+        ``sys.exit()`` (D-01 aggregate-before-exit; T-05-06). No first-
+        error short-circuit.
+      * Exit code is ``EXIT_CODE.INVALID_ARGUMENTS`` (=2, D-03).
+
+    ``MLPSTORAGE_CHECKPOINT_FOLDER`` has no legacy ``MLPERF_*``
+    predecessor (D-08) and is intentionally absent from
+    ``_LEGACY_ENVVAR_MAP``, so the hint is never emitted for
+    checkpoint-folder — this falls out of the map lookup without a
+    special case.
     """
-    errors = []
-    if getattr(args, '_mlps_req_results', False):
-        if not getattr(args, 'results_dir', None):
-            errors.append(
-                "--results-dir/-rd is required (or set MLPERF_RESULTS_DIR)"
-            )
-    if getattr(args, '_mlps_req_systemname', False):
-        if not getattr(args, 'systemname', None):
-            errors.append(
-                "--systemname/-sn is required (or set MLPERF_SYSTEMNAME)"
-            )
-    if errors:
-        # Match argparse's stderr-then-exit-2 convention so existing tests
-        # that catch SystemExit continue to pass.
-        msg = "the following arguments are required: " + ", ".join(errors)
-        print(f"error: {msg}", file=sys.stderr)
+    pending = []
+    for (
+        marker_attr,
+        arg_attr,
+        envvar_name,
+        long_flag,
+        short_flag,
+        name_for_template,
+    ) in _UNIVERSAL_REQUIRED_SPECS:
+        if not getattr(args, marker_attr, False):
+            continue
+        if getattr(args, arg_attr, None):
+            continue
+        # D-02 verbatim template — kept on one physical line so the
+        # phase-wide grep for the exact template string finds it.
+        error_line = f"{long_flag}/{short_flag} is required: pass it on the command line or set MLPSTORAGE_{name_for_template}"
+        # D-04 / D-05: adjacent migration hint when legacy env is set and
+        # the new env is not. checkpoint_folder has no legacy pair, so its
+        # envvar_name is not a key in _LEGACY_ENVVAR_MAP and the hint stays
+        # None without any special-case code.
+        hint_line = None
+        legacy_name = _LEGACY_ENVVAR_MAP.get(envvar_name)
+        if legacy_name is not None:
+            legacy_val = os.environ.get(legacy_name, "")
+            new_val = os.environ.get(envvar_name, "")
+            if legacy_val and not new_val:
+                # D-05 verbatim template — single physical line for the
+                # phase-wide grep to pin the exact wording.
+                hint_line = f"hint: MLPERF_{name_for_template} is set but is no longer read; rename it to MLPSTORAGE_{name_for_template}"
+        pending.append((error_line, hint_line))
+
+    if pending:
+        for error_line, hint_line in pending:
+            print(f"error: {error_line}", file=sys.stderr)
+            if hint_line is not None:
+                print(hint_line, file=sys.stderr)
         sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
 
 

@@ -255,9 +255,8 @@ pytest tests/unit/test_benchmarks_kvcache.py -v
 | `test_cli_kvcache.py` | CLI argument parsing — KV cache model and cache configuration |
 | `test_cli_vectordb.py` | CLI argument parsing — VectorDB run/datagen subcommands |
 | `test_cluster_collector.py` | Cluster metric collection |
-| `test_config.py` | Config module, env var handling, `DEFAULT_RESULTS_DIR` env-var override |
+| `test_config.py` | Config module, env var handling, `ENV_FALLBACK_RESULTS_DIR` / `ENV_FALLBACK_SYSTEMNAME` env-var override |
 | `test_dlio_object_storage.py` | `DLIOBenchmark._apply_object_storage_params()` — `.env` loading, param injection, error cases |
-| `test_main_warnings.py` | `run_benchmark()` tempdir warning — fires/suppresses correctly |
 | `test_dependency_check.py` | Dependency checking logic |
 | `test_environment.py` | Environment detection and validation |
 | `test_history.py` | `HistoryTracker` — run history file management |
