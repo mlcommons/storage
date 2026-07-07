@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlpstorage"
-version = "3.0.34"
+version = "3.0.35"
 description = "MLPerf Storage Benchmark Suite"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -132,6 +132,9 @@ torchaudio = [{ index = "pytorch-cpu" }]
 # Pinned to a specific commit for reproducibility; bump by updating `rev` and
 # re-running `uv lock --upgrade-package dlio-benchmark`.
 # Commit history (most recent first):
+#   - DLIO PR #44 fix for storage #690: checkpoint read double-prepends bucket
+#     for object storage — s3:// scheme stripped by #583 fix then re-added by
+#     get_uri(), yielding s3://bucket/bucket/prefix → 0 checkpoints found
 #   - DLIO PR #43 fix for storage #671: env-var fallback for OpenMPI
 #     COMM_TYPE_SHARED collapse — prevents num_hosts = MPI-rank-count on
 #     Ubuntu 24.04 / kernel 6.8+ / OpenMPI 4.1.6
@@ -157,7 +160,7 @@ torchaudio = [{ index = "pytorch-cpu" }]
 #   - DLIO PR #23 fix for storage #391 part 2 (sudo -n + warn-once for drop_caches)
 #   - DLIO PR #22 fix for storage #415 (mpi4py auto-init in spawn workers)
 #   - DLIO PR #21 fix for storage #391 part 1 (TorchIterableDatasetSimple gating)
-dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "59f94801f9816c5fac436b4b288195a817fce871" }
+dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "91edd681dc6d3fdadfcc31dcbf9dd6b6e0d9015f" }
 
 [dependency-groups]
 dev = [
