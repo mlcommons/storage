@@ -15,8 +15,9 @@ Coordination model:
     rank 0 creates collection/index
     bcast setup status
     Barrier
-    all ranks insert disjoint vector ID ranges
+    all ranks insert disjoint vector ID ranges (no per-rank flush; see #705)
     gather load metrics
+    rank 0 flushes the collection exactly once, then monitors index build
     rank 0 aggregates and emits summary JSON
 
   simple:
@@ -341,8 +342,7 @@ def _load_phase(args: argparse.Namespace) -> int:
 
     start_time = time.time()
     insert_start = start_time
-    flush_start = start_time
-    flush_end = start_time
+    insert_end = start_time
     inserted_total = 0
     error = None
 
@@ -391,9 +391,15 @@ def _load_phase(args: argparse.Namespace) -> int:
                     flush=True,
                 )
 
-            flush_start = time.time()
-            flush_collection(collection)
-            flush_end = time.time()
+            # NOTE(issue #705): do NOT flush here. Milvus's flush() is
+            # collection-scoped and rate limited to one call per 10 s per
+            # collection by default (quotaAndLimits.flushRate.collection.max:
+            # 0.1). With N ranks flushing the same collection concurrently,
+            # ranks at the back of the queue exhaust pymilvus's ~210 s retry
+            # budget and fail with RateLimit (code 8). A single flush on
+            # rank 0 after comm.gather(...) seals every rank's growing
+            # segments, so per-rank flushes are redundant as well as unsafe.
+            insert_end = time.time()
 
     except Exception as exc:
         error = "".join(traceback.format_exception(type(exc), exc, exc.__traceback__))
@@ -420,8 +426,11 @@ def _load_phase(args: argparse.Namespace) -> int:
         "vector_id_end_exclusive": vector_id_start + rank_vector_count,
         "assigned_vectors": rank_vector_count,
         "inserted_vectors": inserted_total,
-        "insert_seconds": flush_start - insert_start,
-        "flush_seconds": flush_end - flush_start,
+        "insert_seconds": insert_end - insert_start,
+        # Kept for rank_stats schema stability. The collection is flushed
+        # exactly once, by rank 0 after the gather; see summary-level
+        # "collection_flush_seconds" (issue #705).
+        "flush_seconds": 0.0,
         "total_seconds": end_time - start_time,
         "return_code": 0 if error is None else 1,
         "error": error,
@@ -435,10 +444,23 @@ def _load_phase(args: argparse.Namespace) -> int:
 
     failed = [p for p in rank_payloads if int(p.get("return_code", 1)) != 0]
 
+    collection_flush_seconds: float | None = None
+
     if not failed:
         try:
             if connect_to_milvus(args.host, str(args.port)):
                 collection = Collection(args.collection_name)
+
+                # Single collection-wide flush (issue #705). comm.gather(...)
+                # above guarantees every rank has finished inserting, and one
+                # flush seals all growing segments regardless of which client
+                # connection inserted them. Scale the deadline with world
+                # size defensively in case other clients contend for the
+                # per-collection flush limiter token.
+                collection_flush_seconds = flush_collection(
+                    collection,
+                    max_wait_s=max(900.0, 60.0 + 15.0 * world_size),
+                )
 
                 monitor_progress(
                     args.collection_name,
@@ -475,6 +497,8 @@ def _load_phase(args: argparse.Namespace) -> int:
         rank_payloads,
         expected_ranks=expected_ranks,
     )
+
+    summary["collection_flush_seconds"] = collection_flush_seconds
 
     if failed:
         summary["mpi"]["partial_failure"] = True
