@@ -2,24 +2,23 @@
 """
 Tests for mlpstorage_py.submission_checker.tools.code_image.capture_or_verify_code_image.
 
-Covers Phase 2 D-07..D-10, D-20, D-21 and the consensus INLINE `.`/`..`
-path-traversal guard (T-02-02-05 mitigation made inline).
+Scope AFTER Plan 06-02 Task 5: only the gating (D-10), env-var validation
+(D-04, D-05), and the consensus INLINE `.`/`..` path-traversal guard
+(T-02-02-05) remain here. The capture/verify behavioral tests were retired
+alongside CAPVER-03 + UX-01 and moved to
+`mlpstorage_py/tests/test_capture_or_verify_pool.py` under
+`class TestCaptureOrVerifyPool`.
 
 Run with:
     pytest mlpstorage_py/tests/test_capture_or_verify_code_image.py -v
 """
 
-import json
-import re
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from mlpstorage_py.errors import ConfigurationError, ErrorCode
 from mlpstorage_py.submission_checker.tools.code_image import (
-    CodeImageError,
-    MissingHashFile,
     capture_or_verify_code_image,
     _SUBMITTER_NAME_RE,
     _RESERVED_PATH_SEGMENTS,
@@ -220,160 +219,21 @@ class TestPathTraversalGuard:
 
 
 # ---------------------------------------------------------------------------
-# Capture path (CAP-01, CAP-02, CAP-06)
+# Capture / verify behavioral tests moved to Plan 06-02:
+#
+# The pre-Phase-6 legacy `code/` tree-shape assertions (`TestCapturePath`) and
+# the hash-mismatch-raise assertions (`TestVerifyPath`) were retired here
+# per Plan 06-02 Task 5 alongside CAPVER-03 + UX-01. The replacement coverage
+# lives in `mlpstorage_py/tests/test_capture_or_verify_pool.py` under
+# `class TestCaptureOrVerifyPool`:
+#   - fresh-tree capture: test_fresh_tree_creates_pool_and_pointer
+#   - match / reuse:      test_second_call_with_matching_hash_returns_existing_pool_dir_no_new_capture
+#   - source change:      test_source_change_creates_second_pool_dir_alongside_first
+#   - CAPVER-03 no-raise: test_source_change_does_NOT_raise_CodeImageError
+#   - POOL-04 dedup:      test_closed_then_open_same_source_reuses_pool
+#   - POOL-03 org isolation: test_two_orgs_maintain_separate_pool_dirs
+#   - PTR-01 pointer:     test_pointer_written_after_run_leaf_created
+# The retired D-21 "delete `code/` and re-run to re-capture" recovery message
+# also no longer applies — Phase 6 refuses legacy `code/` layouts via
+# `LegacyLayoutDetected` (D-63); Phase 7 owns the migration.
 # ---------------------------------------------------------------------------
-
-class TestCapturePath:
-    def test_closed_first_run_captures(self, tmp_path, log):
-        args = _make_args(mode="closed", command="datagen", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "acme"}
-        result = capture_or_verify_code_image(args, env, log)
-        # CAP-02: CLOSED tree shape
-        expected_code = tmp_path / "closed" / "acme" / "code"
-        assert result == expected_code
-        assert expected_code.is_dir()
-        assert (expected_code / ".code-hash.json").is_file()
-        # CAP-06: log message starts "Captured code image at "
-        assert any(s.startswith(f"Captured code image at {expected_code}") for s in log.statuses), log.statuses
-
-    def test_open_first_run_captures_per_leaf(self, tmp_path, log):
-        args = _make_args(
-            mode="open", command="run", results_dir=tmp_path,
-            benchmark="training", model="unet3d",
-        )
-        env = {"MLPSTORAGE_ORGNAME": "acme", "MLPSTORAGE_SYSTEMNAME": "rig01"}
-        result = capture_or_verify_code_image(args, env, log)
-        expected_code = (
-            tmp_path / "open" / "acme" / "results" / "rig01" / "training" / "unet3d" / "code"
-        )
-        assert result == expected_code
-        assert expected_code.is_dir()
-
-    def test_open_vectordb_uses_canonical_type_name(self, tmp_path, log):
-        """The CLI subparser is named 'vectordb', but the on-disk type segment
-        is 'vector_database' (BENCHMARK_TYPES.name). The helper must emit that
-        canonical on-disk segment so the captured code/ lives in the same
-        submission tree the runtime writes results into.
-
-        vector_database splits results by <index_type> because AISAQ results
-        are not comparable to DISKANN/HNSW. The captured code/ lives at
-        vector_database/<index_type>/code/ — per-leaf, same depth as
-        training/checkpointing. The index directory is the UPPERCASE token,
-        matching args.index_type and summary.json.index_type.
-        """
-        args = SimpleNamespace(
-            mode="open", command="run", results_dir=str(tmp_path),
-            benchmark="vectordb", index_type="DISKANN",
-        )
-        env = {"MLPSTORAGE_ORGNAME": "acme", "MLPSTORAGE_SYSTEMNAME": "rig01"}
-        result = capture_or_verify_code_image(args, env, log)
-        expected_code = (
-            tmp_path / "open" / "acme" / "results" / "rig01"
-            / "vector_database" / "DISKANN" / "code"
-        )
-        assert result == expected_code
-        # And the CLI name 'vectordb' must NOT appear as a path segment.
-        assert "vectordb" not in {p.name for p in result.parents}
-
-    def test_open_kvcache_uses_canonical_type_name(self, tmp_path, log):
-        """Same contract as vectordb: CLI name 'kvcache' must map to canonical
-        on-disk segment 'kv_cache' (BENCHMARK_TYPES.name).
-
-        Like vector_database, kv_cache writes <type>/<command>/<datetime>/ —
-        no <model> in the runtime path — so the captured code/ also lives
-        directly under <type>/.
-        """
-        # kvcache does have --model in CLI, but the helper must ignore it
-        # because the runtime path-shape has no model segment.
-        args = _make_args(
-            mode="open", command="run", results_dir=tmp_path,
-            benchmark="kvcache", model="llama3-8b",
-        )
-        env = {"MLPSTORAGE_ORGNAME": "acme", "MLPSTORAGE_SYSTEMNAME": "rig01"}
-        result = capture_or_verify_code_image(args, env, log)
-        expected_code = (
-            tmp_path / "open" / "acme" / "results" / "rig01"
-            / "kv_cache" / "code"
-        )
-        assert result == expected_code
-        assert "kvcache" not in {p.name for p in result.parents}
-        # model segment must not appear in the captured path.
-        assert "llama3-8b" not in {p.name for p in result.parents}
-
-
-# ---------------------------------------------------------------------------
-# Verify path (VALR-01/03 success; VALR-02/04 mismatch; D-21 missing-json)
-# ---------------------------------------------------------------------------
-
-class TestVerifyPath:
-    def test_matching_code_image_verifies_silently(self, tmp_path, log, monkeypatch):
-        # Use an isolated source tree to keep the live-source hash deterministic
-        # (the real repo's untracked / non-copytree-able files would otherwise
-        # diverge between capture-via-shutil and live-source hashing).
-        src = tmp_path / "iso_src"
-        src.mkdir()
-        (src / "a.py").write_bytes(b"A\n")
-        (src / "pyproject.toml").write_bytes(b"# stub\n")
-
-        import mlpstorage_py.submission_checker.tools.code_image as mod
-        monkeypatch.setattr(mod, "find_source_root", lambda: src)
-
-        # First call captures.
-        args = _make_args(mode="closed", command="datasize", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "acme"}
-        code_dir = capture_or_verify_code_image(args, env, log)
-        log.statuses.clear()
-        # Second call should verify and pass.
-        result = capture_or_verify_code_image(args, env, log)
-        assert result == code_dir
-        assert any(
-            f"code unchanged from on-file image at {code_dir}" in s for s in log.statuses
-        ), log.statuses
-
-    def test_closed_mismatch_raises_codeimage_error_with_literal(self, tmp_path, log, monkeypatch):
-        args = _make_args(mode="closed", command="run", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "acme"}
-        capture_or_verify_code_image(args, env, log)
-
-        # Force a hash mismatch by monkeypatching verify_source_against_image to return False.
-        import mlpstorage_py.submission_checker.tools.code_image as mod
-        monkeypatch.setattr(mod, "verify_source_against_image", lambda *a, **k: False)
-
-        log.errors.clear()
-        with pytest.raises(CodeImageError) as exc_info:
-            capture_or_verify_code_image(args, env, log)
-        assert "changes to the codebase are not allowed in a CLOSED run" in str(exc_info.value)
-        assert any(
-            "changes to the codebase are not allowed in a CLOSED run" in e for e in log.errors
-        ), log.errors
-
-    def test_open_mismatch_raises_codeimage_error_with_literal(self, tmp_path, log, monkeypatch):
-        args = _make_args(
-            mode="open", command="run", results_dir=tmp_path,
-            benchmark="training", model="unet3d",
-        )
-        env = {"MLPSTORAGE_ORGNAME": "acme", "MLPSTORAGE_SYSTEMNAME": "rig01"}
-        capture_or_verify_code_image(args, env, log)
-
-        import mlpstorage_py.submission_checker.tools.code_image as mod
-        monkeypatch.setattr(mod, "verify_source_against_image", lambda *a, **k: False)
-
-        log.errors.clear()
-        with pytest.raises(CodeImageError) as exc_info:
-            capture_or_verify_code_image(args, env, log)
-        assert "all runs of this type must use the same codebase" in str(exc_info.value)
-
-    def test_missing_hash_file_logs_recovery_and_reraises(self, tmp_path, log):
-        # Pre-create a code/ directory without .code-hash.json
-        code_dir = tmp_path / "closed" / "acme" / "code"
-        code_dir.mkdir(parents=True)
-        (code_dir / "dummy.py").write_text("# placeholder")
-
-        args = _make_args(mode="closed", command="run", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "acme"}
-        with pytest.raises(MissingHashFile):
-            capture_or_verify_code_image(args, env, log)
-        # D-21 actionable recovery substring
-        assert any(
-            "either delete `code/` and re-run to re-capture" in e for e in log.errors
-        ), log.errors

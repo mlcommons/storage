@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""Phase 2 Plan 02-05 — CAP/VALR contract tests for the CLI dispatch helper.
+"""CAP/VALR gating + env-var validation tests for the CLI dispatch helper.
 
-Covers requirements:
-    CAP-01, CAP-02, CAP-06, CAP-07, CAP-08
-    VALR-01, VALR-02, VALR-03, VALR-04
-    D-04, D-05, D-21
+Scope AFTER Plan 06-02 Task 5:
+    CAP-07, CAP-08 gating (whatif/reports/validate/etc. + non-submission
+        commands under closed|open)
+    D-04, D-05 MLPSTORAGE_ORGNAME / MLPSTORAGE_SYSTEMNAME validation
     Path-traversal '.' / '..' rejection (REVIEWS.md consensus finding,
         Gemini + plan-checker — _RESERVED_PATH_SEGMENTS guard).
+
+The capture/verify behavioral tests (CAP-01/02/06 legacy paths and the
+VALR-01..04 reject-string assertions) were retired here alongside
+CAPVER-03 + UX-01. Replacement coverage lives in
+`mlpstorage_py/tests/test_capture_or_verify_pool.py`.
 
 Tests exercise ``capture_or_verify_code_image(args, env, log)`` via direct
 in-process invocation with ``tmp_path`` + MockLogger fixtures (CD-02 —
@@ -16,18 +21,12 @@ Run with:
     pytest mlpstorage_py/tests/test_cli_code_image.py -v
 """
 
-import json
-from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
 from mlpstorage_py.submission_checker.tools.code_image import (
     capture_or_verify_code_image,
-    capture_code_image,
-    CodeImageError,
-    MissingHashFile,
-    MalformedHashFile,
 )
 from mlpstorage_py.errors import ConfigurationError
 
@@ -99,215 +98,21 @@ def make_args(*, mode, command, results_dir, benchmark="training", model="unet3d
 
 
 # ---------------------------------------------------------------------------
-# TestClosedFirstCapture (CAP-01, CAP-06, TEST-02)
+# Capture / verify behavioral tests moved to Plan 06-02:
+#
+# The pre-Phase-6 legacy `code/` tree-shape assertions
+# (TestClosedFirstCapture / TestOpenFirstCapture), the "code unchanged" reuse
+# assertions (TestRuntimeMatchPasses), and the hash-mismatch reject-string
+# assertions (TestRuntimeMismatchCLOSED / TestRuntimeMismatchOPEN) were retired
+# here per Plan 06-02 Task 5 alongside CAPVER-03 + UX-01. Replacement coverage
+# lives in `mlpstorage_py/tests/test_capture_or_verify_pool.py::TestCaptureOrVerifyPool`:
+#   - fresh capture:      test_fresh_tree_creates_pool_and_pointer
+#   - closed reuse:       test_second_call_with_matching_hash_returns_existing_pool_dir_no_new_capture
+#   - open reuse:         test_open_then_closed_same_source_reuses_pool
+#   - source change:      test_source_change_creates_second_pool_dir_alongside_first
+#   - CAPVER-03 no-raise: test_source_change_does_NOT_raise_CodeImageError
+#   - UX-01 negative:     test_source_change_stderr_does_NOT_contain_retired_reject_string
 # ---------------------------------------------------------------------------
-
-class TestClosedFirstCapture:
-    """CAP-01: first call on closed|datagen captures the image at
-    {results_dir}/closed/<orgname>/code/.
-    """
-
-    def test_closed_first_capture_creates_code_dir(
-        self, tmp_path, fake_source_root, mock_logger
-    ):
-        args = make_args(mode="closed", command="datagen", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "acme"}
-        result = capture_or_verify_code_image(args, env, mock_logger)
-        expected = tmp_path / "closed" / "acme" / "code"
-        assert result == expected
-        assert expected.is_dir()
-        assert (expected / ".code-hash.json").is_file()
-
-    def test_closed_first_capture_logs_absolute_path(
-        self, tmp_path, fake_source_root, mock_logger
-    ):
-        # CAP-06: log starts with "Captured code image at " followed by the
-        # absolute code/ path.
-        args = make_args(mode="closed", command="datagen", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "acme"}
-        capture_or_verify_code_image(args, env, mock_logger)
-        expected = tmp_path / "closed" / "acme" / "code"
-        assert any(
-            s.startswith("Captured code image at ") and str(expected) in s
-            for s in mock_logger.statuses
-        ), mock_logger.statuses
-
-
-# ---------------------------------------------------------------------------
-# TestOpenFirstCapture (CAP-02, CAP-06, TEST-03)
-# ---------------------------------------------------------------------------
-
-class TestOpenFirstCapture:
-    """CAP-02: first call on open|datagen captures the image at
-    {results_dir}/open/<orgname>/results/<systemname>/<benchmark>/<model>/code/.
-    """
-
-    def test_open_first_capture_creates_per_leaf_code_dir(
-        self, tmp_path, fake_source_root, mock_logger
-    ):
-        args = make_args(
-            mode="open", command="datagen", results_dir=tmp_path,
-            benchmark="training", model="unet3d",
-        )
-        env = {"MLPSTORAGE_ORGNAME": "acme", "MLPSTORAGE_SYSTEMNAME": "sys-1"}
-        result = capture_or_verify_code_image(args, env, mock_logger)
-        expected = (
-            tmp_path / "open" / "acme" / "results" / "sys-1"
-            / "training" / "unet3d" / "code"
-        )
-        assert result == expected
-        assert expected.is_dir()
-        assert (expected / ".code-hash.json").is_file()
-
-    def test_open_first_capture_logs_absolute_path(
-        self, tmp_path, fake_source_root, mock_logger
-    ):
-        args = make_args(
-            mode="open", command="datagen", results_dir=tmp_path,
-            benchmark="training", model="unet3d",
-        )
-        env = {"MLPSTORAGE_ORGNAME": "acme", "MLPSTORAGE_SYSTEMNAME": "sys-1"}
-        capture_or_verify_code_image(args, env, mock_logger)
-        expected = (
-            tmp_path / "open" / "acme" / "results" / "sys-1"
-            / "training" / "unet3d" / "code"
-        )
-        assert any(
-            s.startswith("Captured code image at ") and str(expected) in s
-            for s in mock_logger.statuses
-        ), mock_logger.statuses
-
-
-# ---------------------------------------------------------------------------
-# TestRuntimeMatchPasses (VALR-01, VALR-03, TEST-04)
-# ---------------------------------------------------------------------------
-
-class TestRuntimeMatchPasses:
-    """VALR-01/03: second call against an unchanged tree logs the
-    'code unchanged from on-file image at <path>' status and returns the path.
-    """
-
-    def test_closed_second_run_matches(
-        self, tmp_path, fake_source_root, mock_logger
-    ):
-        args = make_args(mode="closed", command="datagen", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "acme"}
-        # First call captures
-        first = capture_or_verify_code_image(args, env, mock_logger)
-        mock_logger.statuses.clear()
-        # Second call must verify silently
-        second = capture_or_verify_code_image(args, env, mock_logger)
-        assert second == first
-        expected = tmp_path / "closed" / "acme" / "code"
-        assert any(
-            f"code unchanged from on-file image at {expected}" in s
-            for s in mock_logger.statuses
-        ), mock_logger.statuses
-
-    def test_open_second_run_matches(
-        self, tmp_path, fake_source_root, mock_logger
-    ):
-        args = make_args(
-            mode="open", command="datagen", results_dir=tmp_path,
-            benchmark="training", model="unet3d",
-        )
-        env = {"MLPSTORAGE_ORGNAME": "acme", "MLPSTORAGE_SYSTEMNAME": "sys-1"}
-        first = capture_or_verify_code_image(args, env, mock_logger)
-        mock_logger.statuses.clear()
-        second = capture_or_verify_code_image(args, env, mock_logger)
-        assert second == first
-        expected = (
-            tmp_path / "open" / "acme" / "results" / "sys-1"
-            / "training" / "unet3d" / "code"
-        )
-        assert any(
-            f"code unchanged from on-file image at {expected}" in s
-            for s in mock_logger.statuses
-        ), mock_logger.statuses
-
-
-# ---------------------------------------------------------------------------
-# TestRuntimeMismatchCLOSED (VALR-02, TEST-05)
-# ---------------------------------------------------------------------------
-
-class TestRuntimeMismatchCLOSED:
-    """VALR-02: on hash mismatch in a CLOSED run, raise CodeImageError
-    containing the literal spec string
-    'changes to the codebase are not allowed in a CLOSED run'.
-    """
-
-    def test_closed_mismatch_raises_with_literal_message(
-        self, tmp_path, fake_source_root, mock_logger, monkeypatch
-    ):
-        args = make_args(mode="closed", command="datagen", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "acme"}
-        # First call captures successfully.
-        capture_or_verify_code_image(args, env, mock_logger)
-
-        # Force a hash mismatch on the second call by monkeypatching
-        # verify_source_against_image to return False. This isolates the
-        # mismatch code path from the Phase 1 capture-vs-verify hash
-        # discrepancy documented in deferred-items.md.
-        import mlpstorage_py.submission_checker.tools.code_image as mod
-        monkeypatch.setattr(mod, "verify_source_against_image", lambda *a, **k: False)
-
-        mock_logger.errors.clear()
-        with pytest.raises(CodeImageError) as exc_info:
-            capture_or_verify_code_image(args, env, mock_logger)
-        # Literal spec string (VALR-02 substring match) — required by
-        # deep_work_rules. Assert against BOTH the raised exception and the
-        # logger so a future regression that drops one path still fails.
-        assert "changes to the codebase are not allowed in a CLOSED run" in str(exc_info.value)
-        assert any(
-            "changes to the codebase are not allowed in a CLOSED run" in e
-            for e in mock_logger.errors
-        ), mock_logger.errors
-        code_dir = tmp_path / "closed" / "acme" / "code"
-        assert any(
-            f"the running code does not match the captured code image at: {code_dir}" in e
-            for e in mock_logger.errors
-        ), mock_logger.errors
-
-
-# ---------------------------------------------------------------------------
-# TestRuntimeMismatchOPEN (VALR-04, TEST-06)
-# ---------------------------------------------------------------------------
-
-class TestRuntimeMismatchOPEN:
-    """VALR-04: on hash mismatch in an OPEN run, raise CodeImageError
-    containing the literal spec string
-    'all runs of this type must use the same codebase'.
-    """
-
-    def test_open_mismatch_raises_with_literal_message(
-        self, tmp_path, fake_source_root, mock_logger, monkeypatch
-    ):
-        args = make_args(
-            mode="open", command="datagen", results_dir=tmp_path,
-            benchmark="training", model="unet3d",
-        )
-        env = {"MLPSTORAGE_ORGNAME": "acme", "MLPSTORAGE_SYSTEMNAME": "sys-1"}
-        capture_or_verify_code_image(args, env, mock_logger)
-
-        import mlpstorage_py.submission_checker.tools.code_image as mod
-        monkeypatch.setattr(mod, "verify_source_against_image", lambda *a, **k: False)
-
-        mock_logger.errors.clear()
-        with pytest.raises(CodeImageError) as exc_info:
-            capture_or_verify_code_image(args, env, mock_logger)
-        assert "all runs of this type must use the same codebase" in str(exc_info.value)
-        assert any(
-            "all runs of this type must use the same codebase" in e
-            for e in mock_logger.errors
-        ), mock_logger.errors
-        code_dir = (
-            tmp_path / "open" / "acme" / "results" / "sys-1"
-            / "training" / "unet3d" / "code"
-        )
-        assert any(
-            f"the running code does not match the captured code image at: {code_dir}" in e
-            for e in mock_logger.errors
-        ), mock_logger.errors
 
 
 # ---------------------------------------------------------------------------
@@ -493,44 +298,17 @@ class TestEnvVarPathTraversal:
 
 
 # ---------------------------------------------------------------------------
-# TestBadImageRecovery (D-21)
+# TestBadImageRecovery (D-21) — retired in Plan 06-02 Task 5.
+#
+# The D-21 "delete `code/` and re-run to re-capture" recovery message applied
+# to the legacy single-`code/` layout. Phase 6 replaces that with a
+# content-addressed pool at `<results_dir>/<orgname>/code-<hash8>/` (D-64);
+# any legacy `code/` present at capture time is refused via
+# `LegacyLayoutDetected` (D-63), with Phase 7 owning the migration. The
+# missing/malformed .code-hash.json recovery workflow is now covered at
+# the pool-scan layer: `_find_matching_pool_image` catches
+# MissingHashFile / MalformedHashFile at DEBUG level and continues (skips
+# non-conformant pool candidates), so a corrupt pool image never trips the
+# runtime capture path — Phase 8's CHECK-02 owns the audit-time
+# self-consistency verification.
 # ---------------------------------------------------------------------------
-
-class TestBadImageRecovery:
-    """D-21: when an existing code/ has a missing or malformed .code-hash.json,
-    the helper logs the actionable recovery substring and re-raises the
-    Phase 1 typed error.
-    """
-
-    def test_missing_hash_file_logs_recovery_message(self, tmp_path, mock_logger):
-        # Pre-create code/ with files but NO .code-hash.json.
-        code_dir = tmp_path / "closed" / "acme" / "code"
-        code_dir.mkdir(parents=True)
-        (code_dir / "dummy.py").write_text("# placeholder\n")
-
-        args = make_args(mode="closed", command="datagen", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "acme"}
-        with pytest.raises(MissingHashFile):
-            capture_or_verify_code_image(args, env, mock_logger)
-        assert any(
-            "either delete `code/` and re-run to re-capture, or restore the original capture."
-            in e
-            for e in mock_logger.errors
-        ), mock_logger.errors
-
-    def test_malformed_hash_file_logs_recovery_message(self, tmp_path, mock_logger):
-        # Pre-create code/ with an invalid .code-hash.json.
-        code_dir = tmp_path / "closed" / "acme" / "code"
-        code_dir.mkdir(parents=True)
-        (code_dir / "dummy.py").write_text("# placeholder\n")
-        (code_dir / ".code-hash.json").write_text("{not valid json")
-
-        args = make_args(mode="closed", command="datagen", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "acme"}
-        with pytest.raises(MalformedHashFile):
-            capture_or_verify_code_image(args, env, mock_logger)
-        assert any(
-            "either delete `code/` and re-run to re-capture, or restore the original capture."
-            in e
-            for e in mock_logger.errors
-        ), mock_logger.errors

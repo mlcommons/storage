@@ -33,6 +33,12 @@ depend on this module (D-S3).
 # §6.6.3 is satisfied by the OPEN run's normal metadata capture, not a
 # distinct check. See mlcommons/storage#658.
 OUT_OF_SCOPE_RULES: dict[str, str] = {
+    "2.1.6": (
+        "STRUCT-06 removed in Phase 8 (feat(08-01) 4aa3ebd); per-pool image "
+        "self-consistency is now CHECK-02 poolImageSelfConsistency in "
+        "PoolStructureCheck for v1.1 pool layout submissions. Direct per-leaf "
+        "code/ enforcement (CHECK-05) is deferred to a follow-up cycle."
+    ),
     "6.4.2": (
         "descriptive — Rules.md §6.4.2 documents the KVCache POSIX I/O "
         "model (.npy files, np.save+fsync, np.load after "

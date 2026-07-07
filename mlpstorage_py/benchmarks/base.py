@@ -173,31 +173,12 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         self.command_output_files = list()
         self.run_result_output = self._reserve_run_directory()
 
-        # LAY-06 (Rules.md §2.1.6): capture the live mlpstorage_py/ source
-        # tree alongside the results so the submission package is auditable.
-        # Per-mode policy:
-        #   closed  → ONE image at <rd>/closed/<orgname>/code/ (idempotent).
-        #   open    → one image per (benchmark, command) tuple.
-        #   whatif  → no image (capture_code_image returns None).
-        # WR-09: ``--dry-run`` short-circuits before any work — so we MUST
-        # also skip the code-image capture (which would otherwise write
-        # ~MBs to disk on every dry-run invocation despite no benchmark
-        # actually running). Mirrors the existing ``mode == 'whatif'``
-        # no-op inside capture_code_image. ``getattr`` is defensive in
-        # case a synthetic args Namespace omits the attribute.
-        # Deferred import keeps top-of-file import-time cost minimal and
-        # avoids cycles with `mlpstorage_py.results_dir`.
-        if getattr(self.args, 'dry_run', False):
-            self.code_image_path: Optional[str] = None
-        else:
-            from mlpstorage_py.results_dir.code_image import capture_code_image
-            self.code_image_path: Optional[str] = capture_code_image(
-                results_dir=self.args.results_dir,
-                mode=self.args.mode,
-                orgname=self.args.orgname,
-                benchmark_type=self.BENCHMARK_TYPE.name,
-                command=getattr(self.args, 'command', 'run'),
-            )
+        # Code-image capture happens in ``mlpstorage_py/main.py`` (call to
+        # ``capture_or_verify_code_image``) BEFORE ``Benchmark`` construction.
+        # The historical LAY-06 in-``__init__`` capture (a per-mode copy under
+        # ``<rd>/{closed,open}/<orgname>/code/``) was retired in Phase 6 Plan
+        # 06-03 (D-60): two coexisting capture paths collapsed to one
+        # content-addressed pool at ``<rd>/<orgname>/code-<hash8>/``.
 
         self.metadata_filename = f"{self.BENCHMARK_TYPE.value}_{self.run_datetime}_metadata.json"
         self.metadata_file_path = os.path.join(self.run_result_output, self.metadata_filename)

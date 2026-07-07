@@ -766,29 +766,12 @@ class VdbCheck(BaseCheck):
         Missing ``code/`` is NOT logged here — STRUCT-06 (§2.1.6) owns the
         VALS-01 missing-code/ violation; re-firing here would double-count.
         """
-        if self.mode != "vector_database":
-            return True
-        if self.division != "closed":
-            return True
-
-        # <root>/closed/<orgname>/results/<system>/vector_database/<DisplayIndex>
-        # walk up four levels: DisplayIndex → vector_database → system → results → <orgname>
-        submitter_path = os.path.dirname(os.path.dirname(os.path.dirname(os.path.dirname(self.path))))
-        code_path = os.path.join(submitter_path, "code")
-
-        if not os.path.isdir(code_path):
-            return True  # STRUCT-06 owns missing-code/
-
-        expected = self.config.get_reference_checksum()
-        return _check_code_image_layered(
-            code_path,
-            "closed",
-            expected,
-            self.log,
-            self.log_violation,
-            "5.6.1",
-            "vdbClosedSubmissionChecksum",
-        )
+        # TODO(Phase8-Plan2): replaced in Plan 08-02 with per-image pool-image
+        # lookup (D-89). The legacy code/ walk and get_reference_checksum() call
+        # are removed; Plan 08-02 implements the full CHECK-05 flow using
+        # _read_pointer → pool image resolution → verify_image_self_consistent
+        # → REFERENCE_CHECKSUMS[mlpstorage_version] per-image lookup.
+        return True  # TODO(Phase8-Plan2): replaced in Plan 08-02
 
     @rule("5.6.2", "vdbClosedDatabaseBackend")
     def vdb_closed_database_backend(self):

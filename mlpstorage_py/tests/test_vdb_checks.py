@@ -179,14 +179,12 @@ def _make_vdb_check(
     datagen_files=None,
     system_file=None,
     mode: str = "vector_database",
-    reference_checksum_override=None,
 ):
     """Instantiate VdbCheck against fake SubmissionLogs / LoaderMetadata."""
     config = Config(
         version="v3.0",
         submitters=None,
         skip_output_file=True,
-        reference_checksum_override=reference_checksum_override,
     )
     loader_metadata = LoaderMetadata(
         division=division,
@@ -724,97 +722,6 @@ class Test_5_5_1_VdbObjectStorageBackend:
         )
         assert check.vdb_object_storage_backend() is True
         assert _violations(mock_logger, "5.5.1", "vdbObjectStorageBackend") == []
-
-
-# ===========================================================================
-# §5.6.1 vdbClosedSubmissionChecksum — load-bearing CD-04 / D-06 wiring tests
-# ===========================================================================
-
-class Test_5_6_1_VdbClosedSubmissionChecksum:
-    """Exercise helpers._check_code_image_layered via VdbCheck's rule ID.
-
-    These tests are the load-bearing wiring proofs that violation messages
-    are tagged with 5.6.1 / vdbClosedSubmissionChecksum (NOT 2.1.6 /
-    codeDirectoryContents) when the helper is invoked through VdbCheck.
-    """
-
-    def test_closed_self_consistent_passes(self, tmp_path, mock_logger):
-        leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DISKANN",
-            with_code_image=True,
-        )
-        check = _make_vdb_check(leaf, "closed", mock_logger)
-        assert check.vdb_closed_submission_checksum() is True
-        assert _violations(mock_logger, "5.6.1", "vdbClosedSubmissionChecksum") == []
-        assert _warnings(mock_logger, "5.6.1", "vdbClosedSubmissionChecksum") == []
-
-    def test_closed_self_consistency_violation_uses_5_6_1_rule_id(
-        self, tmp_path, mock_logger,
-    ):
-        leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DISKANN",
-            with_code_image=True,
-        )
-        # Tamper with .code-hash.json to break self-consistency.
-        hash_file = tmp_path / "closed" / "acme" / "code" / ".code-hash.json"
-        payload = json.loads(hash_file.read_text(encoding="utf-8"))
-        payload["hash"] = "0" * 32
-        hash_file.write_text(json.dumps(payload), encoding="utf-8")
-
-        check = _make_vdb_check(leaf, "closed", mock_logger)
-        assert check.vdb_closed_submission_checksum() is False
-        # Exactly one 5.6.1 violation — and it MUST NOT be a 2.1.6 violation.
-        viol = _violations(mock_logger, "5.6.1", "vdbClosedSubmissionChecksum")
-        assert len(viol) == 1, (
-            "expected exactly one [5.6.1 vdbClosedSubmissionChecksum] violation; "
-            "found %s" % mock_logger.errors
-        )
-        # Rule-id-wiring guard: must NOT misreport as 2.1.6.
-        assert not _violations(mock_logger, "2.1.6", "codeDirectoryContents"), (
-            "5.6.1 violation leaked into 2.1.6 codeDirectoryContents tag"
-        )
-        assert "code tree hash does not match" in viol[0]
-
-    def test_closed_upstream_identity_violation_when_reference_set(
-        self, tmp_path, mock_logger,
-    ):
-        leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DISKANN",
-            with_code_image=True,
-        )
-        # Configure a reference checksum that will NOT match.
-        bogus_ref = "ff" * 16
-        check = _make_vdb_check(
-            leaf, "closed", mock_logger,
-            reference_checksum_override=bogus_ref,
-        )
-        assert check.vdb_closed_submission_checksum() is False
-        viol = _violations(mock_logger, "5.6.1", "vdbClosedSubmissionChecksum")
-        assert len(viol) == 1, mock_logger.errors
-        assert "code tree MD5 mismatch" in viol[0]
-        assert bogus_ref in viol[0]
-        assert not _violations(mock_logger, "2.1.6", "codeDirectoryContents"), (
-            "5.6.1 upstream-identity violation misreported as 2.1.6"
-        )
-
-    def test_open_division_is_noop(self, tmp_path, mock_logger):
-        leaf = _build_vdb_leaf(
-            tmp_path, "open", "acme", "sys-1", "DISKANN",
-            with_code_image=True,
-        )
-        check = _make_vdb_check(leaf, "open", mock_logger)
-        assert check.vdb_closed_submission_checksum() is True
-        assert mock_logger.errors == []
-        assert mock_logger.warnings == []
-
-    def test_missing_code_dir_does_not_double_violate(self, tmp_path, mock_logger):
-        # CLOSED but no code/ — STRUCT-06 owns the missing-code violation.
-        leaf = _build_vdb_leaf(
-            tmp_path, "closed", "acme", "sys-1", "DISKANN",
-        )
-        check = _make_vdb_check(leaf, "closed", mock_logger)
-        assert check.vdb_closed_submission_checksum() is True
-        assert _violations(mock_logger, "5.6.1", "vdbClosedSubmissionChecksum") == []
 
 
 # ===========================================================================

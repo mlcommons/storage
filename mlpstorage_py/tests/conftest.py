@@ -105,13 +105,6 @@ _CHKPT_TIMESTAMPS = [
     "20250112_110001",
 ]
 
-# Stable 3-file code/ tree content (binary-stable, deterministic)
-_CODE_FILES = {
-    "mod.py": b"# mod\ndef hello():\n    return 'hello'\n",
-    "helper.py": b"# helper\ndef util():\n    return 42\n",
-    "README.md": b"# Submission Code\n\nThis is the reference implementation.\n",
-}
-
 # Default summary.json content per run timestamp (feeds STRUCT-09)
 _DEFAULT_SUMMARY = {
     "num_hosts": 2,
@@ -256,10 +249,6 @@ def build_submission(tmp_path, **overrides) -> Path:
         tmp_path/
           closed/
             Acme/
-              code/
-                mod.py
-                helper.py
-                README.md
               systems/
                 acme-storage-v1.yaml   (schema-valid)
                 acme-storage-v1.pdf    (1-byte placeholder)
@@ -288,12 +277,8 @@ def build_submission(tmp_path, **overrides) -> Path:
     * ``open_mismatches_closed`` (bool)     — adds open/ missing one subdir
     * ``wrong_submitter_in_closed`` (bool)  — closed/OtherAcme/ instead
     * ``multiple_submitters_in_closed`` (bool) — two submitter dirs under closed/
-    * ``missing_required_subdir`` (str)     — removes code/results/systems
+    * ``missing_required_subdir`` (str)     — removes results/systems
     * ``extra_submitter_subdir`` (str)      — adds a stray dir under submitter
-    * ``mutate_code`` (bool)                — adds extra file → hash differs
-    * ``set_reference_checksum`` (str)      — unused in tree; caller passes to Config
-    * ``code_with_symlink`` (bool)          — adds a symlink in code/
-    * ``code_with_pycache`` (bool)          — adds code/pkg/__pycache__/mod.pyc
     * ``unpaired_yaml`` (bool)              — systems/ yaml without pdf
     * ``extra_systems_file`` (str)          — adds a stray file in systems/
     * ``unpaired_results_system`` (bool)    — adds results/no-yaml-for-this/
@@ -388,10 +373,6 @@ def build_submission(tmp_path, **overrides) -> Path:
     multiple_submitters_in_closed = overrides.pop("multiple_submitters_in_closed", False)
     missing_required_subdir = overrides.pop("missing_required_subdir", None)
     extra_submitter_subdir = overrides.pop("extra_submitter_subdir", None)
-    mutate_code = overrides.pop("mutate_code", False)
-    set_reference_checksum = overrides.pop("set_reference_checksum", None)  # caller uses this
-    code_with_symlink = overrides.pop("code_with_symlink", False)
-    code_with_pycache = overrides.pop("code_with_pycache", False)
     unpaired_yaml = overrides.pop("unpaired_yaml", False)
     extra_systems_file = overrides.pop("extra_systems_file", None)
     unpaired_results_system = overrides.pop("unpaired_results_system", False)
@@ -482,8 +463,9 @@ def build_submission(tmp_path, **overrides) -> Path:
         if multiple_submitters_in_closed:
             (div_path / "AlsoAcme").mkdir()
 
-        # Required subdirectories
-        required_subdirs = {"code", "results", "systems"}
+        # Required subdirectories — v1.1 pool layout: code/ lives in
+        # <root>/<division>/pool/code-images/<hash>/, not per-submitter.
+        required_subdirs = {"results", "systems"}
         if missing_required_subdir:
             required_subdirs.discard(missing_required_subdir)
 
@@ -493,31 +475,8 @@ def build_submission(tmp_path, **overrides) -> Path:
         if extra_submitter_subdir:
             (sub_path / extra_submitter_subdir).mkdir()
 
-        code_path = sub_path / "code"
         results_path = sub_path / "results"
         systems_path = sub_path / "systems"
-
-        # ---------------------------------------------------------------
-        # code/ tree
-        # ---------------------------------------------------------------
-        if code_path.exists():
-            for fname, content in _CODE_FILES.items():
-                (code_path / fname).write_bytes(content)
-
-            if mutate_code:
-                (code_path / "extra_unexpected.py").write_bytes(b"# extra\n")
-
-            if code_with_symlink:
-                target = code_path / "mod.py"
-                link = code_path / "link_to_mod.py"
-                os.symlink(str(target), str(link))
-
-            if code_with_pycache:
-                pkg_dir = code_path / "pkg"
-                pkg_dir.mkdir()
-                pycache_dir = pkg_dir / "__pycache__"
-                pycache_dir.mkdir()
-                (pycache_dir / "mod.pyc").write_bytes(b"\x00\x00\x00\x00")
 
         # ---------------------------------------------------------------
         # systems/ directory
