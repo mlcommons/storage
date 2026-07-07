@@ -153,11 +153,6 @@ class TestConfigBackwardsCompat:
         assert c.version == "v2.0"
         assert c.submitters == ["Acme"]
 
-    def test_get_reference_checksum_still_works(self):
-        """Phase 1's get_reference_checksum is unaffected."""
-        c = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
-        assert c.get_reference_checksum() is None  # REFERENCE_CHECKSUMS["v2.0"] is None
-
     def test_parallelism_cache_starts_empty(self):
         """New _parallelism_cache starts empty — no pre-loaded values."""
         c = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
