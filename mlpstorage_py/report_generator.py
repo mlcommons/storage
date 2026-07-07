@@ -613,6 +613,12 @@ class ReportGenerator:
                             for index_dir in model_dir.iterdir():
                                 if index_dir.is_dir():
                                     found.add(str(index_dir.resolve()))
+                        elif bt_dir.name == 'training':
+                            # training: per-model rollup lives at <model>/run/
+                            # (Rules.md 2.1.16). Only add run/ if it exists.
+                            run_dir = model_dir / 'run'
+                            if run_dir.is_dir():
+                                found.add(str(run_dir.resolve()))
                         else:
                             found.add(str(model_dir.resolve()))
             except (OSError, PermissionError) as e:

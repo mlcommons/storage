@@ -122,16 +122,18 @@ class TestBottomUpBuild:
         assert rc == 0, f"generate_reports failed with rc={rc}"
 
         # D-02 (a): Per-model results.{csv,json} at each per-org
-        # per-model path. multi_orgname has:
-        #   closed/acme/results/system-a/training/unet3d/
-        #   closed/beta_corp/results/system-b/training/unet3d/
+        # per-model path. For training, Rules.md 2.1.16 mandates the
+        # rollup lives inside the <model>/run/ phase directory.
+        # multi_orgname has:
+        #   closed/acme/results/system-a/training/unet3d/run/
+        #   closed/beta_corp/results/system-b/training/unet3d/run/
         acme_dir = (
             results_root / "closed" / "acme" / "results" / "system-a"
-            / "training" / "unet3d"
+            / "training" / "unet3d" / "run"
         )
         beta_dir = (
             results_root / "closed" / "beta_corp" / "results" / "system-b"
-            / "training" / "unet3d"
+            / "training" / "unet3d" / "run"
         )
         for per_model_dir in (acme_dir, beta_dir):
             assert (per_model_dir / "results.csv").exists(), (
@@ -287,11 +289,11 @@ class TestEmptyModelDir:
     ):
         # empty_model fixture layout:
         #   empty_model/training/unet3d/run/.gitkeep
-        # Copy JUST training/unet3d/ tree so the results_dir has a
-        # canonical training/<model>/ shape with no run subdirs beneath it
-        # (only a .gitkeep placeholder). _enumerate_on_disk_model_dirs
-        # walks the tree, finds training/unet3d/, and _emit_empty_model_dirs
-        # writes results.csv + results.json to it.
+        # Copy the tree so the results_dir has a canonical training/<model>/run/
+        # shape with no run timestamp subdirs. _enumerate_on_disk_model_dirs
+        # walks the tree, finds training/unet3d/run/ (Rules.md 2.1.16 —
+        # training per-model rollup lives at <model>/run/), and
+        # _emit_empty_model_dirs writes results.csv + results.json there.
         src = _FIXTURES_ROOT / "empty_model"
         results_root = tmp_path / "results_root"
         shutil.copytree(src, results_root)
@@ -311,8 +313,9 @@ class TestEmptyModelDir:
         assert rc == 0
 
         # The empty per-model dir MUST have results.csv (header row
-        # only, 1 line) and results.json ([]).
-        per_model_dir = results_root / "training" / "unet3d"
+        # only, 1 line) and results.json ([]). For training, this is at
+        # <model>/run/ per Rules.md 2.1.16.
+        per_model_dir = results_root / "training" / "unet3d" / "run"
         csv_path = per_model_dir / "results.csv"
         json_path = per_model_dir / "results.json"
         assert csv_path.exists(), (
