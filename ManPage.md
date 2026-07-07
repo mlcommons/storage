@@ -944,6 +944,7 @@ This section enumerates every environment variable mlpstorage reads or borrows, 
 | `MLPSTORAGE_ORGNAME` | `mlpstorage init` at init time | [not set] | Read only by `init` subcommand; all other commands source orgname from the `mlperf-results.yaml` sentinel. |
 | `MLPSTORAGE_CHECKPOINT_URI_SCHEME` | `mlpstorage_py/checkpointing/storage_writers/__init__.py:44` (via `CHECKPOINT_URI_SCHEME_ENV` constant) | [not set] | Selects checkpoint storage backend (`s3`, `file`, etc.). `[internal-write]` — also written by `mlpstorage_py/benchmarks/dlio.py` during checkpointing setup. |
 | `KVCACHE_SELECTED_WORKLOADS` | `kv-cache-wrapper.sh` (shell dispatch layer); displayed by `run_summary.py:546` | [not set] | `[shell-wrapper-read]` — filters which kvcache workloads run; unset = run all. Functionally owned by mlpstorage; only the shell wrapper reads it. |
+| `MLPS_CHECKPOINT_MP_START_METHOD` | `mlpstorage_py/checkpointing/streaming_checkpoint.py` (`MP_START_METHOD_ENV` constant) | [not set] — backend-aware default used (`fork` for POSIX file, `forkserver` for object-storage) | Overrides the multiprocessing start method for the streaming checkpoint writer subprocess. Valid values: `auto`, `fork`, `forkserver`, `spawn`. `fork` is refused on object-storage paths (deadlocks Tokio runtime, #642); constructor `mp_start_method` arg wins if both are set. |
 
 ### MPI-borrowed
 

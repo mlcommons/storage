@@ -206,7 +206,7 @@ _MANPAGE_SYNC_ALLOWLIST = frozenset({
 })
 
 MANPAGE_ENV_VAR_TIERS = {
-    # -- Owned (7) --
+    # -- Owned (8) --
     'MLPSTORAGE_RESULTS_DIR': 'owned',
     'MLPSTORAGE_SYSTEMNAME': 'owned',
     'MLPSTORAGE_ORGNAME': 'owned',
@@ -214,6 +214,7 @@ MANPAGE_ENV_VAR_TIERS = {
     'MLPSTORAGE_CHECKPOINT_FOLDER': 'owned',
     'MLPSTORAGE_CHECKPOINT_URI_SCHEME': 'owned',      # dual-role: primary Owned; internal-write sub-tag in ManPage prose per D-12/D-13.
     'KVCACHE_SELECTED_WORKLOADS': 'owned',            # functional shell-wrapper contract per D-09.
+    'MLPS_CHECKPOINT_MP_START_METHOD': 'owned',       # MP start method override for streaming checkpointing (#682).
 
     # -- MPI-borrowed (4) --
     'MPI_RUN_BIN': 'mpi-borrowed',

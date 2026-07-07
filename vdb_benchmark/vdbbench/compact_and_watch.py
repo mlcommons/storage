@@ -17,6 +17,7 @@ logging.basicConfig(
 # Add the parent directory to sys.path to import config_loader
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from vdbbench.config_loader import load_config, merge_config_with_args
+from vdbbench.connection import open_connection
 
 # Configure logging
 logging.basicConfig(
@@ -63,13 +64,7 @@ def parse_args():
 def connect_to_milvus(host, port):
     """Connect to Milvus server"""
     try:
-        connections.connect(
-            "default",
-            host=host,
-            port=port,
-            max_receive_message_length=514_983_574,
-            max_send_message_length=514_983_574
-        )
+        open_connection("default", host=host, port=port)
         logging.info(f"Connected to Milvus server at {host}:{port}")
         return True
     except Exception as e:

@@ -444,6 +444,8 @@ class TestMultiOrgnameCollection:
         # level).
 
         # D-09: per-org per-model files exist at their canonical paths.
+        # For training, Rules.md 2.1.16 mandates the rollup lives inside
+        # the <model>/run/ phase directory, not directly under <model>/.
         acme_per_model_json = (
             dest / "closed" / "acme" / "results" / "system-a"
             / "training" / "unet3d" / "run" / "results.json"
