@@ -920,6 +920,101 @@ class TestInvalidRulesStrict:
         assert "expected 10 checkpoint operations per Rules.md" not in text
         assert "cannot aggregate" not in text
 
+    def test_training_datagen_group_skips_rules_strict_gates(self, tmp_path):
+        """Issue #717: training ``datagen`` group must NOT trip the D-27 count gate.
+
+        Rules.md §2.1.17's 1-warmup-plus-5-real invariant applies to the
+        ``run`` command only. ``datagen`` legitimately produces a single
+        invocation; the D-27 gate at ``_process_workload_groups`` was
+        firing on it because it filtered only by ``benchmark_type``, not
+        by command. Since the workload grouping key includes
+        ``accelerator`` (``None`` for datagen vs e.g. ``h100`` for run),
+        datagen runs land in their own group and hit the gate.
+
+        This test constructs a single training datagen ``BenchmarkRun``
+        under a ``.../training/unet3d/datagen/<ts>/`` path (matching the
+        production layout at ``rules/utils.py:285-300``) and asserts the
+        emitted result is NOT categorized ``INVALID`` with the D-27
+        template.
+        """
+        gen = _make_bare_generator(tmp_path)
+        run_root = tmp_path / "closed" / "acme" / "results" / "sys-a" / "training" / "unet3d" / "datagen"
+        ts = "20260708_114640"
+        run_dir = run_root / ts
+        run_dir.mkdir(parents=True)
+        datagen_run = _make_run(
+            benchmark_type=BENCHMARK_TYPES.training,
+            model="unet3d",
+            result_dir=str(run_dir),
+            metrics={},
+            accelerator=None,
+            run_datetime=ts,
+            command="datagen",
+        )
+
+        _run_process_workload_groups(gen, [datagen_run])
+
+        assert len(gen.workload_results) == 1
+        result = next(iter(gen.workload_results.values()))
+        text = self._row_issue_text(result)
+        # Primary contract: the D-27 template MUST NOT appear.
+        assert "expected 6 training invocations per Rules.md" not in text, (
+            f"Issue #717 regression: D-27 template fired on datagen group; got: {text!r}"
+        )
+        assert _INVALID_MSG_TRAINING_COUNT.format(n=1) not in text
+        # And the result must not be flagged INVALID by the rules-strict
+        # gates (the upstream verifier is stubbed to CLOSED in this test).
+        assert result.category != PARAM_VALIDATION.INVALID, (
+            f"Issue #717 regression: datagen group downgraded to INVALID; "
+            f"category={result.category!r}, issues={text!r}"
+        )
+
+    def test_checkpointing_non_run_group_skips_rules_strict_gates(self, tmp_path):
+        """Guard for #717-shape latent bug in the checkpointing branch.
+
+        The D-20/D-24 gate at ``_process_workload_groups`` iterates
+        ``run.metrics`` looking for list values of length != 10. Like
+        the training D-27 gate, it filters only by ``benchmark_type``,
+        not by command. Checkpointing does not currently accept
+        ``datagen`` / ``validate`` at the CLI, so this cannot fire in
+        production today — but the same-shape defense keeps the gate
+        honest if either command is added later.
+
+        Synthesizes a checkpointing ``BenchmarkRun`` with
+        ``command != 'run'`` and a metric list of length 7 (would trip
+        D-24 template c under the current gate). Asserts the
+        checkpoint-count template does NOT appear.
+        """
+        gen = _make_bare_generator(tmp_path)
+        run_root = tmp_path / "closed" / "acme" / "results" / "sys-a" / "checkpointing" / "llama3-8b"
+        ts = "20260708_120000"
+        run_dir = run_root / ts
+        run_dir.mkdir(parents=True)
+        non_run = _make_run(
+            benchmark_type=BENCHMARK_TYPES.checkpointing,
+            model="llama3-8b",
+            result_dir=str(run_dir),
+            # 7 entries — under the current gate this would be INVALID.
+            metrics={"checkpoint_read_throughput_GB_per_second": [1.0] * 7},
+            accelerator=None,
+            run_datetime=ts,
+            command="datagen",
+        )
+
+        _run_process_workload_groups(gen, [non_run])
+
+        assert len(gen.workload_results) == 1
+        result = next(iter(gen.workload_results.values()))
+        text = self._row_issue_text(result)
+        assert "expected 10 checkpoint operations per Rules.md" not in text, (
+            f"Latent #717-shape bug fired on non-run checkpointing group; got: {text!r}"
+        )
+        assert _INVALID_MSG_CHECKPOINT_COUNT.format(n=7) not in text
+        assert result.category != PARAM_VALIDATION.INVALID, (
+            f"Non-run checkpointing group downgraded to INVALID; "
+            f"category={result.category!r}, issues={text!r}"
+        )
+
     def test_statistics_error_not_swallowed(self, tmp_path):
         """D-23 loud-failure: helper propagates ``StatisticsError`` on empty metric list.
 
