@@ -125,6 +125,46 @@ class TestS3EnvForwardingMissing:
 
 
 # ---------------------------------------------------------------------------
+# BUG #712: MLPS_/MLPSTORAGE_ vars not forwarded to remote ranks
+# ---------------------------------------------------------------------------
+
+class TestMlpsEnvForwardingMissing:
+    """MLPS_/MLPSTORAGE_-prefixed env vars must reach remote MPI ranks.
+
+    Concrete trigger (issue #712): `MLPSTORAGE_CHECKPOINT_URI_SCHEME` is set
+    by `CheckpointingBenchmark.add_checkpoint_params` (see #583) so the
+    writer/reader factories can put the object-store scheme back on the
+    URI. Without `-x` forwarding, remote ranks never see it and the
+    `S3DLIOStorageWriter` fails with "Unsupported URI scheme" on every
+    mp_rank that landed on a non-head host.
+
+    `MLPS_CHECKPOINT_MP_START_METHOD` is the same class of latent bug for
+    the streaming-checkpoint subprocess start method.
+    """
+
+    @patch(_MPI_PREFIX_PATCH, return_value=_FIXED_MPI_PREFIX)
+    def test_mlpstorage_checkpoint_uri_scheme_forwarded(self, _mock, monkeypatch):
+        """#712: MLPSTORAGE_CHECKPOINT_URI_SCHEME must reach remote ranks."""
+        monkeypatch.setenv("MLPSTORAGE_CHECKPOINT_URI_SCHEME", "s3")
+        monkeypatch.delenv("DLIO_DROP_CACHES_TIMEOUT", raising=False)
+        cmd = _make_dlio_for_cmd().generate_dlio_command()
+        assert "-x MLPSTORAGE_CHECKPOINT_URI_SCHEME" in cmd, (
+            "BUG #712: MLPSTORAGE_CHECKPOINT_URI_SCHEME not forwarded; "
+            "remote-rank object-store writes fail with 'Unsupported URI scheme'"
+        )
+
+    @patch(_MPI_PREFIX_PATCH, return_value=_FIXED_MPI_PREFIX)
+    def test_mlps_checkpoint_mp_start_method_forwarded(self, _mock, monkeypatch):
+        """#712 sibling: MLPS_CHECKPOINT_MP_START_METHOD must reach remote ranks."""
+        monkeypatch.setenv("MLPS_CHECKPOINT_MP_START_METHOD", "forkserver")
+        monkeypatch.delenv("DLIO_DROP_CACHES_TIMEOUT", raising=False)
+        cmd = _make_dlio_for_cmd().generate_dlio_command()
+        assert "-x MLPS_CHECKPOINT_MP_START_METHOD" in cmd, (
+            "BUG #712: MLPS_CHECKPOINT_MP_START_METHOD not forwarded"
+        )
+
+
+# ---------------------------------------------------------------------------
 # Invariant: absent vars must NOT produce -x flags (no spurious forwarding)
 # ---------------------------------------------------------------------------
 
@@ -144,6 +184,20 @@ class TestAbsentVarsNotForwarded:
         monkeypatch.delenv("DLIO_DROP_CACHES_TIMEOUT", raising=False)
         cmd = _make_dlio_for_cmd().generate_dlio_command()
         assert "-x S3DLIO_CONNECT_TIMEOUT_SECS" not in cmd
+
+    @patch(_MPI_PREFIX_PATCH, return_value=_FIXED_MPI_PREFIX)
+    def test_absent_mlpstorage_var_not_forwarded(self, _mock, monkeypatch):
+        monkeypatch.delenv("MLPSTORAGE_CHECKPOINT_URI_SCHEME", raising=False)
+        monkeypatch.delenv("DLIO_DROP_CACHES_TIMEOUT", raising=False)
+        cmd = _make_dlio_for_cmd().generate_dlio_command()
+        assert "-x MLPSTORAGE_CHECKPOINT_URI_SCHEME" not in cmd
+
+    @patch(_MPI_PREFIX_PATCH, return_value=_FIXED_MPI_PREFIX)
+    def test_absent_mlps_var_not_forwarded(self, _mock, monkeypatch):
+        monkeypatch.delenv("MLPS_CHECKPOINT_MP_START_METHOD", raising=False)
+        monkeypatch.delenv("DLIO_DROP_CACHES_TIMEOUT", raising=False)
+        cmd = _make_dlio_for_cmd().generate_dlio_command()
+        assert "-x MLPS_CHECKPOINT_MP_START_METHOD" not in cmd
 
 
 # ---------------------------------------------------------------------------
