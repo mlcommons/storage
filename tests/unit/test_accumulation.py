@@ -16,6 +16,7 @@ covers single-run discovery. This file covers the multi-run accumulation gap.
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -786,3 +787,68 @@ class TestReserveRunDirectory:
             "20250111_140000", _flat_path_for(tmp_path), budget=3
         )
         assert final_dt == "20250111_140002"
+
+    def test_accepts_leaf_prewritten_with_code_image_pointer_only(self, tmp_path):
+        """Issue #718: capture_or_verify_code_image runs BEFORE Benchmark
+        instantiation and creates the run leaf with mkdir(exist_ok=True) to
+        drop a .mlps-code-image pointer. Reserve must not treat that leaf as
+        a collision — otherwise it bumps the timestamp by one second, the
+        benchmark's outputs land in leaf T+1s (with no pointer, failing
+        CHECK-01), and leaf T is left holding only the pointer (failing all
+        result-file presence checks). Accept a leaf whose only content is
+        the pre-written pointer as our own reserved slot.
+        """
+        leaf = tmp_path / "20260708_120804"
+        leaf.mkdir()
+        (leaf / ".mlps-code-image").write_text("md5-tree-v2:" + "a" * 32)
+
+        reserved, final_dt = reserve_run_directory(
+            "20260708_120804", _flat_path_for(tmp_path)
+        )
+
+        assert final_dt == "20260708_120804", (
+            "Reserve must not bump the timestamp when the pre-existing "
+            "leaf holds only the code-image pointer written by capture."
+        )
+        assert reserved == str(leaf)
+        # Pointer must survive so downstream CHECK-01 sees it.
+        assert (leaf / ".mlps-code-image").exists()
+
+    def test_accepts_leaf_prewritten_with_pointer_and_tmp_sibling(self, tmp_path):
+        """Same as above, but the pointer's atomic-write tmp sibling is
+        still present (write failed mid-flight or a rank crashed before the
+        rename). Reserve must still accept the leaf — the tmp file is our
+        own artifact, not a foreign occupant.
+        """
+        leaf = tmp_path / "20260708_120804"
+        leaf.mkdir()
+        (leaf / ".mlps-code-image").write_text("md5-tree-v2:" + "a" * 32)
+        # _write_pointer_atomic names its tmp sibling ".<pointer>.tmp.<pid>"
+        # which, since _POINTER_FILENAME already starts with a dot, becomes
+        # "..mlps-code-image.tmp.<pid>" on disk.
+        (leaf / f"..mlps-code-image.tmp.{os.getpid()}").write_text("partial")
+
+        reserved, final_dt = reserve_run_directory(
+            "20260708_120804", _flat_path_for(tmp_path)
+        )
+
+        assert final_dt == "20260708_120804"
+        assert reserved == str(leaf)
+
+    def test_still_bumps_when_prewritten_leaf_has_other_files(self, tmp_path):
+        """Regression guard for the #718 fix: if the pre-existing leaf holds
+        anything OTHER than the code-image pointer (e.g., a completed prior
+        run's summary.json), it's a genuine same-second collision and must
+        still bump forward — otherwise a rerun would overwrite results.
+        """
+        collided = tmp_path / "20250111_140000"
+        collided.mkdir()
+        (collided / ".mlps-code-image").write_text("md5-tree-v2:" + "a" * 32)
+        (collided / "summary.json").write_text("{}")
+
+        reserved, final_dt = reserve_run_directory(
+            "20250111_140000", _flat_path_for(tmp_path)
+        )
+
+        assert final_dt == "20250111_140001"
+        assert reserved == str(tmp_path / "20250111_140001")
