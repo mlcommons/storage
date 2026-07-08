@@ -143,8 +143,9 @@ class TestRefuseToOverwriteWiring:
 
         args = _training_datagen_args(tmp_path)
         args.command = "run"
-        # verify_benchmark runs for `run` — it will likely raise, but
-        # the refuse-guard invocation is what we assert on.
+        # verify_benchmark runs for `run` and may raise (or call
+        # sys.exit) — either is fine; the refuse-guard invocation is
+        # what we assert on.
         from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
 
         with patch(
@@ -152,7 +153,7 @@ class TestRefuseToOverwriteWiring:
         ) as mock_guard:
             try:
                 TrainingBenchmark(args, logger=MagicMock())
-            except Exception:
+            except (Exception, SystemExit):
                 pass
             mock_guard.assert_not_called()
 
@@ -191,7 +192,7 @@ class TestSupportedModelWiring:
         ) as mock_validate:
             try:
                 TrainingBenchmark(args, logger=MagicMock())
-            except Exception:
+            except (Exception, SystemExit):
                 pass
             # Guard is not invoked in whatif — helper handles it, but
             # the caller short-circuits earlier for symmetry with the

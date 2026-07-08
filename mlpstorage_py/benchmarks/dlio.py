@@ -14,6 +14,10 @@ from mlpstorage_py.config import (CONFIGS_ROOT_DIR, BENCHMARK_TYPES, EXEC_TYPE, 
 from mlpstorage_py.dependency_check import validate_benchmark_dependencies
 from mlpstorage_py.errors import ConfigurationError, ErrorCode
 from mlpstorage_py.rules import calculate_training_data_size, HostInfo, HostMemoryInfo, HostCPUInfo, ClusterInformation
+from mlpstorage_py.rules.datagen_hierarchy import (
+    assert_data_dir_hierarchy_absent,
+    validate_supported_model,
+)
 from mlpstorage_py.utils import (read_config_from_file, create_nested_dict, update_nested_dict, generate_mpi_prefix_cmd)
 from mlpstorage_py.storage_config import resolve_object_storage_config
 
@@ -667,6 +671,22 @@ class TrainingBenchmark(DLIOBenchmark):
             self.verify_benchmark()
 
         if self.args.command != "datasize" and self.args.data_dir:
+            # Pre-datagen guards: fire BEFORE add_datadir_param so no
+            # directories are created if we abort. Whatif skips both
+            # guards (matches D-29 reportgen policy and the "no
+            # significant validation" direction for whatif).
+            if self.args.command == "datagen" and self.args.mode != "whatif":
+                validate_supported_model(self.args.model, self.args.mode)
+                storage_type = self.params_dict.get(
+                    "storage.storage_type", "local"
+                )
+                if storage_type == "local":
+                    # Object-storage (S3) presence checks are a
+                    # different API and are out of scope for the
+                    # local-filesystem refuse-to-overwrite guard.
+                    assert_data_dir_hierarchy_absent(
+                        self.args.data_dir, self.args.model
+                    )
             # The datasize command uses --data-dir and needs to generate a command that also calls --data-dir
             # The add_datadir_param would convert --data-dir to --dataset.data_folder which is invalid to
             # mlpstorage.
