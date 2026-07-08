@@ -50,6 +50,8 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 
 import numpy as np
 
+from vdbbench.disk_stats import classify_storage_target
+
 try:
     from pymilvus import (
         Collection,
@@ -2484,6 +2486,15 @@ def main() -> None:
     # Enhanced path execution
     ap.add_argument("--k", type=int, default=10, help="Top-k for enhanced path.")
     ap.add_argument("--seed", type=int, default=1234)
+    ap.add_argument(
+        "--data-path",
+        default=None,
+        help=(
+            "Path to the storage under test as mounted on this node. "
+            "Used to classify whether disk_io from /proc/diskstats is "
+            "applicable; network/remote targets are marked N/A."
+        ),
+    )
     ap.add_argument("--normalize-cosine", action="store_true")
     ap.add_argument("--mode", choices=["single", "mp", "both"], default="both")
     ap.add_argument("--processes", type=int, default=8)
@@ -2822,6 +2833,15 @@ def main() -> None:
         print("Calculating benchmark statistics...")
         stats = calculate_statistics(output_dir, recall_stats=recall_stats)
 
+        # Issue #591: mark disk_io N/A when the storage under test is a
+        # network/remote filesystem (no local block device in diskstats).
+        storage_target = classify_storage_target(
+            data_path=getattr(args, "data_path", None)
+        )
+        disk_io_applicable = bool(storage_target["applicable"])
+        if not disk_io_applicable:
+            print(f"NOTE: disk_io marked N/A — {storage_target['reason']}")
+
         if disk_io_diff:
             total_bytes_read = sum(d["bytes_read"] for d in disk_io_diff.values())
             total_bytes_written = sum(d["bytes_written"] for d in disk_io_diff.values())
@@ -2853,7 +2873,7 @@ def main() -> None:
                         "write_iops": round(dev_write_iops, 1),
                     }
 
-            stats["disk_io"] = {
+            counters = {
                 "total_bytes_read": total_bytes_read,
                 "total_bytes_written": total_bytes_written,
                 "total_read_ios": total_read_ios,
@@ -2868,8 +2888,47 @@ def main() -> None:
                 "benchmark_duration_sec": round(total_time, 2),
                 "devices": dev_stats_out,
             }
+
+            target_summary = {
+                "applicable": disk_io_applicable,
+                "confidence": storage_target.get("confidence"),
+                "data_path": storage_target.get("target_path"),
+                "fstype": storage_target.get("target_fstype"),
+                "mountpoint": storage_target.get("target_mountpoint"),
+                "network_mounts_detected": [
+                    f"{m['fstype']}:{m['mountpoint']}"
+                    for m in storage_target.get("network_mounts", [])
+                ],
+                "reason": storage_target.get("reason", ""),
+            }
+
+            if disk_io_applicable:
+                stats["disk_io"] = {
+                    "applicable": True,
+                    "status": "OK",
+                    "storage_target": target_summary,
+                    **counters,
+                }
+            else:
+                stats["disk_io"] = {
+                    "applicable": False,
+                    "status": "N/A",
+                    "not_applicable_reason": storage_target.get("reason", ""),
+                    "storage_target": target_summary,
+                    # Client-local block-device counters, preserved for
+                    # debugging only; NOT storage-under-test I/O.
+                    "client_local_io": counters,
+                }
         else:
-            stats["disk_io"] = {"error": "Disk I/O statistics not available"}
+            stats["disk_io"] = {
+                "applicable": False,
+                "status": "N/A",
+                "storage_target": {
+                    "applicable": False,
+                    "reason": storage_target.get("reason", ""),
+                },
+                "error": "Disk I/O statistics not available",
+            }
 
         with open(os.path.join(output_dir, "statistics.json"), "w", encoding="utf-8") as f:
             json.dump(stats, f, indent=2)
@@ -2908,7 +2967,11 @@ def main() -> None:
 
             print("\nDISK I/O DURING BENCHMARK")
             print("-" * 60)
-            if disk_io_diff:
+            if not disk_io_applicable:
+                fstype = storage_target.get("target_fstype") or "network/remote"
+                print(f"N/A — storage under test is on a {fstype} filesystem;")
+                print("/proc/diskstats only covers local block devices.")
+            elif disk_io_diff:
                 di = stats.get("disk_io", {})
                 print(
                     f"Total Read: {di.get('total_read_formatted', 'N/A')} "

@@ -255,6 +255,7 @@ def aggregate_disk_io(base_dir: Path, duration_seconds: float) -> dict[str, Any]
     total_read = 0.0
     total_write = 0.0
     hosts_seen: set[str] = set()
+    hosts_not_applicable: set[str] = set()
 
     for rank_dir in _rank_dirs(base_dir):
         meta = _json_load_if_exists(rank_dir / "rank_metadata.json")
@@ -268,12 +269,21 @@ def aggregate_disk_io(base_dir: Path, duration_seconds: float) -> dict[str, Any]
 
         stats = _json_load_if_exists(rank_dir / "statistics.json")
         disk = stats.get("disk_io") or {}
+
+        # Issue #591: hosts whose storage target is a network/remote
+        # filesystem report disk_io as N/A; exclude them from the sum.
+        if disk.get("applicable") is False:
+            hosts_not_applicable.add(hostname)
+            continue
+
         read_bytes, write_bytes = _extract_disk_totals(disk)
         total_read += read_bytes
         total_write += write_bytes
 
     return {
         "aggregation": "one_sample_per_hostname_local_rank_0",
+        "applicable": len(hosts_seen) > len(hosts_not_applicable),
+        "hosts_not_applicable": sorted(hosts_not_applicable),
         "host_count": len(hosts_seen),
         "duration_seconds": duration_seconds,
         "total_bytes_read": int(total_read),
@@ -752,6 +762,7 @@ def _aggregate_disk_io_from_rank_payloads(
     total_read = 0.0
     total_write = 0.0
     hosts_seen: set[str] = set()
+    hosts_not_applicable: set[str] = set()
 
     for payload in rank_payloads:
         if int(payload.get("local_rank", 0)) != 0:
@@ -764,12 +775,20 @@ def _aggregate_disk_io_from_rank_payloads(
 
         summary = payload.get("rank_summary") or {}
         disk = summary.get("disk_io") or {}
+
+        # Issue #591: skip N/A (network-target) hosts.
+        if disk.get("applicable") is False:
+            hosts_not_applicable.add(hostname)
+            continue
+
         read_bytes, write_bytes = _extract_disk_totals(disk)
         total_read += read_bytes
         total_write += write_bytes
 
     return {
         "aggregation": "mpi_gather_one_sample_per_hostname_local_rank_0",
+        "applicable": len(hosts_seen) > len(hosts_not_applicable),
+        "hosts_not_applicable": sorted(hosts_not_applicable),
         "host_count": len(hosts_seen),
         "duration_seconds": duration_seconds,
         "total_bytes_read": int(total_read),
