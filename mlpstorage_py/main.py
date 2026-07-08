@@ -14,6 +14,11 @@ import signal
 import sys
 import traceback
 
+# §4.7.1 gap origin — must precede all heavier mlpstorage_py imports so the
+# timestamp is captured before framework startup (Python imports, MPI spawn,
+# CAP env-validation, etc.). See mlpstorage_py/_invocation.py.
+from mlpstorage_py._invocation import INVOCATION_START  # noqa: F401
+
 from mlpstorage_py.cli_parser import parse_arguments, validate_args, update_args
 from mlpstorage_py.config import HISTFILE, DATETIME_STR, EXIT_CODE, DEFAULT_RESULTS_DIR, get_datetime_string, HYDRA_OUTPUT_SUBDIR
 from mlpstorage_py.debug import debugger_hook, MLPS_DEBUG

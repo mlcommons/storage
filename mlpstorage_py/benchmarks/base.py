@@ -42,10 +42,12 @@ import time
 import types
 import uuid
 from argparse import Namespace
+from datetime import datetime
 from typing import Tuple, Dict, Any, List, Optional, Callable, Set, TYPE_CHECKING
 
 from functools import wraps
 
+from mlpstorage_py._invocation import INVOCATION_START
 from mlpstorage_py.config import PARAM_VALIDATION, DATETIME_STR, MLPS_DEBUG, EXEC_TYPE
 from mlpstorage_py.errors import ConfigurationError, ErrorCode, FileSystemError
 from mlpstorage_py.run_directory import (
@@ -422,6 +424,9 @@ class Benchmark(BenchmarkInterface, abc.ABC):
 
         # Additional context (not part of BenchmarkRunData but useful)
         metadata['runtime'] = self.runtime
+        # §4.7.1 gap origin — ISO local naive to match DLIO summary.json's
+        # start/end format so _parse_iso_gap can consume both fields uniformly.
+        metadata['invocation_start_time'] = datetime.fromtimestamp(INVOCATION_START).isoformat()
         metadata['verification'] = self.verification.name if self.verification else None
         metadata['executed_command'] = getattr(self, 'executed_command', None)
         metadata['command_output_files'] = self.command_output_files
