@@ -589,6 +589,17 @@ class CheckpointingCheck(BaseCheck):
         not charged against the 30-second callout budget. See Rules.md 4.7.1
         for the semantic and mlpstorage_py/_invocation.py for the capture.
 
+        **Backward compat** — results directories produced by an mlpstorage
+        version predating this rule do not carry ``invocation_start_time``
+        in the read-phase metadata. In that case the check falls back to the
+        legacy origin (``read.summary.start_time`` / ``start``), which
+        conflates the failover callout with per-invocation framework startup
+        and so is not authoritative. To honor the rule that was in force
+        when those results were produced, a gap breach measured against the
+        legacy origin is emitted as a warning (``warn_violation``) rather
+        than a hard failure. The submitter can regenerate with a current
+        mlpstorage to get the honest measurement.
+
         A negative gap indicates NTP skew between the write and read nodes
         (the metadata is timestamped on the read-invocation host, the summary
         on the write-invocation host); it is reported as such rather than as
@@ -603,9 +614,17 @@ class CheckpointingCheck(BaseCheck):
             return valid
         for write_entry, read_entry in pairs:
             write_summary, _, write_ts = write_entry
-            _read_summary, read_metadata, read_ts = read_entry
+            read_summary, read_metadata, read_ts = read_entry
             write_end = (write_summary or {}).get("end_time") or (write_summary or {}).get("end")
             read_start = (read_metadata or {}).get("invocation_start_time")
+            used_legacy_origin = False
+            if read_start is None:
+                # Backward-compat fallback for results dirs that predate the
+                # §4.7.1 fix and don't carry invocation_start_time. Measure
+                # against read.summary.start_time and downgrade any breach
+                # to warn_violation below.
+                read_start = (read_summary or {}).get("start_time") or (read_summary or {}).get("start")
+                used_legacy_origin = True
             if write_end is None:
                 self.log_violation(
                     "4.7.1", "checkpointCacheFlushValidation", self.path,
@@ -618,10 +637,9 @@ class CheckpointingCheck(BaseCheck):
             if read_start is None:
                 self.log_violation(
                     "4.7.1", "checkpointCacheFlushValidation", self.path,
-                    "cannot compute failover-callout gap: missing "
-                    "invocation_start_time in read-phase metadata. Re-run "
-                    "with an mlpstorage version that emits it (see "
-                    "Rules.md 4.7.1). (write_ts=%s, read_ts=%s)",
+                    "cannot compute failover-callout gap: read-phase metadata "
+                    "has no invocation_start_time and read-phase summary.json "
+                    "has no start_time/start (write_ts=%s, read_ts=%s)",
                     write_ts, read_ts,
                 )
                 valid = False
@@ -644,11 +662,31 @@ class CheckpointingCheck(BaseCheck):
                     "4.7.1", "checkpointCacheFlushValidation", self.path,
                     "failover-callout gap is negative (%.1fs); likely NTP "
                     "clock skew between write host and read host "
-                    "(write end=%s, read invocation_start=%s)",
+                    "(write end=%s, read start=%s)",
                     gap_seconds, write_end, read_start,
                 )
                 continue
             if gap_seconds > 30:
+                if used_legacy_origin:
+                    # Pre-fix results dir: honor the rule that was in force
+                    # when the run was produced by warning rather than
+                    # failing. The gap measurement here includes per-
+                    # invocation framework startup and is not authoritative
+                    # against the new (invocation_start_time-based) rule.
+                    self.warn_violation(
+                        "4.7.1", "checkpointCacheFlushValidation", self.path,
+                        "failover-callout gap %.1f seconds exceeds 30-second "
+                        "limit, measured against read.summary.start_time "
+                        "because invocation_start_time is not present in "
+                        "read-phase metadata (results dir predates the "
+                        "§4.7.1 gap-origin fix). Gap includes per-invocation "
+                        "framework startup so this reading is not "
+                        "authoritative — re-run with a current mlpstorage "
+                        "for the honest measurement. "
+                        "(write end=%s, read start=%s)",
+                        gap_seconds, write_end, read_start,
+                    )
+                    continue
                 self.log_violation(
                     "4.7.1", "checkpointCacheFlushValidation", self.path,
                     "failover-callout gap %.1f seconds exceeds 30-second limit "

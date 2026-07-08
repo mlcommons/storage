@@ -199,22 +199,45 @@ class TestChkpt02_CacheFlushValidation:
             f"Expected [4.7.1 checkpointCacheFlushValidation]; got {mock_logger.errors[0]!r}"
         assert "missing end_time in write-phase summary.json" in mock_logger.errors[0]
 
-    def test_split_mode_missing_invocation_start_time_emits_4_7_1(self, tmp_path, mock_logger):
-        """Split-mode read metadata w/o invocation_start_time → [4.7.1] regenerate-required."""
+    def test_split_mode_missing_invocation_start_time_falls_back_to_legacy_origin_and_passes(self, tmp_path, mock_logger):
+        """Backward-compat: pre-fix results dir (no invocation_start_time) falls back
+        to read.summary.start_time. Fixture default gap is 25s → passes silently."""
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(
             tmp_path,
             chkpt_split_mode=True,
             chkpt_summary_timestamps=True,
             chkpt_omit_invocation_start_time=True,
+            # default chkpt_cache_flush_gap_seconds=25 → legacy gap is 25s → under 30
         )
         check = _run_checkpointing_check(root, mock_logger)
         result = check.cache_flush_validation()
-        assert result is False
-        assert len(mock_logger.errors) >= 1
-        assert mock_logger.errors[0].startswith("[4.7.1 checkpointCacheFlushValidation]"), \
-            f"Expected [4.7.1 checkpointCacheFlushValidation]; got {mock_logger.errors[0]!r}"
-        assert "missing invocation_start_time in read-phase metadata" in mock_logger.errors[0]
+        assert result is True
+        assert mock_logger.errors == []
+        assert mock_logger.warnings == []
+
+    def test_split_mode_legacy_origin_gap_over_30_emits_warning_not_error(self, tmp_path, mock_logger):
+        """Backward-compat: pre-fix results dir with 45s legacy gap → warn_violation,
+        not log_violation. Honors the rule that was in force when the run was produced."""
+        from mlpstorage_py.tests.conftest import build_submission
+        root = build_submission(
+            tmp_path,
+            chkpt_split_mode=True,
+            chkpt_summary_timestamps=True,
+            chkpt_omit_invocation_start_time=True,
+            chkpt_cache_flush_gap_seconds=45,
+        )
+        check = _run_checkpointing_check(root, mock_logger)
+        result = check.cache_flush_validation()
+        # Legacy origin + gap > 30 → warning, not a hard failure.
+        assert result is True
+        assert mock_logger.errors == []
+        assert any(
+            w.startswith("[4.7.1 checkpointCacheFlushValidation]")
+            and "exceeds 30-second limit" in w
+            and "predates the §4.7.1 gap-origin fix" in w
+            for w in mock_logger.warnings
+        ), f"Expected legacy-origin over-limit warning; got warnings={mock_logger.warnings!r}"
 
     def test_split_mode_negative_gap_emits_clock_skew_warning(self, tmp_path, mock_logger):
         """Split-mode with negative gap → warning (clock skew), not a hard violation."""

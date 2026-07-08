@@ -338,8 +338,12 @@ def build_submission(tmp_path, **overrides) -> Path:
       ``cache_flush_validation`` sees. May be negative to simulate NTP clock skew
       between the write and read hosts.
     * ``chkpt_omit_invocation_start_time`` (bool, default False) — CHKPT-02:
-      when True, do NOT emit ``invocation_start_time`` in read-side metadata.
-      Exercises the "missing invocation_start_time" branch of §4.7.1.
+      when True, do NOT emit ``invocation_start_time`` in read-side metadata
+      (simulates a results dir produced by an mlpstorage version predating
+      the §4.7.1 gap-origin fix). Exercises the backward-compat fallback
+      path in ``cache_flush_validation`` — the check falls back to
+      ``read.summary.start_time`` and downgrades a 30-second breach from
+      hard failure to warning.
     * ``chkpt_model`` (str, default "llama3-8b") — CHKPT-01: model directory name
       under ``checkpointing/``.
     * ``chkpt_open_num_processes`` (int | None) — CHKPT-01: when non-None, sets
