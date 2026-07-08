@@ -1,7 +1,7 @@
 # MLPerf Storage Benchmark v3.0 — Significant Bugs Fixed by Version
 
-**Date:** 2026-07-06
-**Covers:** Versions 3.0.3 through 3.0.34 (May 28 – July 6, 2026)
+**Date:** 2026-07-07
+**Covers:** Versions 3.0.3 through 3.0.37 (May 28 – July 7, 2026)
 
 ---
 
@@ -287,3 +287,13 @@ No new mlpstorage-level significant bug fixes in this range. DLIO was updated fr
 - `reportgen` did not set `INVALID` for invocation count violations — training runs with a count other than 6 (1 warmup + 5 real per §2.1.17) and checkpointing runs with op lists other than 10 (per §2.1.23) were silently aggregated with the wrong category. (#707)
 - `reportgen` applied INVALID gates to `whatif` rows — simulation output was incorrectly marked INVALID when invocation counts did not meet submission requirements; `whatif` is not a submission and should bypass all rules-strict gates. (#707)
 - Training per-model rollup written to `<model>/run/` but empty-dir scan walked to `<model>/` — path mismatch caused a stray empty `results.{csv,json}` to be written at `training/<model>/` on every `reportgen` invocation. (#707)
+
+---
+
+## Version 3.0.37 (July 7, 2026)
+
+**Invocation**
+- VDB datagen: concurrent per-rank flush calls hit Milvus's per-collection rate limit (0.1 qps); pymilvus retry budget exhausted, datagen aborted at scale. (#705, #709)
+
+**Other Significant**
+- CLOSED code-image verify raised `CodeImageError` on any hash mismatch — valid submissions were blocked if mlpstorage was upgraded between runs of the same submission. (#710)

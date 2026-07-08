@@ -207,6 +207,65 @@ class TestPreCheckHelper:
         _check_and_migrate_legacy_layout(args, {}, _make_log())
         assert scan_spy.call_count == 0, "sentinel present: _scan_legacy_layout must NOT be called"
 
+    def test_pool_dirs_present_but_no_sentinel_triggers_migration(self, tmp_path, monkeypatch):
+        """Issue #716: sentinel-absent + pool-present + no-legacy must migrate.
+
+        Fresh-tree flow: capture_or_verify_code_image creates
+        ``<org>/code-<hash8>/`` pool dirs but never writes the sentinel. If a
+        subsequent submission-mode invocation still finds no sentinel and no
+        legacy ``code/`` dirs, the pre-check must call migrate_legacy_layout
+        so it can write the sentinel via its N=0 recovery branch — otherwise
+        CHECK-04 D-91 flags the tree as partial-migration forever.
+        """
+        results_dir = tmp_path / "results"
+        org_root = results_dir / "Acme"
+        org_root.mkdir(parents=True)
+        # Pool dir exists (capture_or_verify_code_image ran on a prior invocation).
+        (org_root / "code-deadbeef").mkdir()
+        # Sentinel does NOT exist.
+        assert not (org_root / ".mlps-image-pool").exists()
+
+        # No legacy code/ dirs.
+        monkeypatch.setattr(lm, "_scan_legacy_layout", lambda rd, org: [])
+
+        migrate_spy = MagicMock()
+        monkeypatch.setattr(lm, "migrate_legacy_layout", migrate_spy)
+
+        args = Namespace(
+            mode="closed", command="run", results_dir=str(results_dir),
+            orgname="Acme", systemname=None,
+        )
+        _check_and_migrate_legacy_layout(args, {}, _make_log())
+
+        assert migrate_spy.call_count == 1, (
+            "pool dirs present + sentinel absent + no legacy: "
+            "migrate_legacy_layout must be called so N=0 branch writes the sentinel"
+        )
+
+    def test_no_pool_dirs_and_no_legacy_does_not_migrate(self, tmp_path, monkeypatch):
+        """Fresh-tree pre-capture path stays a no-op.
+
+        Genuine fresh tree (no sentinel, no legacy, no pool dirs) must not
+        trigger migration — that path predates capture_or_verify_code_image
+        and there is nothing to seal a sentinel over.
+        """
+        results_dir = tmp_path / "results"
+        (results_dir / "Acme").mkdir(parents=True)
+
+        monkeypatch.setattr(lm, "_scan_legacy_layout", lambda rd, org: [])
+        migrate_spy = MagicMock()
+        monkeypatch.setattr(lm, "migrate_legacy_layout", migrate_spy)
+
+        args = Namespace(
+            mode="closed", command="run", results_dir=str(results_dir),
+            orgname="Acme", systemname=None,
+        )
+        _check_and_migrate_legacy_layout(args, {}, _make_log())
+
+        assert migrate_spy.call_count == 0, (
+            "fresh tree with no pool dirs: migrate_legacy_layout must NOT be called"
+        )
+
     def test_non_submission_mode_no_ops(self, tmp_path, monkeypatch):
         """_check_and_migrate_legacy_layout is a no-op for non-submission modes.
 

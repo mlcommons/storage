@@ -40,6 +40,7 @@ from tabulate import tabulate
 
 from vdbbench.config_loader import load_config, merge_config_with_args
 from vdbbench.connection import open_connection
+from vdbbench.disk_stats import build_disk_io_stats, classify_storage_target
 from vdbbench.list_collections import get_collection_info
 
 try:
@@ -1564,6 +1565,17 @@ def main():
         default=42,
         help="Random seed for deterministic query-vector generation",
     )
+    parser.add_argument(
+        "--data-path",
+        type=str,
+        default=None,
+        help=(
+            "Path to the storage under test as mounted on this node "
+            "(e.g. the Milvus data directory or its NFS mount). Used to "
+            "classify whether disk_io from /proc/diskstats is applicable; "
+            "network/remote targets are marked N/A in statistics.json."
+        ),
+    )
 
     args = parser.parse_args()
 
@@ -1634,6 +1646,7 @@ def main():
         "num_query_vectors": args.num_query_vectors,
         "no_create_flat": args.no_create_flat,
         "seed": args.seed,
+        "data_path": args.data_path,
     }
 
     print(f"Results will be saved to: {output_dir}")
@@ -1998,44 +2011,22 @@ def main():
             json.dump(stats, f, indent=2)
         sys.exit(1)
 
-    if disk_io_diff:
-        total_bytes_read = sum(
-            dev_stats["bytes_read"] for dev_stats in disk_io_diff.values()
-        )
-        total_bytes_written = sum(
-            dev_stats["bytes_written"] for dev_stats in disk_io_diff.values()
-        )
+    # Issue #591: classify the storage target so disk_io is marked N/A
+    # for network/remote filesystems instead of reporting empty or
+    # client-local-only numbers as if they described the storage under test.
+    storage_target = classify_storage_target(data_path=args.data_path)
 
-        duration = stats.get("total_time_seconds", 0) or 0
+    if not storage_target["applicable"]:
+        print(f"NOTE: disk_io marked N/A — {storage_target['reason']}")
+    elif storage_target["confidence"] == "heuristic" and storage_target["network_mounts"]:
+        print(f"WARNING: {storage_target['reason']}")
 
-        stats["disk_io"] = {
-            "total_bytes_read": total_bytes_read,
-            "total_bytes_read_per_sec": (
-                total_bytes_read / duration if duration > 0 else 0.0
-            ),
-            "total_bytes_written": total_bytes_written,
-            "total_bytes_written_per_sec": (
-                total_bytes_written / duration if duration > 0 else 0.0
-            ),
-            "total_read_formatted": format_bytes(total_bytes_read),
-            "total_write_formatted": format_bytes(total_bytes_written),
-            "devices": {},
-        }
-
-        for device, io_stats in disk_io_diff.items():
-            bytes_read = io_stats["bytes_read"]
-            bytes_written = io_stats["bytes_written"]
-
-            if bytes_read > 0 or bytes_written > 0:
-                stats["disk_io"]["devices"][device] = {
-                    "bytes_read": bytes_read,
-                    "bytes_written": bytes_written,
-                    "read_formatted": format_bytes(bytes_read),
-                    "write_formatted": format_bytes(bytes_written),
-                }
-
-    else:
-        stats["disk_io"] = {"error": "Disk I/O statistics not available"}
+    stats["disk_io"] = build_disk_io_stats(
+        disk_io_diff=disk_io_diff,
+        duration_seconds=stats.get("total_time_seconds", 0) or 0,
+        storage_target=storage_target,
+        format_bytes_fn=format_bytes,
+    )
 
     stats_output_file = os.path.join(output_dir, "statistics.json")
     with open(stats_output_file, "w", encoding="utf-8") as f:
@@ -2097,7 +2088,15 @@ def main():
         print("\nDISK I/O DURING BENCHMARK")
         print("-" * 50)
 
-        if disk_io_diff:
+        if not storage_target["applicable"]:
+            fstype = storage_target.get("target_fstype") or "network/remote"
+            print(f"N/A — storage under test is on a {fstype} filesystem;")
+            print("/proc/diskstats only covers local block devices.")
+            print(
+                "(Client-local counters preserved under "
+                "disk_io.client_local_io in statistics.json.)"
+            )
+        elif disk_io_diff:
             total_bytes_read = sum(
                 dev_stats["bytes_read"] for dev_stats in disk_io_diff.values()
             )
