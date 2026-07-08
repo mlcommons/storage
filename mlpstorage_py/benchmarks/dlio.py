@@ -599,11 +599,20 @@ class DLIOBenchmark(Benchmark, abc.ABC):
                                                  mpi_btl=getattr(self.args, 'mpi_btl', 'auto'))
             # Forward env vars to ranks — OpenMPI does not propagate arbitrary
             # env vars to remote hosts by default; -x VAR opts each one in.
+            # (HPE Cray PALS mpiexec propagates env by default and takes the
+            # PALS-native branch in generate_mpi_prefix_cmd, so it doesn't
+            # need this list.)
             if 'DLIO_DROP_CACHES_TIMEOUT' in os.environ:
                 mpi_prefix += " -x DLIO_DROP_CACHES_TIMEOUT"
             # S3/object-storage vars required for multi-host runs (storage #592).
+            # MLPS_/MLPSTORAGE_ vars required for multi-host checkpointing —
+            # notably MLPSTORAGE_CHECKPOINT_URI_SCHEME (storage #712 / #583),
+            # without which remote-rank object-store writes fail with
+            # "Unsupported URI scheme" once the model-parallel shards land off
+            # the head node.
             for _v in sorted(os.environ):
                 if (_v.startswith('AWS_') or _v.startswith('S3DLIO_')
+                        or _v.startswith('MLPS_') or _v.startswith('MLPSTORAGE_')
                         or _v in ('STORAGE_LIBRARY', 'BUCKET')):
                     mpi_prefix += f" -x {_v}"
             cmd = f"{mpi_prefix} {cmd}"
