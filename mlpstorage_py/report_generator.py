@@ -1382,7 +1382,18 @@ class ReportGenerator:
                 # is a simulation, not a submission; INVALID semantics
                 # don't apply.
                 invalid_messages: List[str] = []
-                if category_str != 'whatif':
+                # Issue #717: the D-26/D-27 (training) and D-20/D-24
+                # (checkpointing) rules-strict gates encode Rules.md
+                # invariants that apply to the ``run`` command only —
+                # ``datagen`` legitimately produces a single invocation
+                # and carries no metric lists. The workload grouping
+                # key does not include ``command`` (D-05), and datagen
+                # runs typically land in their own group anyway because
+                # they carry ``accelerator=None`` while ``run`` groups
+                # carry e.g. ``h100``. Skip these gates for any group
+                # whose command is not ``run`` — otherwise a datagen
+                # group gets a spurious "found 1" INVALID.
+                if category_str != 'whatif' and runs[0].command == 'run':
                     bt = runs[0].benchmark_type
                     if bt == BENCHMARK_TYPES.training:
                         # D-27: training must be exactly 6 invocations
