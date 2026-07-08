@@ -550,3 +550,76 @@ class TestCaptureOrVerifyPool:
         )
         with pytest.raises(ConfigurationError):
             capture_or_verify_code_image(args, {}, log)
+
+
+class TestSentinelSelfHeal:
+    """Issue #716: capture_or_verify_code_image must leave a .mlps-image-pool
+    sentinel whenever it leaves a pool image. Otherwise CHECK-04 D-91 flags
+    the tree as a partial migration forever.
+    """
+
+    def test_first_run_on_fresh_tree_writes_sentinel(
+        self, tmp_path, fake_source_root, log
+    ):
+        results_dir = tmp_path / "results"
+        results_dir.mkdir()
+        args = _make_args(
+            mode="closed", command="run", results_dir=results_dir, orgname="Acme",
+        )
+        capture_or_verify_code_image(args, {}, log)
+
+        sentinel = results_dir / "Acme" / ".mlps-image-pool"
+        assert sentinel.is_file(), (
+            "capture on a fresh tree must write the sentinel; "
+            "otherwise CHECK-04 D-91 flags the tree as partial-migration"
+        )
+        # Sentinel content shape (D-72): two key=value lines.
+        text = sentinel.read_text()
+        assert "mlpstorage_version=" in text
+        assert "migration_completed_at=" in text
+
+    def test_match_branch_writes_sentinel_when_absent(
+        self, tmp_path, fake_source_root, log
+    ):
+        """Sentinel-heal fires on the reuse path too — covers legacy trees
+        that had pool images before the fix landed."""
+        results_dir = tmp_path / "results"
+        results_dir.mkdir()
+        args = _make_args(
+            mode="closed", command="run", results_dir=results_dir, orgname="Acme",
+        )
+        # First capture writes both pool and sentinel.
+        capture_or_verify_code_image(args, {}, log)
+        sentinel = results_dir / "Acme" / ".mlps-image-pool"
+        assert sentinel.is_file()
+
+        # Simulate a pre-fix tree: pool dir on disk, sentinel deleted.
+        sentinel.unlink()
+        assert not sentinel.exists()
+
+        # Second call goes through the match branch and must re-heal the sentinel.
+        capture_or_verify_code_image(args, {}, log)
+        assert sentinel.is_file(), (
+            "reuse path must also self-heal the sentinel — this covers "
+            "trees created before the #716 fix landed"
+        )
+
+    def test_existing_sentinel_is_not_rewritten(
+        self, tmp_path, fake_source_root, log
+    ):
+        """If the sentinel already exists, don't clobber it — preserves
+        migration_completed_at timestamps from prior legitimate migrations."""
+        results_dir = tmp_path / "results"
+        results_dir.mkdir()
+        args = _make_args(
+            mode="closed", command="run", results_dir=results_dir, orgname="Acme",
+        )
+        capture_or_verify_code_image(args, {}, log)
+        sentinel = results_dir / "Acme" / ".mlps-image-pool"
+        first_content = sentinel.read_text()
+        first_mtime = sentinel.stat().st_mtime_ns
+
+        # Second call must not rewrite the sentinel.
+        capture_or_verify_code_image(args, {}, log)
+        assert sentinel.read_text() == first_content
+        assert sentinel.stat().st_mtime_ns == first_mtime

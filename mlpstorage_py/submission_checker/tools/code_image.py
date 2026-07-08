@@ -1057,6 +1057,18 @@ def capture_or_verify_code_image(args, env, log):
         pool_dir = _capture_new_pool_image(org_root, source_root, live_hash, log)
         log.status(f"captured new pool image at {pool_dir}")
 
+    # Issue #716: ensure the .mlps-image-pool sentinel exists whenever a pool
+    # image does. CHECK-04 D-91 hard-fails validation when pool dirs exist
+    # without the sentinel. Deferred import breaks the code_image ↔
+    # legacy_migration cycle (legacy_migration imports _scan_legacy_layout
+    # from this module).
+    from mlpstorage_py.submission_checker.tools.legacy_migration import (
+        _SENTINEL_FILENAME,
+        _write_sentinel_atomic,
+    )
+    if not (org_root / _SENTINEL_FILENAME).exists():
+        _write_sentinel_atomic(org_root, log)
+
     # 6d. Compute the run leaf via the canonical Rules.md §2.1 shape and
     # write the pointer file (PTR-01, D-65). We construct a lightweight
     # shim rather than a real Benchmark instance because

@@ -335,12 +335,20 @@ def _check_and_migrate_legacy_layout(args, env, log) -> None:
     if not results_dir.exists():
         return
 
-    sentinel = results_dir / orgname / _SENTINEL_FILENAME
+    org_root = results_dir / orgname
+    sentinel = org_root / _SENTINEL_FILENAME
     if sentinel.exists():
         return
 
     offenders = _scan_legacy_layout(results_dir, orgname)
     if not offenders:
+        # Sentinel absent + no legacy code/ dirs. If pool images already exist
+        # (capture_or_verify_code_image ran first on a fresh tree), we must
+        # still write the sentinel — otherwise CHECK-04 D-91 will flag the
+        # tree as a partial migration forever. migrate_legacy_layout handles
+        # the N=0 case by just writing the sentinel atomically.
+        if org_root.is_dir() and any(org_root.glob("code-*")):
+            migrate_legacy_layout(results_dir, orgname, log)
         return
 
     migrate_legacy_layout(results_dir, orgname, log)
