@@ -1691,6 +1691,48 @@ write_iops
 
 In distributed mode, disk I/O is aggregated once per benchmark client host to avoid double-counting multiple MPI ranks on the same host.
 
+#### Scope and validity of `disk_io`
+
+`/proc/diskstats` only accounts for **local block devices** on the
+benchmark client node. The `disk_io` figures are therefore only valid
+when the storage under test is backed by a local block device on that
+node (e.g. local NVMe hosting the Milvus data directory).
+
+When the storage under test is a **network / remote filesystem** (NFS,
+CIFS/SMB, CephFS, GlusterFS, Lustre, GPFS, BeeGFS, PanFS, virtiofs,
+FUSE-based remote clients, etc.), no corresponding local block device
+exists, so diskstats deltas do not describe the storage under test. In
+that case the benchmark marks `disk_io` as **not applicable**:
+
+```json
+"disk_io": {
+  "applicable": false,
+  "status": "N/A",
+  "not_applicable_reason": "storage under test is a network/remote filesystem (nfs4 mounted at /mnt/vdb from filer:/export/vdb); /proc/diskstats only accounts for local block devices, so disk_io is not applicable.",
+  "storage_target": { "fstype": "nfs4", "mountpoint": "/mnt/vdb", "...": "..." },
+  "client_local_io": { "total_bytes_read": 0, "...": "..." }
+}
+```
+
+`client_local_io` preserves the raw client-local counters for
+debugging and audit, but must **not** be interpreted as I/O to the
+storage under test.
+
+Pass `--data-path <path>` (the mount point or directory backing the
+storage under test on the client node) for exact classification. If
+`--data-path` is omitted, classification is heuristic: `disk_io` is
+still reported, `storage_target.confidence` is set to `heuristic`, and
+any detected network mounts are listed so reviewers can judge scope.
+
+`disk_io` is informational only. The benchmark score (QPS, latency,
+recall) is never derived from `disk_io`, so `applicable: false` does
+not affect scoring or submission validity.
+
+In distributed mode, hosts reporting `applicable: false` are excluded
+from the aggregated totals and listed under
+`disk_io.hosts_not_applicable`; the aggregated `disk_io.applicable`
+flag is `false` when every sampled host was N/A.
+
 ---
 
 ## 11. Testing and Validation
