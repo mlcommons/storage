@@ -1,0 +1,348 @@
+"""Unit tests for mlpstorage_py.rules.datagen_hierarchy.
+
+Covers the four helpers introduced for training datagen validation:
+
+    * ``validate_supported_model(model, mode)`` — hard-fail on unsupported
+      model for the given submission mode. Whatif skips (matches the D-29
+      whatif-exemption policy in Phase 6 reportgen).
+
+    * ``assert_data_dir_hierarchy_absent(data_dir, model)`` — refuse to
+      overwrite an existing ``<data-dir>/<model>`` tree. Rationale: a
+      re-datagen with different ``num_samples_per_file`` (or any other
+      parameter that changes per-file byte size) would leave the old
+      and new files interleaved on filename collision, silently
+      corrupting the dataset.
+
+    * ``validate_datagen_leaf(leaf_path)`` — stat-only presence check
+      of the four datagen-required files plus ``dlio_config/`` and its
+      three inner files. Returns a list of human-readable missing-item
+      strings (empty list means the leaf is complete). Does NOT walk
+      into file contents.
+
+    * ``write_datagen_manifest(...)`` — extract
+      ``num_files_train`` / ``num_samples_per_file`` /
+      ``record_length_bytes`` from a nested ``dataset`` param dict,
+      write ``<data-dir>/<model>/.mlps-datagen-manifest.json`` with the
+      documented schema, and return the manifest path. Loud failure if
+      any of the three fields is absent from the input dict.
+"""
+from __future__ import annotations
+
+import json
+import os
+import pathlib
+
+import pytest
+
+from mlpstorage_py.errors import ConfigurationError
+from mlpstorage_py.rules.datagen_hierarchy import (
+    DATAGEN_MANIFEST_FILENAME,
+    DATAGEN_MANIFEST_SCHEMA_VERSION,
+    assert_data_dir_hierarchy_absent,
+    validate_datagen_leaf,
+    validate_supported_model,
+    write_datagen_manifest,
+)
+
+
+# --------------------------------------------------------------------------- #
+# validate_supported_model                                                    #
+# --------------------------------------------------------------------------- #
+
+
+class TestValidateSupportedModel:
+    """Mode-aware model allowlist enforcement.
+
+    Rules.md v3.0 restricts CLOSED and OPEN to {unet3d, retinanet}.
+    Whatif is simulation and skips all validation per the D-29
+    reportgen policy — the helper mirrors that policy so unsupported
+    models pass through in whatif.
+    """
+
+    @pytest.mark.parametrize("mode", ["closed", "open"])
+    @pytest.mark.parametrize("model", ["unet3d", "retinanet"])
+    def test_supported_models_accepted_in_closed_and_open(self, mode, model):
+        # Must not raise.
+        validate_supported_model(model, mode)
+
+    @pytest.mark.parametrize("mode", ["closed", "open"])
+    @pytest.mark.parametrize(
+        "model", ["cosmoflow", "resnet50", "dlrm", "flux", "gpt2", ""]
+    )
+    def test_unsupported_models_rejected_in_closed_and_open(self, mode, model):
+        with pytest.raises(ConfigurationError) as excinfo:
+            validate_supported_model(model, mode)
+        # Message should surface both the model and the mode so the
+        # operator can see immediately which allowlist rejected them.
+        text = str(excinfo.value)
+        assert model in text or "model" in text.lower()
+        assert mode in text
+
+    @pytest.mark.parametrize(
+        "model", ["unet3d", "retinanet", "cosmoflow", "resnet50", "dlrm", "flux"]
+    )
+    def test_whatif_accepts_any_known_model(self, model):
+        # Whatif is simulation — the D-29 pattern skips validation.
+        validate_supported_model(model, "whatif")
+
+    def test_unknown_mode_rejected(self):
+        # Defensive: a mode outside {closed, open, whatif} means a
+        # caller wiring bug — loud failure over silent accept.
+        with pytest.raises(ConfigurationError):
+            validate_supported_model("unet3d", "bogus")
+
+
+# --------------------------------------------------------------------------- #
+# assert_data_dir_hierarchy_absent                                            #
+# --------------------------------------------------------------------------- #
+
+
+class TestAssertDataDirHierarchyAbsent:
+    """Refuse-to-overwrite guard for ``<data-dir>/<model>``.
+
+    Rationale: if the operator re-runs datagen against the same
+    ``--data-dir`` with a different ``num_samples_per_file`` (or any
+    other per-file size knob), filename collisions may only
+    partially overwrite the prior tree. Rather than teach the
+    generator to detect that, we refuse and force ``rm -rf`` or a
+    different ``--data-dir``.
+    """
+
+    def test_absent_hierarchy_returns_cleanly(self, tmp_path):
+        # <data-dir>/<model> does not exist — nothing to refuse.
+        assert_data_dir_hierarchy_absent(str(tmp_path), "unet3d")
+
+    def test_empty_model_dir_returns_cleanly(self, tmp_path):
+        # A pre-created but empty directory is allowed — e.g. the
+        # operator ran ``mkdir -p`` in advance. The invariant we
+        # protect is "no partially-overwritten files", so an empty
+        # dir is fine.
+        (tmp_path / "unet3d").mkdir()
+        assert_data_dir_hierarchy_absent(str(tmp_path), "unet3d")
+
+    def test_non_empty_model_dir_raises_configuration_error(self, tmp_path):
+        model_dir = tmp_path / "unet3d"
+        model_dir.mkdir()
+        (model_dir / "some_shard.npz").write_bytes(b"prior data")
+        with pytest.raises(ConfigurationError) as excinfo:
+            assert_data_dir_hierarchy_absent(str(tmp_path), "unet3d")
+        text = str(excinfo.value)
+        # Operator needs to see the offending path and be told how to
+        # recover (rm -rf or a different --data-dir).
+        assert str(model_dir) in text
+        assert "unet3d" in text
+
+    def test_model_dir_is_a_file_raises(self, tmp_path):
+        # An operator laying down a file at <data-dir>/<model> is a
+        # pathological state; refuse rather than silently proceed.
+        (tmp_path / "unet3d").write_text("stray")
+        with pytest.raises(ConfigurationError):
+            assert_data_dir_hierarchy_absent(str(tmp_path), "unet3d")
+
+    def test_sibling_model_dir_does_not_block(self, tmp_path):
+        # A populated retinanet tree must not block a fresh unet3d
+        # datagen — one --data-dir is allowed to hold multiple
+        # datasets, as long as the per-model subdirs don't collide.
+        (tmp_path / "retinanet").mkdir()
+        (tmp_path / "retinanet" / "shard.jpeg").write_bytes(b"x")
+        assert_data_dir_hierarchy_absent(str(tmp_path), "unet3d")
+
+
+# --------------------------------------------------------------------------- #
+# validate_datagen_leaf                                                       #
+# --------------------------------------------------------------------------- #
+
+
+def _make_healthy_leaf(root: pathlib.Path, ts: str = "20260708_120000") -> pathlib.Path:
+    """Create a healthy datagen leaf directory: all required files + dlio_config."""
+    leaf = root / ts
+    leaf.mkdir(parents=True)
+    (leaf / "training_datagen.stdout.log").write_text("")
+    (leaf / "training_datagen.stderr.log").write_text("")
+    (leaf / "dlio.log").write_text("")
+    (leaf / f"training_{ts}_metadata.json").write_text("{}")
+    dlio_cfg = leaf / "dlio_config"
+    dlio_cfg.mkdir()
+    (dlio_cfg / "config.yaml").write_text("")
+    (dlio_cfg / "hydra.yaml").write_text("")
+    (dlio_cfg / "overrides.yaml").write_text("")
+    return leaf
+
+
+class TestValidateDatagenLeaf:
+    """Stat-only completeness check of the ``datagen/<ts>/`` leaf.
+
+    Mirrors the file/folder list already enforced by
+    ``submission_checker`` rule §2.1.14 / §2.1.15 (see
+    ``mlpstorage_py/submission_checker/constants.py:67-81``) but is
+    reachable both from a post-datagen run-checker hook and from
+    ``reports reportgen`` — the submission_checker itself is a
+    separate tool the operator may never invoke.
+
+    Contract: return a list of human-readable missing-item strings.
+    Empty list means the leaf is complete. Never raises for a
+    stat-only check.
+    """
+
+    def test_healthy_leaf_returns_empty_list(self, tmp_path):
+        leaf = _make_healthy_leaf(tmp_path)
+        assert validate_datagen_leaf(str(leaf)) == []
+
+    def test_missing_stdout_log_reported(self, tmp_path):
+        leaf = _make_healthy_leaf(tmp_path)
+        (leaf / "training_datagen.stdout.log").unlink()
+        missing = validate_datagen_leaf(str(leaf))
+        assert any("stdout" in m for m in missing), missing
+
+    def test_missing_metadata_reported(self, tmp_path):
+        leaf = _make_healthy_leaf(tmp_path, ts="20260708_130000")
+        (leaf / "training_20260708_130000_metadata.json").unlink()
+        missing = validate_datagen_leaf(str(leaf))
+        assert any("metadata" in m for m in missing), missing
+
+    def test_missing_dlio_log_reported(self, tmp_path):
+        leaf = _make_healthy_leaf(tmp_path)
+        (leaf / "dlio.log").unlink()
+        missing = validate_datagen_leaf(str(leaf))
+        assert any("dlio.log" in m for m in missing), missing
+
+    def test_missing_dlio_config_folder_reported(self, tmp_path):
+        leaf = _make_healthy_leaf(tmp_path)
+        # Remove the whole folder — expects folder-level missing message,
+        # not per-file complaints.
+        for entry in (leaf / "dlio_config").iterdir():
+            entry.unlink()
+        (leaf / "dlio_config").rmdir()
+        missing = validate_datagen_leaf(str(leaf))
+        assert any("dlio_config" in m for m in missing), missing
+
+    def test_missing_config_yaml_inside_dlio_config_reported(self, tmp_path):
+        leaf = _make_healthy_leaf(tmp_path)
+        (leaf / "dlio_config" / "config.yaml").unlink()
+        missing = validate_datagen_leaf(str(leaf))
+        assert any("config.yaml" in m for m in missing), missing
+
+    def test_leaf_does_not_exist_reports_leaf_missing(self, tmp_path):
+        # If the leaf itself does not exist, the helper reports that
+        # as a single top-level miss rather than N per-file misses.
+        missing = validate_datagen_leaf(str(tmp_path / "does_not_exist"))
+        assert len(missing) == 1
+        assert "does_not_exist" in missing[0]
+
+
+# --------------------------------------------------------------------------- #
+# write_datagen_manifest                                                      #
+# --------------------------------------------------------------------------- #
+
+
+def _valid_dataset_params():
+    """Realistic dataset param block matching configs/dlio/workload/unet3d_datagen.yaml."""
+    return {
+        "num_files_train": 168,
+        "num_samples_per_file": 1,
+        "record_length_bytes": 146600628,
+    }
+
+
+class TestWriteDatagenManifest:
+    """Manifest emission at ``<data-dir>/<model>/.mlps-datagen-manifest.json``.
+
+    Fields recorded (per user direction — only what the future
+    run-vs-datagen size check needs plus provenance):
+
+        schema_version         — integer, bumps if layout changes
+        model                  — e.g. "unet3d"
+        num_files_train        — from merged DLIO config
+        num_samples_per_file   — from merged DLIO config
+        record_length_bytes    — from merged DLIO config
+        created_at             — ISO 8601 UTC (Z-suffixed)
+        mlpstorage_version     — from mlpstorage_py.__version__
+        source_datagen_result_dir — absolute path to the --results-dir leaf
+
+    Loud failure if any of the three DLIO fields is absent from the
+    input dict — the extraction is authoritative, and a config that
+    lacks any of them is a workload-YAML bug (both unet3d_datagen.yaml
+    and retinanet_datagen.yaml expose all three).
+    """
+
+    def test_writes_manifest_with_all_expected_fields(self, tmp_path):
+        source_dir = "/tmp/whatever/training/unet3d/datagen/20260708_120000"
+        manifest_path = write_datagen_manifest(
+            data_dir=str(tmp_path),
+            model="unet3d",
+            dataset_params=_valid_dataset_params(),
+            source_datagen_result_dir=source_dir,
+        )
+        # Return value: absolute path we wrote.
+        assert manifest_path.endswith(
+            os.path.join("unet3d", DATAGEN_MANIFEST_FILENAME)
+        )
+        assert os.path.isabs(manifest_path)
+        assert os.path.isfile(manifest_path)
+
+        with open(manifest_path) as f:
+            data = json.load(f)
+
+        assert data["schema_version"] == DATAGEN_MANIFEST_SCHEMA_VERSION
+        assert data["model"] == "unet3d"
+        assert data["num_files_train"] == 168
+        assert data["num_samples_per_file"] == 1
+        assert data["record_length_bytes"] == 146600628
+        assert data["source_datagen_result_dir"] == source_dir
+        # ISO 8601 UTC — the exact format string is trivial to verify,
+        # but the important invariant is "parseable + Z-suffixed".
+        assert isinstance(data["created_at"], str)
+        assert data["created_at"].endswith("Z")
+        # mlpstorage_version is captured — value not pinned here so
+        # the test doesn't break on every version bump.
+        assert isinstance(data["mlpstorage_version"], str)
+        assert data["mlpstorage_version"]
+
+    def test_writes_into_model_subdir(self, tmp_path):
+        # Manifest lives at <data-dir>/<model>/.mlps-datagen-manifest.json —
+        # NOT at the data-dir root. Per-model nesting lets one
+        # --data-dir hold multiple datasets.
+        write_datagen_manifest(
+            data_dir=str(tmp_path),
+            model="retinanet",
+            dataset_params={
+                "num_files_train": 1170301,
+                "num_samples_per_file": 1,
+                "record_length_bytes": 322957,
+            },
+            source_datagen_result_dir="/some/leaf",
+        )
+        assert (tmp_path / "retinanet" / DATAGEN_MANIFEST_FILENAME).is_file()
+        # And NOT at the top level.
+        assert not (tmp_path / DATAGEN_MANIFEST_FILENAME).exists()
+
+    def test_creates_model_subdir_if_missing(self, tmp_path):
+        # The refuse-to-overwrite guard fires BEFORE this helper —
+        # by the time we get here, <data-dir>/<model> may not exist
+        # yet (datagen itself hasn't populated it). The manifest
+        # writer must create the directory as needed.
+        write_datagen_manifest(
+            data_dir=str(tmp_path),
+            model="unet3d",
+            dataset_params=_valid_dataset_params(),
+            source_datagen_result_dir="/some/leaf",
+        )
+        assert (tmp_path / "unet3d").is_dir()
+
+    @pytest.mark.parametrize(
+        "missing_key",
+        ["num_files_train", "num_samples_per_file", "record_length_bytes"],
+    )
+    def test_missing_required_field_raises_loudly(self, tmp_path, missing_key):
+        params = _valid_dataset_params()
+        del params[missing_key]
+        with pytest.raises(ConfigurationError) as excinfo:
+            write_datagen_manifest(
+                data_dir=str(tmp_path),
+                model="unet3d",
+                dataset_params=params,
+                source_datagen_result_dir="/some/leaf",
+            )
+        # Error must name the missing key so operators can see which
+        # workload YAML is broken.
+        assert missing_key in str(excinfo.value)
