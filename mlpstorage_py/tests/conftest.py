@@ -331,7 +331,15 @@ def build_submission(tmp_path, **overrides) -> Path:
     * ``chkpt_cache_flush_gap_seconds`` (int, default 25) — CHKPT-02/04: when
       ``chkpt_split_mode=True`` AND ``chkpt_summary_timestamps=True``, sets the
       gap between a write run's ``end`` and the following read run's ``start`` to
-      this many seconds.
+      this many seconds. Also sets the read metadata's ``invocation_start_time``
+      to write ``end`` + this many seconds — since Rules.md §4.7.1 §4.7.1 measures
+      the failover-callout gap from write.summary.end_time to
+      read.metadata.invocation_start_time, this is the value that
+      ``cache_flush_validation`` sees. May be negative to simulate NTP clock skew
+      between the write and read hosts.
+    * ``chkpt_omit_invocation_start_time`` (bool, default False) — CHKPT-02:
+      when True, do NOT emit ``invocation_start_time`` in read-side metadata.
+      Exercises the "missing invocation_start_time" branch of §4.7.1.
     * ``chkpt_model`` (str, default "llama3-8b") — CHKPT-01: model directory name
       under ``checkpointing/``.
     * ``chkpt_open_num_processes`` (int | None) — CHKPT-01: when non-None, sets
@@ -400,6 +408,7 @@ def build_submission(tmp_path, **overrides) -> Path:
     chkpt_summary_timestamps = overrides.pop("chkpt_summary_timestamps", False)
     chkpt_split_mode = overrides.pop("chkpt_split_mode", False)
     chkpt_cache_flush_gap_seconds = overrides.pop("chkpt_cache_flush_gap_seconds", 25)
+    chkpt_omit_invocation_start_time = overrides.pop("chkpt_omit_invocation_start_time", False)
     chkpt_model = overrides.pop("chkpt_model", "llama3-8b")
     chkpt_open_num_processes = overrides.pop("chkpt_open_num_processes", None)
     chkpt_closed_num_processes = overrides.pop("chkpt_closed_num_processes", None)
@@ -742,6 +751,37 @@ def build_submission(tmp_path, **overrides) -> Path:
                     else:
                         chkpt_meta["args"]["num_checkpoints_write"] = 0
                         chkpt_meta["args"]["num_checkpoints_read"] = 10
+
+                # §4.7.1: metadata.invocation_start_time is the read-side origin
+                # of the failover-callout gap check (see checkpointing_checks.py
+                # cache_flush_validation). Emit unconditionally to mirror real
+                # mlpstorage runs, except when the test explicitly opts out to
+                # exercise the missing-field branch.
+                if chkpt_summary_timestamps and not (
+                    chkpt_omit_invocation_start_time
+                    and chkpt_split_mode
+                    and ts in read_timestamps
+                ):
+                    if chkpt_split_mode:
+                        if ts in write_timestamps:
+                            # Write invocation entered mlpstorage right before write_start.
+                            wi = write_timestamps.index(ts)
+                            _write_start = _BASE_DT + datetime.timedelta(minutes=10 * wi)
+                            chkpt_meta["invocation_start_time"] = _write_start.isoformat()
+                        else:
+                            # Read invocation entered mlpstorage `gap_seconds` after
+                            # the write's summary.end_time — this is what §4.7.1
+                            # measures. Negative gap models NTP clock skew.
+                            ri = read_timestamps.index(ts)
+                            _write_start = _BASE_DT + datetime.timedelta(minutes=10 * ri)
+                            _write_end = _write_start + datetime.timedelta(minutes=5)
+                            _inv = _write_end + datetime.timedelta(
+                                seconds=chkpt_cache_flush_gap_seconds
+                            )
+                            chkpt_meta["invocation_start_time"] = _inv.isoformat()
+                    else:
+                        _ts_start = _BASE_DT + datetime.timedelta(minutes=10 * i)
+                        chkpt_meta["invocation_start_time"] = _ts_start.isoformat()
 
                 (ts_dir / "metadata.json").write_text(
                     json.dumps(chkpt_meta), encoding="utf-8"

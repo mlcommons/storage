@@ -184,7 +184,7 @@ class TestChkpt02_CacheFlushValidation:
         assert "30-second limit" in mock_logger.errors[0]
 
     def test_split_mode_missing_timestamps_emits_4_7_1(self, tmp_path, mock_logger):
-        """Split-mode without timestamps → [4.7.1] 'missing end_time/start_time'."""
+        """Split-mode without write summary end_time → [4.7.1] 'missing end_time'."""
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(
             tmp_path,
@@ -197,7 +197,44 @@ class TestChkpt02_CacheFlushValidation:
         assert len(mock_logger.errors) >= 1
         assert mock_logger.errors[0].startswith("[4.7.1 checkpointCacheFlushValidation]"), \
             f"Expected [4.7.1 checkpointCacheFlushValidation]; got {mock_logger.errors[0]!r}"
-        assert "missing end_time/start_time" in mock_logger.errors[0]
+        assert "missing end_time in write-phase summary.json" in mock_logger.errors[0]
+
+    def test_split_mode_missing_invocation_start_time_emits_4_7_1(self, tmp_path, mock_logger):
+        """Split-mode read metadata w/o invocation_start_time → [4.7.1] regenerate-required."""
+        from mlpstorage_py.tests.conftest import build_submission
+        root = build_submission(
+            tmp_path,
+            chkpt_split_mode=True,
+            chkpt_summary_timestamps=True,
+            chkpt_omit_invocation_start_time=True,
+        )
+        check = _run_checkpointing_check(root, mock_logger)
+        result = check.cache_flush_validation()
+        assert result is False
+        assert len(mock_logger.errors) >= 1
+        assert mock_logger.errors[0].startswith("[4.7.1 checkpointCacheFlushValidation]"), \
+            f"Expected [4.7.1 checkpointCacheFlushValidation]; got {mock_logger.errors[0]!r}"
+        assert "missing invocation_start_time in read-phase metadata" in mock_logger.errors[0]
+
+    def test_split_mode_negative_gap_emits_clock_skew_warning(self, tmp_path, mock_logger):
+        """Split-mode with negative gap → warning (clock skew), not a hard violation."""
+        from mlpstorage_py.tests.conftest import build_submission
+        root = build_submission(
+            tmp_path,
+            chkpt_split_mode=True,
+            chkpt_summary_timestamps=True,
+            chkpt_cache_flush_gap_seconds=-3,
+        )
+        check = _run_checkpointing_check(root, mock_logger)
+        result = check.cache_flush_validation()
+        # Negative gap → warning-level, not an error. cache_flush_validation
+        # returns True (no hard violation) but emits a warning.
+        assert result is True
+        assert mock_logger.errors == []
+        assert any(
+            "gap is negative" in w and "clock skew" in w
+            for w in mock_logger.warnings
+        ), f"Expected clock-skew warning; got warnings={mock_logger.warnings!r}"
 
 
 # ---------------------------------------------------------------------------
