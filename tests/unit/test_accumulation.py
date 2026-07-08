@@ -823,7 +823,10 @@ class TestReserveRunDirectory:
         leaf = tmp_path / "20260708_120804"
         leaf.mkdir()
         (leaf / ".mlps-code-image").write_text("md5-tree-v2:" + "a" * 32)
-        (leaf / f".mlps-code-image.tmp.{os.getpid()}").write_text("partial")
+        # _write_pointer_atomic names its tmp sibling ".<pointer>.tmp.<pid>"
+        # which, since _POINTER_FILENAME already starts with a dot, becomes
+        # "..mlps-code-image.tmp.<pid>" on disk.
+        (leaf / f"..mlps-code-image.tmp.{os.getpid()}").write_text("partial")
 
         reserved, final_dt = reserve_run_directory(
             "20260708_120804", _flat_path_for(tmp_path)
