@@ -43,6 +43,7 @@ import types
 import uuid
 from argparse import Namespace
 from datetime import datetime
+from pathlib import Path
 from typing import Tuple, Dict, Any, List, Optional, Callable, Set, TYPE_CHECKING
 
 from functools import wraps
@@ -174,6 +175,22 @@ class Benchmark(BenchmarkInterface, abc.ABC):
 
         self.command_output_files = list()
         self.run_result_output = self._reserve_run_directory()
+
+        # #725 Bug 2 safety net: write the .mlps-code-image pointer to the
+        # ACTUAL reserved leaf. capture_or_verify_code_image already writes
+        # one at a leaf path derived from a shim namespace + DATETIME_STR,
+        # but the reported repro showed pool images with no referring leaf
+        # pointer — meaning the shim-based write either raised silently or
+        # targeted a path that diverged from self.run_result_output. This
+        # second write is guaranteed against the real leaf and is a no-op
+        # when args._validated_pool_hash is absent (unit tests that bypass
+        # capture, or non-submission modes gated off in capture at D-10).
+        pool_hash = getattr(self.args, '_validated_pool_hash', None)
+        if pool_hash:
+            from mlpstorage_py.submission_checker.tools.code_image import (
+                _write_pointer_atomic,
+            )
+            _write_pointer_atomic(Path(self.run_result_output), pool_hash, self.logger)
 
         # Code-image capture happens in ``mlpstorage_py/main.py`` (call to
         # ``capture_or_verify_code_image``) BEFORE ``Benchmark`` construction.
