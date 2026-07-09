@@ -213,7 +213,10 @@ def run_benchmark(args, run_datetime):
             logger=logger
         ) as (update, set_desc):
             # Errors from validation will propagate after progress cleanup
-            validate_benchmark_environment(args, logger=logger)
+            validate_benchmark_environment(
+                args, logger=logger,
+                skip_remote_checks=getattr(args, 'skip_ssh_check', False),
+            )
     else:
         logger.warning("Skipping environment validation (--skip-validation flag)")
 

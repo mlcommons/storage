@@ -321,6 +321,17 @@ def add_universal_arguments(parser, req_results, req_systemname=False):
         help="Skip environment validation (MPI, SSH, DLIO checks). Useful for debugging.",
     )
     validation_args.add_argument(
+        "--skip-ssh-check",
+        action="store_true",
+        help=(
+            "Skip only the SSH connectivity preflight to remote hosts. Use for "
+            "scheduler-launched runs (HPE/Cray PALS 'mpiexec', Slurm 'srun') "
+            "where ranks are spawned by the batch daemon rather than over SSH. "
+            "Unlike --skip-validation, all other checks (MPI/DLIO dependencies, "
+            "filesystem separation, paths) still run."
+        ),
+    )
+    validation_args.add_argument(
         "--skip-fs-separation-gate",
         action="store_true",
         help=(
