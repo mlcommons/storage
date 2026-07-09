@@ -677,18 +677,14 @@ class TrainingBenchmark(DLIOBenchmark):
             # directories are created if we abort. Whatif skips both
             # guards (matches D-29 reportgen policy and the "no
             # significant validation" direction for whatif).
+            # The refuse-to-overwrite helper detects object-storage
+            # URIs via scheme and dispatches to s3dlio internally, so
+            # no storage_type gate is needed here.
             if self.args.command == "datagen" and self.args.mode != "whatif":
                 validate_supported_model(self.args.model, self.args.mode)
-                storage_type = self.params_dict.get(
-                    "storage.storage_type", "local"
+                assert_data_dir_hierarchy_absent(
+                    self.args.data_dir, self.args.model
                 )
-                if storage_type == "local":
-                    # Object-storage (S3) presence checks are a
-                    # different API and are out of scope for the
-                    # local-filesystem refuse-to-overwrite guard.
-                    assert_data_dir_hierarchy_absent(
-                        self.args.data_dir, self.args.model
-                    )
             # The datasize command uses --data-dir and needs to generate a command that also calls --data-dir
             # The add_datadir_param would convert --data-dir to --dataset.data_folder which is invalid to
             # mlpstorage.
@@ -979,11 +975,11 @@ class TrainingBenchmark(DLIOBenchmark):
     def _post_datagen_actions(self):
         """WARN for missing leaf files, then write the datagen manifest.
 
-        Leaf-presence check runs unconditionally — any missing file
-        surfaces as a WARN but does not flip the exit code. Manifest
-        write is local-storage-only (S3 presence semantics are a
-        separate API and the future run-vs-datagen size check would
-        need a different discovery path for object storage).
+        Leaf-presence check runs unconditionally on the local
+        ``run_result_output`` — any missing file surfaces as a WARN
+        but does not flip the exit code. The manifest writer detects
+        object-storage URIs via ``--data-dir``'s scheme and dispatches
+        to s3dlio internally, so this method is backend-agnostic.
         """
         missing = validate_datagen_leaf(self.run_result_output)
         for item in missing:
@@ -991,9 +987,6 @@ class TrainingBenchmark(DLIOBenchmark):
                 f'Datagen output leaf incomplete: {item}'
             )
 
-        storage_type = self.params_dict.get("storage.storage_type", "local")
-        if storage_type != "local":
-            return
         dataset_params = (self.combined_params or {}).get("dataset", {})
         manifest_path = write_datagen_manifest(
             data_dir=self.args.data_dir,

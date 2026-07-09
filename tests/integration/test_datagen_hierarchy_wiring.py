@@ -289,23 +289,6 @@ class TestPostRunManifestWrite:
         )
         assert not os.path.exists(manifest_path)
 
-    def test_datagen_object_storage_skips_local_manifest_write(self, tmp_path):
-        (tmp_path / "data").mkdir()
-        benchmark, _logger = _instantiate_datagen_benchmark(tmp_path)
-        # Simulate the object-storage branch: params_dict was
-        # written by _apply_object_storage_params in production.
-        benchmark.params_dict["storage.storage_type"] = "s3"
-
-        result = benchmark._run()
-
-        assert result == EXIT_CODE.SUCCESS
-        # No local manifest for object storage — the file path we
-        # would have written to must not exist.
-        manifest_path = os.path.join(
-            benchmark.args.data_dir, "unet3d", DATAGEN_MANIFEST_FILENAME
-        )
-        assert not os.path.exists(manifest_path)
-
     def test_datagen_missing_dlio_field_returns_failure(self, tmp_path):
         (tmp_path / "data").mkdir()
         benchmark, logger = _instantiate_datagen_benchmark(tmp_path)
