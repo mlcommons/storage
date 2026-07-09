@@ -132,6 +132,12 @@ torchaudio = [{ index = "pytorch-cpu" }]
 # Pinned to a specific commit for reproducibility; bump by updating `rev` and
 # re-running `uv lock --upgrade-package dlio-benchmark`.
 # Commit history (most recent first):
+#   - DLIO PR #48 fix for storage #741: drop page cache before the
+#     read_threads memory guard — prevents run 2..N of a 5-run
+#     submission from tripping the guard on reclaimable Lustre page
+#     cache pinned by the prior run.  Gated on local_rank() == 0 (not
+#     MPI.node(), which is unreliable under --map-by node).  Reuses
+#     the existing DLIO_DROP_CACHES_TIMEOUT knob.
 #   - DLIO PR #47 fix for storage #626 (bucket 2): shared 64-way concurrency
 #     ceiling across object-storage libraries — caps s3dlio /
 #     ObjStoreLibStorage / SimpleStreamingCheckpointing on the same
@@ -170,7 +176,7 @@ torchaudio = [{ index = "pytorch-cpu" }]
 #   - DLIO PR #23 fix for storage #391 part 2 (sudo -n + warn-once for drop_caches)
 #   - DLIO PR #22 fix for storage #415 (mpi4py auto-init in spawn workers)
 #   - DLIO PR #21 fix for storage #391 part 1 (TorchIterableDatasetSimple gating)
-dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "86945a7a203912435774e0972f6350221446229e" }
+dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "95c6a9d46a2a072b7f1455b65b3a5e22602b53e5" }
 
 [dependency-groups]
 dev = [
