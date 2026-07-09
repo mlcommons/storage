@@ -540,6 +540,94 @@ class TestResultFilesExtractor:
 
         assert result is None
 
+    def test_from_metadata_falls_back_to_summary_metric_when_missing(
+        self, mock_logger, tmp_path,
+    ):
+        """Issue #733 — training metadata.json omits the `metric` block, so
+        `_from_metadata` must fall back to summary.json's `metric` dict
+        (filtered to list-valued keys) instead of returning `metrics=None`.
+        Otherwise `_aggregate_training` sees the metric-key intersection as
+        empty and silently emits {} for the whole run set — the AU never
+        makes it into results.json.
+        """
+        result_dir = tmp_path / "training_run"
+        result_dir.mkdir()
+
+        # Real training metadata.json does NOT include a 'metrics' key.
+        metadata = {
+            "benchmark_type": "training",
+            "model": "unet3d",
+            "command": "run",
+            "run_datetime": "20260701_100000",
+            "num_processes": 8,
+            "parameters": {"dataset": {"num_files_train": 400}},
+        }
+        with open(result_dir / "training_20260701_100000_metadata.json", 'w') as f:
+            json.dump(metadata, f)
+
+        # summary.json's `metric` block has list-valued per-epoch series
+        # (used by _aggregate_training) alongside scalar/string entries
+        # that fmean cannot consume — the fallback must filter these out.
+        summary = {
+            "start": "2026-07-01 10:00:00",
+            "end": "2026-07-01 10:15:00",
+            "metric": {
+                "train_au_percentage": [96.1, 95.8, 96.4],
+                "train_throughput_samples_per_second": [128.0, 130.0, 129.5],
+                "train_au_mean_percentage": 96.1,
+                "train_au_meet_expectation": "success",
+            },
+        }
+        with open(result_dir / "summary.json", 'w') as f:
+            json.dump(summary, f)
+
+        extractor = ResultFilesExtractor()
+        result = extractor._from_metadata(metadata, str(result_dir))
+
+        assert result.metrics is not None, (
+            "training metadata.json lacks 'metrics'; _from_metadata must "
+            "fall back to summary.json's 'metric' block (#733)"
+        )
+        assert "train_au_percentage" in result.metrics
+        assert result.metrics["train_au_percentage"] == [96.1, 95.8, 96.4]
+        assert "train_throughput_samples_per_second" in result.metrics
+        # Scalar/string entries must be filtered out so aggregation's
+        # `fmean(metric_list)` doesn't blow up on non-iterables.
+        assert "train_au_mean_percentage" not in result.metrics
+        assert "train_au_meet_expectation" not in result.metrics
+
+    def test_from_metadata_prefers_explicit_metrics_over_summary(
+        self, mock_logger, tmp_path,
+    ):
+        """When metadata.json DOES carry a populated `metrics` block
+        (checkpointing case), the summary.json fallback must not clobber
+        it — the metadata value wins.
+        """
+        result_dir = tmp_path / "checkpointing_run"
+        result_dir.mkdir()
+
+        metadata = {
+            "benchmark_type": "checkpointing",
+            "model": "llama3-8b",
+            "command": "run",
+            "run_datetime": "20260701_100000",
+            "num_processes": 8,
+            "parameters": {},
+            "metrics": {"checkpoint_save_time": [1.2, 1.3, 1.1]},
+        }
+        with open(result_dir / "checkpointing_20260701_100000_metadata.json", 'w') as f:
+            json.dump(metadata, f)
+
+        # A stray summary.json should not overwrite the explicit metadata.
+        summary = {"metric": {"unrelated_key": [999.0]}}
+        with open(result_dir / "summary.json", 'w') as f:
+            json.dump(summary, f)
+
+        extractor = ResultFilesExtractor()
+        result = extractor._from_metadata(metadata, str(result_dir))
+
+        assert result.metrics == {"checkpoint_save_time": [1.2, 1.3, 1.1]}
+
 
 class TestExtractorIntegration:
     """Integration tests using fixture data from tests/fixtures."""

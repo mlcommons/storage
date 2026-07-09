@@ -924,15 +924,30 @@ class ResultFilesExtractor:
             pass  # TODO: Reconstruct system_info
 
         # DLIO's summary.json is the source of truth for phase end timestamps
-        # (Rules.md §4.7.1 cache-flush gap check). The run tool doesn't populate
-        # metadata['end_datetime'] for checkpointing, so fall back to summary
-        # to keep the metadata- and summary-based extraction paths agreeing
-        # on that field. Issue #618.
+        # (Rules.md §4.7.1 cache-flush gap check) AND for training per-run
+        # metric series. The run tool doesn't populate metadata['end_datetime']
+        # for checkpointing, and training's Benchmark.write_metadata never
+        # writes a 'metrics' block at all — the training AU only lives in
+        # summary.json under metric.train_au_percentage etc. Reuse a single
+        # summary read to backfill both. Issues #618 and #733.
         end_datetime = metadata.get('end_datetime', '')
-        if not end_datetime:
+        run_metrics = metadata.get('metrics')
+        if not end_datetime or not run_metrics:
             summary = self._load_summary(result_dir)
             if summary:
-                end_datetime = summary.get('end_time') or summary.get('end', '')
+                if not end_datetime:
+                    end_datetime = summary.get('end_time') or summary.get('end', '')
+                if not run_metrics:
+                    metric_block = summary.get('metric')
+                    if isinstance(metric_block, dict):
+                        # Filter to list-valued keys so _aggregate_training's
+                        # fmean(metric_list) doesn't blow up on scalars like
+                        # train_au_mean_percentage or strings like
+                        # train_au_meet_expectation.
+                        run_metrics = {
+                            k: v for k, v in metric_block.items()
+                            if isinstance(v, list)
+                        } or None
 
         return BenchmarkRunData(
             benchmark_type=benchmark_type,
@@ -944,7 +959,7 @@ class ResultFilesExtractor:
             parameters=metadata.get('parameters', {}),
             override_parameters=metadata.get('override_parameters', {}),
             system_info=system_info,
-            metrics=metadata.get('metrics'),
+            metrics=run_metrics,
             result_dir=result_dir,
             accelerator=metadata.get('accelerator'),
         )
