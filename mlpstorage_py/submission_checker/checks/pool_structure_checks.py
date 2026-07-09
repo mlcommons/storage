@@ -180,7 +180,9 @@ class PoolStructureCheck(BaseCheck):
                         "CHECK-01", "poolPointerResolution",
                         str(org_root),
                         "No pool root found for org %s: missing %s/.mlps-image-pool. "
-                        "Run mlpstorage to migrate.",
+                        "Auto-migration fires on the next `mlpstorage {closed|open} "
+                        "<benchmark> {datasize|datagen|run}` invocation against this "
+                        "--results-dir; `mlpstorage validate` does not migrate.",
                         submitter, str(org_root),
                     )
                     valid = False
@@ -387,8 +389,10 @@ class PoolStructureCheck(BaseCheck):
                 remaining = len(offenders) - 1
                 msg = (
                     "Legacy code/ layout detected at %s. "
-                    "Run mlpstorage against this results directory to "
-                    "auto-migrate before revalidating."
+                    "Auto-migration fires on the next `mlpstorage "
+                    "{closed|open} <benchmark> {datasize|datagen|run}` "
+                    "invocation against this --results-dir; `mlpstorage "
+                    "validate` does not migrate."
                 )
                 if remaining > 0:
                     msg += " (%d additional legacy code/ directories found)" % remaining
@@ -412,8 +416,10 @@ class PoolStructureCheck(BaseCheck):
                     "CHECK-04", "poolLegacyCheck",
                     str(org_root),
                     "Partial migration detected for org %s (pool images found "
-                    "but .mlps-image-pool sentinel absent). Run mlpstorage to "
-                    "complete migration.",
+                    "but .mlps-image-pool sentinel absent). Auto-heal fires on "
+                    "the next `mlpstorage {closed|open} <benchmark> "
+                    "{datasize|datagen|run}` invocation against this "
+                    "--results-dir; `mlpstorage validate` does not migrate.",
                     submitter,
                 )
                 valid = False
