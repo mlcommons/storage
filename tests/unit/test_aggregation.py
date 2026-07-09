@@ -1095,6 +1095,149 @@ class TestInvalidRulesStrict:
 
 
 # --------------------------------------------------------------------------- #
+# TestDatagenReportgenValidation — post-#717 datagen-side checks              #
+# --------------------------------------------------------------------------- #
+
+
+def _make_datagen_run(dest_root: pathlib.Path, *, model: str, ts: str,
+                     populate_leaf: bool = True) -> BenchmarkRun:
+    """Build a training datagen ``BenchmarkRun`` and optionally populate its leaf.
+
+    Path shape mirrors production (``rules/utils.py:285-300``):
+        ``<dest_root>/<ts>/`` with either the four required files +
+        dlio_config folder (populate_leaf=True) or an empty dir
+        (populate_leaf=False).
+    """
+    leaf = dest_root / ts
+    leaf.mkdir(parents=True, exist_ok=True)
+    if populate_leaf:
+        for name in (
+            "training_datagen.stdout.log",
+            "training_datagen.stderr.log",
+            "dlio.log",
+            f"training_{ts}_metadata.json",
+        ):
+            (leaf / name).write_text("")
+        dlio_cfg = leaf / "dlio_config"
+        dlio_cfg.mkdir()
+        for name in ("config.yaml", "hydra.yaml", "overrides.yaml"):
+            (dlio_cfg / name).write_text("")
+    return _make_run(
+        benchmark_type=BENCHMARK_TYPES.training,
+        model=model,
+        result_dir=str(leaf),
+        metrics={},
+        accelerator=None,
+        run_datetime=ts,
+        command="datagen",
+    )
+
+
+class TestDatagenReportgenValidation:
+    """Datagen-side reportgen checks — supported-model INVALID + leaf WARN.
+
+    Fires only on training datagen groups (``runs[0].command == 'datagen'``
+    and ``runs[0].benchmark_type == training``). Whatif rows skip both
+    checks per the D-29 policy the #717 fix already established.
+    """
+
+    def _row_issue_text(self, result) -> str:
+        return "; ".join(
+            getattr(issue, "message", "") or str(issue)
+            for issue in (result.issues or [])
+        )
+
+    def test_unsupported_model_datagen_group_marked_invalid(self, tmp_path):
+        """Datagen leaf whose model is not in MODELS_CLOSED → row is INVALID.
+
+        Uses ``cosmoflow`` — a v2.0 model no longer in the v3.0 allowlist.
+        Full leaf files are present so any INVALID must come from the
+        model check, not from a leaf-presence path.
+        """
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "closed" / "acme" / "results" / "sys-a" / "training" / "cosmoflow" / "datagen"
+        run = _make_datagen_run(runs_root, model="cosmoflow", ts="20260708_120000")
+
+        _run_process_workload_groups(gen, [run])
+
+        assert len(gen.workload_results) == 1
+        result = next(iter(gen.workload_results.values()))
+        assert result.category == PARAM_VALIDATION.INVALID
+        text = self._row_issue_text(result)
+        assert "cosmoflow" in text
+        assert "closed" in text
+
+    def test_supported_model_datagen_group_not_invalid(self, tmp_path):
+        """Datagen leaf with unet3d + populated files → NOT INVALID."""
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "closed" / "acme" / "results" / "sys-a" / "training" / "unet3d" / "datagen"
+        run = _make_datagen_run(runs_root, model="unet3d", ts="20260708_130000")
+
+        _run_process_workload_groups(gen, [run])
+
+        result = next(iter(gen.workload_results.values()))
+        assert result.category != PARAM_VALIDATION.INVALID, (
+            f"Expected non-INVALID for healthy unet3d datagen; got "
+            f"category={result.category!r}, issues={self._row_issue_text(result)!r}"
+        )
+
+    def test_whatif_unsupported_model_datagen_group_not_invalid(self, tmp_path):
+        """Whatif skips the supported-model gate per D-29."""
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "whatif" / "training" / "cosmoflow" / "datagen"
+        run = _make_datagen_run(runs_root, model="cosmoflow", ts="20260708_140000")
+
+        _run_process_workload_groups(gen, [run])
+
+        result = next(iter(gen.workload_results.values()))
+        assert result.category != PARAM_VALIDATION.INVALID
+        # And no unsupported-model text should have leaked through.
+        text = self._row_issue_text(result)
+        assert "not permitted" not in text
+        assert "cosmoflow" not in text or "Model 'cosmoflow'" not in text
+
+    def test_missing_leaf_files_datagen_warn_not_invalid(self, tmp_path):
+        """Datagen leaf missing files → row carries WARN messages, category NOT INVALID.
+
+        A malformed datagen contribution to a submission is worth
+        surfacing (so the operator can regenerate) but does not by
+        itself invalidate the submission.
+        """
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "closed" / "acme" / "results" / "sys-a" / "training" / "unet3d" / "datagen"
+        run = _make_datagen_run(
+            runs_root, model="unet3d", ts="20260708_150000", populate_leaf=False
+        )
+
+        _run_process_workload_groups(gen, [run])
+
+        result = next(iter(gen.workload_results.values()))
+        assert result.category != PARAM_VALIDATION.INVALID, (
+            f"Missing leaf files should WARN, not INVALID; got category={result.category!r}"
+        )
+        text = self._row_issue_text(result)
+        # WARN messages surface with a distinguishable prefix so the
+        # CSV column stays parseable.
+        assert "[WARN]" in text, f"Expected [WARN] prefix in issues text; got: {text!r}"
+        assert "dlio.log" in text or "stdout" in text or "metadata" in text, text
+
+    def test_healthy_leaf_datagen_no_warn_no_invalid(self, tmp_path):
+        """Fully-populated datagen leaf produces no datagen-side WARN and no INVALID."""
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "closed" / "acme" / "results" / "sys-a" / "training" / "unet3d" / "datagen"
+        run = _make_datagen_run(runs_root, model="unet3d", ts="20260708_160000")
+
+        _run_process_workload_groups(gen, [run])
+
+        result = next(iter(gen.workload_results.values()))
+        assert result.category != PARAM_VALIDATION.INVALID
+        text = self._row_issue_text(result)
+        assert "[WARN]" not in text, (
+            f"No [WARN] should be emitted for a healthy leaf; got: {text!r}"
+        )
+
+
+# --------------------------------------------------------------------------- #
 # TestColumnOrdering — D-14 / D-18                                            #
 # --------------------------------------------------------------------------- #
 
