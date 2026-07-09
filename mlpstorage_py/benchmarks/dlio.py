@@ -573,7 +573,14 @@ class DLIOBenchmark(Benchmark, abc.ABC):
         if hasattr(self.args, "command"):
             output_file_prefix += f"_{self.args.command}"
 
-        self._execute_command(cmd, output_file_prefix=output_file_prefix)
+        # Capture the DLIO exit status so _run() can gate side-effects
+        # (notably the datagen manifest write) on real success. Prior
+        # to storage#744, the rc was discarded and a failed DLIO/MPI
+        # datagen still produced a success-looking manifest.
+        _stdout, _stderr, rc = self._execute_command(
+            cmd, output_file_prefix=output_file_prefix
+        )
+        self._last_command_rc = rc
 
     @abc.abstractmethod
     def add_workflow_to_cmd(self, cmd) -> str:
@@ -955,13 +962,26 @@ class TrainingBenchmark(DLIOBenchmark):
         except Exception as e:
             self.logger.error(f'Error occurred while executing command: {str(e)}')
             return EXIT_CODE.FAILURE
-        # Post-datagen actions: leaf WARN + self-describing manifest
-        # write. Runs only after DLIO's datagen command returned
-        # success and only outside whatif (whatif is simulation and
-        # skips per D-29 policy).
+        # Post-datagen actions: leaf completeness check + self-describing
+        # manifest write. Runs only after DLIO's datagen command returned
+        # success and only outside whatif (whatif is simulation and skips
+        # per D-29 policy). storage#744: gate on the DLIO exit code and
+        # on required-leaf presence — a success-looking manifest written
+        # after a failed run lets downstream steps treat an incomplete
+        # dataset as valid.
         if self.args.command == "datagen" and self.args.mode != "whatif":
+            rc = getattr(self, '_last_command_rc', 0)
+            if rc != 0:
+                self.logger.error(
+                    f'DLIO datagen command exited with non-zero status '
+                    f'({rc}); skipping datagen manifest write. The dataset '
+                    f'under "{self.args.data_dir}" is incomplete and must '
+                    f'be regenerated.'
+                )
+                return EXIT_CODE.FAILURE
             try:
-                self._post_datagen_actions()
+                if not self._post_datagen_actions():
+                    return EXIT_CODE.FAILURE
             except ConfigurationError as e:
                 # A workload YAML that lacks the three DLIO fields is
                 # a real bug — surface loudly rather than write a
@@ -972,20 +992,30 @@ class TrainingBenchmark(DLIOBenchmark):
                 return EXIT_CODE.FAILURE
         return EXIT_CODE.SUCCESS
 
-    def _post_datagen_actions(self):
-        """WARN for missing leaf files, then write the datagen manifest.
+    def _post_datagen_actions(self) -> bool:
+        """Verify the datagen leaf, then write the manifest.
 
-        Leaf-presence check runs unconditionally on the local
-        ``run_result_output`` — any missing file surfaces as a WARN
-        but does not flip the exit code. The manifest writer detects
+        Returns ``True`` on success (manifest written), ``False`` when a
+        required leaf artifact is missing and the manifest was skipped.
+        Prior to storage#744 the leaf-presence check only WARNed and the
+        manifest was written unconditionally; a partial DLIO run left
+        behind a success-looking marker. The manifest writer detects
         object-storage URIs via ``--data-dir``'s scheme and dispatches
         to s3dlio internally, so this method is backend-agnostic.
         """
         missing = validate_datagen_leaf(self.run_result_output)
-        for item in missing:
-            self.logger.warning(
-                f'Datagen output leaf incomplete: {item}'
+        if missing:
+            for item in missing:
+                self.logger.error(
+                    f'Datagen output leaf incomplete: {item}'
+                )
+            self.logger.error(
+                f'Datagen leaf under "{self.run_result_output}" is missing '
+                f'{len(missing)} required artifact(s); skipping datagen '
+                f'manifest write. The dataset under "{self.args.data_dir}" '
+                f'is incomplete and must be regenerated.'
             )
+            return False
 
         dataset_params = (self.combined_params or {}).get("dataset", {})
         manifest_path = write_datagen_manifest(
@@ -995,6 +1025,7 @@ class TrainingBenchmark(DLIOBenchmark):
             source_datagen_result_dir=self.run_result_output,
         )
         self.logger.info(f'Datagen manifest written: {manifest_path}')
+        return True
 
 
 class CheckpointingBenchmark(DLIOBenchmark):

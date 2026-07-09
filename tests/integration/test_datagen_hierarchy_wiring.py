@@ -244,9 +244,39 @@ def _instantiate_datagen_benchmark(tmp_path, *, model="unet3d", mode="closed"):
     benchmark = TrainingBenchmark(args, logger=logger)
     # Patch the DLIO invocation path so _run does not actually shell out.
     # The command_method_map for 'datagen' points at execute_command;
-    # substitute a no-op so _run reports success without invoking DLIO.
-    benchmark.command_method_map["datagen"] = MagicMock(return_value=None)
+    # substitute a stub that sets _last_command_rc=0 (matching a
+    # successful DLIO invocation) so the storage#744 rc gate lets the
+    # post-run manifest write proceed.
+    def _fake_execute_command():
+        benchmark._last_command_rc = 0
+    benchmark.command_method_map["datagen"] = MagicMock(
+        side_effect=_fake_execute_command
+    )
     return benchmark, logger
+
+
+def _populate_healthy_datagen_leaf(benchmark):
+    """Populate the reserved leaf with the artifacts DLIO would produce.
+
+    Mirrors what production DLIO writes so ``validate_datagen_leaf``
+    returns an empty list and the storage#744 leaf-completeness gate
+    admits the manifest write.
+    """
+    leaf = benchmark.run_result_output
+    for name in (
+        "training_datagen.stdout.log",
+        "training_datagen.stderr.log",
+        "dlio.log",
+    ):
+        open(os.path.join(leaf, name), "w").close()
+    # The mlpstorage-injected metadata name is timestamped; the leaf's
+    # basename is the datetime segment used in the metadata filename.
+    ts = os.path.basename(leaf)
+    open(os.path.join(leaf, f"training_{ts}_metadata.json"), "w").close()
+    dlio_cfg = os.path.join(leaf, "dlio_config")
+    os.makedirs(dlio_cfg)
+    for name in ("config.yaml", "hydra.yaml", "overrides.yaml"):
+        open(os.path.join(dlio_cfg, name), "w").close()
 
 
 class TestPostRunManifestWrite:
@@ -255,6 +285,7 @@ class TestPostRunManifestWrite:
     def test_datagen_success_writes_manifest_with_dlio_fields(self, tmp_path):
         (tmp_path / "data").mkdir()
         benchmark, _logger = _instantiate_datagen_benchmark(tmp_path)
+        _populate_healthy_datagen_leaf(benchmark)
 
         result = benchmark._run()
 
@@ -292,6 +323,7 @@ class TestPostRunManifestWrite:
     def test_datagen_missing_dlio_field_returns_failure(self, tmp_path):
         (tmp_path / "data").mkdir()
         benchmark, logger = _instantiate_datagen_benchmark(tmp_path)
+        _populate_healthy_datagen_leaf(benchmark)
         # Simulate a broken workload YAML: strip record_length_bytes
         # from combined_params so write_datagen_manifest raises.
         del benchmark.combined_params["dataset"]["record_length_bytes"]
@@ -311,65 +343,105 @@ class TestPostRunManifestWrite:
         ), f"Expected 'record_length_bytes' in error logs; got {error_msgs!r}"
 
 
-class TestPostRunLeafWarn:
-    """Missing leaf files produce WARN log entries, not FAILURE."""
+class TestPostRunLeafGate:
+    """storage#744: missing leaf artifacts fail the run — no manifest written.
 
-    def test_missing_leaf_files_emit_warnings(self, tmp_path):
+    Prior to storage#744 the leaf-presence check only WARNed; the manifest
+    was written even when DLIO had failed to produce required artifacts,
+    which let downstream steps treat an incomplete dataset as valid.
+    """
+
+    def test_missing_leaf_files_fail_and_skip_manifest(self, tmp_path):
         (tmp_path / "data").mkdir()
         benchmark, logger = _instantiate_datagen_benchmark(tmp_path)
         # The result_dir was reserved during __init__ (empty dir —
-        # DLIO would populate it, but our mocked command_method_map
-        # never runs). validate_datagen_leaf should report every
-        # required file/folder as missing.
+        # DLIO would populate it, but our fake execute_command never
+        # invokes DLIO). validate_datagen_leaf should report every
+        # required file/folder as missing → FAILURE, no manifest.
 
         result = benchmark._run()
 
-        assert result == EXIT_CODE.SUCCESS
-        warn_msgs = [
+        assert result == EXIT_CODE.FAILURE
+        error_msgs = [
             call.args[0]
-            for call in logger.warning.call_args_list
+            for call in logger.error.call_args_list
             if call.args
         ]
-        # Sanity: at least the four required files + dlio_config folder
-        # should surface as WARN. Assert on a couple of representative
-        # anchors rather than the full list to avoid over-pinning.
-        joined = "\n".join(warn_msgs)
+        joined = "\n".join(error_msgs)
         assert "stdout" in joined, joined
         assert "dlio.log" in joined, joined
         assert "dlio_config" in joined, joined
+        # The summary line names the incomplete dataset the user must
+        # regenerate — the whole point of the loud failure.
+        assert any(
+            "must be regenerated" in m for m in error_msgs
+        ), f"Expected 'must be regenerated' summary; got {error_msgs!r}"
+        # And the manifest MUST NOT exist — that's the storage#744 bug.
+        manifest_path = os.path.join(
+            benchmark.args.data_dir, "unet3d", DATAGEN_MANIFEST_FILENAME
+        )
+        assert not os.path.exists(manifest_path), (
+            f"Manifest written despite missing leaf artifacts: {manifest_path}"
+        )
 
-    def test_healthy_leaf_produces_no_warn(self, tmp_path):
+    def test_healthy_leaf_produces_no_error(self, tmp_path):
         (tmp_path / "data").mkdir()
         benchmark, logger = _instantiate_datagen_benchmark(tmp_path)
-        # Simulate DLIO's on-disk output: populate the reserved
-        # result_dir with all required files.
-        leaf = benchmark.run_result_output
-        for name in (
-            "training_datagen.stdout.log",
-            "training_datagen.stderr.log",
-            "dlio.log",
-        ):
-            open(os.path.join(leaf, name), "w").close()
-        # The mlpstorage-injected metadata name is timestamped;
-        # os.path.basename(leaf) is the datetime segment used in
-        # the metadata filename in production.
-        ts = os.path.basename(leaf)
-        open(os.path.join(leaf, f"training_{ts}_metadata.json"), "w").close()
-        dlio_cfg = os.path.join(leaf, "dlio_config")
-        os.makedirs(dlio_cfg)
-        for name in ("config.yaml", "hydra.yaml", "overrides.yaml"):
-            open(os.path.join(dlio_cfg, name), "w").close()
+        _populate_healthy_datagen_leaf(benchmark)
 
         result = benchmark._run()
 
         assert result == EXIT_CODE.SUCCESS
-        warn_msgs = [
+        error_msgs = [
             call.args[0]
-            for call in logger.warning.call_args_list
+            for call in logger.error.call_args_list
             if call.args and "Datagen output leaf" in call.args[0]
         ]
-        assert warn_msgs == [], (
-            f"Unexpected leaf-incomplete warnings on healthy leaf: {warn_msgs}"
+        assert error_msgs == [], (
+            f"Unexpected leaf-incomplete errors on healthy leaf: {error_msgs}"
+        )
+
+
+class TestDLIOFailureGate:
+    """storage#744: non-zero DLIO exit code fails the run — no manifest written."""
+
+    def test_dlio_nonzero_rc_skips_manifest_and_returns_failure(self, tmp_path):
+        (tmp_path / "data").mkdir()
+        benchmark, logger = _instantiate_datagen_benchmark(tmp_path)
+        # Even with a healthy leaf on disk, a non-zero DLIO rc must
+        # block the manifest — the leaf may look complete but the run
+        # itself failed (killed process, MPI bad-termination, etc.).
+        _populate_healthy_datagen_leaf(benchmark)
+        # Override the fake execute_command to simulate mpiexec
+        # returning a non-zero exit code (as it does when a rank is
+        # killed with EXIT CODE: 9).
+        def _fake_execute_failure():
+            benchmark._last_command_rc = 9
+        benchmark.command_method_map["datagen"] = MagicMock(
+            side_effect=_fake_execute_failure
+        )
+
+        result = benchmark._run()
+
+        assert result == EXIT_CODE.FAILURE
+        error_msgs = [
+            call.args[0]
+            for call in logger.error.call_args_list
+            if call.args
+        ]
+        assert any(
+            "non-zero status" in m and "9" in m for m in error_msgs
+        ), f"Expected rc-9 error message; got {error_msgs!r}"
+        assert any(
+            "must be regenerated" in m for m in error_msgs
+        ), f"Expected 'must be regenerated' summary; got {error_msgs!r}"
+        # And the manifest MUST NOT exist even though the on-disk leaf
+        # was populated — the run itself failed.
+        manifest_path = os.path.join(
+            benchmark.args.data_dir, "unet3d", DATAGEN_MANIFEST_FILENAME
+        )
+        assert not os.path.exists(manifest_path), (
+            f"Manifest written despite non-zero DLIO rc: {manifest_path}"
         )
 
 
@@ -454,11 +526,16 @@ class TestTrainingBenchmarkObjectStorageWiring:
             assert "unet3d" in list_uri
             assert list_kwargs.get("recursive") is False
 
-            # Replace DLIO invocation with a no-op so _run reports
-            # SUCCESS without shelling out.
+            # Replace DLIO invocation with a stub that sets rc=0 (the
+            # storage#744 gate). Populate the local leaf with the
+            # DLIO-produced artifacts so the leaf-completeness gate
+            # also admits the write.
+            def _fake_execute_command():
+                benchmark._last_command_rc = 0
             benchmark.command_method_map["datagen"] = MagicMock(
-                return_value=None
+                side_effect=_fake_execute_command
             )
+            _populate_healthy_datagen_leaf(benchmark)
 
             result = benchmark._run()
 
