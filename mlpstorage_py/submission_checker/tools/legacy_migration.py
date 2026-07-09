@@ -25,6 +25,7 @@ Public API:
 from __future__ import annotations
 
 import os
+import re
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
@@ -50,6 +51,15 @@ from mlpstorage_py.rules.utils import MLPSTORAGE_ORGNAME_ENVVAR
 
 # Authoritative "migration done" signal per D-72.
 _SENTINEL_FILENAME = ".mlps-image-pool"
+
+# Datetime-shaped run-leaf directory names: `YYYYMMDD_HHMMSS`. Mirrors
+# `_TIMESTAMP_RE` in submission_checker/checks/pool_structure_checks.py so
+# migration and CHECK-01 agree on what counts as a run leaf. Without this
+# filter the fixed-depth globs below match subdirectories of a leaf
+# (`dlio_config/`, `collector-staging/`, `.chk_iterations/`, ...), and
+# pointer files land inside `dlio_config/` — breaking the 2.1.15/2.1.20/
+# 2.1.26 exact-file-set checks (#725 Bug 1).
+_LEAF_NAME_RE = re.compile(r"^\d{8}_\d{6}$")
 
 
 @dataclass(frozen=True)
@@ -238,6 +248,12 @@ def _enumerate_run_leaves(subtree_root: Path, log) -> list[Path]:
     - Training/kv_cache (5-level): ``results/<sys>/<bench>/<model>/<cmd>/<dt>/``
     - Checkpointing (4-level): ``results/<sys>/checkpointing/<model>/<dt>/``
     - Vector_database (6-level): ``results/<sys>/<bench>/<eng>/<idx>/<cmd>/<dt>/``
+
+    Each yielded dir's basename must match ``YYYYMMDD_HHMMSS``. The globs
+    overlap between shapes (e.g. training's 5-level glob also matches
+    checkpointing subdirs like ``<dt>/dlio_config``), so an explicit
+    filename filter is required to keep pointer writes out of leaf
+    subdirectories (#725 Bug 1).
     """
     results = subtree_root / "results"
     if not results.is_dir():
@@ -246,18 +262,14 @@ def _enumerate_run_leaves(subtree_root: Path, log) -> list[Path]:
     leaves: list[Path] = []
     seen: set[Path] = set()
 
-    for p in results.glob("*/*/*/*/*"):
-        if p.is_dir() and p not in seen:
-            leaves.append(p)
-            seen.add(p)
-
-    for p in results.glob("*/*/*/*"):
-        if p.is_dir() and p not in seen and "checkpointing" in p.parts:
-            leaves.append(p)
-            seen.add(p)
-
-    for p in results.glob("*/*/*/*/*/*"):
-        if p.is_dir() and p not in seen:
+    for glob in ("*/*/*/*", "*/*/*/*/*", "*/*/*/*/*/*"):
+        for p in results.glob(glob):
+            if p in seen:
+                continue
+            if not _LEAF_NAME_RE.match(p.name):
+                continue
+            if not p.is_dir():
+                continue
             leaves.append(p)
             seen.add(p)
 
