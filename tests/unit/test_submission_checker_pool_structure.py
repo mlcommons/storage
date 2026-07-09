@@ -239,6 +239,47 @@ class TestPoolPointerResolutionCheck:
         errors = [r for r in caplog.records if r.levelno >= logging.ERROR]
         assert errors == [], f"Unexpected errors: {[r.message for r in errors]}"
 
+    def test_no_pool_root_message_names_submission_mode_trigger(
+        self, tmp_path, caplog,
+    ):
+        """CHECK-01 (#724): the 'no pool root' error must tell the user
+        exactly which command auto-heals the tree, and must call out that
+        ``mlpstorage validate`` does NOT trigger migration. Message wording
+        that says only "Run mlpstorage to migrate" leaves users searching
+        for a non-existent ``migrate`` subcommand — the auto-heal fires in
+        ``_check_and_migrate_legacy_layout`` (main.py) which runs only on
+        submission-mode invocations, never during validate.
+        """
+        root = tmp_path / "root"
+        orgname = "Acme"
+
+        # closed/<orgname>/results/... exists so the submitter appears via
+        # _iter_submitter_dirs, but there is NO <root>/<orgname>/.mlps-image-pool
+        # sentinel — the exact configuration Issue #724 reports.
+        leaf = (
+            root / "closed" / orgname / "results" / "sys1"
+            / "training" / "unet3d" / "run" / "20260101_120000"
+        )
+        leaf.mkdir(parents=True, exist_ok=True)
+        (leaf / "output.txt").write_text("run 0\n")
+
+        check = _make_pool_check(root)
+        with caplog.at_level(logging.ERROR):
+            result = check.pool_pointer_resolution_check()
+
+        assert result is False
+        all_messages = " ".join(caplog.messages)
+        # Actionable trigger — must name the concrete submission-mode form.
+        assert "mlpstorage {closed|open}" in all_messages, (
+            f"CHECK-01 no-pool-root message must name the submission-mode "
+            f"trigger form; got: {all_messages!r}"
+        )
+        # Honesty — must warn that validate does NOT migrate.
+        assert "`mlpstorage validate` does not migrate" in all_messages, (
+            f"CHECK-01 no-pool-root message must warn that validate does "
+            f"not migrate; got: {all_messages!r}"
+        )
+
 
 # ===========================================================================
 # TestPoolImageSelfConsistencyCheck — CHECK-02
@@ -360,6 +401,33 @@ class TestPoolLegacyCheck:
         all_messages = " ".join(caplog.messages)
         assert "Legacy code/ layout detected" in all_messages
 
+    def test_legacy_code_message_names_submission_mode_trigger(
+        self, tmp_path, caplog,
+    ):
+        """CHECK-04 D-81 (#724): legacy code/ error must name the concrete
+        submission-mode form that triggers auto-migration and warn that
+        ``mlpstorage validate`` does NOT migrate.
+        """
+        root = tmp_path / "root"
+        _build_v11_tree(root)
+        legacy = root / "closed" / "Acme" / "code"
+        legacy.mkdir(parents=True, exist_ok=True)
+        (legacy / "pyproject.toml").write_text("[project]\nname='x'\n")
+
+        check = _make_pool_check(root)
+        with caplog.at_level(logging.ERROR):
+            check.pool_legacy_check()
+
+        all_messages = " ".join(caplog.messages)
+        assert "mlpstorage {closed|open}" in all_messages, (
+            f"CHECK-04 legacy-code message must name the submission-mode "
+            f"trigger form; got: {all_messages!r}"
+        )
+        assert "`mlpstorage validate` does not migrate" in all_messages, (
+            f"CHECK-04 legacy-code message must warn that validate does "
+            f"not migrate; got: {all_messages!r}"
+        )
+
     def test_partial_migration_d91_returns_false(self, tmp_path, caplog):
         """CHECK-04 D-91: pool images present but .mlps-image-pool absent → partial migration."""
         root = tmp_path / "root"
@@ -387,6 +455,41 @@ class TestPoolLegacyCheck:
         assert result is False
         all_messages = " ".join(caplog.messages)
         assert "Partial migration detected" in all_messages
+
+    def test_partial_migration_message_names_submission_mode_trigger(
+        self, tmp_path, caplog,
+    ):
+        """CHECK-04 D-91 (#724): partial-migration error must name the
+        concrete submission-mode form that triggers auto-heal and warn
+        that ``mlpstorage validate`` does NOT migrate. This is the exact
+        message Issue #724 quotes as unactionable.
+        """
+        root = tmp_path / "root"
+        orgname = "Acme"
+        leaf = (
+            root / "closed" / orgname / "results" / "sys1"
+            / "training" / "unet3d" / "run" / "20260101_120000"
+        )
+        leaf.mkdir(parents=True, exist_ok=True)
+        (leaf / "output.txt").write_text("run 0\n")
+        org_root = root / orgname
+        org_root.mkdir(parents=True, exist_ok=True)
+        # sentinel NOT created — mirrors #724 reporter's tree state.
+        _build_pool_image(org_root, log=_MockLog())
+
+        check = _make_pool_check(root)
+        with caplog.at_level(logging.ERROR):
+            check.pool_legacy_check()
+
+        all_messages = " ".join(caplog.messages)
+        assert "mlpstorage {closed|open}" in all_messages, (
+            f"CHECK-04 partial-migration message must name the "
+            f"submission-mode trigger form; got: {all_messages!r}"
+        )
+        assert "`mlpstorage validate` does not migrate" in all_messages, (
+            f"CHECK-04 partial-migration message must warn that validate "
+            f"does not migrate; got: {all_messages!r}"
+        )
 
     def test_d90_empty_pool_returns_true_with_warning(self, tmp_path, caplog):
         """CHECK-04 D-90: sentinel present but no pool images → warning only, not failure."""
