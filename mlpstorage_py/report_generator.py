@@ -22,6 +22,11 @@ from typing import List, Dict, Any, Optional, Set
 from mlpstorage_py.mlps_logging import setup_logging, apply_logging_options
 from mlpstorage_py.config import MLPS_DEBUG, BENCHMARK_TYPES, EXIT_CODE, PARAM_VALIDATION, LLM_MODELS, MODELS, ACCELERATORS
 from mlpstorage_py.rules import get_runs_files, BenchmarkVerifier, BenchmarkRun, Issue, RunID
+from mlpstorage_py.rules.datagen_hierarchy import (
+    validate_datagen_leaf,
+    validate_supported_model,
+)
+from mlpstorage_py.errors import ConfigurationError
 from mlpstorage_py.utils import flatten_nested_dict, remove_nan_values
 from mlpstorage_py.reporting import (
     ResultsDirectoryValidator,
@@ -1432,6 +1437,42 @@ class ReportGenerator:
                     # the D-22 pass-through boundary — their INVALID
                     # category (if any) is set by the upstream
                     # BenchmarkVerifier, not by Phase 6.
+
+                # ----------------------------------------------------------
+                # Datagen-side reportgen checks (training datagen only):
+                #   - Supported-model gate: reject models not in the
+                #     current mode's allowlist. INVALID.
+                #   - Leaf presence: WARN for any missing required file
+                #     under the datagen leaf. Does NOT invalidate — a
+                #     malformed datagen contribution is worth surfacing
+                #     but does not by itself void the submission.
+                # Whatif skips both, matching the D-29 policy the #717
+                # fix already established.
+                # ----------------------------------------------------------
+                if (
+                    category_str != 'whatif'
+                    and runs[0].command == 'datagen'
+                    and runs[0].benchmark_type == BENCHMARK_TYPES.training
+                ):
+                    try:
+                        validate_supported_model(
+                            runs[0].model or "", category_str or ""
+                        )
+                    except ConfigurationError as e:
+                        invalid_messages.append(str(e))
+                    for run in runs:
+                        result_dir = run.result_dir or ""
+                        missing = validate_datagen_leaf(result_dir)
+                        for item in missing:
+                            leaf_name = os.path.basename(result_dir) or "?"
+                            issues.append(
+                                Issue(
+                                    PARAM_VALIDATION.CLOSED,
+                                    f"[WARN] datagen leaf incomplete "
+                                    f"({leaf_name}): {item}",
+                                    severity="warning",
+                                )
+                            )
 
                 # ----------------------------------------------------------
                 # Aggregation dispatch — inner try/except for
