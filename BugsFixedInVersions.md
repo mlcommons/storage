@@ -132,7 +132,7 @@ are not tracked here.
 
 ## Versions 3.0.21 – 3.0.22 (June 25 – 26, 2026)
 
-No new mlpstorage-level significant bug fixes in this range. DLIO was updated from the PR #27 pin through PR #36, pulling in the following DLIO-layer fixes (PR #37 is test-only and excluded).
+No new mlpstorage-level significant bug fixes in this range. DLIO was updated from the PR #27 pin through PR #36, pulling in the DLIO-layer fixes below (PR #37 is test-only and excluded). The s3dlio floor was also bumped 0.9.100 → 0.9.102, pulling in the s3dlio-layer fixes below.
 
 **Score-Affecting**
 - DLIO: slow kernel flush misread as sudo refused — page-cache drops silently disabled for the run, inflating throughput. (#487; DLIO PR #28)
@@ -144,9 +144,11 @@ No new mlpstorage-level significant bug fixes in this range. DLIO was updated fr
 - DLIO: PyTorch shm-reap `RuntimeError` from `RemoveIPC=yes` surfaced as bare traceback with no actionable guidance. (#528; DLIO PR #34)
 - DLIO: flat-directory listing double-allocated all URIs — ~8.8 GB peak RAM on rank 0 before training started at 50 M files. (#466; DLIO PR #35)
 - DLIO: `direct://` and `file://` schemes skipped path-existence and writability checks — misconfigured paths not caught before ranks started. (#507; DLIO PR #36)
+- s3dlio: documented `S3DLIO_CONNECT_TIMEOUT_SECS` was never read — actual connect ceiling was 5 s (SDK layer shadowed the 10 s transport). Cold-start `dispatch failure` at large-scale S3 warmup traced to this; now wired end-to-end, default raised 10 s → 20 s. (#506; s3dlio PR #144)
 
 **Other Significant**
 - DLIO: drop_caches timeout warnings silenced after first occurrence — per-epoch retry status not visible in logs. (#487; DLIO PR #29)
+- s3dlio: cold-start `RuntimeError: dispatch failure` was opaque — 22 S3 call sites now surface the full SDK error chain (endpoint, TCP error, connect refused) instead of a bare message. New `S3DLIO_MAX_RETRY_ATTEMPTS` (default 3) enables fast-fail (`=1`) for cold-start diagnosis or extended retries (`5+`) for flaky links. (#506; s3dlio PR #144)
 
 ---
 
@@ -254,6 +256,7 @@ No new mlpstorage-level significant bug fixes in this range. DLIO was updated fr
 
 **Other Significant**
 - Training `results.json` written inside `run/` subdirectory but submission checker expected it one level up. (#680, #683)
+- s3dlio: opt-in HEAD-verify + retry for object writes now available via `S3DLIO_PUT_VERIFY` and `S3DLIO_MPU_PUT_VERIFY` (both default off) — enables per-run detection of silent write truncation on any network backend, complementing the DLIO PR #41 obj_store_lib fix from 3.0.28. s3dlio floor bumped 0.9.102 → 0.9.106; v0.9.104's always-on verification was reverted to opt-in in v0.9.106 to avoid the always-on HEAD-per-PUT throughput cost. (#593; s3dlio PR #145, PR #147)
 
 ---
 
@@ -318,3 +321,28 @@ No new mlpstorage-level significant bug fixes in this range. DLIO was updated fr
 - First-run submission trees tripped CHECK-04 D-91 — pool `code-*` dirs existed but the `.mlps-image-pool` sentinel did not; both capture and retro-heal paths now write it. (#716, #727)
 - Network-attached storage targets always failed submission on the `disk_io` check — `disk_io` is now marked N/A for network-attached targets. (#591, #726)
 - Training `datagen` could silently overwrite an existing populated `<data-dir>/<model>` tree — datagen now refuses non-empty targets and emits a self-describing `.mlps-datagen-manifest.json`. (#731, #732)
+
+---
+
+## Version 3.0.39 (July 9, 2026)
+
+One mlpstorage-level fix landed in this range. The DLIO pin did not move. The s3dlio floor was bumped 0.9.106 → 0.9.110, pulling in the v0.9.108 performance & concurrency audit (17 fixes) and the v0.9.110 multi-agent bug audit (39 fixes across 6 phases). The most benchmark-relevant s3dlio-layer changes are listed below. Several fixes live in s3dlio's own DLIO-adapter subpackage (`python/s3dlio/integrations/dlio/`, which ships inside the s3dlio wheel) — these are s3dlio-side code changes, distinct from the DLIO storage handlers in `mlcommons/DLIO_local_changes`.
+
+**Score-Affecting**
+- s3dlio: per-process GET throughput on many-small-object workloads (unet3d-style) was capped at ~1.1 GB/s regardless of prefetch depth — task-level parallelism at 9 fetch sites, zero-copy range assembly, and a streaming SDK connector deliver 3.2–3.8× on 64 KB workloads at high concurrency, 1.6–2.1× on single-object concurrent range GET ≥64 MiB, and +17–19% on 256 KB – 1 MB GET. (#701; s3dlio PR #149)
+- s3dlio: HTTP/2 was ALPN-negotiated by default on `https://` and is measurably slower than HTTP/1.1 for object-storage workloads in this codebase — default reversed to HTTP/1.1 on both schemes. Object-storage throughput measurements from prior versions may not be directly comparable to 3.0.39+. Restore prior behavior with `S3DLIO_HTTPS_H2=1` or `S3DLIO_ENABLE_HTTP2=1`. (s3dlio PR #149)
+- s3dlio: `direct://` (O_DIRECT) `list()` returned `file://` URIs — round-tripping the results through `store_for_uri()` silently dropped O_DIRECT semantics, so recursive walks over a `direct://` tree quietly reverted to buffered I/O. (s3dlio PR #159)
+- s3dlio: `S3DLIO_PUT_MAX_RETRIES=0` produced a 0-attempt retry loop that failed every write with "no attempts made" — now correctly falls back to the documented default of 3. (s3dlio PR #159)
+
+**Invocation**
+- Multi-host SSH preflight aborted valid PALS/Slurm runs — `mlpstorage` probed passwordless SSH between compute nodes for every distributed run, but PALS (`palsd`) and Slurm (`slurmstepd`) launchers do not spawn ranks over SSH; on sites where SSH is disabled by policy, correctly configured runs failed with no launcher-aware bypass. New `--skip-ssh-check` targets only the SSH probe; PALS and Slurm launchers are auto-detected via `PALS_*` / `SLURM_JOB_ID` and skip the probe automatically. (#740)
+- s3dlio DLIO-adapter subpackage: the `S3dlioStorage` adapter (shipped in the s3dlio wheel, not in DLIO_local_changes) hardcoded a 32 MiB multipart threshold with no env override, unlike its sibling `ObjStoreLibStorage` in DLIO_local_changes — v0.9.110 wires `S3DLIO_MULTIPART_THRESHOLD_MB`, `_PART_SIZE_MB`, `_MAX_IN_FLIGHT`, and `S3DLIO_DISABLE_MULTIPART` through the adapter, so operators can force single-PUT for large objects. (#715; s3dlio PR #159)
+- s3dlio: `RangeEngine::download()` on a zero-byte object returned an error — legitimately empty files on Azure/GCS aborted the read path; now succeeds. (s3dlio PR #159)
+- s3dlio DLIO-adapter subpackage: `s3_torch_storage.walk_node()` silently flattened nested object-store keys — subdirectory structure was destroyed on any recursive listing, breaking checkpointing layouts that rely on prefix structure. (s3dlio PR #159)
+- s3dlio DLIO-adapter subpackage: `s3_torch_storage.create_node` / `delete_node` / `walk_node` swallowed every exception and returned `True` / `False` / `[]` — auth failures, network errors, and permission denials were invisible to callers and never surfaced as an aborted run. (s3dlio PR #159)
+- s3dlio: Azure multipart uploads swallowed mid-upload errors in the `__exit__` path and had no client-side 50,000-block cap check — silent partial uploads or a wasted full upload's worth of network I/O before Azure rejected the commit server-side. (s3dlio PR #159)
+
+**Other Significant**
+- s3dlio DLIO-adapter subpackage: `AWS_ENDPOINT_URL` set in the user's environment was clobbered by the adapter's own endpoint selection — user-configured S3-compatible endpoints were silently overridden. (s3dlio PR #159)
+- s3dlio: `parse_s3_uri_full` endpoint-detection heuristic misrouted legitimate bucket names with 2+ dots, leading digits, or names containing `minio` / `ceph` / `localhost` (e.g. `mycompany.data.backups`) as custom endpoint hostnames — heuristic narrowed; use `S3DLIO_S3_ENDPOINT_HINT_TLDS` to opt back in. (s3dlio PR #159)
+- s3dlio: GCS RAPID-bucket detection had no exponential backoff on retry, and a transient failure permanently poisoned the detection cache with the wrong answer — subsequent GCS reads used the wrong code path for the rest of the process lifetime. (s3dlio PR #159)
