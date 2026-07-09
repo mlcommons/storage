@@ -162,10 +162,12 @@ def test_failure_message_text(tmp_path):
                     "--num-processes", "1"]),
         # reports reportgen takes --results-dir + --systemname.
         ("reports", ["reports", "reportgen", "--systemname", "sys-v1"]),
-        # history show takes --results-dir + --systemname.
-        ("history", ["history", "show", "--systemname", "sys-v1"]),
+        # Issue #721: history subcommands no longer accept --results-dir on
+        # the CLI, so they can't reach the pre-swap LAY-03 gate. The
+        # post-swap gate on the historical command's --results-dir is
+        # covered by TestHistoryRerunOrgnameGate below.
     ],
-    ids=["closed", "open", "whatif", "reports", "history"],
+    ids=["closed", "open", "whatif", "reports"],
 )
 def test_gated_commands_fail_uninitialized(tmp_path, mode, extra_argv):
     """Every mode that takes ``--results-dir`` (per D-12 gated scope) must
@@ -489,14 +491,13 @@ def test_history_rerun_redispatches_bypass_mode(replayed_mode, tmp_path):
     from mlpstorage_py import main as main_mod
     from mlpstorage_py.config import EXIT_CODE
 
-    # Initial argv: history rerun with --results-dir (orgname gate fires
-    # only on the original args, which is fine — history is not bypassed).
+    # Initial argv: history rerun. Issue #721: history subparsers accept
+    # no universal arguments, so --results-dir / --systemname are supplied
+    # only via the *stored* command's replayed Namespace (the ``replayed``
+    # NS below). The pre-swap LAY-03 gate skips history because there's
+    # no args.results_dir; the post-swap gate honors the bypass mode.
     init_dir = _init_results_dir(tmp_path)
-    argv = [
-        "mlpstorage", "history", "rerun", "1",
-        "--results-dir", init_dir,
-        "--systemname", "sys-v1",
-    ]
+    argv = ["mlpstorage", "history", "rerun", "1"]
 
     # Build a replayed Namespace that lands in the requested bypass mode.
     # Keep the attributes minimal — only ``mode`` and the bare-minimum
@@ -544,3 +545,152 @@ def test_history_rerun_redispatches_bypass_mode(replayed_mode, tmp_path):
     mock_update_args.assert_not_called()
     mock_run_benchmark.assert_not_called()
     mock_print_summary.assert_not_called()
+
+
+# ---------------------------------------------------------------------------- #
+# Issue #721 — history rerun must re-resolve orgname from the *historical*     #
+# command's --results-dir sentinel after the args swap.                        #
+# ---------------------------------------------------------------------------- #
+
+
+class TestHistoryRerunOrgnameGate:
+    """Issue #721 regression tests for post-swap LAY-03 gate."""
+
+    def test_history_rerun_populates_orgname_from_historical_sentinel(self, tmp_path):
+        """The stored command's --results-dir sentinel drives orgname.
+
+        Pre-fix: LAY-03 ran only on the pre-swap args (which had no
+        --results-dir because the rerun subparser now rejects it), so
+        the swap left args.orgname unset and Benchmark.__init__ raised
+        E101 (issue #721). Post-fix: after args = new_args, LAY-03 is
+        re-run against new_args.results_dir and populates args.orgname
+        from the historical dir's sentinel.
+        """
+        from mlpstorage_py import main as main_mod
+
+        init_dir = _init_results_dir(tmp_path, orgname="Hammerspace")
+
+        # Simulate: user ran a benchmark that stored a training run against
+        # ``init_dir``. handle_history_command reparses that stored line —
+        # here we mock it to return the corresponding Namespace.
+        replayed = Namespace(
+            mode="closed",
+            benchmark="training",
+            command="run",
+            debug=False,
+            verbose=False,
+            stream_log_level="INFO",
+            quiet=False,
+            results_dir=init_dir,
+        )
+
+        argv = ["mlpstorage", "history", "rerun", "1"]
+
+        # Capture the args that flow past the gate. run_benchmark is patched
+        # so we don't need to construct a valid full benchmark Namespace.
+        captured = {}
+
+        def _capture_args(args, *_a, **_kw):
+            captured["orgname"] = getattr(args, "orgname", None)
+            captured["results_dir"] = getattr(args, "results_dir", None)
+            from mlpstorage_py.config import EXIT_CODE
+            return EXIT_CODE.SUCCESS
+
+        with patch.object(main_mod, "update_args"), \
+             patch.object(main_mod, "run_benchmark", side_effect=_capture_args), \
+             patch.object(main_mod, "validate_benchmark_environment"), \
+             patch("mlpstorage_py.run_summary.print_run_summary"), \
+             patch("mlpstorage_py.history.HistoryTracker.handle_history_command",
+                   return_value=replayed), \
+             patch("sys.argv", argv):
+            try:
+                main_mod._main_impl()
+            except SystemExit:
+                pass
+
+        assert captured.get("orgname") == "Hammerspace", (
+            f"post-swap LAY-03 gate did not resolve orgname from historical "
+            f"--results-dir sentinel; got {captured!r}"
+        )
+        assert captured.get("results_dir") == init_dir
+
+    def test_history_rerun_uninitialized_historical_dir_fails_lay03(self, tmp_path):
+        """Post-swap gate raises the standard LAY-03 error when the
+        historical --results-dir has no sentinel (mirrors the pre-swap
+        gate's contract on other modes)."""
+        from mlpstorage_py import main as main_mod
+        from mlpstorage_py.errors import ConfigurationError
+
+        uninit = tmp_path / "uninit"
+        uninit.mkdir()
+
+        replayed = Namespace(
+            mode="closed",
+            benchmark="training",
+            command="run",
+            debug=False,
+            verbose=False,
+            stream_log_level="INFO",
+            quiet=False,
+            results_dir=str(uninit),
+        )
+
+        argv = ["mlpstorage", "history", "rerun", "1"]
+
+        with patch.object(main_mod, "update_args"), \
+             patch.object(main_mod, "run_benchmark"), \
+             patch.object(main_mod, "validate_benchmark_environment"), \
+             patch("mlpstorage_py.run_summary.print_run_summary"), \
+             patch("mlpstorage_py.history.HistoryTracker.handle_history_command",
+                   return_value=replayed), \
+             patch("sys.argv", argv):
+            with pytest.raises(ConfigurationError) as excinfo:
+                main_mod._main_impl()
+
+        assert "has not been initialized" in str(excinfo.value)
+
+    @pytest.mark.parametrize(
+        "bypass_mode",
+        ["version", "lockfile", "rules-coverage", "init"],
+    )
+    def test_history_rerun_skips_post_swap_gate_for_bypass_modes(
+        self, bypass_mode, tmp_path,
+    ):
+        """Post-swap gate must respect the NON_BENCHMARK_NO_ORGNAME_MODES
+        skip set, so a replayed bypass entry never hits the sentinel gate
+        even if its results_dir is bogus / uninitialized.
+        """
+        from mlpstorage_py import main as main_mod
+        from mlpstorage_py.config import EXIT_CODE
+
+        uninit = tmp_path / "uninit"
+        uninit.mkdir()
+
+        replayed = Namespace(
+            mode=bypass_mode,
+            debug=False,
+            verbose=False,
+            stream_log_level="INFO",
+            quiet=False,
+            # Deliberately uninitialised — the gate would raise if it fired.
+            results_dir=str(uninit),
+        )
+
+        argv = ["mlpstorage", "history", "rerun", "1"]
+
+        with patch("mlpstorage_py.results_dir.init.run_init",
+                   return_value=EXIT_CODE.SUCCESS), \
+             patch.object(main_mod, "handle_lockfile_command",
+                          return_value=EXIT_CODE.SUCCESS), \
+             patch("mlpstorage_py.submission_checker.tools.rules_coverage.run",
+                   return_value=EXIT_CODE.SUCCESS, create=True), \
+             patch("mlpstorage_py.history.HistoryTracker.handle_history_command",
+                   return_value=replayed), \
+             patch("sys.argv", argv):
+            try:
+                main_mod._main_impl()
+            except SystemExit:
+                # version raises SystemExit(0); accept.
+                pass
+            # If the gate fired against uninit, this would raise
+            # ConfigurationError, which we would NOT catch here.

@@ -288,6 +288,53 @@ def run_benchmark(args, run_datetime):
     return ret_code
 
 
+def _apply_lay03_orgname_gate(args):
+    """LAY-03 orgname-resolution gate — pin ``args.orgname`` from the
+    ``<results_dir>/mlperf-results.yaml`` sentinel.
+
+    Extracted so ``history rerun`` can re-run the gate on the post-swap
+    args (issue #721): the pre-swap gate resolves against the rerun
+    invocation's results-dir, then ``args = new_args`` from
+    ``handle_history_command`` clobbers the resolved orgname. The
+    post-swap invocation of this helper resolves against the historical
+    command's results-dir — which is the dir the Benchmark actually
+    writes to.
+
+    The error message backticks are LOCKED VERBATIM per CONTEXT.md
+    LAY-03 / ROADMAP success criterion #2.
+    """
+    if args.mode in NON_BENCHMARK_NO_ORGNAME_MODES:
+        return
+    results_dir_value = getattr(args, 'results_dir', None)
+    if not results_dir_value:
+        return
+    try:
+        args.orgname = resolve_orgname(results_dir_value)
+    except ResultsDirNotInitializedError as e:
+        raise ConfigurationError(
+            f"results-dir `{results_dir_value}` has not been initialized.",
+            suggestion=f"Run `mlpstorage init <orgname> {results_dir_value}` first.",
+            code=ErrorCode.CONFIG_MISSING_REQUIRED,
+        ) from e
+    # WR-06: defense-in-depth re-validation. See historical inline
+    # comment (retained here for the invariants it enumerates):
+    #   * a future Pydantic-version bump that regresses to
+    #     non-anchored regex semantics,
+    #   * a switch to v1's ``regex=`` keyword (different match
+    #     semantics),
+    #   * any unit-test path that constructs args.orgname directly
+    #     without going through ``read_sentinel``.
+    if not re.fullmatch(r"[A-Za-z0-9._-]+", args.orgname):
+        raise ConfigurationError(
+            f"sentinel orgname {args.orgname!r} contains invalid characters",
+            suggestion=(
+                "Re-initialize the results-dir with a clean orgname "
+                "(matches [A-Za-z0-9._-]+)."
+            ),
+            code=ErrorCode.CONFIG_INVALID_VALUE,
+        )
+
+
 def _main_impl():
     """
     Main implementation with error handling.
@@ -346,57 +393,19 @@ def _main_impl():
         from mlpstorage_py.submission_checker.tools.rules_coverage import run as run_rules_coverage
         return run_rules_coverage(args)
 
-    # ------------------------------------------------------------------ #
-    # LAY-03 orgname-resolution gate.
-    #
-    # Every gated mode that supplies `--results-dir` must have a valid
-    # `mlperf-results.yaml` sentinel in that directory; the gate reads the
-    # sentinel, pins `args.orgname` for downstream consumers (path generator,
-    # banner, benchmark base), and fails fast with the EXACT CONTEXT.md
-    # message when the sentinel is missing or malformed.
-    #
-    # The error message backticks are LOCKED VERBATIM per CONTEXT.md LAY-03
-    # / ROADMAP success criterion #2 — do NOT switch to single quotes (`!r`
-    # would render `'…'`) and do NOT add backslash escapes (the backtick is
-    # not a Python escape sequence; `\\`` produces `\` + backtick on screen).
-    # ------------------------------------------------------------------ #
-    if args.mode not in NON_BENCHMARK_NO_ORGNAME_MODES:
-        results_dir_value = getattr(args, 'results_dir', None)
-        if results_dir_value:
-            try:
-                args.orgname = resolve_orgname(results_dir_value)
-            except ResultsDirNotInitializedError as e:
-                raise ConfigurationError(
-                    f"results-dir `{results_dir_value}` has not been initialized.",
-                    suggestion=f"Run `mlpstorage init <orgname> {results_dir_value}` first.",
-                    code=ErrorCode.CONFIG_MISSING_REQUIRED,
-                ) from e
-            # WR-06: defense-in-depth re-validation at the gate. The schema
-            # (Pydantic v2) already full-match-validates the sentinel's
-            # ``orgname`` against ``[A-Za-z0-9._-]+`` on read, so a properly-
-            # written sentinel cannot reach here with a path separator or
-            # other unsafe character. But ``args.orgname`` lands in
-            # ``os.path.join(..., orgname, "results", ...)`` immediately
-            # downstream, so we want a paranoid post-resolution assertion
-            # that catches:
-            #   * a future Pydantic-version bump that regresses to
-            #     non-anchored regex semantics,
-            #   * a switch to v1's ``regex=`` keyword (which used different
-            #     match semantics),
-            #   * any unit-test path that constructs args.orgname directly
-            #     without going through ``read_sentinel``.
-            if not re.fullmatch(r"[A-Za-z0-9._-]+", args.orgname):
-                raise ConfigurationError(
-                    f"sentinel orgname {args.orgname!r} contains invalid characters",
-                    suggestion=(
-                        "Re-initialize the results-dir with a clean orgname "
-                        "(matches [A-Za-z0-9._-]+)."
-                    ),
-                    code=ErrorCode.CONFIG_INVALID_VALUE,
-                )
+    # LAY-03 orgname-resolution gate — resolve args.orgname from the
+    # <results_dir>/mlperf-results.yaml sentinel for every gated mode that
+    # supplies --results-dir. For history mode this pre-swap invocation is
+    # essentially a no-op (history subparsers no longer take --results-dir;
+    # see issue #721) — the real resolution happens post-swap below.
+    _apply_lay03_orgname_gate(args)
 
-    # Handle history command separately (now AFTER the gate so it inherits
-    # a resolved args.orgname when --results-dir is supplied; D-12).
+    # Handle history command separately. Issue #721: history subparsers no
+    # longer accept --results-dir / --systemname / logging flags (the rerun
+    # replays the stored command line verbatim). After the swap we re-run
+    # the LAY-03 gate against the *historical* command's results-dir — that
+    # is the dir the Benchmark will actually write to — and re-apply logging
+    # options from the (now-swapped) args.
     if args.mode == 'history':
         new_args = hist.handle_history_command(args)
 
@@ -406,14 +415,9 @@ def _main_impl():
             return new_args
 
         elif isinstance(new_args, object) and hasattr(new_args, 'mode'):
-            # Check if logging options have changed
-            if (hasattr(new_args, 'debug') and new_args.debug != args.debug) or \
-               (hasattr(new_args, 'verbose') and new_args.verbose != args.verbose) or \
-               (hasattr(new_args, 'stream_log_level') and new_args.stream_log_level != args.stream_log_level):
-                # Apply the new logging options
-                apply_logging_options(logger, new_args)
-
             args = new_args
+            apply_logging_options(logger, args)
+            _apply_lay03_orgname_gate(args)
         else:
             # If handle_history_command returned an exit code, return it
             return new_args
