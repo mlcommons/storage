@@ -388,3 +388,150 @@ class TestPostRunLeafWarn:
         assert warn_msgs == [], (
             f"Unexpected leaf-incomplete warnings on healthy leaf: {warn_msgs}"
         )
+
+
+# --------------------------------------------------------------------------- #
+# Object-storage parity — TrainingBenchmark invokes the S3 branches           #
+# --------------------------------------------------------------------------- #
+
+
+def _apply_object_storage_stub(self):
+    """Stub for ``_apply_object_storage_params``: set the s3 params directly.
+
+    In production the real method reads ``BUCKET`` / ``STORAGE_LIBRARY``
+    from the environment (via ``.env`` loading) and mutates
+    ``params_dict``. Under test we bypass the .env dance and just
+    inject the two keys the downstream storage-scheme-consistency
+    check compares — that matches the production shape without
+    needing real credentials.
+    """
+    self.params_dict['storage.storage_type'] = 's3'
+
+
+@pytest.fixture
+def _object_storage_env_stubs():
+    """Stub the .env-driven object-storage wiring so tests can pass an s3:// URI.
+
+    Two things need bypassing:
+
+    - ``_apply_object_storage_params`` reads env vars → replace with a
+      stub that just injects ``storage.storage_type='s3'``.
+    - ``_check_storage_scheme_consistency`` verifies s3 storage_type
+      pairs with an s3:// dataset URI; the real check would pass here
+      but pulls in production plumbing we don't need in the test.
+    """
+    with patch(
+        "mlpstorage_py.benchmarks.dlio.DLIOBenchmark._apply_object_storage_params",
+        _apply_object_storage_stub,
+    ), patch(
+        "mlpstorage_py.benchmarks.dlio.DLIOBenchmark._check_storage_scheme_consistency",
+        lambda self: None,
+    ):
+        yield
+
+
+class TestTrainingBenchmarkObjectStorageWiring:
+    """The datagen wiring must fire the guards for object-storage --data-dir too.
+
+    Prior to this test class, both the pre-run refuse guard and the
+    post-run manifest write were gated on ``storage_type == 'local'``
+    which made them silent no-ops on S3. This class pins the parity:
+    an ``s3://`` --data-dir must:
+
+    - Invoke ``assert_data_dir_hierarchy_absent`` (which internally
+      dispatches to ``s3dlio.list``, mocked here) BEFORE add_datadir_param.
+    - Invoke ``write_datagen_manifest`` (which internally dispatches
+      to ``s3dlio.put_bytes``, mocked here) AFTER DLIO returns success.
+    """
+
+    def test_s3_datagen_invokes_refuse_and_manifest_write(
+        self, tmp_path, _object_storage_env_stubs
+    ):
+        # Point --data-dir at an s3 URI. --results-dir stays local
+        # because submission artifacts always land locally.
+        args = _training_datagen_args(tmp_path)
+        args.data_dir = "s3://mybucket/mytraining"
+
+        from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
+
+        # Patch s3dlio at the module boundary
+        # (mlpstorage_py.rules.datagen_hierarchy.s3dlio). Empty LIST
+        # → refuse-guard passes; put_bytes mock captures the manifest
+        # PUT arguments for verification.
+        with patch(
+            "mlpstorage_py.rules.datagen_hierarchy.s3dlio"
+        ) as mock_s3dlio:
+            mock_s3dlio.list.return_value = []
+
+            benchmark = TrainingBenchmark(args, logger=MagicMock())
+            # LIST fired during __init__ pre-run guard.
+            assert mock_s3dlio.list.call_count == 1
+            (list_uri,), list_kwargs = mock_s3dlio.list.call_args
+            assert list_uri.startswith("s3://mybucket/mytraining")
+            assert "unet3d" in list_uri
+            assert list_kwargs.get("recursive") is False
+
+            # Replace DLIO invocation with a no-op so _run reports
+            # SUCCESS without shelling out.
+            benchmark.command_method_map["datagen"] = MagicMock(
+                return_value=None
+            )
+
+            result = benchmark._run()
+
+        assert result == EXIT_CODE.SUCCESS
+        # PUT fired during post-run manifest write.
+        mock_s3dlio.put_bytes.assert_called_once()
+        (put_uri, payload), _ = mock_s3dlio.put_bytes.call_args
+        assert put_uri == (
+            "s3://mybucket/mytraining/unet3d/"
+            ".mlps-datagen-manifest.json"
+        )
+        assert isinstance(payload, (bytes, bytearray))
+
+    def test_s3_datagen_refuses_when_prefix_non_empty(
+        self, tmp_path, _object_storage_env_stubs
+    ):
+        args = _training_datagen_args(tmp_path)
+        args.data_dir = "s3://mybucket/mytraining"
+
+        from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
+
+        with patch(
+            "mlpstorage_py.rules.datagen_hierarchy.s3dlio"
+        ) as mock_s3dlio:
+            # LIST returns a non-empty result → refuse-guard raises.
+            mock_s3dlio.list.return_value = [
+                "s3://mybucket/mytraining/unet3d/train/shard_000.npz"
+            ]
+            with pytest.raises(ConfigurationError) as excinfo:
+                TrainingBenchmark(args, logger=MagicMock())
+
+        text = str(excinfo.value)
+        assert "unet3d" in text
+        assert "s3://mybucket/mytraining" in text
+        # And put_bytes MUST NOT have been called — refuse fires
+        # before any write path.
+        mock_s3dlio.put_bytes.assert_not_called()
+
+    def test_s3_datagen_whatif_skips_both_s3_calls(
+        self, tmp_path, _object_storage_env_stubs
+    ):
+        args = _training_datagen_args(tmp_path, mode="whatif")
+        args.data_dir = "s3://mybucket/mytraining"
+
+        from mlpstorage_py.benchmarks.dlio import TrainingBenchmark
+
+        with patch(
+            "mlpstorage_py.rules.datagen_hierarchy.s3dlio"
+        ) as mock_s3dlio:
+            benchmark = TrainingBenchmark(args, logger=MagicMock())
+            benchmark.command_method_map["datagen"] = MagicMock(
+                return_value=None
+            )
+            benchmark._run()
+
+        # Whatif skips both the pre-run guard and the post-run
+        # manifest write per the D-29 policy.
+        mock_s3dlio.list.assert_not_called()
+        mock_s3dlio.put_bytes.assert_not_called()
