@@ -92,7 +92,8 @@ class TestCLIStructureAndCombinations:
 
         # Utilities — top-level siblings, no mode prefix needed (they are their own mode)
         ("12", ['reports', 'reportgen', '-rd', '/tmp', '-sn', 'sys-v1'], 'reports', 'reportgen'),
-        ("13", ['history', 'show', '-rd', '/tmp', '-sn', 'sys-v1'], 'history', 'show'),
+        # Issue #721: history takes no universal arguments.
+        ("13", ['history', 'show'], 'history', 'show'),
         ("14", ['lockfile', 'generate', '-rd', '/tmp'], 'lockfile', 'generate'),
         ("15", ['lockfile', 'verify', '-rd', '/tmp'], 'lockfile', 'verify'),
     ])
@@ -362,9 +363,11 @@ class TestModeAndBenchmarkAttributes:
         assert not hasattr(args, 'benchmark')
 
     def test_history_sets_mode(self):
-        """history subcommand should set mode='history'."""
-        with patch('sys.argv', ['mlpstorage', 'history', 'show',
-                                '--results-dir', '/tmp', '--systemname', 'sys-v1']):
+        """history subcommand should set mode='history'.
+
+        Issue #721: history subcommands accept no universal arguments.
+        """
+        with patch('sys.argv', ['mlpstorage', 'history', 'show']):
             args = parse_arguments()
         assert args.mode == 'history'
         assert not hasattr(args, 'benchmark')
@@ -400,13 +403,18 @@ class TestSystemname:
 
     Per CONTEXT.md D-10, --systemname is required on every emitting subcommand:
     training {datagen, run, configview, datasize}, checkpointing {datagen, run,
-    configview, validate}, vectordb {datagen, run}, kvcache {run, datagen}, plus
-    history (show, rerun). ``reports reportgen`` accepts --systemname but does
-    NOT require it (omitting it aggregates a global summary across all systems
-    under the org's canonical ``results/`` folder).
+    configview, validate}, vectordb {datagen, run}, kvcache {run, datagen}.
+    ``reports reportgen`` accepts --systemname but does NOT require it (omitting
+    it aggregates a global summary across all systems under the org's canonical
+    ``results/`` folder).
 
     Pure utility commands (lockfile, version, init, rules-coverage) are exempt
     and continue to parse without --systemname.
+
+    Issue #721: history {show, rerun} accept NO universal arguments — ``show``
+    just prints ~/mlps_history; ``rerun`` replays the stored command line
+    verbatim so --results-dir / --systemname on the rerun invocation would be
+    misleading. Argparse rejects them.
     """
 
     # Sets of full argv (without --systemname) that should each accept the flag.
@@ -450,9 +458,8 @@ class TestSystemname:
         ('reports-reportgen', [
             'reports', 'reportgen', '--results-dir', '/r',
         ]),
-        ('history-show', [
-            'history', 'show', '--results-dir', '/r',
-        ]),
+        # Issue #721: history subcommands accept no universal arguments;
+        # ``history show --results-dir X --systemname Y`` is unrecognized.
     ]
 
     @pytest.mark.parametrize(

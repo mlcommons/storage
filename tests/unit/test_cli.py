@@ -615,7 +615,14 @@ class TestAddReportsArguments:
 
 
 class TestAddHistoryArguments:
-    """Tests for add_history_arguments function."""
+    """Tests for add_history_arguments function.
+
+    Issue #721: history subcommands accept NO universal arguments.
+    ``show`` only reads ~/mlps_history; ``rerun`` replays the stored
+    command line verbatim (so --results-dir / --systemname / logging
+    flags on the rerun invocation would be misleading — argparse
+    rejects them).
+    """
 
     @pytest.fixture
     def parser(self):
@@ -626,28 +633,59 @@ class TestAddHistoryArguments:
 
     def test_show_subcommand_exists(self, parser):
         """History should have show subcommand."""
-        args = parser.parse_args(['show', '--results-dir', '/tmp',
-                                  '--systemname', 'sys-v1'])
+        args = parser.parse_args(['show'])
         assert args.command == 'show'
 
     def test_show_limit_argument(self, parser):
         """Show should accept --limit argument."""
-        args = parser.parse_args(['show', '--results-dir', '/tmp',
-                                  '--systemname', 'sys-v1', '--limit', '10'])
+        args = parser.parse_args(['show', '--limit', '10'])
         assert args.limit == 10
 
     def test_show_id_argument(self, parser):
         """Show should accept --id argument."""
-        args = parser.parse_args(['show', '--results-dir', '/tmp',
-                                  '--systemname', 'sys-v1', '--id', '5'])
+        args = parser.parse_args(['show', '--id', '5'])
         assert args.id == 5
 
     def test_rerun_subcommand_exists(self, parser):
         """History should have rerun subcommand."""
-        args = parser.parse_args(['rerun', '42', '--results-dir', '/tmp',
-                                  '--systemname', 'sys-v1'])
+        args = parser.parse_args(['rerun', '42'])
         assert args.command == 'rerun'
         assert args.rerun_id == 42
+
+    def test_show_rejects_results_dir(self, parser):
+        """Issue #721: ``history show --results-dir X`` is unrecognized."""
+        with pytest.raises(SystemExit):
+            parser.parse_args(['show', '--results-dir', '/tmp'])
+
+    def test_show_rejects_systemname(self, parser):
+        """Issue #721: ``history show --systemname X`` is unrecognized."""
+        with pytest.raises(SystemExit):
+            parser.parse_args(['show', '--systemname', 'sys-v1'])
+
+    def test_rerun_rejects_results_dir(self, parser):
+        """Issue #721: ``history rerun 6 --results-dir X`` is unrecognized.
+
+        The stored command line is the sole source of truth for
+        --results-dir on rerun; overriding it on the rerun invocation
+        was never respected, and the misleading UX drove issue #721.
+        """
+        with pytest.raises(SystemExit):
+            parser.parse_args(['rerun', '6', '--results-dir', '/tmp'])
+
+    def test_rerun_rejects_systemname(self, parser):
+        """Issue #721: ``history rerun 6 --systemname X`` is unrecognized."""
+        with pytest.raises(SystemExit):
+            parser.parse_args(['rerun', '6', '--systemname', 'sys-v1'])
+
+    def test_rerun_rejects_logging_flags(self, parser):
+        """Issue #721: rerun invocation cannot override logging.
+
+        The stored command's logging flags are re-applied post-swap;
+        any override on the rerun invocation was never used and is
+        now rejected as an unrecognized argument.
+        """
+        with pytest.raises(SystemExit):
+            parser.parse_args(['rerun', '6', '--debug'])
 
 
 class TestValidateArgs:
@@ -1050,10 +1088,11 @@ class TestParseArgumentsStoragePositional:
         assert not hasattr(args, "object")
 
     def test_history_does_not_need_storage_positional(self, monkeypatch, tmp_path):
-        """`history show` must parse cleanly (no storage positional)."""
-        args = self._run(monkeypatch, ["mlpstorage", "history", "show",
-                                        "--results-dir", str(tmp_path),
-                                        "--systemname", "sys-v1"])
+        """`history show` must parse cleanly (no storage positional).
+
+        Issue #721: history subcommands accept no universal arguments.
+        """
+        args = self._run(monkeypatch, ["mlpstorage", "history", "show"])
         assert args.mode == "history"
         assert args.command == "show"
         assert not hasattr(args, "file")
