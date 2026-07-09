@@ -41,6 +41,9 @@ import json
 import os
 import re
 from typing import Any, Dict, List, Mapping, Optional
+from urllib.parse import urlparse
+
+import s3dlio
 
 from mlpstorage_py import __version__ as _MLPSTORAGE_VERSION
 from mlpstorage_py.config import (
@@ -122,6 +125,40 @@ def validate_supported_model(model: str, mode: str) -> None:
 
 
 # --------------------------------------------------------------------------- #
+# URI helpers — local vs object storage dispatch                              #
+# --------------------------------------------------------------------------- #
+
+# Object-storage URI schemes that s3dlio abstracts uniformly. The
+# ``direct://`` scheme is s3dlio's zero-copy file-backed backend; from
+# our perspective it's just another URI-based backend so it lives in
+# the same branch as s3/gs/az.
+_OBJECT_STORAGE_SCHEMES = frozenset({"s3", "gs", "az", "direct"})
+
+
+def _is_object_uri(path: str) -> bool:
+    """Return True if ``path`` is an object-storage URI s3dlio understands.
+
+    An empty scheme (bare ``/local/path``) and ``file://`` are both
+    treated as local filesystem — the local branch uses ``os.path``
+    and ``open()`` directly.
+    """
+    scheme = urlparse(path).scheme
+    return scheme in _OBJECT_STORAGE_SCHEMES
+
+
+def _join_model_location(data_dir: str, model: str) -> str:
+    """Join ``data_dir`` and ``model`` into a per-model location string.
+
+    For local paths uses ``os.path.join``. For object-storage URIs
+    normalizes any trailing slash and appends ``/<model>``. The
+    caller may further append ``/<filename>`` for a manifest URI.
+    """
+    if _is_object_uri(data_dir):
+        return data_dir.rstrip("/") + "/" + model
+    return os.path.join(data_dir, model)
+
+
+# --------------------------------------------------------------------------- #
 # assert_data_dir_hierarchy_absent                                            #
 # --------------------------------------------------------------------------- #
 
@@ -136,56 +173,111 @@ def assert_data_dir_hierarchy_absent(data_dir: str, model: str) -> None:
     detect that, we refuse and force the operator to ``rm -rf`` or
     supply a different ``--data-dir``.
 
+    Dispatches on ``data_dir``'s URI scheme:
+
+    - Local filesystem (empty scheme or ``file://``): stat-based
+      check with ``os.scandir``.
+    - Object storage (``s3://``, ``gs://``, ``az://``, ``direct://``):
+      bounded LIST via ``s3dlio.list(uri, recursive=False)``. The
+      ``recursive=False`` flag yields a delimiter-based listing that
+      returns only direct children — bounded regardless of how many
+      objects sit under a prior datagen's prefix. Any s3dlio
+      exception during the LIST fails safe (aborts) per the design
+      decision: a transient object-store error must NOT be silently
+      treated as "assume empty, proceed".
+
     Accepted states (no raise):
         - ``<data-dir>/<model>`` does not exist.
-        - ``<data-dir>/<model>`` exists as an empty directory (the
-          operator pre-created the mount point).
+        - ``<data-dir>/<model>`` exists as an empty directory (local
+          case only — the operator pre-created the mount point).
 
     Rejected states (raise ``ConfigurationError``):
-        - ``<data-dir>/<model>`` exists as a non-empty directory.
-        - ``<data-dir>/<model>`` exists as a file, symlink to a file,
-          or other non-directory node.
+        - ``<data-dir>/<model>`` contains any file/object.
+        - ``<data-dir>/<model>`` exists as a non-directory node
+          (local case only).
+        - Object-storage LIST raises for any reason.
     """
-    model_dir = os.path.join(data_dir, model)
+    model_location = _join_model_location(data_dir, model)
 
-    if not os.path.lexists(model_dir):
+    if _is_object_uri(data_dir):
+        _assert_object_hierarchy_absent(model_location, model)
         return
 
-    if not os.path.isdir(model_dir):
+    if not os.path.lexists(model_location):
+        return
+
+    if not os.path.isdir(model_location):
         raise ConfigurationError(
-            f"{model_dir!r} exists and is not a directory — refusing to "
+            f"{model_location!r} exists and is not a directory — refusing to "
             f"proceed with datagen.",
             parameter="data_dir",
-            actual=model_dir,
+            actual=model_location,
             suggestion=(
-                f"Remove {model_dir!r} manually or pass a different "
+                f"Remove {model_location!r} manually or pass a different "
                 "--data-dir."
             ),
             code=ErrorCode.CONFIG_INVALID_VALUE,
         )
 
     try:
-        has_entries = any(True for _ in os.scandir(model_dir))
+        has_entries = any(True for _ in os.scandir(model_location))
     except OSError as e:
         raise ConfigurationError(
-            f"Cannot inspect {model_dir!r}: {e}.",
+            f"Cannot inspect {model_location!r}: {e}.",
             parameter="data_dir",
-            actual=model_dir,
+            actual=model_location,
             code=ErrorCode.CONFIG_INVALID_VALUE,
         ) from e
 
     if has_entries:
         raise ConfigurationError(
-            f"{model_dir!r} already exists and is not empty — refusing to "
+            f"{model_location!r} already exists and is not empty — refusing to "
             f"overwrite an existing {model!r} dataset. A re-datagen with "
             f"different parameters (e.g. num_samples_per_file) may only "
             f"partially overwrite files on filename collision, silently "
             f"corrupting the dataset.",
             parameter="data_dir",
-            actual=model_dir,
+            actual=model_location,
             suggestion=(
-                f"Remove {model_dir!r} (e.g. rm -rf) or pass a different "
+                f"Remove {model_location!r} (e.g. rm -rf) or pass a different "
                 "--data-dir."
+            ),
+            code=ErrorCode.CONFIG_INVALID_VALUE,
+        )
+
+
+def _assert_object_hierarchy_absent(model_uri: str, model: str) -> None:
+    """Object-storage half of :func:`assert_data_dir_hierarchy_absent`.
+
+    See parent docstring for semantics. Any s3dlio exception during
+    the LIST is wrapped as a ``ConfigurationError`` and the original
+    is chained via ``__cause__`` so the operator can diagnose the
+    underlying object-store failure.
+    """
+    try:
+        entries = s3dlio.list(model_uri, recursive=False)
+    except Exception as e:
+        raise ConfigurationError(
+            f"Cannot inspect {model_uri!r} for prior {model!r} datagen "
+            f"output: {e}. Refusing to proceed rather than silently "
+            f"assume the prefix is empty.",
+            parameter="data_dir",
+            actual=model_uri,
+            code=ErrorCode.CONFIG_INVALID_VALUE,
+        ) from e
+
+    if entries:
+        raise ConfigurationError(
+            f"{model_uri!r} already contains objects — refusing to "
+            f"overwrite an existing {model!r} dataset. A re-datagen with "
+            f"different parameters (e.g. num_samples_per_file) may only "
+            f"partially overwrite objects on key collision, silently "
+            f"corrupting the dataset.",
+            parameter="data_dir",
+            actual=model_uri,
+            suggestion=(
+                f"Remove the existing objects under {model_uri!r} or pass a "
+                "different --data-dir."
             ),
             code=ErrorCode.CONFIG_INVALID_VALUE,
         )
@@ -328,12 +420,33 @@ def write_datagen_manifest(
         "mlpstorage_version": _MLPSTORAGE_VERSION,
         "source_datagen_result_dir": source_datagen_result_dir,
     }
+    payload = json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8")
+
+    if _is_object_uri(data_dir):
+        manifest_uri = (
+            _join_model_location(data_dir, model)
+            + "/"
+            + DATAGEN_MANIFEST_FILENAME
+        )
+        try:
+            s3dlio.put_bytes(manifest_uri, payload)
+        except Exception as e:
+            # Loud failure over silent skip — a manifest that fails
+            # to land leaves the dataset without provenance and
+            # breaks the future run-vs-datagen size check.
+            raise ConfigurationError(
+                f"Failed to write datagen manifest to {manifest_uri!r}: {e}.",
+                parameter="data_dir",
+                actual=manifest_uri,
+                code=ErrorCode.CONFIG_INVALID_VALUE,
+            ) from e
+        return manifest_uri
 
     model_dir = os.path.join(data_dir, model)
     os.makedirs(model_dir, exist_ok=True)
     manifest_path = os.path.abspath(
         os.path.join(model_dir, DATAGEN_MANIFEST_FILENAME)
     )
-    with open(manifest_path, "w") as f:
-        json.dump(manifest, f, indent=2, sort_keys=True)
+    with open(manifest_path, "wb") as f:
+        f.write(payload)
     return manifest_path
