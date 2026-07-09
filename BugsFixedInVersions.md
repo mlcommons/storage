@@ -1,7 +1,7 @@
 # MLPerf Storage Benchmark v3.0 — Significant Bugs Fixed by Version
 
-**Date:** 2026-07-07
-**Covers:** Versions 3.0.3 through 3.0.37 (May 28 – July 7, 2026)
+**Date:** 2026-07-08
+**Covers:** Versions 3.0.3 through 3.0.38 (May 28 – July 8, 2026)
 
 ---
 
@@ -297,3 +297,24 @@ No new mlpstorage-level significant bug fixes in this range. DLIO was updated fr
 
 **Other Significant**
 - CLOSED code-image verify raised `CodeImageError` on any hash mismatch — valid submissions were blocked if mlpstorage was upgraded between runs of the same submission. (#710)
+
+---
+
+## Version 3.0.38 (July 8, 2026)
+
+**Score-Affecting**
+- §4.7.1 30 s gap check charged the read invocation's own framework startup (~50 s) to the failover-callout budget — legitimate split-mode submissions were unmeetable. Gap origin is now `read.metadata.invocation_start_time`. (#696, #714)
+- reportgen D-26 flagged every v3.0 6-invocation training group INVALID — the warmup detector fired only on the retired `--loops` collision; the 5-run mean was skipped and `train_mean_of_au_percentage` was omitted from results.json. Lex-earliest tiebreak now identifies the warmup. (#719, #720, #722, #730)
+
+**Invocation**
+- Multi-host checkpoint runs raised `Unsupported URI scheme` on model-parallel shards off the head node — `MLPS_/MLPSTORAGE_` env vars set by mlpstorage weren't forwarded via `mpirun -x`. (#712, #713)
+- Submission-mode runs colliding with a capture-prewritten pointer leaf bumped the timestamp +1 s and split outputs across two leaves — both failed submission gates (~40–50 spurious `[ERROR]` lines per validate). (#718, #729)
+- `mlpstorage history rerun N` failed with E101 (orgname not resolved) — the historical command line clobbered the pre-swap resolved args; orgname now re-resolves from the historical `--results-dir` sentinel. (#721, #736)
+
+**Other Significant**
+- Legacy-layout migration wrote `.mlps-code-image` pointers into leaf subdirs (`dlio_config/`, `collector-staging/`, `.chk_iterations/`) — 2.1.15 / 2.1.20 / 2.1.26 exact-file-set checks then marked previously-valid CLOSED submissions broken as soon as any run triggered migration. (#725, #737)
+- Training `results.json` emitted no `train_mean_of_au_percentage` — `metadata.json` omits the `metric` block and reportgen never fell back to `summary.json`; every training run silently lost its headline number. (#733, #735)
+- Training `datagen` runs hit the D-27 "expected 6 training invocations" gate and were flagged INVALID — rules-strict count gates now scope to the `run` command only (also fixes latent D-20/D-24 checkpointing case). (#717, #728)
+- First-run submission trees tripped CHECK-04 D-91 — pool `code-*` dirs existed but the `.mlps-image-pool` sentinel did not; both capture and retro-heal paths now write it. (#716, #727)
+- Network-attached storage targets always failed submission on the `disk_io` check — `disk_io` is now marked N/A for network-attached targets. (#591, #726)
+- Training `datagen` could silently overwrite an existing populated `<data-dir>/<model>` tree — datagen now refuses non-empty targets and emits a self-describing `.mlps-datagen-manifest.json`. (#731, #732)
