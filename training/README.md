@@ -26,9 +26,23 @@ The benchmark execution process requires these steps:
 2. Datagen - Generate the required dataset
 3. Run - Execute the benchmark
 
+> **Note — CLI shape (v3.0):** The current command line uses positional arguments for
+> submission mode, model, and storage type. The general shape is:
+>
+> ```
+> mlpstorage <closed|open|whatif> training <model> <command> [file|object] [OPTIONS]
+> ```
+>
+> The `--open`, `--closed`, and `--loops` flags that appear in some historical
+> help snippets below have all been retired and no longer exist. Use the leading
+> positional mode instead (`mlpstorage closed training …`, `mlpstorage open
+> training …`, `mlpstorage whatif training …`). Run `mlpstorage -h` and
+> `mlpstorage closed training -h` for the authoritative current help; the pasted
+> help blocks below are being refreshed and may otherwise lag the real CLI.
+
 ```bash
 [root@localhost ]# mlpstorage training --help
-usage: mlpstorage training [-h] [--results-dir RESULTS_DIR] [--loops LOOPS] [--open | --closed] [--debug] [--verbose]
+usage: mlpstorage training [-h] [--results-dir RESULTS_DIR] [--debug] [--verbose]
                            [--stream-log-level STREAM_LOG_LEVEL] [--allow-invalid-params] [--what-if]
                            {datasize,datagen,run,configview} ...
 
@@ -49,9 +63,6 @@ optional arguments:
 Standard Arguments:
   --results-dir RESULTS_DIR, -rd RESULTS_DIR
                         Directory where the benchmark results will be saved.
-  --loops LOOPS         Number of times to run the benchmark
-  --open                Run as an open submission
-  --closed              Run as a closed submission
 
 Output Control:
   --debug               Enable debug mode
@@ -86,7 +97,7 @@ usage: mlpstorage training datasize [-h] [--hosts HOSTS [HOSTS ...]] --model {Un
                                     --max-accelerators MAX_ACCELERATORS --accelerator-type {b200,mi355}
                                     --num-client-hosts NUM_CLIENT_HOSTS [--data-dir DATA_DIR]
                                     [--params PARAMS [PARAMS ...]]
-                                    [--results-dir RESULTS_DIR] [--loops LOOPS] [--open | --closed] [--debug]
+                                    [--results-dir RESULTS_DIR] [--debug]
                                     [--verbose] [--stream-log-level STREAM_LOG_LEVEL] [--allow-invalid-params]
                                     [--what-if]
 
@@ -132,9 +143,6 @@ MPI:
 Standard Arguments:
   --results-dir RESULTS_DIR, -rd RESULTS_DIR
                         Directory where the benchmark results will be saved.
-  --loops LOOPS         Number of times to run the benchmark
-  --open                Run as an open submission
-  --closed              Run as a closed submission
 
 Output Control:
   --debug               Enable debug mode
@@ -163,7 +171,7 @@ usage: mlpstorage training datagen [-h] [--hosts HOSTS [HOSTS ...]] --model {une
                                    [--exec-type {mpi,docker}] [--mpi-bin {mpirun,mpiexec}] [--oversubscribe]
                                    [--allow-run-as-root] --num-processes NUM_PROCESSES [--data-dir DATA_DIR]
                                    [--ssh-username SSH_USERNAME] [--params PARAMS [PARAMS ...]]
-                                   [--results-dir RESULTS_DIR] [--loops LOOPS] [--open | --closed] [--debug]
+                                   [--results-dir RESULTS_DIR] [--debug]
                                    [--verbose] [--stream-log-level STREAM_LOG_LEVEL] [--allow-invalid-params]
                                    [--what-if]
 
@@ -199,9 +207,6 @@ MPI:
 Standard Arguments:
   --results-dir RESULTS_DIR, -rd RESULTS_DIR
                         Directory where the benchmark results will be saved.
-  --loops LOOPS         Number of times to run the benchmark
-  --open                Run as an open submission
-  --closed              Run as a closed submission
 
 Output Control:
   --debug               Enable debug mode
@@ -231,7 +236,7 @@ usage: mlpstorage training run [-h] [--hosts HOSTS [HOSTS ...]] --model {unet3d,
                                [--mpi-bin {mpirun,mpiexec}] [--oversubscribe] [--allow-run-as-root] --num-accelerators
                                NUM_ACCELERATORS --accelerator-type {b200,mi355} --num-client-hosts NUM_CLIENT_HOSTS
                                [--data-dir DATA_DIR] [--ssh-username SSH_USERNAME] [--params PARAMS [PARAMS ...]]
-                               [--results-dir RESULTS_DIR] [--loops LOOPS] [--open | --closed] [--debug] [--verbose]
+                               [--results-dir RESULTS_DIR] [--debug] [--verbose]
                                [--stream-log-level STREAM_LOG_LEVEL] [--allow-invalid-params] [--what-if]
 
 optional arguments:
@@ -276,9 +281,6 @@ MPI:
 Standard Arguments:
   --results-dir RESULTS_DIR, -rd RESULTS_DIR
                         Directory where the benchmark results will be saved.
-  --loops LOOPS         Number of times to run the benchmark
-  --open                Run as an open submission
-  --closed              Run as a closed submission
 
 Output Control:
   --debug               Enable debug mode
@@ -305,7 +307,7 @@ mlpstorage training run --hosts 10.117.61.121,10.117.61.165 --num-client-hosts 2
 ```bash
 # TODO: Update
 [root@localhost]# mlpstorage reports --help
-usage: mlpstorage reports [-h] [--results-dir RESULTS_DIR] [--loops LOOPS] [--open | --closed] [--debug] [--verbose]
+usage: mlpstorage reports [-h] [--results-dir RESULTS_DIR] [--debug] [--verbose]
                           [--stream-log-level STREAM_LOG_LEVEL] [--allow-invalid-params] [--what-if]
                           {reportgen} ...
 
@@ -319,9 +321,6 @@ optional arguments:
 Standard Arguments:
   --results-dir RESULTS_DIR, -rd RESULTS_DIR
                         Directory where the benchmark results will be saved.
-  --loops LOOPS         Number of times to run the benchmark
-  --open                Run as an open submission
-  --closed              Run as a closed submission
 
 Output Control:
   --debug               Enable debug mode
@@ -338,8 +337,7 @@ To generate the benchmark report,
 
 ```bash
 [root@localhost]# mlpstorage reports reportgen --help
-usage: mlpstorage reports reportgen [-h] [--output-dir OUTPUT_DIR] [--results-dir RESULTS_DIR] [--loops LOOPS]
-                                    [--open | --closed] [--debug] [--verbose] [--stream-log-level STREAM_LOG_LEVEL]
+usage: mlpstorage reports reportgen [-h] [--output-dir OUTPUT_DIR] [--results-dir RESULTS_DIR]                                    [--debug] [--verbose] [--stream-log-level STREAM_LOG_LEVEL]
                                     [--allow-invalid-params] [--what-if]
 
 optional arguments:
@@ -350,9 +348,6 @@ optional arguments:
 Standard Arguments:
   --results-dir RESULTS_DIR, -rd RESULTS_DIR
                         Directory where the benchmark results will be saved.
-  --loops LOOPS         Number of times to run the benchmark
-  --open                Run as an open submission
-  --closed              Run as a closed submission
 
 Output Control:
   --debug               Enable debug mode
