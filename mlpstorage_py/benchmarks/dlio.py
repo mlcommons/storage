@@ -16,7 +16,9 @@ from mlpstorage_py.errors import ConfigurationError, ErrorCode
 from mlpstorage_py.rules import calculate_training_data_size, HostInfo, HostMemoryInfo, HostCPUInfo, ClusterInformation
 from mlpstorage_py.rules.datagen_hierarchy import (
     assert_data_dir_hierarchy_absent,
+    validate_datagen_leaf,
     validate_supported_model,
+    write_datagen_manifest,
 )
 from mlpstorage_py.utils import (read_config_from_file, create_nested_dict, update_nested_dict, generate_mpi_prefix_cmd)
 from mlpstorage_py.storage_config import resolve_object_storage_config
@@ -957,7 +959,49 @@ class TrainingBenchmark(DLIOBenchmark):
         except Exception as e:
             self.logger.error(f'Error occurred while executing command: {str(e)}')
             return EXIT_CODE.FAILURE
+        # Post-datagen actions: leaf WARN + self-describing manifest
+        # write. Runs only after DLIO's datagen command returned
+        # success and only outside whatif (whatif is simulation and
+        # skips per D-29 policy).
+        if self.args.command == "datagen" and self.args.mode != "whatif":
+            try:
+                self._post_datagen_actions()
+            except ConfigurationError as e:
+                # A workload YAML that lacks the three DLIO fields is
+                # a real bug — surface loudly rather than write a
+                # silently-broken manifest.
+                self.logger.error(
+                    f'Post-datagen validation failed: {e}'
+                )
+                return EXIT_CODE.FAILURE
         return EXIT_CODE.SUCCESS
+
+    def _post_datagen_actions(self):
+        """WARN for missing leaf files, then write the datagen manifest.
+
+        Leaf-presence check runs unconditionally — any missing file
+        surfaces as a WARN but does not flip the exit code. Manifest
+        write is local-storage-only (S3 presence semantics are a
+        separate API and the future run-vs-datagen size check would
+        need a different discovery path for object storage).
+        """
+        missing = validate_datagen_leaf(self.run_result_output)
+        for item in missing:
+            self.logger.warning(
+                f'Datagen output leaf incomplete: {item}'
+            )
+
+        storage_type = self.params_dict.get("storage.storage_type", "local")
+        if storage_type != "local":
+            return
+        dataset_params = (self.combined_params or {}).get("dataset", {})
+        manifest_path = write_datagen_manifest(
+            data_dir=self.args.data_dir,
+            model=self.args.model,
+            dataset_params=dataset_params,
+            source_datagen_result_dir=self.run_result_output,
+        )
+        self.logger.info(f'Datagen manifest written: {manifest_path}')
 
 
 class CheckpointingBenchmark(DLIOBenchmark):
