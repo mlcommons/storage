@@ -515,6 +515,25 @@ def _is_distributed_run(args) -> bool:
     return False
 
 
+def _launcher_bypasses_ssh(args) -> bool:
+    """True when the configured MPI launcher spawns ranks via a batch-scheduler
+    daemon rather than SSH, so SSH reachability is not a prerequisite.
+
+    Recognized conservatively — only inside the matching allocation, so a
+    generic-cluster ``mpirun`` / MPICH-Hydra ``mpiexec`` (which bootstrap over
+    SSH by default) still trigger the SSH preflight:
+
+      * Slurm ``srun``            when ``SLURM_JOB_ID`` is set
+      * HPE/Cray PALS ``mpiexec`` when ``PALS_*`` env vars are present
+    """
+    launcher = os.path.basename((getattr(args, 'mpi_bin', '') or '').strip())
+    if launcher == 'srun' and os.environ.get('SLURM_JOB_ID'):
+        return True
+    if launcher == 'mpiexec' and any(k.startswith('PALS_') for k in os.environ):
+        return True
+    return False
+
+
 def _requires_dlio(args) -> bool:
     """
     Determine if DLIO benchmark is required.
@@ -603,8 +622,11 @@ def validate_benchmark_environment(
                 logger.debug(f"DLIO check failed: {e}")
             issues.append(e)
 
-    # Check SSH connectivity for distributed runs (unless skipped)
-    if _is_distributed_run(args) and not skip_remote_checks:
+    # Check SSH connectivity for distributed runs (unless skipped, or the MPI
+    # launcher does not bootstrap ranks over SSH — e.g. PALS mpiexec / Slurm
+    # srun spawn via the batch daemon, so SSH reachability is irrelevant).
+    if _is_distributed_run(args) and not skip_remote_checks \
+            and not _launcher_bypasses_ssh(args):
         hosts = getattr(args, 'hosts', [])
         if hosts:
             if logger:
@@ -635,6 +657,13 @@ def validate_benchmark_environment(
                 if logger:
                     logger.debug(f"SSH check failed: {e}")
                 issues.append(e)
+    elif _is_distributed_run(args):
+        if logger:
+            logger.info(
+                "Skipping SSH connectivity preflight: MPI launcher does not "
+                "bootstrap ranks over SSH (scheduler launcher), or "
+                "--skip-ssh-check was set."
+            )
 
     # Issue #447: warn (don't fail) when systemd-logind RemoveIPC=yes could
     # reap POSIX semaphores out from under the benchmark's spawn workers.
