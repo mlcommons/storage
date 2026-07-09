@@ -77,7 +77,6 @@ from mlpstorage_py.report_generator import (
     _INVALID_MSG_CHECKPOINT_COUNT,
     _INVALID_MSG_EMPTY_METRIC,
     _INVALID_MSG_TRAINING_COUNT,
-    _INVALID_MSG_WARMUP_UNDETECTED,
 )
 from mlpstorage_py.config import BENCHMARK_TYPES, PARAM_VALIDATION
 from mlpstorage_py.rules.models import BenchmarkRun, BenchmarkRunData
@@ -773,32 +772,93 @@ class TestInvalidRulesStrict:
         assert "1 warmup + 5 real" in text
         assert "found 3" in text
 
-    def test_warmup_undetected_on_6run_training_downgrades_to_invalid(self, tmp_path):
-        """D-26: 6-invocation training with empty ``warmup_result_dirs`` → INVALID.
+    def test_warmup_undetected_on_6run_training_falls_back_to_earliest(self, tmp_path):
+        """Issue #719: 6-invocation training with empty ``warmup_result_dirs``
+        falls back to the Rules.md §2.1.17 positional rule.
 
-        Uses the 6-run unet3d fixture but leaves
-        ``gen.warmup_result_dirs`` empty (as if the DLIO id-collision
-        detection failed to fire). The D-26 gate refuses to
-        aggregate and emits the second verbatim D-24 template.
+        Uses the 6-run unet3d fixture and leaves ``gen.warmup_result_dirs``
+        empty (as under the v3.0 flow of 6 independent ``run`` invocations,
+        which produce no ``summary.start`` collision). The workload-group
+        loop must pick the lex-earliest directory (``20260701_100000`` —
+        the warmup slot) as the warmup and aggregate the mean over the
+        remaining 5 real runs. The result must match what an explicit
+        collision-based warmup population produces.
         """
         gen = _make_bare_generator(tmp_path)
         runs_root = tmp_path / "closed" / "acme" / "results" / "sys-a" / "training" / "unet3d" / "run"
         runs_root.mkdir(parents=True)
         runs = _training_runs_from_unet3d_fixture(runs_root)
-        # Intentionally empty — the invariant D-26 protects.
+        # Intentionally empty — mimics the v3.0 independent-invocation flow.
         gen.warmup_result_dirs = set()
 
         _run_process_workload_groups(gen, runs)
 
         assert len(gen.workload_results) == 1
         result = next(iter(gen.workload_results.values()))
-        assert result.category == PARAM_VALIDATION.INVALID
-        text = self._row_issue_text(result)
-        # Structured pin.
-        assert _INVALID_MSG_WARMUP_UNDETECTED in text
-        # Verbatim substring pin — the exact D-24 template literal.
-        assert "expected exactly 1 warmup invocation to be detected" in text
-        assert "found 0 in a 6-invocation set" in text
+        # Fallback must PROMOTE the row from INVALID to a valid category.
+        assert result.category != PARAM_VALIDATION.INVALID, (
+            f"expected fallback to produce a valid aggregation; got {result.category!r} "
+            f"with issues={result.issues!r}"
+        )
+
+        # Earliest fixture ts is the warmup; it must now be in warmup_result_dirs.
+        expected_warmup_abs = os.path.abspath(str(runs_root / "20260701_100000"))
+        assert expected_warmup_abs in gen.warmup_result_dirs, (
+            f"earliest-timestamp fallback did not populate warmup_result_dirs; "
+            f"got {gen.warmup_result_dirs!r}"
+        )
+
+        # The aggregated mean must match the 5-run mean (warmup excluded).
+        real_run_ts = [
+            "20260701_101500",
+            "20260701_103000",
+            "20260701_104500",
+            "20260701_110000",
+            "20260701_111500",
+        ]
+        real_per_run_means = []
+        for ts in real_run_ts:
+            m = _load_summary(runs_root / ts / "summary.json")["metric"]
+            real_per_run_means.append(statistics.fmean(m["train_au_percentage"]))
+        expected_5run_mean = statistics.fmean(real_per_run_means)
+
+        actual = result.metrics.get("train_mean_of_au_percentage")
+        assert actual is not None, (
+            f"expected 'train_mean_of_au_percentage' in aggregated result; "
+            f"got keys: {list(result.metrics)}"
+        )
+        assert math.isclose(actual, expected_5run_mean, rel_tol=1e-9), (
+            f"train_mean_of_au_percentage = {actual}, "
+            f"expected 5-run mean = {expected_5run_mean} (warmup excluded)"
+        )
+
+    def test_collision_populated_warmup_is_preserved_over_fallback(self, tmp_path):
+        """Issue #719: collision path (Tier 1) is preserved.
+
+        When ``warmup_result_dirs`` is already populated by the
+        ``--loops``-era collision detection, the earliest-timestamp
+        fallback (Tier 2) must not fire — the pre-existing entry wins
+        and no additional entries are added.
+        """
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "closed" / "acme" / "results" / "sys-a" / "training" / "unet3d" / "run"
+        runs_root.mkdir(parents=True)
+        runs = _training_runs_from_unet3d_fixture(runs_root)
+        # Populate with a NON-earliest run to prove Tier 1 wins Tier 2.
+        preset_warmup = os.path.abspath(str(runs_root / "20260701_103000"))
+        gen.warmup_result_dirs = {preset_warmup}
+
+        _run_process_workload_groups(gen, runs)
+
+        result = next(iter(gen.workload_results.values()))
+        assert result.category != PARAM_VALIDATION.INVALID
+        # No fallback promotion happened — earliest is NOT in the set.
+        earliest_abs = os.path.abspath(str(runs_root / "20260701_100000"))
+        assert earliest_abs not in gen.warmup_result_dirs, (
+            "earliest-timestamp fallback fired when Tier-1 collision path had already "
+            "populated warmup_result_dirs — Tier 1 must win"
+        )
+        assert preset_warmup in gen.warmup_result_dirs
 
     def test_checkpointing_op_count_mismatch_downgrades_to_invalid(self, tmp_path):
         """D-24 template c: checkpointing metric list len != 10 → INVALID.

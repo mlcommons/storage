@@ -39,10 +39,6 @@ from mlpstorage_py.reporting import (
 _INVALID_MSG_TRAINING_COUNT = (
     "expected 6 training invocations per Rules.md §2.1.17 (1 warmup + 5 real); found {n}"
 )
-_INVALID_MSG_WARMUP_UNDETECTED = (
-    "expected exactly 1 warmup invocation to be detected; found 0 in a 6-invocation set. "
-    "Cannot compute Rules.md §2.1.17 5-run mean."
-)
 _INVALID_MSG_CHECKPOINT_COUNT = (
     "expected 10 checkpoint operations per Rules.md §2.1.23; found {n}"
 )
@@ -769,16 +765,29 @@ class ReportGenerator:
         should be aggregated into results.{csv,json}. Checkpointing has
         1 disk dir = 1 run (write-then-read self-warms), no warmup.
 
-        DLIO writes the warmup's ``summary.start`` value to match the FIRST
-        real run's start time (not the warmup's own directory timestamp), so
-        the two runs produce equal ``run_id`` values and collide in
-        ``self.run_results``. Detection here: on collision, the run whose
-        ``result_dir`` basename is lex-earlier is the warmup — its basename
-        is recorded in ``self.warmup_result_dirs`` and the later run wins
-        the dict slot (matching prior dict-overwrite semantics, which are
-        preserved so aggregate counts are unchanged). The workload printer
-        looks up ``warmup_result_dirs`` to render the warmup with a
-        ``[WARMUP, not aggregated]`` label instead of a category badge.
+        Warmup detection is two-tier:
+
+        Tier 1 (collision) — retained for backward compatibility with the
+        retired ``--loops`` orchestrator. DLIO writes the warmup's
+        ``summary.start`` value to match the FIRST real run's start time
+        (not the warmup's own directory timestamp), so the two runs produce
+        equal ``run_id`` values and collide in ``self.run_results``.
+        Detection here: on collision, the run whose ``result_dir`` basename
+        is lex-earlier is the warmup — its basename is recorded in
+        ``self.warmup_result_dirs`` and the later run wins the dict slot
+        (matching prior dict-overwrite semantics, which are preserved so
+        aggregate counts are unchanged).
+
+        Tier 2 (earliest-timestamp fallback per Rules.md §2.1.17) — applied
+        in ``_process_workload_groups`` for 6-invocation training groups
+        when Tier 1 finds nothing. The v3.0 flow prescribed by #502 uses
+        6 independent ``run`` invocations, each with its own
+        ``summary.start`` → no Tier-1 collision. Fallback picks the
+        lex-earliest ``basename(result_dir)`` in the group as the warmup.
+
+        The workload printer looks up ``warmup_result_dirs`` to render the
+        warmup with a ``[WARMUP, not aggregated]`` label instead of a
+        category badge.
 
         Args:
             benchmark_run: The benchmark run to process.
@@ -1403,16 +1412,38 @@ class ReportGenerator:
                                 _INVALID_MSG_TRAINING_COUNT.format(n=len(runs))
                             )
                         else:
-                            # D-26: warmup MUST have been detected for a
-                            # 6-invocation set. No lex-first-timestamp
-                            # fallback — loud INVALID over silent guess.
+                            # Issue #719: when the ``summary.start`` collision
+                            # path (retired ``--loops`` orchestrator) does not
+                            # fire — the v3.0 flow of 6 independent ``run``
+                            # invocations produces no collision — fall back
+                            # to the Rules.md §2.1.17 positional rule: "the
+                            # 1st of those 6 is the warm up run". Pick the
+                            # lex-earliest ``basename(result_dir)`` (dir
+                            # names are ISO-8601-ish so lex == chronological;
+                            # tiebreak on abspath is defensive, atomic
+                            # datetime allocation prevents same-second
+                            # collisions in practice). Retain the collision
+                            # path for backward compat with ``--loops``-era
+                            # trees.
                             warmup_present = any(
                                 os.path.abspath(r.result_dir or "") in self.warmup_result_dirs
                                 for r in runs
                             )
                             if not warmup_present:
-                                invalid_messages.append(
-                                    _INVALID_MSG_WARMUP_UNDETECTED
+                                earliest = min(
+                                    runs,
+                                    key=lambda r: (
+                                        os.path.basename(r.result_dir or ""),
+                                        os.path.abspath(r.result_dir or ""),
+                                    ),
+                                )
+                                earliest_abs = os.path.abspath(earliest.result_dir or "")
+                                self.warmup_result_dirs.add(earliest_abs)
+                                self.logger.debug(
+                                    f"Detected warmup run (earliest-timestamp "
+                                    f"fallback per Rules.md §2.1.17): "
+                                    f"{os.path.basename(earliest_abs)} "
+                                    "(excluded from aggregate)"
                                 )
                     elif bt == BENCHMARK_TYPES.checkpointing:
                         # D-20/D-24: each invocation's metric lists MUST
