@@ -1057,6 +1057,16 @@ def capture_or_verify_code_image(args, env, log):
         pool_dir = _capture_new_pool_image(org_root, source_root, live_hash, log)
         log.status(f"captured new pool image at {pool_dir}")
 
+    # #725 Bug 2 safety net: stash the live hash on args so Benchmark.__init__
+    # can re-write the pointer to the ACTUAL reserved leaf after
+    # _reserve_run_directory returns. The shim-based pointer write below
+    # computes its target via generate_output_location(shim), which can drift
+    # from Benchmark's own generate_output_location(self, self.run_datetime)
+    # under conditions we could not reproduce statically but that produce
+    # orphaned pool images in the field. Publishing the hash gives the
+    # benchmark base class a guaranteed leaf-write path.
+    args._validated_pool_hash = live_hash
+
     # Issue #716: ensure the .mlps-image-pool sentinel exists whenever a pool
     # image does. CHECK-04 D-91 hard-fails validation when pool dirs exist
     # without the sentinel. Deferred import breaks the code_image ↔
@@ -1112,9 +1122,13 @@ def capture_or_verify_code_image(args, env, log):
     except CodeImageError:
         raise
     except Exception as e:
-        # Non-fatal: pool image is on disk. Log and continue so the caller
-        # observes the successful capture even if the leaf-side plumbing
-        # (e.g. a stale test fixture without args.model) is incomplete.
-        log.debug("skipping pointer write (leaf computation failed: %s)", e)
+        # Non-fatal: pool image is on disk, and Benchmark.__init__ writes a
+        # second pointer to self.run_result_output as a safety net (#725
+        # Bug 2). Elevate from debug to warning so any recurrence is visible
+        # in normal-run output rather than hidden behind --debug.
+        log.warning(
+            "skipping capture-time pointer write (leaf computation failed: %s); "
+            "Benchmark.__init__ will write to the reserved leaf instead", e,
+        )
 
     return pool_dir

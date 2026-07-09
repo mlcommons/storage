@@ -224,6 +224,79 @@ class TestMigrateBenchmarkShapes:
             assert ptr.exists(), f"pointer missing in vector_database datetime leaf {leaf}"
 
 
+class TestMigrateLeafSubdirs:
+    """#725 Bug 1: migration must not drop pointers into leaf subdirectories.
+
+    Real DLIO run leaves contain ``dlio_config/``, ``collector-staging/``,
+    ``.chk_iterations/`` and similar subdirs. The migration's fixed-depth
+    globs overlap between benchmark shapes (training's 5-level glob also
+    matches checkpointing's ``<dt>/dlio_config``), and only a leaf-name
+    filter keeps pointer writes off those subdirectories. Without it,
+    2.1.15 / 2.1.20 / 2.1.26 fail on previously-valid submissions.
+    """
+
+    def test_training_leaf_subdirs_do_not_receive_pointer(
+        self, tmp_path, legacy_tree_factory, log
+    ):
+        """A training leaf's ``dlio_config/`` and ``collector-staging/`` must
+        NOT receive a ``.mlps-code-image`` pointer.
+        """
+        rd = legacy_tree_factory(
+            orgname="Acme", benchmark_shape="training", n_run_leaves=1
+        )
+        base = (
+            rd / "closed" / "Acme" / "results" / "sys1"
+            / "training" / "unet3d" / "run"
+        )
+        leaf = next(base.iterdir())
+        (leaf / "dlio_config").mkdir()
+        (leaf / "dlio_config" / "hydra.yaml").write_text("")
+        (leaf / "dlio_config" / "overrides.yaml").write_text("")
+        (leaf / "dlio_config" / "config.yaml").write_text("")
+        (leaf / "collector-staging").mkdir()
+
+        migrate_legacy_layout(rd, "Acme", log)
+
+        assert (leaf / ".mlps-code-image").exists(), (
+            "training leaf root must still receive a pointer"
+        )
+        assert not (leaf / "dlio_config" / ".mlps-code-image").exists(), (
+            "Bug 1: dlio_config/ must NOT receive a pointer (2.1.20 breaker)"
+        )
+        assert not (leaf / "collector-staging" / ".mlps-code-image").exists(), (
+            "Bug 1: collector-staging/ must NOT receive a pointer"
+        )
+
+    def test_checkpointing_leaf_subdirs_do_not_receive_pointer(
+        self, tmp_path, legacy_tree_factory, log
+    ):
+        """A checkpointing leaf's ``dlio_config/`` and ``collector-staging/``
+        must NOT receive a pointer (2.1.26 breaker in the reported repro).
+        """
+        rd = legacy_tree_factory(
+            orgname="Acme", benchmark_shape="checkpointing", n_run_leaves=1
+        )
+        base = (
+            rd / "closed" / "Acme" / "results" / "sys1"
+            / "checkpointing" / "llama3-8b"
+        )
+        leaf = next(base.iterdir())
+        (leaf / "dlio_config").mkdir()
+        (leaf / "collector-staging").mkdir()
+
+        migrate_legacy_layout(rd, "Acme", log)
+
+        assert (leaf / ".mlps-code-image").exists(), (
+            "checkpointing leaf root must still receive a pointer"
+        )
+        assert not (leaf / "dlio_config" / ".mlps-code-image").exists(), (
+            "Bug 1: dlio_config/ must NOT receive a pointer (2.1.26 breaker)"
+        )
+        assert not (leaf / "collector-staging" / ".mlps-code-image").exists(), (
+            "Bug 1: collector-staging/ must NOT receive a pointer"
+        )
+
+
 class TestMigrateEmptyRunLeaves:
     """Edge cases for trees with zero or absent run-leaf dirs."""
 
