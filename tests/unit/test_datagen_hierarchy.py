@@ -31,6 +31,7 @@ from __future__ import annotations
 import json
 import os
 import pathlib
+from unittest.mock import MagicMock, patch
 
 import pytest
 
@@ -346,3 +347,207 @@ class TestWriteDatagenManifest:
         # Error must name the missing key so operators can see which
         # workload YAML is broken.
         assert missing_key in str(excinfo.value)
+
+
+# --------------------------------------------------------------------------- #
+# Object-storage parity — refuse-to-overwrite + manifest PUT via s3dlio       #
+# --------------------------------------------------------------------------- #
+
+# All s3dlio interaction goes through the ``s3dlio`` module attribute
+# on ``mlpstorage_py.rules.datagen_hierarchy``. Patching that attribute
+# is how we simulate LIST / PUT behavior in these unit tests — no real
+# object-storage endpoint is required. The maintainer confirmed
+# depending on s3dlio's upstream unit tests for wire-level correctness
+# is acceptable given (1) s3dlio is already exercised by the
+# checkpointing benchmark's actual production I/O, and (2) our sentinel
+# operations are a ~1 KB PUT and a bounded LIST — orders of magnitude
+# simpler than what s3dlio already carries in this codebase.
+
+
+@pytest.mark.parametrize(
+    "uri",
+    [
+        "s3://bucket/prefix",
+        "s3://bucket/prefix/",
+        "gs://bucket/prefix",
+        "az://container/prefix",
+        "direct://bucket/prefix",
+    ],
+)
+class TestAssertDataDirHierarchyAbsentObjectStorage:
+    """Refuse-to-overwrite parity for every URI scheme s3dlio abstracts.
+
+    Semantic contract must match the local case:
+        - No object under <data-dir>/<model>/ → clean return.
+        - Any object present → ``ConfigurationError`` with the offending
+          URI in the message.
+        - Any s3dlio exception during LIST → ``ConfigurationError``
+          (fail-safe abort per the design decision — a transient
+          object-store error must not silently be treated as
+          "assume empty, proceed").
+    """
+
+    def test_empty_prefix_returns_cleanly(self, uri):
+        with patch(
+            "mlpstorage_py.rules.datagen_hierarchy.s3dlio"
+        ) as mock_s3dlio:
+            mock_s3dlio.list.return_value = []
+            # Must not raise.
+            assert_data_dir_hierarchy_absent(uri, "unet3d")
+
+            # LIST must be scoped to <data-dir>/<model>/ (with model
+            # segment appended), NOT to the raw data-dir prefix —
+            # otherwise a data-dir that hosts sibling datasets
+            # (retinanet, etc.) would be misdetected as populated.
+            (called_uri,), _ = mock_s3dlio.list.call_args
+            assert "unet3d" in called_uri
+            assert called_uri.startswith(uri.rstrip("/"))
+
+    def test_bounded_list_uses_non_recursive(self, uri):
+        # s3dlio.list has no MaxKeys=1 knob. To keep the check
+        # bounded regardless of dataset size we pass
+        # recursive=False — a delimiter-based listing that returns
+        # only the small set of direct children (train/, valid/,
+        # test/ + manifest). Documented in the design conversation
+        # and PR discussion.
+        with patch(
+            "mlpstorage_py.rules.datagen_hierarchy.s3dlio"
+        ) as mock_s3dlio:
+            mock_s3dlio.list.return_value = []
+            assert_data_dir_hierarchy_absent(uri, "unet3d")
+            _, kwargs = mock_s3dlio.list.call_args
+            assert kwargs.get("recursive") is False, (
+                f"Expected recursive=False for bounded LIST; got kwargs={kwargs!r}"
+            )
+
+    def test_non_empty_prefix_raises_with_uri_in_message(self, uri):
+        with patch(
+            "mlpstorage_py.rules.datagen_hierarchy.s3dlio"
+        ) as mock_s3dlio:
+            mock_s3dlio.list.return_value = [
+                f"{uri.rstrip('/')}/unet3d/train/shard_000.npz"
+            ]
+            with pytest.raises(ConfigurationError) as excinfo:
+                assert_data_dir_hierarchy_absent(uri, "unet3d")
+            text = str(excinfo.value)
+            # Must name the offending model URI so the operator can
+            # act (rm-rf equivalent or a different --data-dir).
+            assert "unet3d" in text
+            assert "s3://" in text or "gs://" in text or "az://" in text or "direct://" in text
+
+    def test_s3dlio_exception_fails_safe_abort(self, uri):
+        # Per the design decision: a transient LIST failure must NOT
+        # be treated as "assume empty". Any s3dlio exception during
+        # the refuse-to-overwrite check is a ConfigurationError.
+        with patch(
+            "mlpstorage_py.rules.datagen_hierarchy.s3dlio"
+        ) as mock_s3dlio:
+            mock_s3dlio.list.side_effect = RuntimeError(
+                "network failure or credentials missing"
+            )
+            with pytest.raises(ConfigurationError) as excinfo:
+                assert_data_dir_hierarchy_absent(uri, "unet3d")
+            # The underlying error must surface (chained or in the
+            # message) so the operator can diagnose.
+            text = str(excinfo.value)
+            assert "unet3d" in text
+            # Chained exception should preserve the original.
+            assert excinfo.value.__cause__ is not None
+
+
+class TestWriteDatagenManifestObjectStorage:
+    """Manifest PUT via s3dlio.put_bytes for object-storage --data-dir.
+
+    Feature parity with the local ``open(..., 'w')`` path: the JSON
+    body is byte-identical (schema_version, three DLIO knobs,
+    provenance fields) — only the write mechanism differs.
+    """
+
+    def test_writes_manifest_via_put_bytes_at_expected_uri(self):
+        with patch(
+            "mlpstorage_py.rules.datagen_hierarchy.s3dlio"
+        ) as mock_s3dlio:
+            returned_uri = write_datagen_manifest(
+                data_dir="s3://mybucket/mytraining",
+                model="unet3d",
+                dataset_params=_valid_dataset_params(),
+                source_datagen_result_dir="/results/leaf",
+            )
+
+            # The manifest lands under <data-dir>/<model>/<filename>
+            # (matches local per-model nesting so one bucket can hold
+            # multiple model datasets).
+            expected_uri = (
+                f"s3://mybucket/mytraining/unet3d/{DATAGEN_MANIFEST_FILENAME}"
+            )
+            assert returned_uri == expected_uri
+            mock_s3dlio.put_bytes.assert_called_once()
+            (called_uri, payload), _ = mock_s3dlio.put_bytes.call_args
+            assert called_uri == expected_uri
+            # Payload must be bytes-typed — s3dlio.put_bytes contract.
+            assert isinstance(payload, (bytes, bytearray))
+
+    def test_manifest_body_matches_local_schema(self):
+        # The wire body must be byte-identical to what the local
+        # branch would write — the future run-side reader is the
+        # same code path across storage backends.
+        with patch(
+            "mlpstorage_py.rules.datagen_hierarchy.s3dlio"
+        ) as mock_s3dlio:
+            write_datagen_manifest(
+                data_dir="s3://mybucket/mytraining",
+                model="unet3d",
+                dataset_params=_valid_dataset_params(),
+                source_datagen_result_dir="/results/leaf",
+            )
+            (_, payload), _ = mock_s3dlio.put_bytes.call_args
+            data = json.loads(payload.decode("utf-8"))
+            assert data["schema_version"] == DATAGEN_MANIFEST_SCHEMA_VERSION
+            assert data["model"] == "unet3d"
+            assert data["num_files_train"] == 168
+            assert data["num_samples_per_file"] == 1
+            assert data["record_length_bytes"] == 146600628
+            assert data["source_datagen_result_dir"] == "/results/leaf"
+            assert data["created_at"].endswith("Z")
+            assert data["mlpstorage_version"]
+
+    @pytest.mark.parametrize(
+        "missing_key",
+        ["num_files_train", "num_samples_per_file", "record_length_bytes"],
+    )
+    def test_missing_field_raises_before_put(self, missing_key):
+        # The loud-failure contract applies to object storage too.
+        # No PUT must fire if extraction fails — otherwise a
+        # zero-valued placeholder could pollute the object store.
+        with patch(
+            "mlpstorage_py.rules.datagen_hierarchy.s3dlio"
+        ) as mock_s3dlio:
+            params = _valid_dataset_params()
+            del params[missing_key]
+            with pytest.raises(ConfigurationError):
+                write_datagen_manifest(
+                    data_dir="s3://mybucket/mytraining",
+                    model="unet3d",
+                    dataset_params=params,
+                    source_datagen_result_dir="/results/leaf",
+                )
+            mock_s3dlio.put_bytes.assert_not_called()
+
+    def test_put_bytes_exception_propagates_configuration_error(self):
+        # s3dlio raises on PUT (auth failure, network hiccup, etc.).
+        # Wrap into ConfigurationError so main.py's uniform error
+        # rendering surfaces it — silent PUT failure would leave the
+        # dataset without its manifest and break the future
+        # run-vs-datagen check.
+        with patch(
+            "mlpstorage_py.rules.datagen_hierarchy.s3dlio"
+        ) as mock_s3dlio:
+            mock_s3dlio.put_bytes.side_effect = RuntimeError("PUT failed")
+            with pytest.raises(ConfigurationError) as excinfo:
+                write_datagen_manifest(
+                    data_dir="s3://mybucket/mytraining",
+                    model="unet3d",
+                    dataset_params=_valid_dataset_params(),
+                    source_datagen_result_dir="/results/leaf",
+                )
+            assert excinfo.value.__cause__ is not None
