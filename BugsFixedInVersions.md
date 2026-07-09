@@ -5,6 +5,18 @@
 
 ---
 
+## Table of Contents
+
+Jump to the group of releases you care about. Only versions divisible by 10 are linked — each link
+lands on the first entry in that decade of point-releases.
+
+- [All the 3.0.10's releases](#versions-3010--3013-june-15--18-2026)
+- [All the 3.0.20's releases](#version-3020-june-25-2026)
+- [All the 3.0.30's releases](#version-3031-july-4-2026) *(3.0.29 and 3.0.30 were not released; the decade starts at 3.0.31)*
+- [All the 3.0.40's releases](#version-3040-july-9-2026)
+
+---
+
 ## Source Code Size For Versions 3.0.3 – 3.0.9 (May 28 – June 14, 2026)
 
 | Subtree | May 29 (excl. tests) | May 29 (tests only) | HEAD (excl. tests) | HEAD (tests only) |
@@ -26,6 +38,10 @@ Each section below lists significant bugs fixed in that release, organized into 
 
 Trivial fixes (CLI message wording, whitespace, docs-only changes, test-only changes) are excluded.
 Issue and PR numbers are provided at the end of each entry for reference.
+
+Each entry is a single line of 120 characters or fewer, written to help a reader who has already
+"finished" running a benchmark decide whether prior runs affected by the bug are worth rerunning
+under this version or a later one — so entries lead with the user-visible symptom, not the internals.
 
 ---
 
@@ -358,8 +374,8 @@ No mlpstorage-level code change landed in this range. The DLIO pin advanced twic
 _(None. All three DLIO fixes in this range are invocation or metadata correctness — no measured-throughput or latency change.)_
 
 **Invocation**
-- DLIO: `read_threads` per-node memory guard aborted runs 2..N of every 5-run submission on POSIX filesystems whose client pins a large reclaimable page cache (Lustre in particular). Run 1 warmed the cache; subsequent runs sampled `psutil.virtual_memory().available`, saw the cache as "unavailable," and DLIO refused to launch in `initialize()` — before the benchmark's own per-epoch page-cache flush ever got to run. `reportgen` then reported `INVALID: 0 runs` for a submission whose only real problem was launch-order timing. DLIO now drops the local host's page cache immediately before sampling `virtual_memory()`, gated on `local_rank() == 0` (not `MPI.node()`, which is unreliable under `--map-by node`) with a `Barrier()` so non-leader ranks read post-drop memory. Reuses the existing `DLIO_DROP_CACHES_TIMEOUT` env var — no new operator knob. Fail-open matches the per-epoch flush: `sudo -n` refusal, kernel timeout, `Barrier` error, and every subprocess exception are swallowed so the guard downstream still runs. (#741; DLIO PR #48)
-- DLIO: `_s3_iterable_mixin` had a latent fork-safety hazard — the module-level `_PREFETCH_POOL = ThreadPoolExecutor(...)` was created in the parent at import time, and its worker thread does not survive `os.fork()`. Any `.submit()` in a DLIO DataLoader worker enqueued work that nobody drained and `future.result()` blocked indefinitely. Currently only affected the `minio` and `s3torchconnector` code paths (the `s3dlio` path short-circuits around the pool before submitting); post-fix, the pool is per-mixin-instance and created inside `_s3_init()` — strictly after `os.fork()` — so every DataLoader worker gets its own live pool. Same shape as the LOCAL_FS hazard closed for storage#391. (#626; DLIO PR #46)
+- DLIO: memory guard aborted runs 2–5 on page-cached POSIX FS (Lustre); rerun 5-run sets flagged INVALID. (#741; DLIO PR #48)
+- DLIO: S3 prefetch pool didn't survive fork; minio/s3torchconnector runs hung — rerun any that hung. (#626; DLIO PR #46)
 
 **Other Significant**
-- DLIO: per-worker in-flight I/O concurrency in `_S3IterableMixin` depended on which `storage_library` a submitter chose, not on the storage system under test — s3dlio at 64, `minio` hardcoded at 16 (undocumented, 4× lower), `s3torchconnector` fully sequential (up to 64× lower). All three prefetch paths now share a single module-level `_MAX_PREFETCH_CONCURRENCY = 64`: `minio`'s `ThreadPoolExecutor` and backing `urllib3.PoolManager` raised 16 → 64, and `s3torchconnector` rewritten from sequential to a `ThreadPoolExecutor`-based path (readers drained single-threaded first because `S3IterableDataset`'s iterator isn't safe for concurrent `next()`; only `.read()`, where the real I/O happens, is fanned out). Note: this closes the *concurrency-ceiling parity* gap only — it does not eliminate the raw-throughput gap between s3dlio's native Rust engine and the Python SDK clients (`minio` in particular remains GIL-serialized on request signing / header construction / response parsing), which is a client-library implementation difference, not a DLIO benchmark-code issue. Live loopback verification at cap=64 with 2000 × 256 KiB objects: s3dlio 77 ms, minio 1,359 ms, s3torchconnector 677 ms — the concurrency lift is real (~2× on `s3torchconnector` alone), the SDK-runtime gap is not something this fix could touch. `prefetch_window` semantic-collision docs on both `_s3_iterable_mixin` and `_local_fs_iterable_mixin` updated to reflect the new shared ceiling. (#626; DLIO PR #47)
+- DLIO: S3 prefetch cap: minio 16, s3torch 1, s3dlio 64; unified to 64 — rerun cross-library runs. (#626; DLIO PR #47)
