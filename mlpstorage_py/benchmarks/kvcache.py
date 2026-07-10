@@ -305,9 +305,17 @@ class KVCacheBenchmark(Benchmark):
         global_kv_args = self._build_global_kvcache_args(is_closed)
 
         option_results = {}
+        # Track (trial_index, exit_code, stderr_log_path) per option so the
+        # operator can go straight to the log that captured the underlying
+        # kv-cache.py error when a trial produced no rank result files
+        # (issue #758). We don't bail early — later options usually hit the
+        # same environment problem, and running them gives the operator the
+        # full log surface to inspect in one pass.
+        option_trial_failures: dict = {}
         for option in [1, 2, 3]:
             option_kv_args = self._build_option_kvcache_args(option, is_closed)
             trial_dirs = []
+            trial_failures: list = []
 
             for trial in range(trials):
                 option_trial_dir = (
@@ -329,18 +337,54 @@ class KVCacheBenchmark(Benchmark):
                 )
 
                 self.logger.status(f"Running option {option} trial {trial + 1}/{trials}...")
-                self._execute_command(
+                trial_prefix = f"kvcache_opt{option}_trial{trial}_{self.run_datetime}"
+                _, _, trial_rc = self._execute_command(
                     wrapper_cmd,
-                    output_file_prefix=f"kvcache_opt{option}_trial{trial}_{self.run_datetime}",
+                    output_file_prefix=trial_prefix,
                     print_stdout=True,
                     print_stderr=True,
                 )
                 trial_dirs.append(str(option_trial_dir))
 
+                if trial_rc != 0:
+                    stderr_log = Path(self.run_result_output) / f"{trial_prefix}.stderr.log"
+                    trial_failures.append((trial, trial_rc, str(stderr_log)))
+                    self.logger.error(
+                        f"Option {option} trial {trial + 1}/{trials}: mpirun "
+                        f"exited with code {trial_rc}. See {stderr_log} for "
+                        f"the underlying kv-cache.py error."
+                    )
+
+            if trial_failures:
+                option_trial_failures[option] = trial_failures
+
             if not getattr(self.args, 'what_if', False):
                 option_results[option] = self._aggregate_option_results(
                     option, trial_dirs, total_ranks
                 )
+                # Issue #758: when every rank across every trial failed to
+                # produce a result file, surface a loud error rather than
+                # silently averaging zeros into summary.json. The per-rank
+                # WARNING inside _aggregate_option_results still covers the
+                # partial-failure case (subset of ranks missing on a multi-
+                # host run); this block covers the total-loss case Nutanix
+                # hit.
+                expected_files = total_ranks * trials
+                missing_files = option_results[option].get('missing_files', [])
+                if expected_files > 0 and len(missing_files) >= expected_files:
+                    first_stderr = (
+                        Path(self.run_result_output)
+                        / f"kvcache_opt{option}_trial0_{self.run_datetime}.stderr.log"
+                    )
+                    self.logger.error(
+                        f"Option {option}: no kvcache_results_*.json produced "
+                        f"by any of the {total_ranks} rank(s) across "
+                        f"{trials} trial(s). kv-cache.py exited without "
+                        f"writing its output file. Inspect {first_stderr} "
+                        f"(and the sibling .stderr.log files for other "
+                        f"trials) for the underlying error; do not treat "
+                        f"summary.json aggregates as valid results."
+                    )
             else:
                 self.logger.info(f"what-if: skipping aggregation for option {option}")
 
@@ -348,10 +392,40 @@ class KVCacheBenchmark(Benchmark):
                 self._interruptible_sleep(inter_option_delay)
 
         if not getattr(self.args, 'what_if', False):
-            self._write_run_summary(option_results, npernode, len(hosts), total_ranks, trials)
+            self._write_run_summary(
+                option_results,
+                npernode,
+                len(hosts),
+                total_ranks,
+                trials,
+                option_trial_failures=option_trial_failures,
+            )
 
         self.write_metadata()
         self.write_cluster_info()
+
+        # Loud-failure verdict: if any option produced zero result files, the
+        # run's aggregates are meaningless. Exit non-zero so callers (CI,
+        # submission tooling, the operator's own shell $?) can't mistake a
+        # zero-value summary.json for a successful benchmark. Trials that
+        # exited non-zero but still produced SOME rank data fall through as
+        # partial_failure (existing behavior).
+        if not getattr(self.args, 'what_if', False):
+            expected_files_per_option = total_ranks * trials
+            zero_data_options = [
+                opt for opt, res in option_results.items()
+                if expected_files_per_option > 0
+                and len(res.get('missing_files', [])) >= expected_files_per_option
+            ]
+            if zero_data_options:
+                self.logger.error(
+                    f"kvcache run failed: option(s) {sorted(zero_data_options)} "
+                    f"produced no result files. summary.json has been written "
+                    f"but its aggregates are meaningless — this run is NOT a "
+                    f"valid MLPerf submission."
+                )
+                return 1
+
         return 0
 
     # ------------------------------------------------------------------
@@ -809,8 +883,27 @@ class KVCacheBenchmark(Benchmark):
         host_count: int,
         total_ranks: int,
         trials: int,
+        option_trial_failures: dict = None,
     ) -> None:
-        """Write aggregated run summary JSON to run_result_output."""
+        """Write aggregated run summary JSON to run_result_output.
+
+        ``option_trial_failures`` maps option number → list of
+        ``(trial_index, exit_code, stderr_log_path)`` for trials whose
+        mpirun invocation returned non-zero. Serialized under the
+        ``trial_failures`` key so an operator inspecting summary.json
+        after the fact can find the exact stderr log to read (issue #758).
+        """
+        serializable_failures = {}
+        for opt, failures in (option_trial_failures or {}).items():
+            serializable_failures[opt] = [
+                {
+                    'trial': trial_idx,
+                    'exit_code': rc,
+                    'stderr_log': stderr_path,
+                }
+                for (trial_idx, rc, stderr_path) in failures
+            ]
+
         summary = {
             'schema_version': '1.0',
             'run_datetime': self.run_datetime,
@@ -822,6 +915,7 @@ class KVCacheBenchmark(Benchmark):
             'partial_failure': any(
                 r.get('partial_failure', False) for r in option_results.values()
             ),
+            'trial_failures': serializable_failures,
         }
         # `summary.json` matches the filename training/checkpointing DLIO
         # writes and the name the submission checker's loader looks for
