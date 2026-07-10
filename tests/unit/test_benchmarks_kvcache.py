@@ -1145,6 +1145,262 @@ class TestExecuteRun:
         assert rc == 0
 
 
+class TestLoudFailureOnMissingResultFiles:
+    """Issue #758: kvcache must NOT silently succeed when kv-cache.py exits
+    without writing kvcache_results_*.json. When an option's rank result
+    files are entirely absent, _execute_run must return non-zero, emit an
+    ERROR log pointing at the specific stderr log, and mirror the trial
+    failures into summary.json under 'trial_failures'.
+    """
+
+    @pytest.fixture
+    def bm(self, tmp_path):
+        return _make_run_benchmark(tmp_path, what_if=False)
+
+    def _zero_data_agg_result(self, option, expected_files):
+        """Aggregate result shape for an option where every rank/trial was missing."""
+        return {
+            'option': option,
+            'aggregated_read_bandwidth_gbps': 0.0,
+            'aggregated_write_bandwidth_gbps': 0.0,
+            'aggregated_avg_throughput_tokens_per_sec': 0.0,
+            'aggregated_storage_throughput_tokens_per_sec': 0.0,
+            'aggregated_p95_latency_ms': None,
+            'rank_count': 2,
+            'trial_count': 3,
+            'partial_failure': True,
+            'missing_files': [f'missing_{i}' for i in range(expected_files)],
+            'cpu_tier_ranks': [],
+        }
+
+    def _healthy_agg_result(self, option):
+        return {
+            'option': option,
+            'aggregated_read_bandwidth_gbps': 1.0,
+            'aggregated_write_bandwidth_gbps': 1.0,
+            'aggregated_avg_throughput_tokens_per_sec': 1.0,
+            'aggregated_storage_throughput_tokens_per_sec': 1.0,
+            'aggregated_p95_latency_ms': 5.0,
+            'rank_count': 2,
+            'trial_count': 3,
+            'partial_failure': False,
+            'missing_files': [],
+            'cpu_tier_ranks': [],
+        }
+
+    def test_returns_1_when_option_has_zero_result_files(self, bm):
+        """When every rank/trial for an option produced no result file,
+        _execute_run must return 1 rather than falsely succeeding."""
+        bm.args.trials = 3
+        bm.args.inter_option_delay = 0
+        # 2 ranks × 3 trials = 6 expected files per option; option 3 has all 6 missing.
+        agg_side_effect = [
+            self._healthy_agg_result(1),
+            self._healthy_agg_result(2),
+            self._zero_data_agg_result(3, expected_files=6),
+        ]
+        with patch.object(bm, '_execute_command', return_value=('', '', 0)), \
+             patch.object(bm, '_interruptible_sleep'), \
+             patch.object(bm, '_aggregate_option_results', side_effect=agg_side_effect), \
+             patch.object(bm, '_write_run_summary'), \
+             patch.object(bm, 'write_metadata'):
+            rc = bm._execute_run()
+        assert rc == 1
+
+    def test_returns_0_when_all_options_have_result_files(self, bm):
+        """Sanity: healthy runs still return 0."""
+        bm.args.trials = 3
+        bm.args.inter_option_delay = 0
+        with patch.object(bm, '_execute_command', return_value=('', '', 0)), \
+             patch.object(bm, '_interruptible_sleep'), \
+             patch.object(bm, '_aggregate_option_results',
+                          side_effect=[self._healthy_agg_result(i) for i in (1, 2, 3)]), \
+             patch.object(bm, '_write_run_summary'), \
+             patch.object(bm, 'write_metadata'):
+            rc = bm._execute_run()
+        assert rc == 0
+
+    def test_returns_0_when_only_partial_failure(self, bm):
+        """A partial failure (some rank files missing but not all) is still
+        recorded as partial_failure and returns 0 — the existing behavior
+        for the multi-host visibility case must not regress."""
+        bm.args.trials = 3
+        bm.args.inter_option_delay = 0
+        # Option 3 has only some ranks missing (3 of 6), not all — this is
+        # the multi-host partial visibility case and should NOT trigger a
+        # non-zero exit.
+        partial = self._healthy_agg_result(3)
+        partial['partial_failure'] = True
+        partial['missing_files'] = ['a', 'b', 'c']
+        with patch.object(bm, '_execute_command', return_value=('', '', 0)), \
+             patch.object(bm, '_interruptible_sleep'), \
+             patch.object(bm, '_aggregate_option_results',
+                          side_effect=[self._healthy_agg_result(1),
+                                       self._healthy_agg_result(2),
+                                       partial]), \
+             patch.object(bm, '_write_run_summary'), \
+             patch.object(bm, 'write_metadata'):
+            rc = bm._execute_run()
+        assert rc == 0
+
+    def test_trial_failure_rc_captured_and_logged(self, bm):
+        """When _execute_command returns a non-zero exit code, an ERROR log
+        must be emitted that names the stderr log path so the operator can
+        go straight to the underlying kv-cache.py traceback."""
+        bm.args.trials = 1
+        bm.args.inter_option_delay = 0
+        # Trial 0 of option 1 fails; the rest succeed.
+        rc_sequence = [
+            ('', '', 137),  # option 1 trial 0 → OOM-kill style
+            ('', '', 0),    # option 2 trial 0
+            ('', '', 0),    # option 3 trial 0
+        ]
+        with patch.object(bm, '_execute_command', side_effect=rc_sequence), \
+             patch.object(bm, '_interruptible_sleep'), \
+             patch.object(bm, '_aggregate_option_results',
+                          side_effect=[self._healthy_agg_result(i) for i in (1, 2, 3)]), \
+             patch.object(bm, '_write_run_summary'), \
+             patch.object(bm, 'write_metadata'), \
+             patch.object(bm.logger, 'error') as mock_error:
+            bm._execute_run()
+        error_messages = [call.args[0] for call in mock_error.call_args_list]
+        matching = [m for m in error_messages if 'exit' in m.lower() and '137' in m]
+        assert matching, (
+            f"Expected an ERROR log mentioning the trial exit code 137. "
+            f"Got: {error_messages}"
+        )
+        # Must reference the stderr log path so the operator knows where to look.
+        assert any('.stderr.log' in m for m in matching), (
+            f"Trial-failure ERROR must include the stderr log path. Got: {matching}"
+        )
+
+    def test_zero_data_option_error_names_stderr_log(self, bm):
+        """The 'no result files' ERROR must include an actual stderr log path
+        so the operator can inspect the underlying kv-cache.py error without
+        grepping through the output directory (loud-failure principle)."""
+        bm.args.trials = 3
+        bm.args.inter_option_delay = 0
+        agg_side_effect = [
+            self._healthy_agg_result(1),
+            self._healthy_agg_result(2),
+            self._zero_data_agg_result(3, expected_files=6),
+        ]
+        with patch.object(bm, '_execute_command', return_value=('', '', 0)), \
+             patch.object(bm, '_interruptible_sleep'), \
+             patch.object(bm, '_aggregate_option_results', side_effect=agg_side_effect), \
+             patch.object(bm, '_write_run_summary'), \
+             patch.object(bm, 'write_metadata'), \
+             patch.object(bm.logger, 'error') as mock_error:
+            bm._execute_run()
+        error_messages = [call.args[0] for call in mock_error.call_args_list]
+        no_result_msgs = [
+            m for m in error_messages
+            if 'no kvcache_results_' in m or 'no result files' in m.lower()
+        ]
+        assert no_result_msgs, (
+            f"Expected a loud ERROR about missing result files. Got: {error_messages}"
+        )
+        assert any('kvcache_opt3_trial0_' in m and '.stderr.log' in m
+                   for m in no_result_msgs), (
+            f"Missing-files ERROR must point at the per-trial stderr log "
+            f"(kvcache_opt3_trial0_<datetime>.stderr.log). Got: {no_result_msgs}"
+        )
+
+    def test_summary_receives_trial_failures(self, bm):
+        """_write_run_summary must be called with the option_trial_failures
+        map so summary.json records the exit code and stderr log path for
+        each failed trial."""
+        bm.args.trials = 1
+        bm.args.inter_option_delay = 0
+        # option 1 trial 0 fails with rc=42; others succeed
+        rc_sequence = [('', '', 42), ('', '', 0), ('', '', 0)]
+        with patch.object(bm, '_execute_command', side_effect=rc_sequence), \
+             patch.object(bm, '_interruptible_sleep'), \
+             patch.object(bm, '_aggregate_option_results',
+                          side_effect=[self._healthy_agg_result(i) for i in (1, 2, 3)]), \
+             patch.object(bm, '_write_run_summary') as mock_ws, \
+             patch.object(bm, 'write_metadata'):
+            bm._execute_run()
+        assert mock_ws.call_count == 1
+        _, kwargs = mock_ws.call_args
+        assert 'option_trial_failures' in kwargs, (
+            f"_write_run_summary must receive option_trial_failures kwarg. "
+            f"Got kwargs: {list(kwargs.keys())}"
+        )
+        failures = kwargs['option_trial_failures']
+        assert 1 in failures, f"Expected option 1 in failures, got {failures}"
+        trial_idx, rc, stderr_path = failures[1][0]
+        assert trial_idx == 0
+        assert rc == 42
+        assert '.stderr.log' in stderr_path
+
+
+class TestWriteRunSummaryTrialFailures:
+    """Issue #758: summary.json must expose trial_failures so post-hoc
+    inspection reveals which trial's stderr log contains the actual error."""
+
+    def _healthy_option_result(self, option):
+        return {
+            'option': option,
+            'aggregated_read_bandwidth_gbps': 1.0,
+            'aggregated_write_bandwidth_gbps': 1.0,
+            'aggregated_avg_throughput_tokens_per_sec': 1.0,
+            'aggregated_storage_throughput_tokens_per_sec': 1.0,
+            'aggregated_p95_latency_ms': 5.0,
+            'rank_count': 2,
+            'trial_count': 3,
+            'partial_failure': False,
+            'missing_files': [],
+            'cpu_tier_ranks': [],
+        }
+
+    def test_trial_failures_key_present_when_empty(self, tmp_path):
+        """summary.json always contains a trial_failures key so downstream
+        readers can rely on its presence."""
+        bm = _make_run_benchmark(tmp_path)
+        output_dir = str(tmp_path / 'summary_out')
+        os.makedirs(output_dir, exist_ok=True)
+        bm.run_result_output = output_dir
+        bm._write_run_summary(
+            {1: self._healthy_option_result(1)},
+            npernode=2, host_count=1, total_ranks=2, trials=3,
+        )
+        with open(Path(output_dir) / 'summary.json') as f:
+            data = json.load(f)
+        assert 'trial_failures' in data
+        assert data['trial_failures'] == {}
+
+    def test_trial_failures_serialized_with_exit_code_and_stderr(self, tmp_path):
+        """When option_trial_failures is provided, each entry must serialize
+        with trial, exit_code, and stderr_log fields."""
+        bm = _make_run_benchmark(tmp_path)
+        output_dir = str(tmp_path / 'summary_out')
+        os.makedirs(output_dir, exist_ok=True)
+        bm.run_result_output = output_dir
+        failures = {
+            3: [
+                (0, 137, '/mnt/logs/.../kvcache_opt3_trial0_20260710_154835.stderr.log'),
+                (1, 137, '/mnt/logs/.../kvcache_opt3_trial1_20260710_154835.stderr.log'),
+            ],
+        }
+        bm._write_run_summary(
+            {3: self._healthy_option_result(3)},
+            npernode=2, host_count=1, total_ranks=2, trials=3,
+            option_trial_failures=failures,
+        )
+        with open(Path(output_dir) / 'summary.json') as f:
+            data = json.load(f)
+        # JSON keys are strings after serialization
+        tf = data['trial_failures']
+        assert '3' in tf or 3 in tf
+        entries = tf.get('3', tf.get(3))
+        assert len(entries) == 2
+        first = entries[0]
+        assert first['trial'] == 0
+        assert first['exit_code'] == 137
+        assert first['stderr_log'].endswith('.stderr.log')
+
+
 class TestClosedEnforcement:
     """Tests for CLOSED submission enforcement in _execute_run."""
 
