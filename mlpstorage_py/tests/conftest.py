@@ -96,6 +96,18 @@ _RUN_TIMESTAMPS = [
 # One datagen timestamp
 _DATAGEN_TIMESTAMPS = ["20250111_130000"]
 
+# One datasize timestamp — parallel to datagen. Rules.md §2.1.12 (post
+# STRUCT-12 datasize-phase landing) requires the phase directory. The
+# sentinel metadata written into datasize/<ts>/ carries the outputs of
+# the datasize calculation that rule 3.3.1 (and, in future, a datagen
+# cross-check) reads back.
+_DATASIZE_TIMESTAMPS = ["20250111_125900"]
+_DATASIZE_DEFAULT_OUTPUTS = {
+    "num_files_train": 14000,
+    "num_subfolders_train": 0,
+    "total_disk_bytes": 68_090_280_000,
+}
+
 # Two checkpointing timestamps — Rules.md 2.1.23 in conjunction with 4.7.1
 # allows 1 or 2 invocations (one timestamp dir per invocation). The fixture
 # uses the two-invocation shape (write phase + read phase) so split-mode
@@ -399,6 +411,15 @@ def build_submission(tmp_path, **overrides) -> Path:
     wrong_training_phase = overrides.pop("wrong_training_phase", None)
     datagen_timestamps_count = overrides.pop("datagen_timestamps", None)
     bad_datagen_timestamp_format = overrides.pop("bad_datagen_timestamp_format", False)
+    # STRUCT-12 datasize-phase kwargs (Rules.md §2.1.12 / §3.3.1):
+    #   ``omit_datasize_phase`` — skip building datasize/ entirely (exercises the
+    #                              warn-level DATASIZE-MISSING path in STRUCT-12
+    #                              and rule 3.3.1).
+    #   ``datasize_missing_output_keys`` — iterable of parameters.dataset.<key>
+    #                              names to drop from the datasize metadata
+    #                              (exercises DATASIZE-MALFORMED in rule 3.3.1).
+    omit_datasize_phase = overrides.pop("omit_datasize_phase", False)
+    datasize_missing_output_keys = overrides.pop("datasize_missing_output_keys", None)
     wrong_checkpointing_workload = overrides.pop("wrong_checkpointing_workload", None)
     # Phase 2 Plan 02-02: system YAML mutation kwargs for SystemYamlSchemaCheck tests.
     system_yaml_bad_capabilities = overrides.pop("system_yaml_bad_capabilities", None)
@@ -585,6 +606,28 @@ def build_submission(tmp_path, **overrides) -> Path:
 
             unet3d_path = training_path / "unet3d"
             unet3d_path.mkdir()
+
+            # datasize timestamp (Rules.md §2.1.12 / §3.3.1 sentinel)
+            if not omit_datasize_phase:
+                datasize_dir = unet3d_path / "datasize"
+                datasize_dir.mkdir()
+                for ts in _DATASIZE_TIMESTAMPS:
+                    ts_dir = datasize_dir / ts
+                    ts_dir.mkdir()
+                    ds_meta = copy.deepcopy(_DEFAULT_METADATA)
+                    ds_meta["benchmark_type"] = "training"
+                    ds_meta["model"] = "unet3d"
+                    ds_meta["args"]["model"] = "unet3d"
+                    ds_meta["args"]["command"] = "datasize"
+                    ds_dataset = {
+                        k: v for k, v in _DATASIZE_DEFAULT_OUTPUTS.items()
+                        if datasize_missing_output_keys is None
+                        or k not in datasize_missing_output_keys
+                    }
+                    ds_meta["parameters"] = {"dataset": ds_dataset}
+                    (ts_dir / "metadata.json").write_text(
+                        json.dumps(ds_meta), encoding="utf-8"
+                    )
 
             # datagen timestamps
             datagen_dir = unet3d_path / "datagen"

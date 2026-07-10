@@ -942,6 +942,11 @@ class TrainingBenchmark(DLIOBenchmark):
         # num_files_train that datasize reported on stderr.
         self.params_dict['dataset.num_files_train'] = num_files_train
         self.params_dict['dataset.num_subfolders_train'] = num_subfolders_train
+        # Persist the total-bytes output alongside the file/subfolder outputs
+        # so a manual reviewer (or future run-checker cross-check against
+        # datagen actual bytes) can read the datasize sentinel end-to-end
+        # from datasize/<ts>/*_metadata.json. See Rules.md §3.3.1.
+        self.params_dict['dataset.total_disk_bytes'] = int(total_disk_bytes)
 
         self.logger.result(f'Number of training files: {num_files_train}')
         self.logger.result(f'Number of training subfolders: {num_subfolders_train}')
