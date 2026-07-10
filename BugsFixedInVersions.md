@@ -17,16 +17,16 @@ lands on the first entry in that decade of point-releases.
 
 ---
 
-## Source Code Size For Versions 3.0.3 – 3.0.9 (May 28 – June 14, 2026)
+## Source Code Size For Versions 3.0.3 (May 28, 2026) and 3.0.40 (July 9, 2026)
 
 | Subtree | May 29 (excl. tests) | May 29 (tests only) | HEAD (excl. tests) | HEAD (tests only) |
 |---|---:|---:|---:|---:|
-| `mlpstorage_py` | 22,222 | 2,995 | 39,309 | 16,395 |
-| `training` + `checkpointing` (DLIO) | 20,746 | 3,389 | 18,226 | 8,552 |
-| `vdb_benchmark` | 11,346 | 5,632 | 14,424 | 6,964 |
+| `mlpstorage_py` | 22,222 | 2,995 | 41,605 | 16,515 |
+| `training` + `checkpointing` (DLIO) | 20,746 | 3,389 | 18,521 | 9,762 |
+| `vdb_benchmark` | 11,346 | 5,632 | 15,332 | 7,320 |
 | `kv_cache_benchmark` | 6,424 | 4,013 | 6,413 | 4,112 |
-| **Subtotal** | **60,738** | **16,029** | **78,372** | **36,023** |
-| **Total (all code)** | **76,767** | | **114,395** | |
+| **Subtotal** | **60,738** | **16,029** | **81,871** | **37,709** |
+| **Total (all code)** | **76,767** | | **119,580** | |
 
 ---
 
