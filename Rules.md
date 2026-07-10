@@ -105,7 +105,7 @@ configuration of storage system and to link together those results with the .pdf
 
 2.1.11. **trainingWorkloads** --  Within the "training" directory, there must be one or more of the following *workload directories*, and nothing else: "unet3d" and/or "retinanet".  These names are case-sensitive.
 
-2.1.12. **trainingPhases** --  Within the *workload directories* in the "training" hierarchy, there must exist *phase directories* named "datagen" and "run", and nothing else.  These names are case-sensitive.
+2.1.12. **trainingPhases** --  Within the *workload directories* in the "training" hierarchy, there must exist *phase directories* named "datasize", "datagen", and "run", and nothing else.  These names are case-sensitive.
 
 2.1.13. **datagenTimestamp** --  Within the "datagen" *phase directory* within the "training" directory hierarchy, there must be exactly one *timestamp directory* named *YYYYMMDD_HHmmss" that represent a *timestamp* of when that part of the test run was completed.  Where Y's are replaced with the year the run was performed, M's are replaced with the month, D's with the day, H's with the hour (in 24-hour format), m's with the minute, and s's with the second.  The timestamps should be relative to the local timezone where the test was actually run.
 
@@ -376,7 +376,7 @@ root_folder (or any name you prefer)
 
 ## 3.3. Training Run Options
 
-3.3.1. **trainingRunDataMatchesDatasize** -- The amount of data the *run* phase is told to use must be exactly equal to the *datasize* value calculated earlier, but can be less than the value used in the *datagen* phase.  To express that, you can run the benchmark on a subset of that dataset by setting `num_files_train` or `num_files_eval` smaller than the number of files available in the dataset folder, but `num_subfolders_train` and `num_subfolders_eval` must be to be equal to the actual number of subfolders inside the dataset folder in order to generate valid results.
+3.3.1. **trainingRunDataMatchesDatasize** -- The amount of data the *run* phase is told to use must be exactly equal to the *datasize* value calculated earlier, but can be less than the value used in the *datagen* phase.  To express that, you can run the benchmark on a subset of that dataset by setting `num_files_train` or `num_files_eval` smaller than the number of files available in the dataset folder, but `num_subfolders_train` and `num_subfolders_eval` must be to be equal to the actual number of subfolders inside the dataset folder in order to generate valid results.  Within the *timestamp directory* in the "datasize" *phase directory*, there must exist a ``*_metadata.json`` file whose ``parameters.dataset`` block records the outputs of the datasize calculation --- `num_files_train`, `num_subfolders_train`, and `total_disk_bytes` --- and whose ``args`` block records the inputs that produced them --- `model`, `accelerator_type`, `max_accelerators`, `client_host_memory_in_gb`, and `data_dir`.  These are the values the *run* phase is cross-checked against.
 
 3.3.2. **trainingAcceleratorUtilizationCheck** -- To pass a benchmark run, the AU (Accelerator Utilization) should be equal to or greater than the minimum value:
   * `total_compute_time = (records_per_file * total_files) / simulated_accelerators / batch_size * computation_time * epochs`

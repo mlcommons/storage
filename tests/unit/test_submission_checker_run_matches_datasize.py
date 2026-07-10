@@ -33,6 +33,8 @@ def _write_metadata(
     num_files_train: int,
     data_dir: str,
     num_files_eval: Optional[int] = None,
+    num_subfolders_train: Optional[int] = 0,
+    total_disk_bytes: Optional[int] = 68_090_280_000,
 ) -> Path:
     """Write a `<benchmark>_<ts>_metadata.json` matching the producer shape.
 
@@ -40,17 +42,21 @@ def _write_metadata(
     with `parameters.dataset.num_files_train` (DLIO-merged) and
     `args.data_dir` (raw CLI namespace). The validator-side rule reads
     those exact paths.
+
+    `num_subfolders_train` and `total_disk_bytes` are populated with
+    non-None defaults so callers writing datasize metadata satisfy the
+    3.3.1 DATASIZE-MALFORMED check by default. Pass ``None`` explicitly
+    to omit either key (used by ``TestDatasizeMalformedCases``).
     """
     metadata_path = timestamp_dir / f"{benchmark}_{timestamp}_metadata.json"
+    dataset: dict = {"num_files_train": num_files_train}
+    if num_subfolders_train is not None:
+        dataset["num_subfolders_train"] = num_subfolders_train
+    if total_disk_bytes is not None:
+        dataset["total_disk_bytes"] = total_disk_bytes
     metadata: dict = {
-        "parameters": {
-            "dataset": {
-                "num_files_train": num_files_train,
-            },
-        },
-        "args": {
-            "data_dir": data_dir,
-        },
+        "parameters": {"dataset": dataset},
+        "args": {"data_dir": data_dir},
     }
     if num_files_eval is not None:
         metadata["parameters"]["dataset"]["num_files_eval"] = num_files_eval
@@ -385,6 +391,67 @@ class TestWarningCases:
         )
         assert result is True
         assert _has_token(records, "[3.3.1 EVAL-FIELD-MISSING]")
+
+
+class TestDatasizeMalformedCases:
+    """Rule 3.3.1 must warn when a datasize sentinel omits its output keys.
+
+    Rules.md §3.3.1 requires the datasize `*_metadata.json` to record
+    ``num_files_train``, ``num_subfolders_train``, and ``total_disk_bytes``
+    under ``parameters.dataset`` so a reviewer (or future run-checker
+    cross-check against datagen's actual output) can verify that datagen
+    produced at least what datasize prescribed. Missing outputs surface as
+    `[3.3.1 DATASIZE-MALFORMED]` (warn-only, submission-window doctrine).
+    """
+
+    def _build_and_drop_datasize_key(self, tmp_path, caplog, drop_key: str):
+        workload_dir = _build_training_tree(
+            tmp_path,
+            datasize_num_files=84_375,
+            datagen_num_files=84_375,
+            run_num_files=84_375,
+        )
+        # Rewrite the datasize metadata without the target key.
+        datasize_ts_dir = workload_dir / "datasize" / "20260630_100000"
+        meta_path = next(datasize_ts_dir.glob("*_metadata.json"))
+        meta = json.loads(meta_path.read_text())
+        meta["parameters"]["dataset"].pop(drop_key, None)
+        meta_path.write_text(json.dumps(meta))
+        root = _scaffold_division_root(tmp_path, workload_dir)
+        return _run_rule(root, caplog)
+
+    def test_missing_num_subfolders_train_warns(self, tmp_path, caplog):
+        result, records = self._build_and_drop_datasize_key(
+            tmp_path, caplog, "num_subfolders_train",
+        )
+        assert result is True
+        assert _has_token(records, "[3.3.1 DATASIZE-MALFORMED]")
+        assert any(
+            "num_subfolders_train" in r.getMessage() and "DATASIZE-MALFORMED" in r.getMessage()
+            for r in records
+        )
+
+    def test_missing_total_disk_bytes_warns(self, tmp_path, caplog):
+        result, records = self._build_and_drop_datasize_key(
+            tmp_path, caplog, "total_disk_bytes",
+        )
+        assert result is True
+        assert _has_token(records, "[3.3.1 DATASIZE-MALFORMED]")
+        assert any(
+            "total_disk_bytes" in r.getMessage() and "DATASIZE-MALFORMED" in r.getMessage()
+            for r in records
+        )
+
+    def test_all_output_keys_present_does_not_warn(self, tmp_path, caplog):
+        """Positive control — the default `_write_metadata` shape must not fire."""
+        result, records = _materialize_scenario(
+            tmp_path, caplog,
+            datasize_num_files=84_375,
+            datagen_num_files=84_375,
+            run_num_files=84_375,
+        )
+        assert result is True
+        assert not _has_token(records, "[3.3.1 DATASIZE-MALFORMED]")
 
 
 # ---------------------------------------------------------------------- #
