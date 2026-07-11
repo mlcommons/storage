@@ -171,6 +171,79 @@ from typing import Optional, Dict, Any
 
 from .storage_writers import StorageWriterFactory
 
+
+# Issue #768: pre-3.13 CPython resource_tracker double-unlink workaround.
+#
+# multiprocessing.resource_tracker registers POSIX shared-memory segments and
+# named semaphores in every process that touches them via
+# SharedMemory(name=...) attach or Queue/Event pickle-unpickle. When the
+# streaming-checkpoint writer subprocess (spawned per save() on the forkserver
+# path for #642 safety) exits, its tracker races Main's to unlink the same
+# names — one wins, the other raises FileNotFoundError. On the shm side that
+# crashed Main's finally block, killing the owning MPI rank; on the semaphore
+# side it produced alarming SemLock._rebuild and "leaked" warnings that
+# spooked benchmark submitters even though nothing was actually lost.
+#
+# The documented CPython workaround for 3.12 is: in the borrowing child,
+# unregister the names from ITS tracker so single-owner semantics are
+# restored — only Main's tracker unlinks at exit. 3.13 adds a public
+# SharedMemory(..., track=False) that supersedes the shm branch below;
+# SemLock has no equivalent even in 3.13, so the semaphore branch stays
+# until we can drop 3.12.
+#
+# Only removes the child's cleanup callback for the given POSIX name; does
+# not close fds, detach shared state, or alter runtime behavior of the IPC
+# object. Every access is hasattr-guarded so a future CPython refactor of
+# the private ``_semlock`` / ``_rlock`` / ``_flag`` attrs degrades to a
+# silent no-op (returning to pre-#768 noise) rather than crashing the
+# checkpoint.
+def _unregister_ipc_from_child_tracker(*ipc_objs):
+    """Undo the child process's redundant resource_tracker registration of
+    parent-owned SharedMemory / Queue / Event primitives (issue #768)."""
+    from multiprocessing import resource_tracker
+
+    def _try(name, kind):
+        try:
+            resource_tracker.unregister(name, kind)
+        except Exception:
+            # KeyError = not tracked here (nothing to undo); anything else =
+            # tracker down / private-attr drift. Silent degrade is the goal.
+            pass
+
+    def _semlock_name(obj):
+        sl = getattr(obj, "_semlock", None)
+        return getattr(sl, "name", None) if sl is not None else None
+
+    for obj in ipc_objs:
+        if obj is None:
+            continue
+
+        # SharedMemory: single named POSIX segment. Detect by the pair of
+        # attrs SharedMemory uniquely provides — a bare object with a _name
+        # attribute would false-positive here otherwise.
+        name = getattr(obj, "_name", None)
+        if name and hasattr(obj, "unlink") and hasattr(obj, "close"):
+            _try(name, "shared_memory")
+            continue
+
+        # mp.Queue and mp.Event both carry SemLock-backed primitives. The
+        # attribute layout is undocumented but stable in CPython since 3.4;
+        # enumerate the known slots and hasattr-guard each.
+        for attr in ("_rlock", "_wlock", "_sem", "_flag"):
+            v = getattr(obj, attr, None)
+            if v is not None:
+                sem_name = _semlock_name(v)
+                if sem_name:
+                    _try(sem_name, "semaphore")
+        for attr in ("_notempty", "_notfull", "_cond"):
+            cond = getattr(obj, attr, None)
+            if cond is not None:
+                lock = getattr(cond, "_lock", None)
+                if lock is not None:
+                    sem_name = _semlock_name(lock)
+                    if sem_name:
+                        _try(sem_name, "semaphore")
+
 # Try to import dgen-py for high-performance data generation
 try:
     import dgen_py
@@ -409,10 +482,10 @@ class StreamingCheckpointing:
             raise
         
         finally:
-            # Cleanup buffers
-            for shm in buffers:
-                shm.close()
-                shm.unlink()
+            # Cleanup buffers — see _release_buffer_pool for the #768 defensive
+            # FileNotFoundError swallow that keeps a raced writer-side unlink
+            # from crashing the owning MPI rank in Main's finally.
+            self._release_buffer_pool(buffers)
         
         # Collect results
         if stats_queue.empty():
@@ -424,6 +497,35 @@ class StreamingCheckpointing:
         
         return self._format_results(stats, gen_time, time.time() - start_time, total_size_bytes)
     
+    @staticmethod
+    def _release_buffer_pool(buffers):
+        """Release Main's per-save() shared-memory buffer pool.
+
+        Defensive against #768: swallows ``FileNotFoundError`` on
+        ``shm.unlink()`` because a second unlink of an already-unlinked
+        segment is exactly the desired end state (segment gone), not a real
+        failure — that spurious exception is what crashed the owning MPI
+        rank and killed the whole job in the reporter's traceback.
+
+        Other exceptions (``PermissionError``, ``OSError`` from the IO layer)
+        still propagate: they indicate real bugs, not the resource_tracker
+        double-unlink race, and must not be masked by this shim.
+        Non-``FileNotFoundError`` ``close()`` failures on one buffer do not
+        stop cleanup of the rest — segments are independent POSIX names and
+        one bad segment shouldn't strand N-1 others as leaks.
+        """
+        for shm in buffers:
+            try:
+                shm.close()
+            except Exception:
+                pass  # keep unwinding — the remaining unlink still matters
+            try:
+                shm.unlink()
+            except FileNotFoundError:
+                # #768: writer's resource_tracker won the race. Segment is
+                # gone, which is what we wanted. Not a real error.
+                pass
+
     def _create_buffer_pool(self):
         """Create shared memory buffer pool."""
         print(f"\n[Main] Creating {self.num_buffers} buffers...")
@@ -528,7 +630,17 @@ class StreamingCheckpointing:
         for name in buffer_names:
             shm = shared_memory.SharedMemory(name=name)
             buffers.append(shm)
-        
+
+        # #768: undo this subprocess's redundant resource_tracker registration
+        # of the SharedMemory segments we just attached to AND the Queue/Event
+        # IPC objects Main passed in as args. Both would otherwise be
+        # unlinked twice at process exit — once here, once in Main — with
+        # whichever tracker lost the race crashing with FileNotFoundError.
+        # Only Main owns these; only Main should unlink.
+        _unregister_ipc_from_child_tracker(
+            *buffers, buffer_queue, stats_queue, stop_event
+        )
+
         print(f"[Writer] Attached to {len(buffers)} buffers ({chunk_size / (1024**2):.0f} MB each)")
         
         # Create storage writer
