@@ -1,7 +1,7 @@
 # MLPerf Storage Benchmark v3.0 — Significant Bugs Fixed by Version
 
-**Date:** 2026-07-09
-**Covers:** Versions 3.0.3 through 3.0.40 (May 28 – July 9, 2026)
+**Date:** 2026-07-10
+**Covers:** Versions 3.0.3 through 3.0.41 (May 28 – July 10, 2026)
 
 ---
 
@@ -374,8 +374,28 @@ No mlpstorage-level code change landed in this range. The DLIO pin advanced twic
 _(None. All three DLIO fixes in this range are invocation or metadata correctness — no measured-throughput or latency change.)_
 
 **Invocation**
-- DLIO: memory guard aborted runs 2–5 on page-cached POSIX FS (Lustre); rerun 5-run sets flagged INVALID. (#741; DLIO PR #48)
-- DLIO: S3 prefetch pool didn't survive fork; minio/s3torchconnector runs hung — rerun any that hung. (#626; DLIO PR #46)
+- DLIO: `read_threads` memory guard sampled `MemAvailable` before the per-epoch page-cache flush, so on Lustre/POSIX the reclaimable cache from run 1 was counted as "used" and runs 2–5 crashed with a bogus per-node memory-budget error. Valid 5-run sets landed as `INVALID: 0 runs`. Rerun any 5-run set where only run 1 completed. (#741; DLIO PR #48)
+- DLIO: `_s3_iterable_mixin` created its prefetch `ThreadPoolExecutor` at module import in the parent; the worker thread didn't survive `os.fork()`, so `minio` and `s3torchconnector` DataLoader workers blocked forever on `future.result()`. `s3dlio` path was unaffected. Rerun any minio/s3torch training run that hung at 0% CPU. (#626; DLIO PR #46)
 
 **Other Significant**
-- DLIO: S3 prefetch cap: minio 16, s3torch 1, s3dlio 64; unified to 64 — rerun cross-library runs. (#626; DLIO PR #47)
+- DLIO: per-worker prefetch concurrency in `_S3IterableMixin` depended on `storage_library`: `s3dlio` 64, `minio` 16 (4× lower), `s3torchconnector` fully sequential (up to 64× lower). CLOSED comparisons across libraries were unfair; unified to a shared 64-way ceiling. Rerun any cross-library S3 comparison from earlier versions. (#626; DLIO PR #47)
+
+---
+
+## Version 3.0.41 (July 10, 2026)
+
+Six mlpstorage-level fixes plus one DLIO pin advance (to `a7d56e73`, picking up DLIO PR #49) landed in this range. The s3dlio floor did not move.
+
+**Score-Affecting**
+
+_(None. All 3.0.41 fixes are invocation or metadata correctness — no measured-throughput or latency change.)_
+
+**Invocation**
+- DLIO: Hydra's `run_job`/`_save_config` called `Path.mkdir(exist_ok=True)` on the shared `hydra.run.dir` from every rank on every node; on networked FS the post-`FileExistsError` `is_dir()` recheck could see stale peer metadata and re-raise, aborting the run before benchmark work started. Rerun any multi-node run that died at Hydra bootstrap. (#754; DLIO PR #49)
+- `training run` and `checkpointing run` returned SUCCESS regardless of DLIO's exit code and never stat-checked required leaf artifacts; a crashed or killed DLIO looked healthy until `mlpstorage validate` later complained about missing `dlio.log`/`summary.json`. Rerun any training/checkpointing "success" you can't corroborate with an intact leaf. (#761, #764)
+- KVCache discarded mpirun's rc, downgraded missing rank output files to per-rank WARNINGs, and averaged zeros into `summary.json` — runs whose `kv-cache.py` crashed (OOM on llama3.1-70b-instruct, etc.) reported SUCCESS with meaningless aggregates. Rerun any KVCache success whose numbers look implausibly small. (#758, #759)
+- Training `datagen` wrote `.mlps-datagen-manifest.json` and returned SUCCESS even when DLIO exited non-zero or left required leaf artifacts (`dlio.log`, `dlio_config/`, `training_*_metadata.json`) missing; downstream `run`/`reportgen` consumed the partial dataset silently. Rerun any datagen whose SUCCESS you can't corroborate with an intact leaf. (#744, #750)
+
+**Other Significant**
+- Rule 2.1.12 (STRUCT-12) required training workload dirs to contain exactly `{datagen, run}`, but `mlpstorage training datasize` emits a `datasize/` directory that PR #611 taught rule 3.3.1 to require. Submitters were stuck between STRUCT-12 error and 3.3.1 warning. `datasize/` is now allowed. Re-validate any datasize submission previously flagged INVALID. (#752)
+- `DLIOBenchmark.datasize()` writes `dataset.total_disk_bytes` into the datasize sentinel per §3.3.1, but the run-rules checker didn't list it in `TOOL_INJECTED_PARAMS`; reportgen saw a user override, emitted `[INVALID] Disallowed parameter override`, and the cascaded "requires 5 runs" gate failed valid submissions. Re-validate submissions that failed that gate. (#760, #762)
