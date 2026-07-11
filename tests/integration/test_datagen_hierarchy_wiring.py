@@ -401,6 +401,57 @@ class TestPostRunLeafGate:
             f"Unexpected leaf-incomplete errors on healthy leaf: {error_msgs}"
         )
 
+    def test_dlio_only_leaf_succeeds_without_pre_seeded_metadata(self, tmp_path):
+        """storage#767: production DLIO never writes the mlpstorage metadata
+        file; that file is written by ``Benchmark.write_metadata()`` in
+        main.py's ``finally`` block, i.e. AFTER ``_run`` returns. Before
+        the fix, ``_post_datagen_actions`` ran the leaf check first and
+        false-positived on every real datagen run with
+        ``ERROR: Datagen output leaf incomplete: training_.*_metadata.json``.
+        This test seeds only the four artifacts DLIO actually produces and
+        asserts SUCCESS + a written manifest + the metadata file present
+        on disk after ``_run``.
+        """
+        (tmp_path / "data").mkdir()
+        benchmark, logger = _instantiate_datagen_benchmark(tmp_path)
+        # Seed only what production DLIO writes — deliberately NO metadata.
+        leaf = benchmark.run_result_output
+        for name in (
+            "training_datagen.stdout.log",
+            "training_datagen.stderr.log",
+            "dlio.log",
+        ):
+            open(os.path.join(leaf, name), "w").close()
+        dlio_cfg = os.path.join(leaf, "dlio_config")
+        os.makedirs(dlio_cfg)
+        for name in ("config.yaml", "hydra.yaml", "overrides.yaml"):
+            open(os.path.join(dlio_cfg, name), "w").close()
+
+        result = benchmark._run()
+
+        assert result == EXIT_CODE.SUCCESS
+        error_msgs = [
+            call.args[0]
+            for call in logger.error.call_args_list
+            if call.args and "Datagen output leaf" in call.args[0]
+        ]
+        assert error_msgs == [], (
+            f"storage#767 regression: leaf check false-positived on "
+            f"metadata file that _post_datagen_actions is now responsible "
+            f"for writing pre-check. Errors: {error_msgs}"
+        )
+        assert os.path.isfile(benchmark.metadata_file_path), (
+            f"Expected metadata file {benchmark.metadata_file_path} to "
+            f"exist after _run — _post_datagen_actions must write it "
+            f"before the leaf check."
+        )
+        manifest_path = os.path.join(
+            benchmark.args.data_dir, "unet3d", DATAGEN_MANIFEST_FILENAME
+        )
+        assert os.path.isfile(manifest_path), (
+            f"Expected manifest at {manifest_path}; not found."
+        )
+
 
 class TestDLIOFailureGate:
     """storage#744: non-zero DLIO exit code fails the run — no manifest written."""
