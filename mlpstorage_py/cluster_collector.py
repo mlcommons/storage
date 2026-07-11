@@ -16,6 +16,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field, asdict
@@ -3921,6 +3922,214 @@ def run_shared_fs_probe(destination, hosts, run_uuid, logger,
         msg,
         path=destination,
         operation="cap02-shared-fs-probe",
+        code=ErrorCode.FS_INVALID_STRUCTURE,
+    )
+
+
+# =============================================================================
+# CAP-02b Results-Dir Shared-Filesystem Probe (storage#772)
+# =============================================================================
+#
+# Sibling of CAP-02: verifies that ``--results-dir`` — not just
+# ``--data-dir`` — is visible at the same path on every host in ``--hosts``.
+# storage#772 reporter's failure mode: DLIO writes ``summary.json`` on rank
+# 0's local FS and ``dlio.log`` on each rank's local FS. When
+# ``--results-dir`` is per-host local storage, those artifacts scatter,
+# ``mlpstorage validate`` sees empty run/timestamp/ leaves on the launcher,
+# and the operator wastes cluster time discovering the misconfiguration.
+#
+# Pattern lifted from ``KVCacheBenchmark._probe_results_dir_shared`` (issue
+# #521). Inline ``python -c "..."`` payload — no SCP staging — so we
+# introduce no new SSH surface beyond what CAP-02 already needs for the
+# launcher bootstrap. Argonne's srun/PALS-launcher path keeps working
+# unchanged because the payload goes through the caller's ``mpi_bin``, not
+# through a dedicated SSH connection.
+#
+# Opt-out: callers respect the same ``--skip-validation`` blanket flag that
+# gates CAP-02. No dedicated ``--skip-results-dir`` flag: the SSH-preflight
+# auto-skip (``_launcher_bypasses_ssh``) is orthogonal because this probe
+# does not do a dedicated SSH reachability test.
+
+
+def run_results_dir_shared_probe(results_dir, hosts, run_uuid, logger,
+                                 mpi_bin=None, allow_run_as_root=False,
+                                 timeout_seconds=60):
+    """Verify --results-dir is visible at the same path on every host.
+
+    Contract (storage#772):
+
+    * **Silent no-op** when ``hosts`` is None/empty/single or resolves to
+      all-localhost. No subprocess is spawned, no ``.fs_probe/`` scratch
+      dir is created, and only a debug-level log is emitted. Callers
+      still invoke the helper unconditionally so the short-circuit lives
+      in one place.
+    * **Shared FS (success)**: each rank drops a sentinel
+      ``{probe_id}__rank<r>__<host>.ok`` under
+      ``<results_dir>/.fs_probe/``. If the launcher sees a sentinel from
+      every unique host, the probe returns ``None`` and removes
+      ``.fs_probe/`` so the timestamp leaf stays clean for the
+      submission checker's directory-contents rules.
+    * **Non-shared FS (failure)**: at least one host wrote its sentinel
+      to its OWN local ``results_dir`` (invisible to the launcher).
+      Raise :class:`FileSystemError` with ``ErrorCode.FS_INVALID_STRUCTURE``
+      and a diagnostic that names the missing hosts and the shared-FS
+      remedy. ``.fs_probe/`` is preserved so the operator can diagnose.
+
+    Args:
+        results_dir: Absolute path of the run's results leaf
+            (``Benchmark.run_result_output``).
+        hosts: The ``--hosts`` list. ``host:N`` slot suffixes are
+            stripped; ``None`` and empty list trigger the silent no-op.
+        run_uuid: The per-Benchmark ``self._run_uuid``. Its first 12
+            hex characters are used as the sentinel probe_id so
+            concurrent runs against the same results tree cannot collide
+            (Pitfall 7 style).
+        logger: Project logger.
+        mpi_bin: MPI binary to invoke (``mpirun`` / ``mpiexec`` / ``srun``).
+            Defaults to :data:`MPIRUN`.
+        allow_run_as_root: If True, append ``--allow-run-as-root`` (Open
+            MPI convention).
+        timeout_seconds: Wall-clock upper bound on the mpirun subprocess.
+
+    Raises:
+        FileSystemError: On non-shared FS detection OR on a non-zero
+            launcher exit code (the latter surfaces mpirun bootstrap
+            errors like bad ``--hosts`` without silently pretending the
+            probe passed).
+    """
+    # Filter to unique hosts, stripping :N slot suffixes so
+    # ``--hosts h1:4 h2:4`` probes 2 hosts, not 8.
+    unique_hosts: List[str] = []
+    seen = set()
+    for raw in hosts or []:
+        hostname = raw.split(":")[0] if ":" in raw else raw
+        if hostname and hostname not in seen:
+            seen.add(hostname)
+            unique_hosts.append(hostname)
+
+    if len(unique_hosts) <= 1:
+        logger.debug("CAP-02b (results-dir) skipped: single-host run")
+        return None
+    if all(_is_localhost(h) for h in unique_hosts):
+        logger.debug("CAP-02b (results-dir) skipped: all-localhost run")
+        return None
+
+    if mpi_bin is None:
+        mpi_bin = MPIRUN
+
+    # Use first 12 hex of the caller's run_uuid so the sentinel name is
+    # bound to this Benchmark instance (concurrent-run collision guard).
+    probe_id = (run_uuid or "")[:12]
+    if len(probe_id) < 12 or not all(c in "0123456789abcdef" for c in probe_id):
+        probe_id = uuid.uuid4().hex[:12]
+
+    probe_dir = Path(results_dir) / ".fs_probe"
+    probe_dir.mkdir(parents=True, exist_ok=True)
+
+    # Inline payload — no staged script file. Each rank:
+    #   1. Re-creates the probe dir on its local view (mkdir exist_ok so a
+    #      rank whose --results-dir was never created still runs).
+    #   2. Writes a sentinel file naming its rank and hostname.
+    # Shared FS: all N sentinels land in the launcher-visible probe_dir.
+    # Split FS: each rank's sentinel lands on its own local filesystem, so
+    # the launcher sees at most its own.
+    inline = (
+        "import os,socket,pathlib;"
+        f"d=pathlib.Path({str(probe_dir)!r});"
+        "d.mkdir(parents=True,exist_ok=True);"
+        "r=os.environ.get('OMPI_COMM_WORLD_RANK',os.environ.get('PMI_RANK','x'));"
+        "h=socket.gethostname();"
+        f"(d/('{probe_id}__rank'+r+'__'+h+'.ok')).write_text(h)"
+    )
+
+    probe_hosts_arg = ",".join(f"{h}:1" for h in unique_hosts)
+    prefix = (
+        f"{mpi_bin} -n {len(unique_hosts)} -host {probe_hosts_arg} "
+        f"--map-by node --bind-to none"
+    )
+    if allow_run_as_root:
+        prefix += " --allow-run-as-root"
+
+    import shlex as _shlex
+    cmd = f"{prefix} {sys.executable} -c {_shlex.quote(inline)}"
+
+    logger.status(
+        f"Probing --results-dir visibility across {len(unique_hosts)} host(s) "
+        f"(CAP-02b, storage#772)..."
+    )
+
+    try:
+        result = subprocess.run(
+            cmd, shell=True, capture_output=True, text=True,
+            timeout=timeout_seconds,
+        )
+    except subprocess.TimeoutExpired as e:
+        raise FileSystemError(
+            (
+                f"CAP-02b: --results-dir shared-FS probe timed out after "
+                f"{timeout_seconds}s across hosts {sorted(unique_hosts)}. "
+                f"Verify --hosts reachability and --mpi-bin choice."
+            ),
+            path=results_dir,
+            operation="cap02b-results-dir-probe",
+            code=ErrorCode.FS_INVALID_STRUCTURE,
+        ) from e
+
+    if result.returncode != 0:
+        # Launcher bootstrap error — do NOT silently pretend the probe
+        # passed just because probe_dir is empty. Surface rc + stderr.
+        msg = (
+            f"CAP-02b: --results-dir shared-FS probe launcher exited "
+            f"with returncode={result.returncode}. "
+            f"stderr: {(result.stderr or '').strip()}"
+        )
+        logger.error(msg)
+        raise FileSystemError(
+            msg,
+            path=results_dir,
+            operation="cap02b-results-dir-probe",
+            code=ErrorCode.FS_INVALID_STRUCTURE,
+        )
+
+    found_hosts: set = set()
+    for marker in probe_dir.glob(f"{probe_id}__rank*__*.ok"):
+        try:
+            found_hosts.add(marker.read_text().strip())
+        except OSError:
+            continue
+
+    if len(found_hosts) >= len(unique_hosts):
+        # Shared FS — clean up so the timestamp leaf stays lean.
+        try:
+            shutil.rmtree(probe_dir)
+        except OSError as cleanup_err:
+            logger.warning(
+                "CAP-02b: could not remove probe dir %s: %s",
+                probe_dir, cleanup_err,
+            )
+        return None
+
+    missing = sorted(set(unique_hosts) - found_hosts)
+    msg = (
+        f"--results-dir is not visible on every host listed in --hosts.\n"
+        f"  Probed {len(unique_hosts)} host(s): {sorted(unique_hosts)}\n"
+        f"  Only {len(found_hosts)} host(s) landed a sentinel into "
+        f"{results_dir}: {sorted(found_hosts)}\n"
+        f"  Missing sentinels for: {missing}\n"
+        f"MLPerf training / checkpointing require --results-dir to be on a "
+        f"shared filesystem (NFS / Lustre / GPFS) mounted at the same path "
+        f"on every host in --hosts. DLIO writes summary.json / output.json "
+        f"on rank 0 and dlio.log on each rank; if --results-dir is per-host "
+        f"local storage those artifacts scatter and mlpstorage validate "
+        f"reports the run leaf as empty (storage#772). Mount a shared "
+        f"filesystem at {results_dir!r} on every host and re-run, or run "
+        f"on a single host."
+    )
+    logger.error(msg)
+    raise FileSystemError(
+        msg,
+        path=results_dir,
+        operation="cap02b-results-dir-probe",
         code=ErrorCode.FS_INVALID_STRUCTURE,
     )
 

@@ -1727,14 +1727,21 @@ class TestPhase5Cap02:
 
     def test_multi_host_cardinality_1_succeeds_silently(self, tmp_path):
         """Multi-host cardinality 1: launcher returns None (success); the
-        benchmark proceeds to _run normally. No logger.error/warning."""
+        benchmark proceeds to _run normally. No logger.error/warning.
+
+        storage#772: CAP-02b (results-dir shared-FS probe) also fires from
+        _pre_execution_gate; patch it alongside CAP-02 so the fake host1/
+        host2 don't trigger a real mpirun/ssh attempt.
+        """
         hosts = [_make_host(hostname=f"h{i}") for i in range(2)]
         bm = _make_benchmark_with_local_destination(
             tmp_path, hosts, hosts_arg=['host1', 'host2'])
         logger = MagicMock()
         bm.logger = logger
         with patch('mlpstorage_py.benchmarks.base.run_shared_fs_probe',
-                   return_value=None) as mock_probe:
+                   return_value=None) as mock_probe, \
+             patch('mlpstorage_py.benchmarks.base.run_results_dir_shared_probe',
+                   return_value=None):
             rc = bm.run()
         assert rc == 0
         assert mock_probe.called
@@ -1805,7 +1812,9 @@ class TestPhase5Cap02:
 
     def test_cap02_fires_after_cap01_in_pre_execution_gate_ordering(self, tmp_path):
         """Gate-order lock: in _pre_execution_gate, check_capacity_4field is
-        called BEFORE run_shared_fs_probe. Slice 3 + Slice 4 ordering."""
+        called BEFORE run_shared_fs_probe, which in turn precedes
+        run_results_dir_shared_probe (CAP-02b, storage#772).
+        Slice 3 + Slice 4 + Slice 4b ordering."""
         hosts = [_make_host(hostname=f"h{i}") for i in range(2)]
         bm = _make_benchmark(tmp_path, hosts)
         bm.args.hosts = ['host1', 'host2']
@@ -1817,15 +1826,19 @@ class TestPhase5Cap02:
             call_order.append('cap01')
         def cap02_se(*a, **kw):
             call_order.append('cap02')
+        def cap02b_se(*a, **kw):
+            call_order.append('cap02b')
 
         with patch('mlpstorage_py.benchmarks.base.check_capacity_4field',
                    side_effect=cap01_se), \
              patch('mlpstorage_py.benchmarks.base.run_shared_fs_probe',
-                   side_effect=cap02_se):
+                   side_effect=cap02_se), \
+             patch('mlpstorage_py.benchmarks.base.run_results_dir_shared_probe',
+                   side_effect=cap02b_se):
             bm.run()
 
-        assert call_order == ['cap01', 'cap02'], (
-            f"Expected CAP-01 BEFORE CAP-02, got: {call_order}"
+        assert call_order == ['cap01', 'cap02', 'cap02b'], (
+            f"Expected CAP-01 → CAP-02 → CAP-02b, got: {call_order}"
         )
 
     def test_cap02_fires_before_write_systemname_yaml(self, tmp_path):
