@@ -40,7 +40,9 @@ from mlpstorage_py.rules.datagen_hierarchy import (
     DATAGEN_MANIFEST_FILENAME,
     DATAGEN_MANIFEST_SCHEMA_VERSION,
     assert_data_dir_hierarchy_absent,
+    validate_checkpoint_leaf,
     validate_datagen_leaf,
+    validate_run_leaf,
     validate_supported_model,
     write_datagen_manifest,
 )
@@ -229,6 +231,167 @@ class TestValidateDatagenLeaf:
         missing = validate_datagen_leaf(str(tmp_path / "does_not_exist"))
         assert len(missing) == 1
         assert "does_not_exist" in missing[0]
+
+
+# --------------------------------------------------------------------------- #
+# validate_run_leaf                                                           #
+# --------------------------------------------------------------------------- #
+
+
+def _make_healthy_run_leaf(root: pathlib.Path, ts: str = "20260710_095915") -> pathlib.Path:
+    """Create a healthy training-run leaf: all required files + dlio_config."""
+    leaf = root / ts
+    leaf.mkdir(parents=True)
+    (leaf / "training_run.stdout.log").write_text("")
+    (leaf / "training_run.stderr.log").write_text("")
+    (leaf / "dlio.log").write_text("")
+    # RUN_REQUIRED_FILES uses the `.*<name>.json` regex family — the DLIO
+    # training loop prefixes these with the workload+timestamp; drop a
+    # representative name here so the regex matches.
+    (leaf / f"unet3d_{ts}_output.json").write_text("{}")
+    (leaf / f"unet3d_{ts}_per_epoch_stats.json").write_text("{}")
+    (leaf / f"unet3d_{ts}_summary.json").write_text("{}")
+    dlio_cfg = leaf / "dlio_config"
+    dlio_cfg.mkdir()
+    (dlio_cfg / "config.yaml").write_text("")
+    (dlio_cfg / "hydra.yaml").write_text("")
+    (dlio_cfg / "overrides.yaml").write_text("")
+    return leaf
+
+
+class TestValidateRunLeaf:
+    """Stat-only completeness check of the ``training/<model>/run/<ts>/`` leaf.
+
+    Mirrors ``TestValidateDatagenLeaf`` against ``RUN_REQUIRED_FILES`` /
+    ``RUN_REQUIRED_FOLDERS`` (submission_checker/constants.py:83-93).
+    Wired into ``TrainingBenchmark._run`` post-run so a DLIO subprocess
+    that crashes silently surfaces at run time instead of at
+    ``mlpstorage validate`` time (storage#761).
+    """
+
+    def test_healthy_leaf_returns_empty_list(self, tmp_path):
+        leaf = _make_healthy_run_leaf(tmp_path)
+        assert validate_run_leaf(str(leaf)) == []
+
+    def test_missing_dlio_log_reported(self, tmp_path):
+        # The exact signature of storage#761: DLIO crashed before
+        # writing dlio.log — the wrapper stdout log is present but the
+        # DLIO-native artifacts are not.
+        leaf = _make_healthy_run_leaf(tmp_path)
+        (leaf / "dlio.log").unlink()
+        missing = validate_run_leaf(str(leaf))
+        assert any("dlio.log" in m for m in missing), missing
+
+    def test_missing_summary_json_reported(self, tmp_path):
+        leaf = _make_healthy_run_leaf(tmp_path, ts="20260710_100000")
+        (leaf / "unet3d_20260710_100000_summary.json").unlink()
+        missing = validate_run_leaf(str(leaf))
+        assert any("summary.json" in m for m in missing), missing
+
+    def test_missing_output_json_reported(self, tmp_path):
+        leaf = _make_healthy_run_leaf(tmp_path, ts="20260710_100000")
+        (leaf / "unet3d_20260710_100000_output.json").unlink()
+        missing = validate_run_leaf(str(leaf))
+        assert any("output.json" in m for m in missing), missing
+
+    def test_missing_per_epoch_stats_reported(self, tmp_path):
+        leaf = _make_healthy_run_leaf(tmp_path, ts="20260710_100000")
+        (leaf / "unet3d_20260710_100000_per_epoch_stats.json").unlink()
+        missing = validate_run_leaf(str(leaf))
+        assert any("per_epoch_stats.json" in m for m in missing), missing
+
+    def test_missing_dlio_config_folder_reported(self, tmp_path):
+        leaf = _make_healthy_run_leaf(tmp_path)
+        for entry in (leaf / "dlio_config").iterdir():
+            entry.unlink()
+        (leaf / "dlio_config").rmdir()
+        missing = validate_run_leaf(str(leaf))
+        assert any("dlio_config" in m for m in missing), missing
+
+    def test_all_dlio_artifacts_missing_reports_all(self, tmp_path):
+        # The exact storage#761 scenario: DLIO never wrote anything.
+        # The wrapper stdout/stderr are present but no dlio.log,
+        # no *.json outputs, no dlio_config/. Expect the helper to
+        # enumerate every miss rather than short-circuit after the first.
+        leaf = tmp_path / "20260710_095915"
+        leaf.mkdir(parents=True)
+        (leaf / "training_run.stdout.log").write_text("")
+        (leaf / "training_run.stderr.log").write_text("")
+        missing = validate_run_leaf(str(leaf))
+        # Expect: dlio.log, output.json, per_epoch_stats.json, summary.json, dlio_config/
+        assert any("dlio.log" in m for m in missing), missing
+        assert any("output.json" in m for m in missing), missing
+        assert any("per_epoch_stats.json" in m for m in missing), missing
+        assert any("summary.json" in m for m in missing), missing
+        assert any("dlio_config" in m for m in missing), missing
+
+    def test_leaf_does_not_exist_reports_leaf_missing(self, tmp_path):
+        missing = validate_run_leaf(str(tmp_path / "does_not_exist"))
+        assert len(missing) == 1
+        assert "does_not_exist" in missing[0]
+        assert "run" in missing[0]
+
+
+# --------------------------------------------------------------------------- #
+# validate_checkpoint_leaf                                                    #
+# --------------------------------------------------------------------------- #
+
+
+def _make_healthy_checkpoint_leaf(root: pathlib.Path, ts: str = "20260710_120000") -> pathlib.Path:
+    """Create a healthy checkpointing-run leaf per CHECKPOINT_REQUIRED_FILES."""
+    leaf = root / ts
+    leaf.mkdir(parents=True)
+    (leaf / "checkpointing_run.stdout.log").write_text("")
+    (leaf / "checkpointing_run.stderr.log").write_text("")
+    (leaf / "dlio.log").write_text("")
+    (leaf / f"llama3_8b_{ts}_output.json").write_text("{}")
+    (leaf / f"llama3_8b_{ts}_per_epoch_stats.json").write_text("{}")
+    (leaf / f"llama3_8b_{ts}_summary.json").write_text("{}")
+    dlio_cfg = leaf / "dlio_config"
+    dlio_cfg.mkdir()
+    (dlio_cfg / "config.yaml").write_text("")
+    (dlio_cfg / "hydra.yaml").write_text("")
+    (dlio_cfg / "overrides.yaml").write_text("")
+    return leaf
+
+
+class TestValidateCheckpointLeaf:
+    """Stat-only completeness check of the checkpointing leaf.
+
+    Mirrors ``TestValidateRunLeaf`` against
+    ``CHECKPOINT_REQUIRED_FILES`` / ``CHECKPOINT_REQUIRED_FOLDERS``
+    (submission_checker/constants.py:98-108). Wired into
+    ``CheckpointingBenchmark._run`` — sibling of storage#761.
+    """
+
+    def test_healthy_leaf_returns_empty_list(self, tmp_path):
+        leaf = _make_healthy_checkpoint_leaf(tmp_path)
+        assert validate_checkpoint_leaf(str(leaf)) == []
+
+    def test_missing_dlio_log_reported(self, tmp_path):
+        leaf = _make_healthy_checkpoint_leaf(tmp_path)
+        (leaf / "dlio.log").unlink()
+        missing = validate_checkpoint_leaf(str(leaf))
+        assert any("dlio.log" in m for m in missing), missing
+
+    def test_missing_summary_json_reported(self, tmp_path):
+        leaf = _make_healthy_checkpoint_leaf(tmp_path, ts="20260710_130000")
+        (leaf / "llama3_8b_20260710_130000_summary.json").unlink()
+        missing = validate_checkpoint_leaf(str(leaf))
+        assert any("summary.json" in m for m in missing), missing
+
+    def test_missing_dlio_config_folder_reported(self, tmp_path):
+        leaf = _make_healthy_checkpoint_leaf(tmp_path)
+        for entry in (leaf / "dlio_config").iterdir():
+            entry.unlink()
+        (leaf / "dlio_config").rmdir()
+        missing = validate_checkpoint_leaf(str(leaf))
+        assert any("dlio_config" in m for m in missing), missing
+
+    def test_leaf_does_not_exist_reports_leaf_missing(self, tmp_path):
+        missing = validate_checkpoint_leaf(str(tmp_path / "does_not_exist"))
+        assert len(missing) == 1
+        assert "checkpoint" in missing[0]
 
 
 # --------------------------------------------------------------------------- #

@@ -1,22 +1,27 @@
-"""Training datagen hierarchy validation and self-describing manifest.
+"""DLIO leaf hierarchy validation and self-describing datagen manifest.
 
-This module packages the four helpers used by:
+This module packages the helpers used by:
 
 - the training benchmark's datagen path in ``mlpstorage_py/benchmarks/``
   (pre-run guard + post-run manifest write + leaf WARN)
 - the report_generator's datagen group handling in
   ``mlpstorage_py/report_generator.py``
   (supported-model INVALID gate + leaf WARN)
+- the training and checkpointing benchmarks' post-run loud-fail hooks
+  (storage#761 sibling of storage#744 for datagen and storage#759 for
+  kvcache) — ``validate_run_leaf`` / ``validate_checkpoint_leaf``.
 
 Design notes
 ------------
 
-The DLIO datagen leaf under ``<results-dir>/.../training/<model>/datagen/<ts>/``
-carries the files listed in
+Each DLIO leaf under
+``<results-dir>/.../{training/<model>/{datagen,run},checkpointing/<model>}/<ts>/``
+carries a required-file set listed in
 ``mlpstorage_py/submission_checker/constants.py``
-(DATAGEN_REQUIRED_FILES / DATAGEN_REQUIRED_FOLDERS). We reuse those constants
-so the same file-set contract is enforced from three call sites (submission
-checker, run-checker, reportgen) without drift.
+(DATAGEN_REQUIRED_FILES / RUN_REQUIRED_FILES / CHECKPOINT_REQUIRED_FILES and
+their _FOLDERS counterparts). We reuse those constants so the same file-set
+contract is enforced from every call site (submission checker, run-checker,
+reportgen) without drift.
 
 The manifest at ``<data-dir>/<model>/.mlps-datagen-manifest.json`` is the
 self-describing record a future ``training run`` command will read to compare
@@ -53,8 +58,12 @@ from mlpstorage_py.config import (
 )
 from mlpstorage_py.errors import ConfigurationError, ErrorCode
 from mlpstorage_py.submission_checker.constants import (
+    CHECKPOINT_REQUIRED_FILES,
+    CHECKPOINT_REQUIRED_FOLDERS,
     DATAGEN_REQUIRED_FILES,
     DATAGEN_REQUIRED_FOLDERS,
+    RUN_REQUIRED_FILES,
+    RUN_REQUIRED_FOLDERS,
 )
 
 
@@ -293,6 +302,48 @@ def _select_regex_set(mapping: Dict[str, List[str]]) -> List[str]:
     return mapping.get("v3.0") or mapping.get("default") or []
 
 
+def _validate_leaf(
+    leaf_path: str,
+    files_map: Dict[str, List[str]],
+    folders_map: Dict[str, List[str]],
+    leaf_kind: str,
+) -> List[str]:
+    """Stat-only presence check against a required-files / folders contract.
+
+    Shared helper for the three DLIO leaf validators: datagen, run,
+    and checkpointing. Each leaf carries a different required-file
+    regex set (see ``submission_checker/constants.py``) but the check
+    shape — presence of the regex-matched files plus presence of the
+    ``dlio_config/`` folder with its three inner YAMLs — is identical.
+
+    Returns:
+        Human-readable missing-item strings; empty list means complete.
+    """
+    if not os.path.isdir(leaf_path):
+        return [f"{leaf_kind} leaf directory not found: {leaf_path}"]
+
+    missing: List[str] = []
+    entries = os.listdir(leaf_path)
+
+    for pattern in _select_regex_set(files_map):
+        if not any(re.search(pattern, name) for name in entries):
+            missing.append(_pretty_file_pattern(pattern))
+
+    for folder in _select_regex_set(folders_map):
+        folder_path = os.path.join(leaf_path, folder)
+        if not os.path.isdir(folder_path):
+            missing.append(f"required folder missing: {folder}/")
+            # No point drilling into the folder's expected inner files
+            # if the folder itself is absent — one message is clearer.
+            continue
+        inner_entries = set(os.listdir(folder_path))
+        for inner_name in _DLIO_CONFIG_REQUIRED_FILES:
+            if inner_name not in inner_entries:
+                missing.append(f"{folder}/{inner_name}")
+
+    return missing
+
+
 def validate_datagen_leaf(leaf_path: str) -> List[str]:
     """Return a list of missing-item descriptions for a datagen leaf.
 
@@ -307,29 +358,40 @@ def validate_datagen_leaf(leaf_path: str) -> List[str]:
         A list of human-readable missing-item strings. Empty list
         means the leaf is complete. Never raises.
     """
-    if not os.path.isdir(leaf_path):
-        return [f"datagen leaf directory not found: {leaf_path}"]
+    return _validate_leaf(
+        leaf_path, DATAGEN_REQUIRED_FILES, DATAGEN_REQUIRED_FOLDERS, "datagen"
+    )
 
-    missing: List[str] = []
-    entries = os.listdir(leaf_path)
 
-    for pattern in _select_regex_set(DATAGEN_REQUIRED_FILES):
-        if not any(re.search(pattern, name) for name in entries):
-            missing.append(_pretty_file_pattern(pattern))
+def validate_run_leaf(leaf_path: str) -> List[str]:
+    """Return a list of missing-item descriptions for a training-run leaf.
 
-    for folder in _select_regex_set(DATAGEN_REQUIRED_FOLDERS):
-        folder_path = os.path.join(leaf_path, folder)
-        if not os.path.isdir(folder_path):
-            missing.append(f"required folder missing: {folder}/")
-            # No point drilling into the folder's expected inner files
-            # if the folder itself is absent — one message is clearer.
-            continue
-        inner_entries = set(os.listdir(folder_path))
-        for inner_name in _DLIO_CONFIG_REQUIRED_FILES:
-            if inner_name not in inner_entries:
-                missing.append(f"{folder}/{inner_name}")
+    Mirrors ``validate_datagen_leaf`` but against the run-side contract
+    (``RUN_REQUIRED_FILES`` / ``RUN_REQUIRED_FOLDERS``). Used by the
+    training benchmark's post-run loud-fail hook so that a DLIO
+    subprocess which exits non-zero — or exits zero but writes no
+    outputs — surfaces as an ERROR at run time rather than a silent
+    "success" the operator only discovers when
+    ``mlpstorage validate`` rejects the submission (storage#761).
+    """
+    return _validate_leaf(
+        leaf_path, RUN_REQUIRED_FILES, RUN_REQUIRED_FOLDERS, "run"
+    )
 
-    return missing
+
+def validate_checkpoint_leaf(leaf_path: str) -> List[str]:
+    """Return a list of missing-item descriptions for a checkpointing leaf.
+
+    Same shape as ``validate_run_leaf`` but against
+    ``CHECKPOINT_REQUIRED_FILES`` / ``CHECKPOINT_REQUIRED_FOLDERS``.
+    Called from ``CheckpointingBenchmark._run`` to close the
+    silent-success gap on the checkpointing subprocess (sibling of
+    storage#761).
+    """
+    return _validate_leaf(
+        leaf_path, CHECKPOINT_REQUIRED_FILES, CHECKPOINT_REQUIRED_FOLDERS,
+        "checkpoint",
+    )
 
 
 def _pretty_file_pattern(pattern: str) -> str:

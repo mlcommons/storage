@@ -16,7 +16,9 @@ from mlpstorage_py.errors import ConfigurationError, ErrorCode
 from mlpstorage_py.rules import calculate_training_data_size, HostInfo, HostMemoryInfo, HostCPUInfo, ClusterInformation
 from mlpstorage_py.rules.datagen_hierarchy import (
     assert_data_dir_hierarchy_absent,
+    validate_checkpoint_leaf,
     validate_datagen_leaf,
+    validate_run_leaf,
     validate_supported_model,
     write_datagen_manifest,
 )
@@ -995,6 +997,37 @@ class TrainingBenchmark(DLIOBenchmark):
                     f'Post-datagen validation failed: {e}'
                 )
                 return EXIT_CODE.FAILURE
+        # Post-run loud-fail (storage#761). Mirrors the datagen block:
+        # storage#744 landed rc + leaf checks for datagen but not for
+        # run, so a DLIO training-run subprocess that died silently
+        # (crashed, killed, wrote no outputs) was reported as SUCCESS
+        # here and only surfaced later when ``mlpstorage validate``
+        # rejected the missing files. mlpstorage owns the verdict; the
+        # operator should not have to grep stdout logs to know whether
+        # their run produced valid artifacts.
+        if self.args.command == "run" and self.args.mode != "whatif":
+            rc = getattr(self, '_last_command_rc', 0)
+            if rc != 0:
+                self.logger.error(
+                    f'DLIO training-run command exited with non-zero '
+                    f'status ({rc}). Inspect the stdout/stderr logs '
+                    f'under "{self.run_result_output}" for the '
+                    f'underlying failure; this run\'s artifacts are '
+                    f'incomplete and must be re-run.'
+                )
+                return EXIT_CODE.FAILURE
+            missing = validate_run_leaf(self.run_result_output)
+            if missing:
+                for item in missing:
+                    self.logger.error(f'Training-run output leaf incomplete: {item}')
+                self.logger.error(
+                    f'Training-run leaf under "{self.run_result_output}" '
+                    f'is missing {len(missing)} required artifact(s) '
+                    f'despite a zero exit code. This run cannot be '
+                    f'submitted; re-run and inspect the DLIO stdout/'
+                    f'stderr logs for the underlying failure.'
+                )
+                return EXIT_CODE.FAILURE
         return EXIT_CODE.SUCCESS
 
     def _post_datagen_actions(self) -> bool:
@@ -1116,6 +1149,35 @@ class CheckpointingBenchmark(DLIOBenchmark):
                 return EXIT_CODE.INVALID_ARGUMENTS
         except Exception as e:
             return EXIT_CODE.FAILURE
+        # Post-run loud-fail (storage#761 sibling). Same silent-success
+        # gap as TrainingBenchmark's run branch: execute_command captures
+        # the DLIO rc into self._last_command_rc but the checkpointing
+        # _run returned SUCCESS regardless. A DLIO checkpointing run
+        # that dies without writing summary.json / dlio.log now surfaces
+        # as ERROR here instead of only at ``mlpstorage validate`` time.
+        if self.args.command == "run" and getattr(self.args, 'mode', None) != "whatif":
+            rc = getattr(self, '_last_command_rc', 0)
+            if rc != 0:
+                self.logger.error(
+                    f'DLIO checkpointing-run command exited with non-zero '
+                    f'status ({rc}). Inspect the stdout/stderr logs '
+                    f'under "{self.run_result_output}" for the '
+                    f'underlying failure; this run\'s artifacts are '
+                    f'incomplete and must be re-run.'
+                )
+                return EXIT_CODE.FAILURE
+            missing = validate_checkpoint_leaf(self.run_result_output)
+            if missing:
+                for item in missing:
+                    self.logger.error(f'Checkpointing-run output leaf incomplete: {item}')
+                self.logger.error(
+                    f'Checkpointing-run leaf under "{self.run_result_output}" '
+                    f'is missing {len(missing)} required artifact(s) '
+                    f'despite a zero exit code. This run cannot be '
+                    f'submitted; re-run and inspect the DLIO stdout/'
+                    f'stderr logs for the underlying failure.'
+                )
+                return EXIT_CODE.FAILURE
         return EXIT_CODE.SUCCESS
 
     # ------------------------------------------------------------------
