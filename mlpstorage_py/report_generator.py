@@ -456,9 +456,11 @@ class ReportGenerator:
         # Unpack the 5-tuple key. Shape is always
         # (category, orgname, systemname, id1, id2) per D-05; id1/id2
         # meaning varies by benchmark type but the prefix positions do
-        # not, so this unpack is stable across types.
+        # not, so this unpack is stable across types. Issue #771 adds an
+        # optional 6th ``command`` discriminator for auxiliary training
+        # commands — slice off the fixed 5-prefix so both shapes unpack.
         try:
-            category_key, orgname_key, systemname_key, _id1, _id2 = workload_key
+            category_key, orgname_key, systemname_key, _id1, _id2 = workload_key[:5]
         except ValueError:
             category_key = orgname_key = systemname_key = ""
 
@@ -1338,6 +1340,25 @@ class ReportGenerator:
         # (category, orgname, systemname, model, accelerator) shape.
         model = str(benchmark_run.model or "")
         accelerator = str(benchmark_run.accelerator or "")
+        # Issue #771: auxiliary training commands (``datasize``, ``datagen``)
+        # run once per (model, accelerator) and are NOT part of the
+        # 1-warmup + 5-real invocation set that Rules.md §2.1.17 governs.
+        # ``datasize`` in particular carries a real accelerator (e.g.
+        # ``b200``) because it needs one to compute the required data
+        # size — so under the plain 5-tuple key it collides with the 6
+        # ``run`` invocations, inflates the count to 7, and trips the
+        # D-27 count gate. ``datagen`` avoids the collision only by the
+        # accident of carrying an empty accelerator. Adding ``command``
+        # as an extra discriminator for non-``run`` training commands
+        # makes the isolation explicit and independent of that accident,
+        # while preserving accelerator-scoped grouping for multi-
+        # accelerator submissions (b200 + mi355 datasize runs stay in
+        # separate groups per accelerator).
+        if bt == BENCHMARK_TYPES.training and benchmark_run.command != 'run':
+            return (
+                category, orgname, systemname, model, accelerator,
+                str(benchmark_run.command),
+            )
         return (category, orgname, systemname, model, accelerator)
 
     def _process_workload_groups(self, benchmark_runs: List[BenchmarkRun]) -> None:
@@ -1371,7 +1392,12 @@ class ReportGenerator:
 
             try:
                 # workload_key = (category, orgname, systemname, id1, id2)
-                category_str, orgname_str, systemname_str, ident1, ident2 = workload_key
+                # or, for auxiliary training commands (Issue #771),
+                # (category, orgname, systemname, id1, id2, command).
+                # Only the fixed 5-prefix is unpacked here — the optional
+                # 6th element is a discriminator, not something the log
+                # line needs to render.
+                category_str, orgname_str, systemname_str, ident1, ident2 = workload_key[:5]
                 self.logger.info(
                     f'Running submission verifiers for '
                     f'{runs[0].benchmark_type.value if runs[0].benchmark_type else "?"} '

@@ -1075,6 +1075,170 @@ class TestInvalidRulesStrict:
             f"category={result.category!r}, issues={text!r}"
         )
 
+    def test_training_datasize_does_not_inflate_run_group_count(self, tmp_path):
+        """Issue #771: ``datasize`` MUST NOT collide with the run-group workload key.
+
+        Rules.md §2.1.17 pins the training run set at 1 warmup + 5 real
+        (6 invocations). ``datasize`` runs are a separate phase — they
+        compute the required data size and are NOT part of that count.
+
+        The #717 fix guarded the D-27 count gate with
+        ``runs[0].command == 'run'``, which relied on non-``run``
+        commands landing in their own workload group. That worked for
+        ``datagen`` (empty accelerator, so a distinct workload key), but
+        ``datasize`` carries a real accelerator (e.g. ``b200``) because
+        it needs one to compute the required data size. Under the plain
+        5-tuple key ``(category, orgname, systemname, model,
+        accelerator)`` it collided with the 6-run set, producing a
+        7-run group and a spurious ``expected 6 training invocations
+        per Rules.md §2.1.17 (1 warmup + 5 real); found 7`` INVALID.
+
+        This test constructs six ``run`` ``BenchmarkRun``s (matching
+        production's 1 warmup + 5 real) plus a single ``datasize`` run
+        under the same (model, accelerator). Under the fix, the datasize
+        run lands in its own workload group keyed by ``command``, and
+        the run-group stays at 6 → CLOSED, not INVALID.
+        """
+        gen = _make_bare_generator(tmp_path)
+        model = "retinanet"
+        accelerator = "b200"
+        model_root = (
+            tmp_path / "closed" / "acme" / "results" / "sys-a"
+            / "training" / model
+        )
+        run_root = model_root / "run"
+        datasize_root = model_root / "datasize"
+
+        # 1 warmup (lex-earliest ts) + 5 real. Metric values are the
+        # same across all 6 — this test cares about the count gate, not
+        # aggregate values.
+        run_timestamps = [
+            "20260710_214832",  # warmup (lex-earliest)
+            "20260711_001950",
+            "20260711_025127",
+            "20260711_052311",
+            "20260711_075449",
+            "20260711_102643",
+        ]
+        run_invocations = []
+        for ts in run_timestamps:
+            leaf = run_root / ts
+            leaf.mkdir(parents=True)
+            run_invocations.append(
+                _make_run(
+                    benchmark_type=BENCHMARK_TYPES.training,
+                    model=model,
+                    result_dir=str(leaf),
+                    metrics={"au_percentage": [95.0]},
+                    accelerator=accelerator,
+                    run_datetime=ts,
+                    command="run",
+                )
+            )
+
+        datasize_ts = "20260710_213005"
+        datasize_leaf = datasize_root / datasize_ts
+        datasize_leaf.mkdir(parents=True)
+        datasize_run = _make_run(
+            benchmark_type=BENCHMARK_TYPES.training,
+            model=model,
+            result_dir=str(datasize_leaf),
+            metrics={},
+            accelerator=accelerator,
+            run_datetime=datasize_ts,
+            command="datasize",
+        )
+
+        _run_process_workload_groups(gen, run_invocations + [datasize_run])
+
+        # Two workload groups: one for ``run`` (6 invocations), one for
+        # ``datasize`` (1). Pre-fix produced a single 7-invocation group.
+        assert len(gen.workload_results) == 2, (
+            f"Issue #771 regression: expected 2 workload groups "
+            f"(run + datasize), got {len(gen.workload_results)} — "
+            f"keys={list(gen.workload_results.keys())!r}"
+        )
+
+        # Locate each group by inspecting the first run's command.
+        run_result = None
+        datasize_result = None
+        for result in gen.workload_results.values():
+            first_run = (
+                result.benchmark_run[0]
+                if isinstance(result.benchmark_run, list)
+                else result.benchmark_run
+            )
+            if first_run.command == "run":
+                run_result = result
+            elif first_run.command == "datasize":
+                datasize_result = result
+        assert run_result is not None, "no run-group in workload_results"
+        assert datasize_result is not None, "no datasize group in workload_results"
+
+        # Run group: exactly 6 invocations and NOT INVALID.
+        assert len(run_result.benchmark_run) == 6, (
+            f"run-group inflated by datasize; "
+            f"count={len(run_result.benchmark_run)}"
+        )
+        run_text = self._row_issue_text(run_result)
+        assert "expected 6 training invocations per Rules.md" not in run_text, (
+            f"Issue #771 regression: D-27 template fired on run-group; "
+            f"got: {run_text!r}"
+        )
+        assert _INVALID_MSG_TRAINING_COUNT.format(n=7) not in run_text
+        assert run_result.category != PARAM_VALIDATION.INVALID, (
+            f"Issue #771 regression: run-group downgraded to INVALID; "
+            f"category={run_result.category!r}, issues={run_text!r}"
+        )
+
+        # Datasize group: 1 invocation, gate skipped, not INVALID.
+        assert len(datasize_result.benchmark_run) == 1
+        ds_text = self._row_issue_text(datasize_result)
+        assert "expected 6 training invocations per Rules.md" not in ds_text
+        assert datasize_result.category != PARAM_VALIDATION.INVALID, (
+            f"datasize group downgraded to INVALID; "
+            f"category={datasize_result.category!r}, issues={ds_text!r}"
+        )
+
+    def test_training_datasize_multi_accelerator_stays_split(self, tmp_path):
+        """Issue #771: datasize groups MUST stay split by accelerator.
+
+        The fix adds ``command`` as a 6th discriminator ONLY for non-run
+        training commands, leaving the accelerator in the 5th position.
+        A multi-accelerator submission (e.g. b200 + mi355 for the same
+        model) must therefore produce TWO datasize groups, not one — the
+        accelerator is a real submission-identity dimension, not an
+        artifact of the current path layout.
+        """
+        gen = _make_bare_generator(tmp_path)
+        model = "unet3d"
+        results = []
+        for accel, ts in [("b200", "20260710_100000"), ("mi355", "20260710_110000")]:
+            leaf = (
+                tmp_path / "closed" / "acme" / "results" / "sys-a"
+                / "training" / model / "datasize" / ts
+            )
+            leaf.mkdir(parents=True)
+            results.append(
+                _make_run(
+                    benchmark_type=BENCHMARK_TYPES.training,
+                    model=model,
+                    result_dir=str(leaf),
+                    metrics={},
+                    accelerator=accel,
+                    run_datetime=ts,
+                    command="datasize",
+                )
+            )
+
+        _run_process_workload_groups(gen, results)
+
+        assert len(gen.workload_results) == 2, (
+            f"expected 2 datasize groups (one per accelerator), got "
+            f"{len(gen.workload_results)} — keys="
+            f"{list(gen.workload_results.keys())!r}"
+        )
+
     def test_statistics_error_not_swallowed(self, tmp_path):
         """D-23 loud-failure: helper propagates ``StatisticsError`` on empty metric list.
 
