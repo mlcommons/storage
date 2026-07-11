@@ -1041,6 +1041,23 @@ class TrainingBenchmark(DLIOBenchmark):
         object-storage URIs via ``--data-dir``'s scheme and dispatches
         to s3dlio internally, so this method is backend-agnostic.
         """
+        # storage#767: write metadata BEFORE the leaf check. The
+        # required-artifact set includes ``training_<ts>_metadata.json``
+        # (mlpstorage-injected — see DATAGEN_REQUIRED_FILES), but
+        # main.py's ``benchmark.write_metadata()`` runs in a ``finally``
+        # block AFTER ``benchmark.run()`` returns. Without this
+        # pre-write the validator false-positived on every datagen run,
+        # reporting the metadata file missing and refusing to write the
+        # manifest. Errors here are logged but not fatal — if the write
+        # actually fails, the leaf check below will surface the
+        # still-missing metadata file with the same loud error path.
+        try:
+            self.write_metadata()
+        except Exception as e:
+            self.logger.warning(
+                f'Failed to write datagen metadata before leaf check: {e}'
+            )
+
         missing = validate_datagen_leaf(self.run_result_output)
         if missing:
             for item in missing:
