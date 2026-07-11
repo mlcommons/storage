@@ -67,6 +67,7 @@ from mlpstorage_py.cluster_collector import (
     TimeSeriesCollector,
     MultiHostTimeSeriesCollector,
     run_shared_fs_probe,
+    run_results_dir_shared_probe,
 )
 from mlpstorage_py.benchmarks.fs_separation_probe import probe_fs_separation
 from mlpstorage_py.progress import create_stage_progress, progress_context
@@ -1056,6 +1057,29 @@ class Benchmark(BenchmarkInterface, abc.ABC):
                 mpi_bin=getattr(self.args, 'mpi_bin', None),
                 allow_run_as_root=getattr(self.args, 'allow_run_as_root', False),
                 ssh_username=getattr(self.args, 'ssh_username', None),
+            )
+        # ------------------------------------------------------------------
+        # CAP-02b: --results-dir shared-FS probe (storage#772).
+        # ------------------------------------------------------------------
+        # CAP-02 covers --data-dir. --results-dir has the same
+        # shared-FS requirement (rank 0 writes summary.json/output.json,
+        # each rank writes its own dlio.log) but was previously only
+        # probed for kvcache (issue #521). Storage#772's reporter ran 51
+        # workers with a per-host-local --results-dir; each host wrote
+        # dlio.log to its own copy, only rank 0 wrote summary.json to
+        # its own copy, and the launcher's timestamp leaf came out empty.
+        # Reuses the same --skip-validation opt-out as CAP-02; no new
+        # flag needed (see storage#772 discussion for the opt-out
+        # rationale re: Argonne's srun/PALS auto-skip).
+        if not getattr(self.args, 'skip_validation', False):
+            hosts = getattr(self.args, 'hosts', None) or []
+            run_results_dir_shared_probe(
+                results_dir=self.run_result_output,
+                hosts=hosts,
+                run_uuid=self._run_uuid,
+                logger=self.logger,
+                mpi_bin=getattr(self.args, 'mpi_bin', None),
+                allow_run_as_root=getattr(self.args, 'allow_run_as_root', False),
             )
         # ------------------------------------------------------------------
         # Slice 5 / CAP-03: FS-separation probe (issue #601).
