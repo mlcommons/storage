@@ -1,7 +1,13 @@
 # MLPerf Storage Benchmark v3.0 — Significant Bugs Fixed by Version
 
-**Date:** 2026-07-10
-**Covers:** Versions 3.0.3 through 3.0.41 (May 28 – July 10, 2026)
+**Date:** 2026-07-11
+**Covers:** Versions 3.0.3 through 3.0.42 (May 28 – July 11, 2026)
+
+**Source repositories** — this file cites fixes that live across three repos. Follow the links to read the code, PR discussions, and full commit bodies:
+
+- **mlpstorage**: https://github.com/mlcommons/storage — this repo; the benchmark harness, CLI, rules, and reportgen.
+- **DLIO_local_changes**: https://github.com/mlcommons/DLIO_local_changes — the MLPerf Storage fork of DLIO; pinned by `pyproject.toml` and pulled in via the DLIO commit-hash bump on each release.
+- **s3dlio**: https://github.com/russfellows/s3dlio — the Rust-backed object-storage engine that DLIO calls into; pinned by version floor in both DLIO and this repo.
 
 ---
 
@@ -399,3 +405,21 @@ _(None. All 3.0.41 fixes are invocation or metadata correctness — no measured-
 **Other Significant**
 - Rule 2.1.12 (STRUCT-12) required training workload dirs to contain exactly `{datagen, run}`, but `mlpstorage training datasize` emits a `datasize/` directory that PR #611 taught rule 3.3.1 to require. Submitters were stuck between STRUCT-12 error and 3.3.1 warning. `datasize/` is now allowed. Re-validate any datasize submission previously flagged INVALID. (#752)
 - `DLIOBenchmark.datasize()` writes `dataset.total_disk_bytes` into the datasize sentinel per §3.3.1, but the run-rules checker didn't list it in `TOOL_INJECTED_PARAMS`; reportgen saw a user override, emitted `[INVALID] Disallowed parameter override`, and the cascaded "requires 5 runs" gate failed valid submissions. Re-validate submissions that failed that gate. (#760, #762)
+
+---
+
+## Version 3.0.42 (July 11, 2026)
+
+No mlpstorage-level code change landed in this range. The DLIO pin advanced once, to `edaf4bb` (DLIO v3.0.4 / PR #50), picking up three DLIO-side fixes; the s3dlio floor moved from `>=0.9.110` to `>=0.9.112`, picking up the counterpart runtime fix plus FFI error-chain preservation.
+
+**Score-Affecting**
+- DLIO: `ObjStoreLibStorage` derived `S3DLIO_RT_THREADS` from the pre-auto-size `write_threads=1` sentinel, pinning s3dlio's Tokio runtime to one worker; NP=1 S3 writes dropped ~9x (~214 vs ~1928 MB/s on UNET3D datagen). Rerun any S3 datagen/checkpointing with auto-sized `write_threads`. (#780; DLIO PR #50)
+- s3dlio: MPI-aware auto-init — `configure_thread_pools(0)` at import sizes the Tokio runtime to `cpus/MPI-world-size` when no explicit env-var override is present, avoiding oversubscription at NP>1 and undersizing at NP=1. (s3dlio v0.9.112 / PR #163)
+- s3dlio: defense-in-depth clamp — `S3DLIO_RT_THREADS` values below `RT_THREADS_LIMIT/4` are raised to `RT_THREADS_LIMIT`, so any downstream miscomputation of the env var (like DLIO's pre-fix #780) no longer starves the runtime. (s3dlio v0.9.112 / PR #163)
+
+**Invocation**
+- DLIO: every MinIO run died at storage construction with `AttributeError: 'MinIOAdapter' object has no attribute 'bucket_exists'`, re-raised by preflight as `ConnectionError: cannot reach bucket ... via minio`. Delegator added. Rerun any MinIO preflight failure. (#756; DLIO PR #50)
+
+**Other Significant**
+- DLIO: opaque `RuntimeError: concurrent range chunk failed` on undersized hosts now emits a proactive workload-shape warning at read start (FD/RAM/CPU projections) and chains a live resource snapshot (fd, RSS, load-avg) onto any RuntimeError. Diagnostic-only. (#755; DLIO PR #50)
+- s3dlio: FFI-boundary hardening (Tiers 1-5) preserves anyhow error chains across the Rust/Python boundary, so a Python-side `RuntimeError` now shows the real underlying cause instead of a bare "concurrent range chunk failed". (s3dlio v0.9.112 / PR #163)
