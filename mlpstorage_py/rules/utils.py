@@ -46,6 +46,43 @@ def _check_safe_path_component(name: str, value: str) -> None:
         )
 
 
+def _reconcile_declared_and_measured(declared_total_bytes, cluster_information, logger):
+    """Return the larger of the CLI-declared budget and the measured cluster
+    memory when both are available (storage#785).
+
+    ``submission_checker`` rule 3.1.2 (trainingRecalculateDatasetSize)
+    computes the 5×memory requirement from the ``host_memory_GB`` array in
+    ``summary.json`` — i.e. the actual ``/proc/meminfo`` values MPI-collected
+    at run time — and the in-process ``check_num_files_train`` runs the
+    same math against ``cluster_information.total_memory_bytes``. If
+    ``datasize`` recommends against a smaller CLI-declared budget only,
+    the resulting dataset undersizes both checks: the reporter's run
+    failed with ``expected >= 1071000, actual 714000`` because their
+    machines had substantially more RAM than the declared
+    ``--client-host-memory-in-gb`` budget.
+
+    When measured < declared (e.g. an operator sizing against a reserved
+    budget larger than what MPI observed under cgroup limits), the
+    declared basis wins — that keeps the recommendation conservative for
+    both rule 3.1.2 (which will accept any file count ≥ 5× measured) and
+    forward-looking runs on unrestricted hardware.
+    """
+    if cluster_information is None:
+        return declared_total_bytes
+    measured = getattr(cluster_information, 'total_memory_bytes', 0) or 0
+    if measured <= declared_total_bytes:
+        return declared_total_bytes
+    logger.warning(
+        f"Measured cluster memory ({measured / (1024**3):.1f}GiB) exceeds "
+        f"the declared --client-host-memory-in-gb budget "
+        f"({declared_total_bytes / (1024**3):.1f}GiB); sizing against the "
+        f"measured value so the recommendation matches run-time "
+        f"check_num_files_train and submission_checker rule 3.1.2. See "
+        f"storage#785."
+    )
+    return measured
+
+
 def calculate_training_data_size(args, cluster_information, dataset_params, reader_params, logger,
                                  num_processes=None) -> Tuple[int, int, int]:
     """
@@ -102,12 +139,16 @@ def calculate_training_data_size(args, cluster_information, dataset_params, read
         per_host_memory_in_bytes = args.client_host_memory_in_gb * 1024 * 1024 * 1024
         num_hosts = args.num_client_hosts
         total_mem_bytes = per_host_memory_in_bytes * num_hosts
+        total_mem_bytes = _reconcile_declared_and_measured(
+            total_mem_bytes, cluster_information, logger)
         num_processes = args.num_processes
     elif hasattr(args, 'clienthost_host_memory_in_gb') and args.clienthost_host_memory_in_gb and \
          not (hasattr(args, 'num_client_hosts') and args.num_client_hosts):
         per_host_memory_in_bytes = args.clienthost_host_memory_in_gb * 1024 * 1024 * 1024
         num_hosts = len(args.hosts)
         total_mem_bytes = per_host_memory_in_bytes * num_hosts
+        total_mem_bytes = _reconcile_declared_and_measured(
+            total_mem_bytes, cluster_information, logger)
         num_processes = args.num_processes
     else:
         raise ValueError('Either args or cluster_information is required')

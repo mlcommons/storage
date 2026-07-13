@@ -205,6 +205,128 @@ class TestCalculateTrainingDataSize:
                 logger=mock_logger,
             )
 
+    def test_datasize_uses_measured_when_it_exceeds_declared_budget(
+            self, mock_logger, sample_reader_params):
+        """storage#785: datasize must recommend against the LARGER of the
+        CLI-declared --client-host-memory-in-gb budget and the actually
+        measured cluster memory. submission_checker rule 3.1.2 aggregates
+        host_memory_GB from summary.json (the /proc/meminfo values
+        MPI-collected at run time), so if we recommend against a smaller
+        declared budget only, datasize can undersize a run that will then
+        fail the run-time check_num_files_train and, later, rule 3.1.2.
+
+        Reporter (issue #785): declared 189 GiB/host * 51 hosts but real
+        hosts have significantly more RAM. Datasize returned 714,000 files
+        (500-step rule against the declared budget) while the run-time
+        check demanded ~1,071,000. Taking max(declared, measured) at
+        datasize time closes the gap so datasize, run-time check, and
+        submission_checker all agree.
+        """
+        # unet3d-sized records so 500-step (28,000) dominates over the
+        # 5x-declared-memory rule with a modest budget — this mirrors the
+        # reporter's shape.
+        unet3d_dataset_params = {
+            'num_samples_per_file': 1,
+            'record_length_bytes': 146_600_628,
+        }
+
+        mock_args = MagicMock()
+        mock_args.client_host_memory_in_gb = 100  # declared per-host GiB
+        mock_args.num_client_hosts = 4
+        mock_args.num_processes = 8
+
+        # Measured cluster memory ~10x the declared budget — e.g. hosts are
+        # 1 TiB machines but the operator scoped the storage budget to 100
+        # GiB/host. Rule 3.1.2 uses the measured value, so datasize must
+        # match.
+        one_tib_bytes = 1024 * 1024 * 1024 * 1024
+        measured_hosts = [
+            HostInfo(hostname=f'h{i}',
+                     memory=HostMemoryInfo.from_total_mem_int(one_tib_bytes))
+            for i in range(4)
+        ]
+        measured_cluster = ClusterInformation(measured_hosts, mock_logger)
+
+        num_files_declared_only, _, _ = calculate_training_data_size(
+            args=mock_args,
+            cluster_information=None,
+            dataset_params=unet3d_dataset_params,
+            reader_params=sample_reader_params,
+            logger=mock_logger,
+        )
+
+        num_files_measured_higher, _, _ = calculate_training_data_size(
+            args=mock_args,
+            cluster_information=measured_cluster,
+            dataset_params=unet3d_dataset_params,
+            reader_params=sample_reader_params,
+            logger=mock_logger,
+        )
+
+        # Sanity: with unet3d record_length and 4x100 GiB declared, the
+        # 5x-memory rule computes ~14,650 files while 500-step's floor is
+        # 500*8*7=28,000, so declared-only returns 28,000. With 4 TiB
+        # measured, the 5x rule dominates and returns ~150k.
+        assert num_files_declared_only == 28000, (
+            f"Precondition failed: declared-only should equal the 500-step "
+            f"floor of 28,000, got {num_files_declared_only}"
+        )
+        assert num_files_measured_higher > num_files_declared_only * 5, (
+            f"When measured cluster memory (~4 TiB) exceeds the declared "
+            f"budget (~400 GiB), datasize must size against the measured "
+            f"value (rule 3.1.2's basis) instead of the smaller declared "
+            f"budget. Got {num_files_measured_higher} vs "
+            f"{num_files_declared_only} — declared value silently wins, "
+            f"which is the storage#785 bug."
+        )
+
+    def test_datasize_keeps_declared_when_it_exceeds_measured(
+            self, mock_logger, sample_dataset_params, sample_reader_params):
+        """Guard against over-correction: when the CLI-declared budget is
+        LARGER than measured (e.g. operator has provisioned more RAM in
+        reserve, or MPI collection under-counted), datasize must still
+        honor the declared value — rule 3.1.2 will accept any file count
+        >= 5x measured, and the declared-larger recommendation stays
+        conservative for both."""
+        mock_args = MagicMock()
+        mock_args.client_host_memory_in_gb = 1024  # declared per-host GiB
+        mock_args.num_client_hosts = 4
+        mock_args.num_processes = 8
+
+        # Measured much smaller than declared (e.g. shrunk under cgroup).
+        small_bytes = 8 * 1024 * 1024 * 1024  # 8 GiB per host
+        measured_hosts = [
+            HostInfo(hostname=f'h{i}',
+                     memory=HostMemoryInfo.from_total_mem_int(small_bytes))
+            for i in range(4)
+        ]
+        measured_cluster = ClusterInformation(measured_hosts, mock_logger)
+
+        num_files_with_small_measured, _, _ = calculate_training_data_size(
+            args=mock_args,
+            cluster_information=measured_cluster,
+            dataset_params=sample_dataset_params,
+            reader_params=sample_reader_params,
+            logger=mock_logger,
+        )
+
+        num_files_declared_only, _, _ = calculate_training_data_size(
+            args=mock_args,
+            cluster_information=None,
+            dataset_params=sample_dataset_params,
+            reader_params=sample_reader_params,
+            logger=mock_logger,
+        )
+
+        # max(declared, measured) with declared > measured should equal the
+        # declared-only result.
+        assert num_files_with_small_measured == num_files_declared_only, (
+            f"When declared budget ({1024*4} GiB) exceeds measured "
+            f"({8*4} GiB), datasize must keep the declared basis; "
+            f"got {num_files_with_small_measured} vs "
+            f"{num_files_declared_only}"
+        )
+
 
 class TestGenerateOutputLocation:
     """Tests for generate_output_location function.
