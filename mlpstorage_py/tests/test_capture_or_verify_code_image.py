@@ -219,6 +219,91 @@ class TestPathTraversalGuard:
 
 
 # ---------------------------------------------------------------------------
+# Issue #778: refuse results-dir nested inside the mlpstorage source tree.
+#
+# Without this guard, _atomic_capture's shutil.copytree walks source_root,
+# descends into the results-dir subtree (which is not in MD5_EXCLUDE_PREFIXES),
+# and copies its own destination into itself. Path length grows unbounded
+# until the OS returns ENAMETOOLONG — the exact traceback in Issue #778.
+# ---------------------------------------------------------------------------
+
+class TestResultsDirInsideSourceRoot:
+    """Issue #778: refuse when --results-dir lives inside source_root."""
+
+    def test_results_dir_inside_source_root_raises_configuration_error(
+        self, tmp_path, log, monkeypatch,
+    ):
+        # Fake source root with a pyproject.toml; results_dir nested underneath.
+        src = tmp_path / "src_root"
+        src.mkdir()
+        (src / "pyproject.toml").write_text("[project]\nname='x'\nversion='0.0.1'\n")
+        monkeypatch.setattr(
+            "mlpstorage_py.submission_checker.tools.code_image.find_source_root",
+            lambda: src,
+        )
+
+        results_dir = src / "mlps-results" / "unet3d"
+        results_dir.mkdir(parents=True)
+
+        args = _make_args(
+            mode="closed", command="datagen",
+            results_dir=results_dir, orgname="local",
+        )
+        with pytest.raises(ConfigurationError) as exc_info:
+            capture_or_verify_code_image(args, {}, log)
+
+        msg = str(exc_info.value)
+        assert "778" in msg, msg
+        assert exc_info.value.parameter == "--results-dir"
+        assert exc_info.value.code == ErrorCode.CONFIG_INVALID_VALUE
+
+    def test_results_dir_equal_to_source_root_raises(
+        self, tmp_path, log, monkeypatch,
+    ):
+        # Edge case: --results-dir set to the source root itself.
+        src = tmp_path / "src_root"
+        src.mkdir()
+        (src / "pyproject.toml").write_text("[project]\nname='x'\nversion='0.0.1'\n")
+        monkeypatch.setattr(
+            "mlpstorage_py.submission_checker.tools.code_image.find_source_root",
+            lambda: src,
+        )
+
+        args = _make_args(
+            mode="closed", command="datagen",
+            results_dir=src, orgname="local",
+        )
+        with pytest.raises(ConfigurationError) as exc_info:
+            capture_or_verify_code_image(args, {}, log)
+        assert "778" in str(exc_info.value)
+
+    def test_results_dir_sibling_of_source_root_is_allowed(
+        self, tmp_path, log, monkeypatch,
+    ):
+        # Sanity: a results_dir OUTSIDE source_root must NOT trip the #778 guard.
+        src = tmp_path / "src_root"
+        src.mkdir()
+        (src / "pyproject.toml").write_text("[project]\nname='x'\nversion='0.0.1'\n")
+        (src / "mlpstorage_py").mkdir()
+        (src / "mlpstorage_py" / "__init__.py").write_text("__version__='0.0.1'\n")
+        monkeypatch.setattr(
+            "mlpstorage_py.submission_checker.tools.code_image.find_source_root",
+            lambda: src,
+        )
+
+        results_dir = tmp_path / "results"
+        results_dir.mkdir()
+
+        args = _make_args(
+            mode="closed", command="datagen",
+            results_dir=results_dir, orgname="local",
+        )
+        # Must not raise the #778 ConfigurationError. It may still succeed
+        # (returning a Path) — the point is that we do NOT reject a valid layout.
+        capture_or_verify_code_image(args, {}, log)
+
+
+# ---------------------------------------------------------------------------
 # Capture / verify behavioral tests moved to Plan 06-02:
 #
 # The pre-Phase-6 legacy `code/` tree-shape assertions (`TestCapturePath`) and
