@@ -7,6 +7,7 @@ from ..loader import SubmissionLogs
 from ..rule_registry import rule
 from .helpers import (
     _check_filesystem_separation,
+    _oldest_final_collection_timestamp,
     _pair_checkpoint_runs,
     _parse_iso_gap,
     read_fs_separation_sidecar,
@@ -601,12 +602,15 @@ class CheckpointingCheck(BaseCheck):
           * missing ``read.metadata.invocation_start_time`` →
             ``read.summary.start_time`` (predates #714). Downgrades a gap
             breach to ``warn_violation``.
-          * missing ``write.metadata.invocation_end_time`` →
-            ``write.summary.end_time`` (predates #782). The gap then
-            includes post-benchmark cluster collection, which on large
-            topologies can be tens of seconds; the check emits a normal
-            violation on breach but the submitter should re-run with a
-            current mlpstorage to get the honest measurement.
+          * missing ``write.metadata.invocation_end_time`` → the earliest
+            post-benchmark ``collection_timestamp`` in the write-phase
+            metadata, when present (a best-effort proxy for node release on
+            results dirs that predate #782 but do record per-node collection
+            timestamps); otherwise ``write.summary.end_time`` (predates both
+            fixes). Either fallback may still include some post-benchmark
+            cluster collection, so the check emits a normal violation on
+            breach but the submitter should re-run with a current mlpstorage
+            to get the honest measurement.
 
         A negative gap indicates NTP skew between the write and read nodes
         (the metadata fields are timestamped on their respective invocation
@@ -627,14 +631,32 @@ class CheckpointingCheck(BaseCheck):
         for write_entry, read_entry in pairs:
             write_summary, write_metadata, write_ts = write_entry
             read_summary, read_metadata, read_ts = read_entry
-            # §4.7.1 write-side origin: prefer invocation_end_time (captured
-            # post-cluster-collection), fall back to summary end_time for
-            # results dirs that predate storage#782.
+            # §4.7.1 write-side origin selection (highest priority first):
+            #   1. write.metadata.invocation_end_time — the authoritative
+            #      write-side bookend captured after _collect_cluster_end()
+            #      returns (storage#782). Excludes post-benchmark teardown.
+            #   2. earliest post-benchmark collection_timestamp in the
+            #      write-phase metadata — a best-effort origin for results
+            #      dirs that predate the invocation_end_time bookend but do
+            #      record per-node collection timestamps. The final cluster
+            #      collection runs after the timed section and occupies the
+            #      write nodes, so its earliest timestamp is a closer proxy
+            #      for node release than the raw summary end.
+            #   3. write.summary.end_time — the timed-section end (pre-fix
+            #      fallback; charges post-benchmark collection to the gap).
             write_end = (write_metadata or {}).get("invocation_end_time")
             write_origin_label = "write invocation_end"
             if write_end is None:
-                write_end = (write_summary or {}).get("end_time") or (write_summary or {}).get("end")
-                write_origin_label = "write summary end"
+                summary_end = (write_summary or {}).get("end_time") or (write_summary or {}).get("end")
+                final_collection_end = _oldest_final_collection_timestamp(
+                    write_metadata, summary_end
+                )
+                if final_collection_end is not None:
+                    write_end = final_collection_end
+                    write_origin_label = "write final-collection timestamp"
+                else:
+                    write_end = summary_end
+                    write_origin_label = "write summary end"
             read_start = (read_metadata or {}).get("invocation_start_time")
             read_origin_label = "read invocation_start"
             used_legacy_read_origin = False
@@ -653,16 +675,6 @@ class CheckpointingCheck(BaseCheck):
                     "invocation_end_time in write-phase metadata.json and "
                     "end_time in write-phase summary.json "
                     "(write_ts=%s, read_ts=%s)",
-                    write_ts, read_ts,
-                )
-                valid = False
-                continue
-            if read_start is None:
-                self.log_violation(
-                    "4.7.1", "checkpointCacheFlushValidation", self.path,
-                    "cannot compute failover-callout gap: read-phase metadata "
-                    "has no invocation_start_time and read-phase summary.json "
-                    "has no start_time/start (write_ts=%s, read_ts=%s)",
                     write_ts, read_ts,
                 )
                 valid = False

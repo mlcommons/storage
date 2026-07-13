@@ -440,3 +440,89 @@ def _parse_iso_gap(start_str: str, end_str: str) -> float:
     start = _parse(start_str)
     end = _parse(end_str)
     return (end - start).total_seconds()
+
+
+# ---------------------------------------------------------------------------
+# _oldest_final_collection_timestamp
+# ---------------------------------------------------------------------------
+
+def _normalize_collection_iso(s: str) -> str:
+    """Normalise an ISO timestamp for naive parsing on Python 3.10+.
+
+    Collection timestamps are emitted with a trailing ``Z`` (UTC designator),
+    e.g. ``"2026-07-13T06:37:03Z"``; benchmark ``summary.json`` timestamps are
+    naive (no offset). Both are wall-clock instants recorded on the same
+    (write-invocation) host, so the ``Z`` is stripped and the values are
+    compared naively. A space separator is normalised to ``T`` as well.
+    """
+    s = s.strip()
+    if s.endswith("Z"):
+        s = s[:-1]
+    return s.replace(" ", "T")
+
+
+def _iter_collection_timestamps(obj):
+    """Yield every ``collection_timestamp`` string found in a nested metadata
+    structure (dicts/lists), recursing into all containers."""
+    if isinstance(obj, dict):
+        for key, value in obj.items():
+            if key == "collection_timestamp" and isinstance(value, str):
+                yield value
+            else:
+                yield from _iter_collection_timestamps(value)
+    elif isinstance(obj, list):
+        for item in obj:
+            yield from _iter_collection_timestamps(item)
+
+
+def _oldest_final_collection_timestamp(metadata, after_iso: str):
+    """Return the oldest post-benchmark ``collection_timestamp`` in ``metadata``.
+
+    The write invocation performs a final, multi-node data collection AFTER the
+    checkpoint benchmark's timed section ends (e.g. the ``end`` cluster
+    snapshot). That collection occupies the write nodes and delays the read
+    invocation from launching, so it should not be charged against the
+    §4.7.1 30-second failover-callout budget — mirroring the read-side
+    framework-startup exclusion (#696/#714).
+
+    This returns the *earliest* ``collection_timestamp`` in ``metadata`` that
+    occurs at or after ``after_iso`` (the write benchmark's summary end),
+    normalised to a naive ISO string, or ``None`` when the metadata carries no
+    post-benchmark collection timestamp. Start-of-run collection timestamps
+    (before ``after_iso``) are ignored so the failover-callout origin is never
+    moved *earlier* than the summary end.
+
+    Choosing the oldest (earliest) post-benchmark timestamp is deliberately
+    conservative: it credits the write phase for its final-collection window
+    while still charging as much of the inter-phase gap to the write side as
+    the evidence allows.
+
+    Args:
+        metadata: The write-phase ``metadata.json`` dict (may be ``None``).
+        after_iso: The write benchmark's ``summary.json`` end timestamp.
+
+    Returns:
+        The oldest qualifying collection timestamp as a naive ISO string, or
+        ``None``.
+    """
+    if not isinstance(metadata, dict) or not after_iso:
+        return None
+    try:
+        after = datetime.datetime.fromisoformat(_normalize_collection_iso(after_iso))
+    except (ValueError, TypeError):
+        return None
+
+    best_str = None
+    best_dt = None
+    for raw in _iter_collection_timestamps(metadata):
+        normalized = _normalize_collection_iso(raw)
+        try:
+            candidate = datetime.datetime.fromisoformat(normalized)
+        except (ValueError, TypeError):
+            continue
+        if candidate < after:
+            continue
+        if best_dt is None or candidate < best_dt:
+            best_dt = candidate
+            best_str = normalized
+    return best_str
