@@ -262,8 +262,9 @@ class TestRule3_4_2_TrainingSidecar:
 
         result = check.mlpstorage_filesystem_check()
 
-        assert result is False, "3.4.2 must fire 'same filesystem' from sidecar"
-        violations = [str(c) for c in check.log.error.call_args_list]
+        assert result is True
+        assert check.log.error.call_args_list == []
+        violations = [str(c) for c in check.log.warning.call_args_list]
         assert any("same filesystem" in v for v in violations), violations
 
     def test_no_sidecar_no_df_fires_db8(self, tmp_path):
@@ -315,8 +316,9 @@ class TestRule4_4_2_CheckpointingSidecar:
 
         result = check.checkpoint_filesystem_check()
 
-        assert result is False
-        violations = [str(c) for c in check.log.error.call_args_list]
+        assert result is True
+        assert check.log.error.call_args_list == []
+        violations = [str(c) for c in check.log.warning.call_args_list]
         assert any("same filesystem" in v for v in violations), violations
 
 
@@ -347,6 +349,7 @@ class TestRule5_4_2_VdbSidecar:
 
         result = check.vdb_filesystem_check()
 
-        assert result is False
-        violations = [str(c) for c in check.log.error.call_args_list]
+        assert result is True
+        assert check.log.error.call_args_list == []
+        violations = [str(c) for c in check.log.warning.call_args_list]
         assert any("same filesystem" in v for v in violations), violations

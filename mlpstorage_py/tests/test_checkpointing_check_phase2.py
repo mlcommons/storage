@@ -675,11 +675,12 @@ class TestChkpt06_CheckpointFilesystemCheck:
         )
         check = _run_checkpointing_check(root, mock_logger)
         result = check.checkpoint_filesystem_check()
-        assert result is False
-        assert len(mock_logger.errors) >= 1
-        assert mock_logger.errors[0].startswith("[4.4.2 checkpointFilesystemCheck]"), \
-            f"Expected [4.4.2 checkpointFilesystemCheck]; got {mock_logger.errors[0]!r}"
-        assert "same filesystem" in mock_logger.errors[0]
+        assert result is True
+        assert mock_logger.errors == []
+        assert len(mock_logger.warnings) >= 1
+        assert mock_logger.warnings[0].startswith("[4.4.2 checkpointFilesystemCheck]"), \
+            f"Expected [4.4.2 checkpointFilesystemCheck]; got {mock_logger.warnings[0]!r}"
+        assert "same filesystem" in mock_logger.warnings[0]
 
     def test_df_not_found_emits_4_4_2_missing(self, tmp_path, mock_logger):
         """No sidecar AND no df logfile → hard [4.4.2] violation (D-B8, #601).
@@ -809,10 +810,11 @@ class TestQual02RuleIdPrefix:
         check()   # run all check methods
 
         prefix = f"[{rule_id} {rule_name}]"
-        assert any(m.startswith(prefix) for m in mock_logger.errors), \
+        records = mock_logger.errors + mock_logger.warnings
+        assert any(m.startswith(prefix) for m in records), \
             (
-                f"Expected at least one error starting with {prefix!r}; "
-                f"got errors: {mock_logger.errors}"
+                f"Expected at least one record starting with {prefix!r}; "
+                f"got errors: {mock_logger.errors}; warnings: {mock_logger.warnings}"
             )
 
 

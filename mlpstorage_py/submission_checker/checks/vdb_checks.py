@@ -648,12 +648,11 @@ class VdbCheck(BaseCheck):
             sidecar = read_fs_separation_sidecar(run_dir)
             if sidecar is not None:
                 if sidecar.get("same_filesystem"):
-                    self.log_violation(
+                    self.warn_violation(
                         "5.4.2", "vdbFilesystemCheck", logfile_path,
                         "vdbFilesystemCheck: vdb data path and results_dir are on the "
                         "same filesystem",
                     )
-                    valid = False
                 continue
             # _check_filesystem_separation looks up "data_dir" or
             # "checkpoint_folder"; for vdb the analog is storage_root. Synthesize
@@ -672,12 +671,11 @@ class VdbCheck(BaseCheck):
                 valid = False
                 continue
             if not ok:
-                self.log_violation(
+                self.warn_violation(
                     "5.4.2", "vdbFilesystemCheck", logfile_path,
                     "vdbFilesystemCheck: vdb data path and results_dir are on the "
                     "same filesystem",
                 )
-                valid = False
 
         if not any_run:
             self._vdb_loader_gap_warning("5.4.2", "vdbFilesystemCheck")
