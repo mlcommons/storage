@@ -197,7 +197,7 @@ class TestChkpt02_CacheFlushValidation:
         assert len(mock_logger.errors) >= 1
         assert mock_logger.errors[0].startswith("[4.7.1 checkpointCacheFlushValidation]"), \
             f"Expected [4.7.1 checkpointCacheFlushValidation]; got {mock_logger.errors[0]!r}"
-        assert "missing end_time in write-phase summary.json" in mock_logger.errors[0]
+        assert "end_time in write-phase summary.json" in mock_logger.errors[0]
 
     def test_split_mode_missing_invocation_start_time_falls_back_to_legacy_origin_and_passes(self, tmp_path, mock_logger):
         """Backward-compat: pre-fix results dir (no invocation_start_time) falls back
@@ -258,6 +258,92 @@ class TestChkpt02_CacheFlushValidation:
             "gap is negative" in w and "clock skew" in w
             for w in mock_logger.warnings
         ), f"Expected clock-skew warning; got warnings={mock_logger.warnings!r}"
+
+    def test_split_mode_write_teardown_excluded_from_gap(self, tmp_path, mock_logger):
+        """storage#782: 45s write-side teardown + 25s real gap → check reports 25s and passes.
+
+        Models the issue's exact scenario — the write phase's final multi-node
+        cluster collection keeps nodes busy for tens of seconds after
+        summary.end_time. Because invocation_end_time is written into the
+        write metadata post-collection, the check origin advances to that
+        point and only the true handoff is charged to the budget.
+        """
+        from mlpstorage_py.tests.conftest import build_submission
+        root = build_submission(
+            tmp_path,
+            chkpt_split_mode=True,
+            chkpt_summary_timestamps=True,
+            chkpt_write_teardown_seconds=45,   # 45s of post-benchmark cluster collection
+            chkpt_cache_flush_gap_seconds=25,  # 25s real inter-invocation handoff
+        )
+        check = _run_checkpointing_check(root, mock_logger)
+        result = check.cache_flush_validation()
+        assert result is True, (
+            "Expected pass: honest gap is 25s (teardown excluded); "
+            f"got errors={mock_logger.errors!r}"
+        )
+        assert mock_logger.errors == []
+        # INFO line must record the invocation_end origin, not the legacy
+        # summary end, so the measurement is transparent.
+        assert any(
+            "[4.7.1 checkpointCacheFlushValidation]" in m
+            and "write invocation_end=" in m
+            and "gap 25.0s" in m
+            for m in mock_logger.infos
+        ), f"Expected INFO with invocation_end origin; got infos={mock_logger.infos!r}"
+
+    def test_split_mode_missing_invocation_end_time_falls_back_to_summary_end(self, tmp_path, mock_logger):
+        """Backward-compat (storage#782): pre-fix write metadata (no invocation_end_time)
+        falls back to summary.end_time and the whole teardown window is charged
+        to the failover-callout budget — reproducing the original #782 bug on
+        older results dirs.
+
+        45s teardown + 25s real gap ⇒ legacy gap = 70s ⇒ FAIL (matches
+        pre-fix behavior). The INFO line must record the "write summary end"
+        origin so the submitter can see why the gap looks so large.
+        """
+        from mlpstorage_py.tests.conftest import build_submission
+        root = build_submission(
+            tmp_path,
+            chkpt_split_mode=True,
+            chkpt_summary_timestamps=True,
+            chkpt_write_teardown_seconds=45,
+            chkpt_cache_flush_gap_seconds=25,
+            chkpt_omit_invocation_end_time=True,   # simulate pre-fix results dir
+        )
+        check = _run_checkpointing_check(root, mock_logger)
+        result = check.cache_flush_validation()
+        assert result is False
+        assert any(
+            e.startswith("[4.7.1 checkpointCacheFlushValidation]")
+            and "exceeds 30-second limit" in e
+            for e in mock_logger.errors
+        ), f"Expected 30-second-limit violation; got errors={mock_logger.errors!r}"
+        # INFO line must record the fallback origin.
+        assert any(
+            "[4.7.1 checkpointCacheFlushValidation]" in m
+            and "write summary end=" in m
+            for m in mock_logger.infos
+        ), f"Expected INFO with summary-end origin; got infos={mock_logger.infos!r}"
+
+    def test_split_mode_info_line_emitted_on_pass(self, tmp_path, mock_logger):
+        """Every write/read pair emits an INFO line, even on the pass path
+        (storage#782 transparency requirement)."""
+        from mlpstorage_py.tests.conftest import build_submission
+        root = build_submission(
+            tmp_path,
+            chkpt_split_mode=True,
+            chkpt_summary_timestamps=True,
+            chkpt_cache_flush_gap_seconds=25,
+        )
+        check = _run_checkpointing_check(root, mock_logger)
+        result = check.cache_flush_validation()
+        assert result is True
+        assert any(
+            "[4.7.1 checkpointCacheFlushValidation]" in m
+            and "gap 25.0s" in m
+            for m in mock_logger.infos
+        ), f"Expected pass-path INFO; got infos={mock_logger.infos!r}"
 
 
 # ---------------------------------------------------------------------------

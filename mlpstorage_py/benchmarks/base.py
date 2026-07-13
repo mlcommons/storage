@@ -48,7 +48,8 @@ from typing import Tuple, Dict, Any, List, Optional, Callable, Set, TYPE_CHECKIN
 
 from functools import wraps
 
-from mlpstorage_py._invocation import INVOCATION_START
+from mlpstorage_py import _invocation
+from mlpstorage_py._invocation import INVOCATION_START, mark_invocation_end
 from mlpstorage_py.config import PARAM_VALIDATION, DATETIME_STR, MLPS_DEBUG, EXEC_TYPE
 from mlpstorage_py.errors import ConfigurationError, ErrorCode, FileSystemError
 from mlpstorage_py.run_directory import (
@@ -445,6 +446,16 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         # §4.7.1 gap origin — ISO local naive to match DLIO summary.json's
         # start/end format so _parse_iso_gap can consume both fields uniformly.
         metadata['invocation_start_time'] = datetime.fromtimestamp(INVOCATION_START).isoformat()
+        # §4.7.1 write-side gap origin — captured after _collect_cluster_end()
+        # returns, i.e. the moment the write nodes are actually released.
+        # Symmetric with invocation_start_time on the read side. Absent when
+        # the invocation exited before mark_invocation_end() ran (e.g. crash
+        # during _run); the submission checker falls back to summary.end_time.
+        # See mlcommons/storage#782.
+        if _invocation.INVOCATION_END is not None:
+            metadata['invocation_end_time'] = datetime.fromtimestamp(
+                _invocation.INVOCATION_END
+            ).isoformat()
         metadata['verification'] = self.verification.name if self.verification else None
         metadata['executed_command'] = getattr(self, 'executed_command', None)
         metadata['command_output_files'] = self.command_output_files
@@ -463,6 +474,17 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         Writes metadata to {metadata_file_path}. In verbose/debug mode,
         also prints metadata to stdout.
         """
+        # §4.7.1 write-side bookend — captured here (as late as possible
+        # while still landing in the persisted file) so the recorded
+        # instant reflects the point at which rank 0 is about to exit,
+        # not merely the end of the timed section. Symmetric with the
+        # read-side invocation_start_time capture at first import of
+        # _invocation.py. Per-invocation teardown that follows this
+        # point (JSON serialization, interpreter shutdown, MPI finalize)
+        # is excluded from the failover-callout budget, mirroring the
+        # framework-startup exclusion on the read side. See
+        # mlcommons/storage#782.
+        mark_invocation_end()
         with open(self.metadata_file_path, 'w+') as fd:
             json.dump(self.metadata, fd, indent=2, cls=MLPSJsonEncoder)
 
