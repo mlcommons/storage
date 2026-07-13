@@ -293,10 +293,10 @@ class TestChkpt02_CacheFlushValidation:
         ), f"Expected INFO with invocation_end origin; got infos={mock_logger.infos!r}"
 
     def test_split_mode_missing_invocation_end_time_falls_back_to_summary_end(self, tmp_path, mock_logger):
-        """Backward-compat (storage#782): pre-fix write metadata (no invocation_end_time)
-        falls back to summary.end_time and the whole teardown window is charged
-        to the failover-callout budget — reproducing the original #782 bug on
-        older results dirs.
+        """Backward-compat (storage#782): pre-fix write metadata (no invocation_end_time
+        and no collection_timestamp) falls back to summary.end_time and the whole
+        teardown window is charged to the failover-callout budget — reproducing
+        the original #782 bug on older results dirs.
 
         45s teardown + 25s real gap ⇒ legacy gap = 70s ⇒ FAIL (matches
         pre-fix behavior). The INFO line must record the "write summary end"
@@ -344,6 +344,100 @@ class TestChkpt02_CacheFlushValidation:
             and "gap 25.0s" in m
             for m in mock_logger.infos
         ), f"Expected pass-path INFO; got infos={mock_logger.infos!r}"
+
+    def test_split_mode_final_collection_timestamp_becomes_gap_origin(self, tmp_path, mock_logger):
+        """§4.7.1 collection_timestamp fallback (used ONLY when invocation_end_time
+        is absent): a 60s raw gap (write.summary.end_time → read.invocation_start_time)
+        would FAIL, but the write nodes are only released once the LAST node finishes
+        the final collection. With post-benchmark collections at end_time+10s and
+        end_time+40s, the latest (+40s) becomes the origin so the charged gap is
+        60-40 = 20s and the pair PASSES. Taking the earliest (+10s) instead would
+        leave a 50s gap and wrongly FAIL. A pre-benchmark collection at end_time-120s
+        must be ignored (else the origin would move earlier and the gap balloons).
+
+        invocation_end_time is omitted so the collection_timestamp path is
+        exercised; when present it takes priority over collection_timestamp.
+        """
+        from mlpstorage_py.tests.conftest import build_submission
+        root = build_submission(
+            tmp_path,
+            chkpt_split_mode=True,
+            chkpt_summary_timestamps=True,
+            chkpt_cache_flush_gap_seconds=60,
+            # No invocation_end_time bookend → exercise the collection_timestamp
+            # fallback (invocation_end_time otherwise takes priority).
+            chkpt_omit_invocation_end_time=True,
+            # -120s = start-of-run collection (ignored); +10s and +40s = the
+            # per-node post-benchmark final collection. The LATEST (+40s), when
+            # the last node is released, becomes the gap origin.
+            chkpt_write_collection_offsets=[-120, 10, 40],
+        )
+        check = _run_checkpointing_check(root, mock_logger)
+        result = check.cache_flush_validation()
+        assert result is True, (
+            "the latest post-benchmark collection_timestamp (+40s) should move "
+            "the gap origin so the charged gap (20s) is within the 30s limit"
+        )
+        assert mock_logger.errors == []
+        # The INFO line must report the final-collection origin and the reduced
+        # 20.0s gap — proving the LATEST collection_timestamp (+40s, not the +10s
+        # earliest and not summary end) was used, and the pre-benchmark timestamp
+        # was ignored.
+        assert any(
+            "failover-callout gap 20.0s" in i
+            and "write final-collection timestamp" in i
+            for i in mock_logger.infos
+        ), f"Expected final-collection-origin INFO with 20.0s gap; got infos={mock_logger.infos!r}"
+
+    def test_split_mode_invocation_end_time_takes_priority_over_collection(self, tmp_path, mock_logger):
+        """When BOTH invocation_end_time and a post-benchmark collection_timestamp
+        are present, invocation_end_time wins. 45s teardown + 25s real gap: the
+        invocation_end bookend yields the honest 25s gap (PASS), even though a
+        collection_timestamp at end_time+5s is also present."""
+        from mlpstorage_py.tests.conftest import build_submission
+        root = build_submission(
+            tmp_path,
+            chkpt_split_mode=True,
+            chkpt_summary_timestamps=True,
+            chkpt_write_teardown_seconds=45,
+            chkpt_cache_flush_gap_seconds=25,
+            chkpt_write_collection_offsets=[5],  # present but must be ignored
+        )
+        check = _run_checkpointing_check(root, mock_logger)
+        result = check.cache_flush_validation()
+        assert result is True, f"got errors={mock_logger.errors!r}"
+        assert mock_logger.errors == []
+        assert any(
+            "[4.7.1 checkpointCacheFlushValidation]" in m
+            and "write invocation_end=" in m
+            and "gap 25.0s" in m
+            for m in mock_logger.infos
+        ), f"Expected invocation_end origin to win; got infos={mock_logger.infos!r}"
+
+    def test_split_mode_pre_benchmark_collection_only_falls_back_to_summary_end(self, tmp_path, mock_logger):
+        """Only a pre-benchmark (start-of-run) collection_timestamp is present
+        (offset < 0), and no invocation_end_time bookend. It must be ignored, so
+        the gap origin falls back to write.summary.end_time and the charged gap
+        equals the raw 25s gap."""
+        from mlpstorage_py.tests.conftest import build_submission
+        root = build_submission(
+            tmp_path,
+            chkpt_split_mode=True,
+            chkpt_summary_timestamps=True,
+            chkpt_cache_flush_gap_seconds=25,
+            chkpt_omit_invocation_end_time=True,
+            chkpt_write_collection_offsets=[-90],  # pre-benchmark only → ignored
+        )
+        check = _run_checkpointing_check(root, mock_logger)
+        result = check.cache_flush_validation()
+        assert result is True
+        assert mock_logger.errors == []
+        # Origin falls back to summary end; charged gap is the raw 25.0s.
+        assert any(
+            "failover-callout gap 25.0s" in i
+            and "write summary end" in i
+            for i in mock_logger.infos
+        ), f"Expected summary-end-origin INFO with 25.0s gap; got infos={mock_logger.infos!r}"
 
 
 # ---------------------------------------------------------------------------
