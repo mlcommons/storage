@@ -7,6 +7,7 @@ by isolating data generation from storage operations using shared memory buffers
 import os
 import time
 import multiprocessing as mp
+from contextlib import contextmanager
 
 
 # Per-node MPI rank count, used to size the dgen-py generator's thread pool.
@@ -172,77 +173,73 @@ from typing import Optional, Dict, Any
 from .storage_writers import StorageWriterFactory
 
 
-# Issue #768: pre-3.13 CPython resource_tracker double-unlink workaround.
+# Issue #768 / #777: pre-3.13 CPython resource_tracker double-unlink workaround.
 #
-# multiprocessing.resource_tracker registers POSIX shared-memory segments and
-# named semaphores in every process that touches them via
-# SharedMemory(name=...) attach or Queue/Event pickle-unpickle. When the
-# streaming-checkpoint writer subprocess (spawned per save() on the forkserver
-# path for #642 safety) exits, its tracker races Main's to unlink the same
-# names — one wins, the other raises FileNotFoundError. On the shm side that
-# crashed Main's finally block, killing the owning MPI rank; on the semaphore
-# side it produced alarming SemLock._rebuild and "leaked" warnings that
-# spooked benchmark submitters even though nothing was actually lost.
+# The tracker daemon's cache is a `set`; REGISTER = idempotent add,
+# UNREGISTER = set.remove (KeyError on absent). SharedMemory(name=...) attach
+# unconditionally sends REGISTER to the tracker, so a writer subprocess that
+# borrows Main-owned buffers ends up double-registered. Without any
+# workaround, the tracker at exit unlinks whatever's left in cache and races
+# Main's own shm.unlink() — one wins, the other raises FileNotFoundError
+# and (on the shm side) killed the owning MPI rank in Main's finally block
+# (#768).
 #
-# The documented CPython workaround for 3.12 is: in the borrowing child,
-# unregister the names from ITS tracker so single-owner semantics are
-# restored — only Main's tracker unlinks at exit. 3.13 adds a public
-# SharedMemory(..., track=False) that supersedes the shm branch below;
-# SemLock has no equivalent even in 3.13, so the semaphore branch stays
-# until we can drop 3.12.
+# The initial #768 fix used the "immediate unregister in child" community
+# pattern (register then unregister right after attach). That pattern is
+# correct only when the parent NEVER explicitly calls shm.unlink() /
+# SemLock finalizer itself — because SharedMemory.unlink() and
+# SemLock._cleanup both end in resource_tracker.unregister() on the same
+# name. Our parent DOES call shm.unlink() per save() cycle (a fresh pool
+# per save() means the previous pool must be released or /dev/shm leaks
+# gigabytes per checkpoint), and Main's SemLock Finalize inevitably fires
+# on Queue/Event GC. The child's immediate UNREGISTER empties the set
+# entry; Main's later UNREGISTER then hits set.remove on an absent name
+# -> KeyError storm at 64 ranks x N save() calls (#777). On the semaphore
+# side the same race + SemLock._cleanup's own sem_unlink produced a
+# 700+/run "sem_unlink -> FileNotFoundError" cascade, correlated with a
+# cluster-wide livelock right after checkpoint 1.
 #
-# Only removes the child's cleanup callback for the given POSIX name; does
-# not close fds, detach shared state, or alter runtime behavior of the IPC
-# object. Every access is hasattr-guarded so a future CPython refactor of
-# the private ``_semlock`` / ``_rlock`` / ``_flag`` attrs degrades to a
-# silent no-op (returning to pre-#768 noise) rather than crashing the
-# checkpoint.
-def _unregister_ipc_from_child_tracker(*ipc_objs):
-    """Undo the child process's redundant resource_tracker registration of
-    parent-owned SharedMemory / Queue / Event primitives (issue #768)."""
+# The correct shape for our lifecycle is the OTHER well-known variant:
+# skip registration in the child entirely, so the tracker cache holds
+# exactly one entry (Main's) and Main's later unlink -> unregister finds
+# it and removes it cleanly. Functionally equivalent to Python 3.13's
+# SharedMemory(track=False).
+#
+# We only do this for shared_memory. SemLock's __setstate__ registers with
+# the tracker BEFORE our target function runs (it happens during pickle
+# unpickling in the forkserver bootstrap), so a context-manager scope
+# can't catch it. That's OK: pre-#768 semaphore behavior was "alarming
+# SemLock._rebuild warnings but functionally correct" — strictly better
+# than the KeyError + double-sem_unlink cascade #777 reports.
+@contextmanager
+def _child_skips_shm_registration():
+    """Suppress ``resource_tracker.register`` for ``shared_memory`` within
+    the block.
+
+    Used in the writer subprocess so ``SharedMemory(name=...)`` attach
+    does NOT double-register Main-owned buffer names in the tracker
+    daemon's cache. See the module comment above for why this is the
+    correct pattern for our lifecycle and why the "immediate unregister
+    after attach" variant (initial #768 fix) is not.
+
+    Only the ``register`` shim is installed — ``unregister`` is left
+    alone, so the child cannot accidentally send an UNREGISTER for a
+    name it never REGISTERed. The patch is scoped to the ``with`` block
+    and restored in ``finally`` even on exception.
+    """
     from multiprocessing import resource_tracker
+    orig_register = resource_tracker.register
 
-    def _try(name, kind):
-        try:
-            resource_tracker.unregister(name, kind)
-        except Exception:
-            # KeyError = not tracked here (nothing to undo); anything else =
-            # tracker down / private-attr drift. Silent degrade is the goal.
-            pass
+    def _register_skip_shm(name, rtype):
+        if rtype == "shared_memory":
+            return
+        return orig_register(name, rtype)
 
-    def _semlock_name(obj):
-        sl = getattr(obj, "_semlock", None)
-        return getattr(sl, "name", None) if sl is not None else None
-
-    for obj in ipc_objs:
-        if obj is None:
-            continue
-
-        # SharedMemory: single named POSIX segment. Detect by the pair of
-        # attrs SharedMemory uniquely provides — a bare object with a _name
-        # attribute would false-positive here otherwise.
-        name = getattr(obj, "_name", None)
-        if name and hasattr(obj, "unlink") and hasattr(obj, "close"):
-            _try(name, "shared_memory")
-            continue
-
-        # mp.Queue and mp.Event both carry SemLock-backed primitives. The
-        # attribute layout is undocumented but stable in CPython since 3.4;
-        # enumerate the known slots and hasattr-guard each.
-        for attr in ("_rlock", "_wlock", "_sem", "_flag"):
-            v = getattr(obj, attr, None)
-            if v is not None:
-                sem_name = _semlock_name(v)
-                if sem_name:
-                    _try(sem_name, "semaphore")
-        for attr in ("_notempty", "_notfull", "_cond"):
-            cond = getattr(obj, attr, None)
-            if cond is not None:
-                lock = getattr(cond, "_lock", None)
-                if lock is not None:
-                    sem_name = _semlock_name(lock)
-                    if sem_name:
-                        _try(sem_name, "semaphore")
+    resource_tracker.register = _register_skip_shm
+    try:
+        yield
+    finally:
+        resource_tracker.register = orig_register
 
 # Try to import dgen-py for high-performance data generation
 try:
@@ -625,21 +622,23 @@ class StreamingCheckpointing:
         print(f"[Writer] DEBUG: AWS_ACCESS_KEY_ID = {aws_key[:4] if aws_key != 'NOT SET' else 'NOT SET'}***")
         print(f"[Writer] DEBUG: AWS_ENDPOINT_URL = {aws_endpoint}")
         
-        # Attach to shared memory buffers
+        # Attach to shared memory buffers.
+        #
+        # #768/#777: suppress this child's tracker REGISTER for each
+        # SharedMemory attach. Main owns these segments and will call
+        # shm.unlink() itself per save() cycle; if we let the child ALSO
+        # register with the tracker daemon, either the tracker unlinks at
+        # exit and races Main's unlink -> FileNotFoundError (#768), or we
+        # "immediate unregister" and Main's later unregister trips
+        # KeyError on an already-empty set (#777). Skipping the register
+        # entirely leaves the daemon holding exactly one entry (Main's),
+        # so Main's unlink -> unregister finds and removes it cleanly.
+        # Equivalent to SharedMemory(track=False) which lands in 3.13.
         buffers = []
-        for name in buffer_names:
-            shm = shared_memory.SharedMemory(name=name)
-            buffers.append(shm)
-
-        # #768: undo this subprocess's redundant resource_tracker registration
-        # of the SharedMemory segments we just attached to AND the Queue/Event
-        # IPC objects Main passed in as args. Both would otherwise be
-        # unlinked twice at process exit — once here, once in Main — with
-        # whichever tracker lost the race crashing with FileNotFoundError.
-        # Only Main owns these; only Main should unlink.
-        _unregister_ipc_from_child_tracker(
-            *buffers, buffer_queue, stats_queue, stop_event
-        )
+        with _child_skips_shm_registration():
+            for name in buffer_names:
+                shm = shared_memory.SharedMemory(name=name)
+                buffers.append(shm)
 
         print(f"[Writer] Attached to {len(buffers)} buffers ({chunk_size / (1024**2):.0f} MB each)")
         
