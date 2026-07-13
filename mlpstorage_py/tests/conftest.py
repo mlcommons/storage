@@ -374,6 +374,16 @@ def build_submission(tmp_path, **overrides) -> Path:
       fallback in ``cache_flush_validation`` — the check falls back to
       ``write.summary.end_time`` and includes any post-benchmark cluster
       collection in the measured gap.
+    * ``chkpt_write_collection_offsets`` (list[int] | None, default None) —
+      CHKPT-02: when ``chkpt_split_mode=True``, inject one nested
+      ``collection_timestamp`` into each WRITE-phase metadata.json per offset,
+      each computed as write ``end_time`` + offset seconds (offsets may be
+      negative to model a pre-benchmark, start-of-run collection). Exercises
+      the final-collection gap-origin path in ``cache_flush_validation``: the
+      earliest post-benchmark ``collection_timestamp`` (offset >= 0) becomes
+      the gap origin, while pre-benchmark timestamps (offset < 0) are ignored.
+      Timestamps are emitted with a trailing ``Z`` to also exercise the
+      ``_normalize_collection_iso`` UTC-designator stripping.
     * ``chkpt_model`` (str, default "llama3-8b") — CHKPT-01: model directory name
       under ``checkpointing/``.
     * ``chkpt_open_num_processes`` (int | None) — CHKPT-01: when non-None, sets
@@ -454,6 +464,7 @@ def build_submission(tmp_path, **overrides) -> Path:
     chkpt_write_teardown_seconds = overrides.pop("chkpt_write_teardown_seconds", 0)
     chkpt_omit_invocation_start_time = overrides.pop("chkpt_omit_invocation_start_time", False)
     chkpt_omit_invocation_end_time = overrides.pop("chkpt_omit_invocation_end_time", False)
+    chkpt_write_collection_offsets = overrides.pop("chkpt_write_collection_offsets", None)
     chkpt_model = overrides.pop("chkpt_model", "llama3-8b")
     chkpt_open_num_processes = overrides.pop("chkpt_open_num_processes", None)
     chkpt_closed_num_processes = overrides.pop("chkpt_closed_num_processes", None)
@@ -824,6 +835,29 @@ def build_submission(tmp_path, **overrides) -> Path:
                     if ts in write_timestamps:
                         chkpt_meta["args"]["num_checkpoints_write"] = 10
                         chkpt_meta["args"]["num_checkpoints_read"] = 0
+
+                        # §4.7.1 final-collection gap origin: inject nested
+                        # collection_timestamp(s) into the WRITE metadata. The
+                        # write invocation performs a post-benchmark multi-node
+                        # collection after end_time; the earliest such timestamp
+                        # (offset >= 0) is the gap origin, pre-benchmark ones
+                        # (offset < 0) are ignored. Emitted with a trailing "Z"
+                        # to also exercise _normalize_collection_iso.
+                        if chkpt_write_collection_offsets:
+                            wi = write_timestamps.index(ts)
+                            _w_start = _BASE_DT + datetime.timedelta(minutes=10 * wi)
+                            _w_end = _w_start + datetime.timedelta(minutes=5)
+                            chkpt_meta["cluster_information"] = {
+                                "collections": [
+                                    {
+                                        "collection_timestamp": (
+                                            _w_end
+                                            + datetime.timedelta(seconds=off)
+                                        ).isoformat() + "Z"
+                                    }
+                                    for off in chkpt_write_collection_offsets
+                                ]
+                            }
                     else:
                         chkpt_meta["args"]["num_checkpoints_write"] = 0
                         chkpt_meta["args"]["num_checkpoints_read"] = 10
