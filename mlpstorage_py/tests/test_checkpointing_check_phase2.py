@@ -348,10 +348,12 @@ class TestChkpt02_CacheFlushValidation:
     def test_split_mode_final_collection_timestamp_becomes_gap_origin(self, tmp_path, mock_logger):
         """§4.7.1 collection_timestamp fallback (used ONLY when invocation_end_time
         is absent): a 60s raw gap (write.summary.end_time → read.invocation_start_time)
-        would FAIL, but a post-benchmark collection_timestamp at end_time+40s moves
-        the origin so the charged gap is 60-40 = 20s and the pair PASSES. A
-        pre-benchmark collection at end_time-120s must be ignored (else the origin
-        would move earlier and the gap would balloon to 180s).
+        would FAIL, but the write nodes are only released once the LAST node finishes
+        the final collection. With post-benchmark collections at end_time+10s and
+        end_time+40s, the latest (+40s) becomes the origin so the charged gap is
+        60-40 = 20s and the pair PASSES. Taking the earliest (+10s) instead would
+        leave a 50s gap and wrongly FAIL. A pre-benchmark collection at end_time-120s
+        must be ignored (else the origin would move earlier and the gap balloons).
 
         invocation_end_time is omitted so the collection_timestamp path is
         exercised; when present it takes priority over collection_timestamp.
@@ -365,20 +367,22 @@ class TestChkpt02_CacheFlushValidation:
             # No invocation_end_time bookend → exercise the collection_timestamp
             # fallback (invocation_end_time otherwise takes priority).
             chkpt_omit_invocation_end_time=True,
-            # -120s = start-of-run collection (ignored); +40s = post-benchmark
-            # final collection (becomes the gap origin).
-            chkpt_write_collection_offsets=[-120, 40],
+            # -120s = start-of-run collection (ignored); +10s and +40s = the
+            # per-node post-benchmark final collection. The LATEST (+40s), when
+            # the last node is released, becomes the gap origin.
+            chkpt_write_collection_offsets=[-120, 10, 40],
         )
         check = _run_checkpointing_check(root, mock_logger)
         result = check.cache_flush_validation()
         assert result is True, (
-            "post-benchmark collection_timestamp should move the gap origin so "
-            "the charged gap (20s) is within the 30s limit"
+            "the latest post-benchmark collection_timestamp (+40s) should move "
+            "the gap origin so the charged gap (20s) is within the 30s limit"
         )
         assert mock_logger.errors == []
         # The INFO line must report the final-collection origin and the reduced
-        # 20.0s gap — proving the collection_timestamp (not summary end) was used
-        # and that the pre-benchmark timestamp was ignored (else gap would be 180s).
+        # 20.0s gap — proving the LATEST collection_timestamp (+40s, not the +10s
+        # earliest and not summary end) was used, and the pre-benchmark timestamp
+        # was ignored.
         assert any(
             "failover-callout gap 20.0s" in i
             and "write final-collection timestamp" in i

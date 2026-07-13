@@ -7,7 +7,7 @@ from ..loader import SubmissionLogs
 from ..rule_registry import rule
 from .helpers import (
     _check_filesystem_separation,
-    _oldest_final_collection_timestamp,
+    _latest_final_collection_timestamp,
     _pair_checkpoint_runs,
     _parse_iso_gap,
     read_fs_separation_sidecar,
@@ -602,15 +602,17 @@ class CheckpointingCheck(BaseCheck):
           * missing ``read.metadata.invocation_start_time`` →
             ``read.summary.start_time`` (predates #714). Downgrades a gap
             breach to ``warn_violation``.
-          * missing ``write.metadata.invocation_end_time`` → the earliest
+          * missing ``write.metadata.invocation_end_time`` → the latest
             post-benchmark ``collection_timestamp`` in the write-phase
-            metadata, when present (a best-effort proxy for node release on
-            results dirs that predate #782 but do record per-node collection
-            timestamps); otherwise ``write.summary.end_time`` (predates both
-            fixes). Either fallback may still include some post-benchmark
-            cluster collection, so the check emits a normal violation on
-            breach but the submitter should re-run with a current mlpstorage
-            to get the honest measurement.
+            metadata, when present (the last node to finish the final cluster
+            collection marks the end of write-phase teardown — a best-effort
+            proxy for node release on results dirs that predate #782 but do
+            record per-node collection timestamps); otherwise
+            ``write.summary.end_time`` (predates both fixes). The summary-end
+            fallback still includes the full post-benchmark collection window
+            in the gap, so the check emits a normal violation on breach but
+            the submitter should re-run with a current mlpstorage to get the
+            honest measurement.
 
         A negative gap indicates NTP skew between the write and read nodes
         (the metadata fields are timestamped on their respective invocation
@@ -635,20 +637,21 @@ class CheckpointingCheck(BaseCheck):
             #   1. write.metadata.invocation_end_time — the authoritative
             #      write-side bookend captured after _collect_cluster_end()
             #      returns (storage#782). Excludes post-benchmark teardown.
-            #   2. earliest post-benchmark collection_timestamp in the
+            #   2. latest post-benchmark collection_timestamp in the
             #      write-phase metadata — a best-effort origin for results
             #      dirs that predate the invocation_end_time bookend but do
-            #      record per-node collection timestamps. The final cluster
-            #      collection runs after the timed section and occupies the
-            #      write nodes, so its earliest timestamp is a closer proxy
-            #      for node release than the raw summary end.
+            #      record per-node collection timestamps. The write nodes are
+            #      only released once the last node finishes the final
+            #      cluster collection, so the latest such timestamp marks the
+            #      end of write-phase teardown and is a close proxy for the
+            #      invocation_end_time bookend.
             #   3. write.summary.end_time — the timed-section end (pre-fix
             #      fallback; charges post-benchmark collection to the gap).
             write_end = (write_metadata or {}).get("invocation_end_time")
             write_origin_label = "write invocation_end"
             if write_end is None:
                 summary_end = (write_summary or {}).get("end_time") or (write_summary or {}).get("end")
-                final_collection_end = _oldest_final_collection_timestamp(
+                final_collection_end = _latest_final_collection_timestamp(
                     write_metadata, summary_end
                 )
                 if final_collection_end is not None:

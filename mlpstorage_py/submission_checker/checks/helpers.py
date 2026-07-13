@@ -443,7 +443,7 @@ def _parse_iso_gap(start_str: str, end_str: str) -> float:
 
 
 # ---------------------------------------------------------------------------
-# _oldest_final_collection_timestamp
+# _latest_final_collection_timestamp
 # ---------------------------------------------------------------------------
 
 def _normalize_collection_iso(s: str) -> str:
@@ -475,8 +475,8 @@ def _iter_collection_timestamps(obj):
             yield from _iter_collection_timestamps(item)
 
 
-def _oldest_final_collection_timestamp(metadata, after_iso: str):
-    """Return the oldest post-benchmark ``collection_timestamp`` in ``metadata``.
+def _latest_final_collection_timestamp(metadata, after_iso: str):
+    """Return the latest post-benchmark ``collection_timestamp`` in ``metadata``.
 
     The write invocation performs a final, multi-node data collection AFTER the
     checkpoint benchmark's timed section ends (e.g. the ``end`` cluster
@@ -485,24 +485,25 @@ def _oldest_final_collection_timestamp(metadata, after_iso: str):
     §4.7.1 30-second failover-callout budget — mirroring the read-side
     framework-startup exclusion (#696/#714).
 
-    This returns the *earliest* ``collection_timestamp`` in ``metadata`` that
-    occurs at or after ``after_iso`` (the write benchmark's summary end),
-    normalised to a naive ISO string, or ``None`` when the metadata carries no
-    post-benchmark collection timestamp. Start-of-run collection timestamps
-    (before ``after_iso``) are ignored so the failover-callout origin is never
-    moved *earlier* than the summary end.
+    The write nodes are only released once the *last* node finishes the final
+    collection, so this returns the *latest* ``collection_timestamp`` in
+    ``metadata`` that occurs at or after ``after_iso`` (the write benchmark's
+    summary end), normalised to a naive ISO string, or ``None`` when the
+    metadata carries no post-benchmark collection timestamp. Start-of-run
+    collection timestamps (before ``after_iso``) are ignored so the
+    failover-callout origin is never moved *earlier* than the summary end.
 
-    Choosing the oldest (earliest) post-benchmark timestamp is deliberately
-    conservative: it credits the write phase for its final-collection window
-    while still charging as much of the inter-phase gap to the write side as
-    the evidence allows.
+    Choosing the latest post-benchmark timestamp marks the true end of the
+    write phase's teardown (the moment the nodes are actually released),
+    excluding that teardown window from the inter-phase gap — the same intent
+    as the ``invocation_end_time`` bookend this fallback stands in for.
 
     Args:
         metadata: The write-phase ``metadata.json`` dict (may be ``None``).
         after_iso: The write benchmark's ``summary.json`` end timestamp.
 
     Returns:
-        The oldest qualifying collection timestamp as a naive ISO string, or
+        The latest qualifying collection timestamp as a naive ISO string, or
         ``None``.
     """
     if not isinstance(metadata, dict) or not after_iso:
@@ -522,7 +523,7 @@ def _oldest_final_collection_timestamp(metadata, after_iso: str):
             continue
         if candidate < after:
             continue
-        if best_dt is None or candidate < best_dt:
+        if best_dt is None or candidate > best_dt:
             best_dt = candidate
             best_str = normalized
     return best_str

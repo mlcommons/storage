@@ -380,10 +380,11 @@ def build_submission(tmp_path, **overrides) -> Path:
       each computed as write ``end_time`` + offset seconds (offsets may be
       negative to model a pre-benchmark, start-of-run collection). Exercises
       the final-collection gap-origin path in ``cache_flush_validation``: the
-      earliest post-benchmark ``collection_timestamp`` (offset >= 0) becomes
-      the gap origin, while pre-benchmark timestamps (offset < 0) are ignored.
-      Timestamps are emitted with a trailing ``Z`` to also exercise the
-      ``_normalize_collection_iso`` UTC-designator stripping.
+      latest post-benchmark ``collection_timestamp`` (offset >= 0) becomes
+      the gap origin (the last node released), while pre-benchmark timestamps
+      (offset < 0) are ignored. Timestamps are emitted with a trailing ``Z``
+      to also exercise the ``_normalize_collection_iso`` UTC-designator
+      stripping.
     * ``chkpt_model`` (str, default "llama3-8b") — CHKPT-01: model directory name
       under ``checkpointing/``.
     * ``chkpt_open_num_processes`` (int | None) — CHKPT-01: when non-None, sets
@@ -839,10 +840,11 @@ def build_submission(tmp_path, **overrides) -> Path:
                         # §4.7.1 final-collection gap origin: inject nested
                         # collection_timestamp(s) into the WRITE metadata. The
                         # write invocation performs a post-benchmark multi-node
-                        # collection after end_time; the earliest such timestamp
-                        # (offset >= 0) is the gap origin, pre-benchmark ones
-                        # (offset < 0) are ignored. Emitted with a trailing "Z"
-                        # to also exercise _normalize_collection_iso.
+                        # collection after end_time; the latest such timestamp
+                        # (offset >= 0, the last node released) is the gap
+                        # origin, pre-benchmark ones (offset < 0) are ignored.
+                        # Emitted with a trailing "Z" to also exercise
+                        # _normalize_collection_iso.
                         if chkpt_write_collection_offsets:
                             wi = write_timestamps.index(ts)
                             _w_start = _BASE_DT + datetime.timedelta(minutes=10 * wi)
