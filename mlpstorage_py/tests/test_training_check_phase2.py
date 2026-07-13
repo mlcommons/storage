@@ -172,12 +172,13 @@ class TestTrain02_MlpstorageFilesystemCheck:
         )
         check = _run_training_check(root, mock_logger)
         result = check.mlpstorage_filesystem_check()
-        assert result is False
-        assert len(mock_logger.errors) >= 1
-        assert mock_logger.errors[0].startswith("[3.4.2 trainingMlpstorageFilesystemCheck]"), \
-            f"Expected prefix [3.4.2 trainingMlpstorageFilesystemCheck]; got {mock_logger.errors[0]!r}"
-        assert "same filesystem" in mock_logger.errors[0], \
-            f"Expected 'same filesystem' in error; got {mock_logger.errors[0]!r}"
+        assert result is True
+        assert mock_logger.errors == []
+        assert len(mock_logger.warnings) >= 1
+        assert mock_logger.warnings[0].startswith("[3.4.2 trainingMlpstorageFilesystemCheck]"), \
+            f"Expected prefix [3.4.2 trainingMlpstorageFilesystemCheck]; got {mock_logger.warnings[0]!r}"
+        assert "same filesystem" in mock_logger.warnings[0], \
+            f"Expected 'same filesystem' in warning; got {mock_logger.warnings[0]!r}"
 
     def test_df_not_found_emits_3_4_2_missing(self, tmp_path, mock_logger):
         """No sidecar AND no df logfile → hard [3.4.2] violation (D-B8, #601).

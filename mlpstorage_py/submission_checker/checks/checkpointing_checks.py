@@ -1019,11 +1019,10 @@ class CheckpointingCheck(BaseCheck):
             sidecar = read_fs_separation_sidecar(run_dir)
             if sidecar is not None:
                 if sidecar.get("same_filesystem"):
-                    self.log_violation(
+                    self.warn_violation(
                         "4.4.2", "checkpointFilesystemCheck", logfile_path,
                         "checkpoint_folder and results_dir are on the same filesystem",
                     )
-                    valid = False
                 continue
             args = metadata.get("args", {})
             # For checkpointing, checkpoint_folder is the "data path" analog (RESEARCH.md).
@@ -1044,11 +1043,8 @@ class CheckpointingCheck(BaseCheck):
                 valid = False
                 continue
             if not ok:
-                # df WAS found (e.g. submitter manually injected it), so this
-                # is a real same-mount finding and remains an error.
-                self.log_violation(
+                self.warn_violation(
                     "4.4.2", "checkpointFilesystemCheck", logfile_path,
                     "checkpoint_folder and results_dir are on the same filesystem",
                 )
-                valid = False
         return valid

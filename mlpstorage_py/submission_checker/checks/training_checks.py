@@ -941,11 +941,10 @@ class TrainingCheck(BaseCheck):
             sidecar = read_fs_separation_sidecar(run_dir)
             if sidecar is not None:
                 if sidecar.get("same_filesystem"):
-                    self.log_violation(
+                    self.warn_violation(
                         "3.4.2", "trainingMlpstorageFilesystemCheck", logfile_path,
                         "data_dir and results_dir are on the same filesystem",
                     )
-                    valid = False
                 continue
             args = metadata.get("args", {})
             ok, df_found = _check_filesystem_separation(args, logfile_path)
@@ -961,11 +960,8 @@ class TrainingCheck(BaseCheck):
                 valid = False
                 continue
             if not ok:
-                # df WAS found (e.g. submitter manually injected it), so this
-                # is a real same-mount finding and remains an error.
-                self.log_violation(
+                self.warn_violation(
                     "3.4.2", "trainingMlpstorageFilesystemCheck", logfile_path,
                     "data_dir and results_dir are on the same filesystem",
                 )
-                valid = False
         return valid

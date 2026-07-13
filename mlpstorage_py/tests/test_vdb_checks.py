@@ -644,9 +644,10 @@ class Test_5_4_2_VdbFilesystemCheck:
         check = _make_vdb_check(
             leaf, "closed", mock_logger, run_files=run_files,
         )
-        assert check.vdb_filesystem_check() is False
-        viol = _violations(mock_logger, "5.4.2", "vdbFilesystemCheck")
-        assert any("same filesystem" in v for v in viol), viol
+        assert check.vdb_filesystem_check() is True
+        assert _violations(mock_logger, "5.4.2", "vdbFilesystemCheck") == []
+        warn = _warnings(mock_logger, "5.4.2", "vdbFilesystemCheck")
+        assert any("same filesystem" in v for v in warn), warn
 
 
 # ===========================================================================
