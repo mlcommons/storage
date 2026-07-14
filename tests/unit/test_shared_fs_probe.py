@@ -1357,6 +1357,12 @@ class TestSkipValidationBypassesCap02:
         bench._capacity_gate_destination = lambda: str(tmp_path)
         bench.required_bytes_for_capacity_gate = lambda: 1
         bench._run_uuid = "test-uuid"
+        # CAP-02b (storage#772) also fires from _pre_execution_gate. It
+        # reads self.run_result_output. These CAP-02 tests set hosts to
+        # a 2-host list — patch the CAP-02b helper in each test that
+        # needs to exercise a non-single-host path; the placeholder path
+        # below just satisfies the attribute lookup.
+        bench.run_result_output = str(tmp_path / "run-result-placeholder")
         # CAP-03 (issue #601) also fires from _pre_execution_gate. These
         # tests target CAP-02 only; return None from _fs_separation_paths
         # to take the A8 skip branch (no local FS to probe).
@@ -1370,7 +1376,9 @@ class TestSkipValidationBypassesCap02:
             "mlpstorage_py.benchmarks.base.check_capacity_4field"
         ), patch(
             "mlpstorage_py.benchmarks.base.run_shared_fs_probe"
-        ) as mock_probe:
+        ) as mock_probe, patch(
+            "mlpstorage_py.benchmarks.base.run_results_dir_shared_probe"
+        ):
             bench._pre_execution_gate()
         mock_probe.assert_not_called()
 
@@ -1381,6 +1389,8 @@ class TestSkipValidationBypassesCap02:
             "mlpstorage_py.benchmarks.base.check_capacity_4field"
         ) as mock_cap01, patch(
             "mlpstorage_py.benchmarks.base.run_shared_fs_probe"
+        ), patch(
+            "mlpstorage_py.benchmarks.base.run_results_dir_shared_probe"
         ):
             bench._pre_execution_gate()
         mock_cap01.assert_called_once()
@@ -1392,7 +1402,9 @@ class TestSkipValidationBypassesCap02:
             "mlpstorage_py.benchmarks.base.check_capacity_4field"
         ), patch(
             "mlpstorage_py.benchmarks.base.run_shared_fs_probe"
-        ) as mock_probe:
+        ) as mock_probe, patch(
+            "mlpstorage_py.benchmarks.base.run_results_dir_shared_probe"
+        ):
             bench._pre_execution_gate()
         mock_probe.assert_called_once()
 
@@ -1404,6 +1416,8 @@ class TestSkipValidationBypassesCap02:
             "mlpstorage_py.benchmarks.base.check_capacity_4field"
         ), patch(
             "mlpstorage_py.benchmarks.base.run_shared_fs_probe"
+        ), patch(
+            "mlpstorage_py.benchmarks.base.run_results_dir_shared_probe"
         ):
             bench._pre_execution_gate()
         assert bench.logger.warning.called, (

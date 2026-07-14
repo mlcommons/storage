@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "mlpstorage"
-version = "3.0.38"
+version = "3.0.42"
 description = "MLPerf Storage Benchmark Suite"
 readme = "README.md"
 license = {text = "Apache-2.0"}
@@ -23,7 +23,7 @@ dependencies = [
     "minio>=7.2.20",
     "s3torchconnector>=1.5.0",
     "python-dotenv>=1.0.0",
-    "s3dlio>=0.9.106",
+    "s3dlio>=0.9.112",
 ]
 
 [project.optional-dependencies]
@@ -132,6 +132,29 @@ torchaudio = [{ index = "pytorch-cpu" }]
 # Pinned to a specific commit for reproducibility; bump by updating `rev` and
 # re-running `uv lock --upgrade-package dlio-benchmark`.
 # Commit history (most recent first):
+#   - DLIO PR #50 v3.0.4: three fixes (storage #780, #756, #755) plus
+#     s3dlio pin bump to >=0.9.112.
+#   - DLIO PR #49 fix for storage #754: race-tolerant Hydra job-dir
+#     bootstrap on multi-node runs — Hydra's own run_job/_save_config
+#     internals call pathlib.Path(...).mkdir(exist_ok=True) on the shared
+#     hydra.run.dir / output_subdir from every rank on every node, and
+#     pathlib's post-FileExistsError is_dir() recheck can observe stale
+#     metadata from a peer's just-completed mkdir on shared/networked FS
+#     and re-raise. Fix monkeypatches Path.mkdir for the duration of the
+#     run_benchmark() call so the race is absorbed instead of aborting.
+#   - DLIO PR #48 fix for storage #741: drop page cache before the
+#     read_threads memory guard — prevents run 2..N of a 5-run
+#     submission from tripping the guard on reclaimable Lustre page
+#     cache pinned by the prior run.  Gated on local_rank() == 0 (not
+#     MPI.node(), which is unreliable under --map-by node).  Reuses
+#     the existing DLIO_DROP_CACHES_TIMEOUT knob.
+#   - DLIO PR #47 fix for storage #626 (bucket 2): shared 64-way concurrency
+#     ceiling across object-storage libraries — caps s3dlio /
+#     ObjStoreLibStorage / SimpleStreamingCheckpointing on the same
+#     pool so multi-adapter runs don't blow past the tuned limit
+#   - DLIO PR #46 fix for storage #626 (bucket 1): fork-safe
+#     _s3_iterable_mixin prefetch pool — reset pool state across fork()
+#     so DataLoader worker processes don't inherit a dead pool
 #   - DLIO PR #45 fix for storage #699: os.makedirs(exist_ok=True) race on
 #     multi-host checkpoint runs — exponential-backoff retry in
 #     _makedirs_race_safe(); applied to FileStorage, ObjStoreLibStorage,
@@ -163,7 +186,7 @@ torchaudio = [{ index = "pytorch-cpu" }]
 #   - DLIO PR #23 fix for storage #391 part 2 (sudo -n + warn-once for drop_caches)
 #   - DLIO PR #22 fix for storage #415 (mpi4py auto-init in spawn workers)
 #   - DLIO PR #21 fix for storage #391 part 1 (TorchIterableDatasetSimple gating)
-dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "24b13d7630a12e3d08624e5db254694a09f71599" }
+dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "edaf4bb3d6343ef2fb6b9f6dbafa6102032ae8bf" }
 
 [dependency-groups]
 dev = [

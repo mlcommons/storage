@@ -96,6 +96,18 @@ _RUN_TIMESTAMPS = [
 # One datagen timestamp
 _DATAGEN_TIMESTAMPS = ["20250111_130000"]
 
+# One datasize timestamp — parallel to datagen. Rules.md §2.1.12 (post
+# STRUCT-12 datasize-phase landing) requires the phase directory. The
+# sentinel metadata written into datasize/<ts>/ carries the outputs of
+# the datasize calculation that rule 3.3.1 (and, in future, a datagen
+# cross-check) reads back.
+_DATASIZE_TIMESTAMPS = ["20250111_125900"]
+_DATASIZE_DEFAULT_OUTPUTS = {
+    "num_files_train": 14000,
+    "num_subfolders_train": 0,
+    "total_disk_bytes": 68_090_280_000,
+}
+
 # Two checkpointing timestamps — Rules.md 2.1.23 in conjunction with 4.7.1
 # allows 1 or 2 invocations (one timestamp dir per invocation). The fixture
 # uses the two-invocation shape (write phase + read phase) so split-mode
@@ -329,21 +341,50 @@ def build_submission(tmp_path, **overrides) -> Path:
       num_checkpoints_read=10`` (read-only) — pairs them per
       ``_pair_checkpoint_runs`` semantics.
     * ``chkpt_cache_flush_gap_seconds`` (int, default 25) — CHKPT-02/04: when
-      ``chkpt_split_mode=True`` AND ``chkpt_summary_timestamps=True``, sets the
-      gap between a write run's ``end`` and the following read run's ``start`` to
-      this many seconds. Also sets the read metadata's ``invocation_start_time``
-      to write ``end`` + this many seconds — since Rules.md §4.7.1 §4.7.1 measures
-      the failover-callout gap from write.summary.end_time to
-      read.metadata.invocation_start_time, this is the value that
-      ``cache_flush_validation`` sees. May be negative to simulate NTP clock skew
-      between the write and read hosts.
+      ``chkpt_split_mode=True`` AND ``chkpt_summary_timestamps=True``, this is
+      the value ``cache_flush_validation`` sees as the failover-callout gap.
+      Rules.md §4.7.1 measures ``read.metadata.invocation_start_time −
+      write.metadata.invocation_end_time``; the fixture sets
+      ``invocation_end_time = summary.end_time + chkpt_write_teardown_seconds``
+      (default 0) and ``invocation_start_time = invocation_end_time +
+      chkpt_cache_flush_gap_seconds``. May be negative to simulate NTP clock
+      skew between the write and read hosts.
+    * ``chkpt_write_teardown_seconds`` (int, default 0) — CHKPT-02 (storage#782):
+      when ``chkpt_split_mode=True`` AND ``chkpt_summary_timestamps=True``,
+      injects a gap between ``write.summary.end_time`` (end of the timed
+      section) and ``write.metadata.invocation_end_time`` (nodes actually
+      released — post cluster collection). Modelling the large-topology case
+      where the write phase's final multi-node collection keeps nodes busy
+      for tens of seconds after the timed section closes. Under the §4.7.1
+      fix in storage#782 the check uses ``invocation_end_time`` as the gap
+      origin, so this value shifts the "legacy" gap seen by pre-fix results
+      dirs (which used ``summary.end_time``) but leaves the "honest"
+      measured gap equal to ``chkpt_cache_flush_gap_seconds``.
     * ``chkpt_omit_invocation_start_time`` (bool, default False) — CHKPT-02:
       when True, do NOT emit ``invocation_start_time`` in read-side metadata
       (simulates a results dir produced by an mlpstorage version predating
-      the §4.7.1 gap-origin fix). Exercises the backward-compat fallback
-      path in ``cache_flush_validation`` — the check falls back to
+      storage#714). Exercises the backward-compat fallback path in
+      ``cache_flush_validation`` — the check falls back to
       ``read.summary.start_time`` and downgrades a 30-second breach from
       hard failure to warning.
+    * ``chkpt_omit_invocation_end_time`` (bool, default False) — CHKPT-02
+      (storage#782): when True, do NOT emit ``invocation_end_time`` in
+      write-side metadata (simulates a results dir produced by an mlpstorage
+      version predating storage#782). Exercises the backward-compat
+      fallback in ``cache_flush_validation`` — the check falls back to
+      ``write.summary.end_time`` and includes any post-benchmark cluster
+      collection in the measured gap.
+    * ``chkpt_write_collection_offsets`` (list[int] | None, default None) —
+      CHKPT-02: when ``chkpt_split_mode=True``, inject one nested
+      ``collection_timestamp`` into each WRITE-phase metadata.json per offset,
+      each computed as write ``end_time`` + offset seconds (offsets may be
+      negative to model a pre-benchmark, start-of-run collection). Exercises
+      the final-collection gap-origin path in ``cache_flush_validation``: the
+      latest post-benchmark ``collection_timestamp`` (offset >= 0) becomes
+      the gap origin (the last node released), while pre-benchmark timestamps
+      (offset < 0) are ignored. Timestamps are emitted with a trailing ``Z``
+      to also exercise the ``_normalize_collection_iso`` UTC-designator
+      stripping.
     * ``chkpt_model`` (str, default "llama3-8b") — CHKPT-01: model directory name
       under ``checkpointing/``.
     * ``chkpt_open_num_processes`` (int | None) — CHKPT-01: when non-None, sets
@@ -399,6 +440,15 @@ def build_submission(tmp_path, **overrides) -> Path:
     wrong_training_phase = overrides.pop("wrong_training_phase", None)
     datagen_timestamps_count = overrides.pop("datagen_timestamps", None)
     bad_datagen_timestamp_format = overrides.pop("bad_datagen_timestamp_format", False)
+    # STRUCT-12 datasize-phase kwargs (Rules.md §2.1.12 / §3.3.1):
+    #   ``omit_datasize_phase`` — skip building datasize/ entirely (exercises the
+    #                              warn-level DATASIZE-MISSING path in STRUCT-12
+    #                              and rule 3.3.1).
+    #   ``datasize_missing_output_keys`` — iterable of parameters.dataset.<key>
+    #                              names to drop from the datasize metadata
+    #                              (exercises DATASIZE-MALFORMED in rule 3.3.1).
+    omit_datasize_phase = overrides.pop("omit_datasize_phase", False)
+    datasize_missing_output_keys = overrides.pop("datasize_missing_output_keys", None)
     wrong_checkpointing_workload = overrides.pop("wrong_checkpointing_workload", None)
     # Phase 2 Plan 02-02: system YAML mutation kwargs for SystemYamlSchemaCheck tests.
     system_yaml_bad_capabilities = overrides.pop("system_yaml_bad_capabilities", None)
@@ -412,7 +462,10 @@ def build_submission(tmp_path, **overrides) -> Path:
     chkpt_summary_timestamps = overrides.pop("chkpt_summary_timestamps", False)
     chkpt_split_mode = overrides.pop("chkpt_split_mode", False)
     chkpt_cache_flush_gap_seconds = overrides.pop("chkpt_cache_flush_gap_seconds", 25)
+    chkpt_write_teardown_seconds = overrides.pop("chkpt_write_teardown_seconds", 0)
     chkpt_omit_invocation_start_time = overrides.pop("chkpt_omit_invocation_start_time", False)
+    chkpt_omit_invocation_end_time = overrides.pop("chkpt_omit_invocation_end_time", False)
+    chkpt_write_collection_offsets = overrides.pop("chkpt_write_collection_offsets", None)
     chkpt_model = overrides.pop("chkpt_model", "llama3-8b")
     chkpt_open_num_processes = overrides.pop("chkpt_open_num_processes", None)
     chkpt_closed_num_processes = overrides.pop("chkpt_closed_num_processes", None)
@@ -586,6 +639,28 @@ def build_submission(tmp_path, **overrides) -> Path:
             unet3d_path = training_path / "unet3d"
             unet3d_path.mkdir()
 
+            # datasize timestamp (Rules.md §2.1.12 / §3.3.1 sentinel)
+            if not omit_datasize_phase:
+                datasize_dir = unet3d_path / "datasize"
+                datasize_dir.mkdir()
+                for ts in _DATASIZE_TIMESTAMPS:
+                    ts_dir = datasize_dir / ts
+                    ts_dir.mkdir()
+                    ds_meta = copy.deepcopy(_DEFAULT_METADATA)
+                    ds_meta["benchmark_type"] = "training"
+                    ds_meta["model"] = "unet3d"
+                    ds_meta["args"]["model"] = "unet3d"
+                    ds_meta["args"]["command"] = "datasize"
+                    ds_dataset = {
+                        k: v for k, v in _DATASIZE_DEFAULT_OUTPUTS.items()
+                        if datasize_missing_output_keys is None
+                        or k not in datasize_missing_output_keys
+                    }
+                    ds_meta["parameters"] = {"dataset": ds_dataset}
+                    (ts_dir / "metadata.json").write_text(
+                        json.dumps(ds_meta), encoding="utf-8"
+                    )
+
             # datagen timestamps
             datagen_dir = unet3d_path / "datagen"
             datagen_dir.mkdir()
@@ -692,12 +767,21 @@ def build_submission(tmp_path, **overrides) -> Path:
                 chkpt_summary = dict(_DEFAULT_SUMMARY)
                 if chkpt_summary_timestamps:
                     if chkpt_split_mode:
+                        # storage#782: read invocation cannot start until the
+                        # write nodes are released — i.e. `gap_seconds` after
+                        # write's ``invocation_end_time``, which is itself
+                        # ``teardown_seconds`` after ``summary.end_time``.
+                        # When teardown=0 (default) this collapses to the
+                        # legacy formula.
+                        _post_write_delta = datetime.timedelta(
+                            seconds=chkpt_write_teardown_seconds
+                            + chkpt_cache_flush_gap_seconds
+                        )
                         if ts in write_timestamps:
                             wi = write_timestamps.index(ts)
                             write_start = _BASE_DT + datetime.timedelta(minutes=10 * wi)
                             write_end = write_start + datetime.timedelta(minutes=5)
-                            # The corresponding read run starts gap_seconds after write_end
-                            read_start = write_end + datetime.timedelta(seconds=chkpt_cache_flush_gap_seconds)
+                            read_start = write_end + _post_write_delta
                             read_end = read_start + datetime.timedelta(minutes=5)
                             chkpt_summary["start"] = write_start.isoformat()
                             chkpt_summary["end"] = write_end.isoformat()
@@ -709,7 +793,7 @@ def build_submission(tmp_path, **overrides) -> Path:
                             # Corresponding write run index is ri
                             write_start = _BASE_DT + datetime.timedelta(minutes=10 * ri)
                             write_end = write_start + datetime.timedelta(minutes=5)
-                            read_start = write_end + datetime.timedelta(seconds=chkpt_cache_flush_gap_seconds)
+                            read_start = write_end + _post_write_delta
                             read_end = read_start + datetime.timedelta(minutes=5)
                             chkpt_summary["start"] = read_start.isoformat()
                             chkpt_summary["end"] = read_end.isoformat()
@@ -752,35 +836,67 @@ def build_submission(tmp_path, **overrides) -> Path:
                     if ts in write_timestamps:
                         chkpt_meta["args"]["num_checkpoints_write"] = 10
                         chkpt_meta["args"]["num_checkpoints_read"] = 0
+
+                        # §4.7.1 final-collection gap origin: inject nested
+                        # collection_timestamp(s) into the WRITE metadata. The
+                        # write invocation performs a post-benchmark multi-node
+                        # collection after end_time; the latest such timestamp
+                        # (offset >= 0, the last node released) is the gap
+                        # origin, pre-benchmark ones (offset < 0) are ignored.
+                        # Emitted with a trailing "Z" to also exercise
+                        # _normalize_collection_iso.
+                        if chkpt_write_collection_offsets:
+                            wi = write_timestamps.index(ts)
+                            _w_start = _BASE_DT + datetime.timedelta(minutes=10 * wi)
+                            _w_end = _w_start + datetime.timedelta(minutes=5)
+                            chkpt_meta["cluster_information"] = {
+                                "collections": [
+                                    {
+                                        "collection_timestamp": (
+                                            _w_end
+                                            + datetime.timedelta(seconds=off)
+                                        ).isoformat() + "Z"
+                                    }
+                                    for off in chkpt_write_collection_offsets
+                                ]
+                            }
                     else:
                         chkpt_meta["args"]["num_checkpoints_write"] = 0
                         chkpt_meta["args"]["num_checkpoints_read"] = 10
 
                 # §4.7.1: metadata.invocation_start_time is the read-side origin
-                # of the failover-callout gap check (see checkpointing_checks.py
-                # cache_flush_validation). Emit unconditionally to mirror real
-                # mlpstorage runs, except when the test explicitly opts out to
-                # exercise the missing-field branch.
-                if chkpt_summary_timestamps and not (
-                    chkpt_omit_invocation_start_time
-                    and chkpt_split_mode
-                    and ts in read_timestamps
-                ):
+                # and metadata.invocation_end_time is the write-side origin of
+                # the failover-callout gap check (see checkpointing_checks.py
+                # cache_flush_validation). Emit both unconditionally to mirror
+                # real mlpstorage runs, except when the test explicitly opts
+                # out to exercise the missing-field fallback branches.
+                if chkpt_summary_timestamps:
                     if chkpt_split_mode:
                         if ts in write_timestamps:
-                            # Write invocation entered mlpstorage right before write_start.
                             wi = write_timestamps.index(ts)
                             _write_start = _BASE_DT + datetime.timedelta(minutes=10 * wi)
                             chkpt_meta["invocation_start_time"] = _write_start.isoformat()
-                        else:
-                            # Read invocation entered mlpstorage `gap_seconds` after
-                            # the write's summary.end_time — this is what §4.7.1
-                            # measures. Negative gap models NTP clock skew.
+                            # storage#782: write-side bookend — captured
+                            # after post-benchmark cluster collection, so it
+                            # lands ``teardown_seconds`` after summary.end_time.
+                            if not chkpt_omit_invocation_end_time:
+                                _write_end = _write_start + datetime.timedelta(minutes=5)
+                                _inv_end = _write_end + datetime.timedelta(
+                                    seconds=chkpt_write_teardown_seconds
+                                )
+                                chkpt_meta["invocation_end_time"] = _inv_end.isoformat()
+                        elif not chkpt_omit_invocation_start_time:
+                            # Read invocation entered mlpstorage `gap_seconds`
+                            # after write's ``invocation_end_time`` (the
+                            # moment nodes are released), i.e. `teardown +
+                            # gap` after ``summary.end_time``. Negative gap
+                            # models NTP clock skew between hosts.
                             ri = read_timestamps.index(ts)
                             _write_start = _BASE_DT + datetime.timedelta(minutes=10 * ri)
                             _write_end = _write_start + datetime.timedelta(minutes=5)
                             _inv = _write_end + datetime.timedelta(
-                                seconds=chkpt_cache_flush_gap_seconds
+                                seconds=chkpt_write_teardown_seconds
+                                + chkpt_cache_flush_gap_seconds
                             )
                             chkpt_meta["invocation_start_time"] = _inv.isoformat()
                     else:

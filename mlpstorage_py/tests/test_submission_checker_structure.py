@@ -965,6 +965,49 @@ class TestStruct12_TrainingPhases:
         assert result is False
         assert any("[2.1.12 trainingPhases]" in m for m in mock_logger.errors)
 
+    def test_missing_datasize_phase_warns_but_passes(self, tmp_path, mock_logger):
+        """Missing datasize/ → warn-level (DATASIZE-MISSING), rule still passes.
+
+        Rules.md §2.1.12 requires the datasize phase, but the checker enforces
+        it at warn-level during the current submission window (see
+        ``_WARN_ONLY_MISSING_TRAINING_PHASES`` note). Regression pin against
+        the retroactive-invalidation concern raised when datasize/ was
+        first added to the required set.
+        """
+        from mlpstorage_py.tests.conftest import build_submission
+        root = build_submission(tmp_path, omit_datasize_phase=True)
+        check = _make_check(root, mock_logger)
+        result = run_one_check(check, "training_phases_check", mock_logger)
+        assert result is True
+        assert any(
+            "[2.1.12 trainingPhases]" in m and "DATASIZE-MISSING" in m
+            for m in mock_logger.warnings
+        )
+        # Must NOT surface as an error (warn-only doctrine).
+        assert not any(
+            "DATASIZE-MISSING" in m for m in mock_logger.errors
+        )
+
+    def test_missing_datagen_phase_still_errors(self, tmp_path, mock_logger):
+        """Missing datagen/ → hard error, unchanged from pre-datasize behavior.
+
+        Pins that the warn-only carve-out is scoped to `datasize` — the
+        other required phases must still fail the check.
+        """
+        import shutil
+        from mlpstorage_py.tests.conftest import build_submission
+        root = build_submission(tmp_path)
+        # Remove the datagen dir the fixture built.
+        datagen_dir = (
+            root / "closed" / "Acme" / "results" / "acme-storage-v1"
+            / "training" / "unet3d" / "datagen"
+        )
+        shutil.rmtree(datagen_dir)
+        check = _make_check(root, mock_logger)
+        result = run_one_check(check, "training_phases_check", mock_logger)
+        assert result is False
+        assert any("[2.1.12 trainingPhases]" in m for m in mock_logger.errors)
+
 
 # ---------------------------------------------------------------------------
 # TestStruct13_DatagenTimestamp  (STRUCT-13, rule 2.1.13)

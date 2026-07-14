@@ -332,6 +332,8 @@ class TrainingCheck(BaseCheck):
                 "[3.3.1 DATASIZE-MISSING] no datasize/ phase found; "
                 "rule 3.3.1 cross-check skipped",
             )
+        else:
+            self._warn_malformed_datasize_metadata(datasize_files)
         if not datagen_files:
             self.warn_violation(
                 "3.3.1", "trainingRunDataMatchesDatasize", self.path,
@@ -409,6 +411,39 @@ class TrainingCheck(BaseCheck):
 
         # Warn-only invariant: rule passes regardless of warnings recorded.
         return valid
+
+    _DATASIZE_REQUIRED_OUTPUT_KEYS = ("num_files_train", "num_subfolders_train", "total_disk_bytes")
+
+    def _warn_malformed_datasize_metadata(self, datasize_files):
+        """Warn when a datasize sentinel omits the Rules.md §3.3.1 output keys.
+
+        Every ``training/<model>/datasize/<ts>/`` sentinel must record its
+        computed outputs — ``num_files_train``, ``num_subfolders_train``,
+        and ``total_disk_bytes`` — under ``parameters.dataset`` so a
+        reviewer (and, once wired, the datagen cross-check) can verify
+        that datagen produced at least what datasize prescribed. Absent
+        metadata or absent keys emit ``[3.3.1 DATASIZE-MALFORMED]``
+        (warn-level, submission-window doctrine).
+        """
+        for _summary, metadata, ts in datasize_files:
+            if metadata is None:
+                self.warn_violation(
+                    "3.3.1", "trainingRunDataMatchesDatasize", self.path,
+                    "[3.3.1 DATASIZE-MALFORMED] datasize/%s has no readable "
+                    "metadata file; sentinel cannot be cross-checked",
+                    ts,
+                )
+                continue
+            dataset_params = (metadata.get("parameters", {}) or {}).get("dataset", {}) or {}
+            missing = [k for k in self._DATASIZE_REQUIRED_OUTPUT_KEYS if dataset_params.get(k) is None]
+            if missing:
+                self.warn_violation(
+                    "3.3.1", "trainingRunDataMatchesDatasize", self.path,
+                    "[3.3.1 DATASIZE-MALFORMED] datasize/%s metadata missing "
+                    "required output key(s) %s under parameters.dataset; "
+                    "sentinel cannot be fully cross-checked",
+                    ts, ", ".join(missing),
+                )
 
     @staticmethod
     def _to_int(v):
@@ -906,11 +941,10 @@ class TrainingCheck(BaseCheck):
             sidecar = read_fs_separation_sidecar(run_dir)
             if sidecar is not None:
                 if sidecar.get("same_filesystem"):
-                    self.log_violation(
+                    self.warn_violation(
                         "3.4.2", "trainingMlpstorageFilesystemCheck", logfile_path,
                         "data_dir and results_dir are on the same filesystem",
                     )
-                    valid = False
                 continue
             args = metadata.get("args", {})
             ok, df_found = _check_filesystem_separation(args, logfile_path)
@@ -926,11 +960,8 @@ class TrainingCheck(BaseCheck):
                 valid = False
                 continue
             if not ok:
-                # df WAS found (e.g. submitter manually injected it), so this
-                # is a real same-mount finding and remains an error.
-                self.log_violation(
+                self.warn_violation(
                     "3.4.2", "trainingMlpstorageFilesystemCheck", logfile_path,
                     "data_dir and results_dir are on the same filesystem",
                 )
-                valid = False
         return valid

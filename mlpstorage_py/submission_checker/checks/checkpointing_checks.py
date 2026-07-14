@@ -7,6 +7,7 @@ from ..loader import SubmissionLogs
 from ..rule_registry import rule
 from .helpers import (
     _check_filesystem_separation,
+    _latest_final_collection_timestamp,
     _pair_checkpoint_runs,
     _parse_iso_gap,
     read_fs_separation_sidecar,
@@ -583,28 +584,45 @@ class CheckpointingCheck(BaseCheck):
         pairs exist.
 
         The gap is measured as
-        ``read.metadata.invocation_start_time − write.summary.end_time`` so
-        that per-invocation framework startup on the read side (Python
-        imports, MPI spawn, CAP env-validation — up to ~50s in the wild) is
-        not charged against the 30-second callout budget. See Rules.md 4.7.1
-        for the semantic and mlpstorage_py/_invocation.py for the capture.
+        ``read.metadata.invocation_start_time − write.metadata.invocation_end_time``.
+        Both bookends are captured by ``mlpstorage_py/_invocation.py``: the
+        read side is snapshotted at first import (before any framework
+        startup — Python imports, MPI spawn, CAP env-validation), and the
+        write side is snapshotted after ``_collect_cluster_end()`` returns
+        (the point at which the write nodes are actually released). Neither
+        per-invocation framework startup on the read side nor post-benchmark
+        cluster collection on the write side is charged against the
+        30-second callout budget. See mlcommons/storage#714 (read side) and
+        #782 (write side).
 
         **Backward compat** — results directories produced by an mlpstorage
-        version predating this rule do not carry ``invocation_start_time``
-        in the read-phase metadata. In that case the check falls back to the
-        legacy origin (``read.summary.start_time`` / ``start``), which
-        conflates the failover callout with per-invocation framework startup
-        and so is not authoritative. To honor the rule that was in force
-        when those results were produced, a gap breach measured against the
-        legacy origin is emitted as a warning (``warn_violation``) rather
-        than a hard failure. The submitter can regenerate with a current
-        mlpstorage to get the honest measurement.
+        version predating either bookend fall back to the corresponding
+        DLIO summary field:
+
+          * missing ``read.metadata.invocation_start_time`` →
+            ``read.summary.start_time`` (predates #714). Downgrades a gap
+            breach to ``warn_violation``.
+          * missing ``write.metadata.invocation_end_time`` → the latest
+            post-benchmark ``collection_timestamp`` in the write-phase
+            metadata, when present (the last node to finish the final cluster
+            collection marks the end of write-phase teardown — a best-effort
+            proxy for node release on results dirs that predate #782 but do
+            record per-node collection timestamps); otherwise
+            ``write.summary.end_time`` (predates both fixes). The summary-end
+            fallback still includes the full post-benchmark collection window
+            in the gap, so the check emits a normal violation on breach but
+            the submitter should re-run with a current mlpstorage to get the
+            honest measurement.
 
         A negative gap indicates NTP skew between the write and read nodes
-        (the metadata is timestamped on the read-invocation host, the summary
-        on the write-invocation host); it is reported as such rather than as
-        an ordering / causality violation (which is the domain of
+        (the metadata fields are timestamped on their respective invocation
+        hosts); it is reported as such rather than as an ordering /
+        causality violation (which is the domain of
         ``checkpoint_invocation_structure``).
+
+        An INFO line is emitted for every write/read pair with the computed
+        gap and the chosen origin so the measurement is transparent whether
+        the pair passes, warns, or fails.
         """
         valid = True
         if self.mode != "checkpointing":
@@ -613,33 +631,53 @@ class CheckpointingCheck(BaseCheck):
         if not pairs:
             return valid
         for write_entry, read_entry in pairs:
-            write_summary, _, write_ts = write_entry
+            write_summary, write_metadata, write_ts = write_entry
             read_summary, read_metadata, read_ts = read_entry
-            write_end = (write_summary or {}).get("end_time") or (write_summary or {}).get("end")
+            # §4.7.1 write-side origin selection (highest priority first):
+            #   1. write.metadata.invocation_end_time — the authoritative
+            #      write-side bookend captured after _collect_cluster_end()
+            #      returns (storage#782). Excludes post-benchmark teardown.
+            #   2. latest post-benchmark collection_timestamp in the
+            #      write-phase metadata — a best-effort origin for results
+            #      dirs that predate the invocation_end_time bookend but do
+            #      record per-node collection timestamps. The write nodes are
+            #      only released once the last node finishes the final
+            #      cluster collection, so the latest such timestamp marks the
+            #      end of write-phase teardown and is a close proxy for the
+            #      invocation_end_time bookend.
+            #   3. write.summary.end_time — the timed-section end (pre-fix
+            #      fallback; charges post-benchmark collection to the gap).
+            write_end = (write_metadata or {}).get("invocation_end_time")
+            write_origin_label = "write invocation_end"
+            if write_end is None:
+                summary_end = (write_summary or {}).get("end_time") or (write_summary or {}).get("end")
+                final_collection_end = _latest_final_collection_timestamp(
+                    write_metadata, summary_end
+                )
+                if final_collection_end is not None:
+                    write_end = final_collection_end
+                    write_origin_label = "write final-collection timestamp"
+                else:
+                    write_end = summary_end
+                    write_origin_label = "write summary end"
             read_start = (read_metadata or {}).get("invocation_start_time")
-            used_legacy_origin = False
+            read_origin_label = "read invocation_start"
+            used_legacy_read_origin = False
             if read_start is None:
-                # Backward-compat fallback for results dirs that predate the
-                # §4.7.1 fix and don't carry invocation_start_time. Measure
-                # against read.summary.start_time and downgrade any breach
-                # to warn_violation below.
+                # Backward-compat fallback for results dirs that predate
+                # storage#714 and don't carry invocation_start_time.
+                # Measure against read.summary.start_time and downgrade
+                # any breach to warn_violation below.
                 read_start = (read_summary or {}).get("start_time") or (read_summary or {}).get("start")
-                used_legacy_origin = True
+                read_origin_label = "read summary start"
+                used_legacy_read_origin = True
             if write_end is None:
                 self.log_violation(
                     "4.7.1", "checkpointCacheFlushValidation", self.path,
-                    "cannot compute failover-callout gap: missing end_time in "
-                    "write-phase summary.json (write_ts=%s, read_ts=%s)",
-                    write_ts, read_ts,
-                )
-                valid = False
-                continue
-            if read_start is None:
-                self.log_violation(
-                    "4.7.1", "checkpointCacheFlushValidation", self.path,
-                    "cannot compute failover-callout gap: read-phase metadata "
-                    "has no invocation_start_time and read-phase summary.json "
-                    "has no start_time/start (write_ts=%s, read_ts=%s)",
+                    "cannot compute failover-callout gap: missing "
+                    "invocation_end_time in write-phase metadata.json and "
+                    "end_time in write-phase summary.json "
+                    "(write_ts=%s, read_ts=%s)",
                     write_ts, read_ts,
                 )
                 valid = False
@@ -654,6 +692,18 @@ class CheckpointingCheck(BaseCheck):
                 )
                 valid = False
                 continue
+            # Transparency: emit an INFO line for every pair with the gap
+            # and the chosen origin, so submitters can see the measurement
+            # regardless of pass/warn/fail. See storage#782.
+            self.log.info(
+                "[4.7.1 checkpointCacheFlushValidation] %s: "
+                "failover-callout gap %.1fs "
+                "(%s=%s, %s=%s, write_ts=%s, read_ts=%s)",
+                self.path, gap_seconds,
+                write_origin_label, write_end,
+                read_origin_label, read_start,
+                write_ts, read_ts,
+            )
             if gap_seconds < 0:
                 # Per Rules.md 4.7.1: negative gap → clock-skew warning, not
                 # a causality violation. Ordering / no-overlap is enforced
@@ -667,7 +717,7 @@ class CheckpointingCheck(BaseCheck):
                 )
                 continue
             if gap_seconds > 30:
-                if used_legacy_origin:
+                if used_legacy_read_origin:
                     # Pre-fix results dir: honor the rule that was in force
                     # when the run was produced by warning rather than
                     # failing. The gap measurement here includes per-
@@ -690,8 +740,10 @@ class CheckpointingCheck(BaseCheck):
                 self.log_violation(
                     "4.7.1", "checkpointCacheFlushValidation", self.path,
                     "failover-callout gap %.1f seconds exceeds 30-second limit "
-                    "(write end=%s, read invocation_start=%s)",
-                    gap_seconds, write_end, read_start,
+                    "(%s=%s, %s=%s)",
+                    gap_seconds,
+                    write_origin_label, write_end,
+                    read_origin_label, read_start,
                 )
                 valid = False
         return valid
@@ -967,11 +1019,10 @@ class CheckpointingCheck(BaseCheck):
             sidecar = read_fs_separation_sidecar(run_dir)
             if sidecar is not None:
                 if sidecar.get("same_filesystem"):
-                    self.log_violation(
+                    self.warn_violation(
                         "4.4.2", "checkpointFilesystemCheck", logfile_path,
                         "checkpoint_folder and results_dir are on the same filesystem",
                     )
-                    valid = False
                 continue
             args = metadata.get("args", {})
             # For checkpointing, checkpoint_folder is the "data path" analog (RESEARCH.md).
@@ -992,11 +1043,8 @@ class CheckpointingCheck(BaseCheck):
                 valid = False
                 continue
             if not ok:
-                # df WAS found (e.g. submitter manually injected it), so this
-                # is a real same-mount finding and remains an error.
-                self.log_violation(
+                self.warn_violation(
                     "4.4.2", "checkpointFilesystemCheck", logfile_path,
                     "checkpoint_folder and results_dir are on the same filesystem",
                 )
-                valid = False
         return valid

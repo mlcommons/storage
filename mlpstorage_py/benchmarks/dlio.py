@@ -16,7 +16,9 @@ from mlpstorage_py.errors import ConfigurationError, ErrorCode
 from mlpstorage_py.rules import calculate_training_data_size, HostInfo, HostMemoryInfo, HostCPUInfo, ClusterInformation
 from mlpstorage_py.rules.datagen_hierarchy import (
     assert_data_dir_hierarchy_absent,
+    validate_checkpoint_leaf,
     validate_datagen_leaf,
+    validate_run_leaf,
     validate_supported_model,
     write_datagen_manifest,
 )
@@ -573,7 +575,14 @@ class DLIOBenchmark(Benchmark, abc.ABC):
         if hasattr(self.args, "command"):
             output_file_prefix += f"_{self.args.command}"
 
-        self._execute_command(cmd, output_file_prefix=output_file_prefix)
+        # Capture the DLIO exit status so _run() can gate side-effects
+        # (notably the datagen manifest write) on real success. Prior
+        # to storage#744, the rc was discarded and a failed DLIO/MPI
+        # datagen still produced a success-looking manifest.
+        _stdout, _stderr, rc = self._execute_command(
+            cmd, output_file_prefix=output_file_prefix
+        )
+        self._last_command_rc = rc
 
     @abc.abstractmethod
     def add_workflow_to_cmd(self, cmd) -> str:
@@ -935,6 +944,11 @@ class TrainingBenchmark(DLIOBenchmark):
         # num_files_train that datasize reported on stderr.
         self.params_dict['dataset.num_files_train'] = num_files_train
         self.params_dict['dataset.num_subfolders_train'] = num_subfolders_train
+        # Persist the total-bytes output alongside the file/subfolder outputs
+        # so a manual reviewer (or future run-checker cross-check against
+        # datagen actual bytes) can read the datasize sentinel end-to-end
+        # from datasize/<ts>/*_metadata.json. See Rules.md §3.3.1.
+        self.params_dict['dataset.total_disk_bytes'] = int(total_disk_bytes)
 
         self.logger.result(f'Number of training files: {num_files_train}')
         self.logger.result(f'Number of training subfolders: {num_subfolders_train}')
@@ -955,13 +969,26 @@ class TrainingBenchmark(DLIOBenchmark):
         except Exception as e:
             self.logger.error(f'Error occurred while executing command: {str(e)}')
             return EXIT_CODE.FAILURE
-        # Post-datagen actions: leaf WARN + self-describing manifest
-        # write. Runs only after DLIO's datagen command returned
-        # success and only outside whatif (whatif is simulation and
-        # skips per D-29 policy).
+        # Post-datagen actions: leaf completeness check + self-describing
+        # manifest write. Runs only after DLIO's datagen command returned
+        # success and only outside whatif (whatif is simulation and skips
+        # per D-29 policy). storage#744: gate on the DLIO exit code and
+        # on required-leaf presence — a success-looking manifest written
+        # after a failed run lets downstream steps treat an incomplete
+        # dataset as valid.
         if self.args.command == "datagen" and self.args.mode != "whatif":
+            rc = getattr(self, '_last_command_rc', 0)
+            if rc != 0:
+                self.logger.error(
+                    f'DLIO datagen command exited with non-zero status '
+                    f'({rc}); skipping datagen manifest write. The dataset '
+                    f'under "{self.args.data_dir}" is incomplete and must '
+                    f'be regenerated.'
+                )
+                return EXIT_CODE.FAILURE
             try:
-                self._post_datagen_actions()
+                if not self._post_datagen_actions():
+                    return EXIT_CODE.FAILURE
             except ConfigurationError as e:
                 # A workload YAML that lacks the three DLIO fields is
                 # a real bug — surface loudly rather than write a
@@ -970,22 +997,80 @@ class TrainingBenchmark(DLIOBenchmark):
                     f'Post-datagen validation failed: {e}'
                 )
                 return EXIT_CODE.FAILURE
+        # Post-run loud-fail (storage#761). Mirrors the datagen block:
+        # storage#744 landed rc + leaf checks for datagen but not for
+        # run, so a DLIO training-run subprocess that died silently
+        # (crashed, killed, wrote no outputs) was reported as SUCCESS
+        # here and only surfaced later when ``mlpstorage validate``
+        # rejected the missing files. mlpstorage owns the verdict; the
+        # operator should not have to grep stdout logs to know whether
+        # their run produced valid artifacts.
+        if self.args.command == "run" and self.args.mode != "whatif":
+            rc = getattr(self, '_last_command_rc', 0)
+            if rc != 0:
+                self.logger.error(
+                    f'DLIO training-run command exited with non-zero '
+                    f'status ({rc}). Inspect the stdout/stderr logs '
+                    f'under "{self.run_result_output}" for the '
+                    f'underlying failure; this run\'s artifacts are '
+                    f'incomplete and must be re-run.'
+                )
+                return EXIT_CODE.FAILURE
+            missing = validate_run_leaf(self.run_result_output)
+            if missing:
+                for item in missing:
+                    self.logger.error(f'Training-run output leaf incomplete: {item}')
+                self.logger.error(
+                    f'Training-run leaf under "{self.run_result_output}" '
+                    f'is missing {len(missing)} required artifact(s) '
+                    f'despite a zero exit code. This run cannot be '
+                    f'submitted; re-run and inspect the DLIO stdout/'
+                    f'stderr logs for the underlying failure.'
+                )
+                return EXIT_CODE.FAILURE
         return EXIT_CODE.SUCCESS
 
-    def _post_datagen_actions(self):
-        """WARN for missing leaf files, then write the datagen manifest.
+    def _post_datagen_actions(self) -> bool:
+        """Verify the datagen leaf, then write the manifest.
 
-        Leaf-presence check runs unconditionally on the local
-        ``run_result_output`` — any missing file surfaces as a WARN
-        but does not flip the exit code. The manifest writer detects
+        Returns ``True`` on success (manifest written), ``False`` when a
+        required leaf artifact is missing and the manifest was skipped.
+        Prior to storage#744 the leaf-presence check only WARNed and the
+        manifest was written unconditionally; a partial DLIO run left
+        behind a success-looking marker. The manifest writer detects
         object-storage URIs via ``--data-dir``'s scheme and dispatches
         to s3dlio internally, so this method is backend-agnostic.
         """
-        missing = validate_datagen_leaf(self.run_result_output)
-        for item in missing:
+        # storage#767: write metadata BEFORE the leaf check. The
+        # required-artifact set includes ``training_<ts>_metadata.json``
+        # (mlpstorage-injected — see DATAGEN_REQUIRED_FILES), but
+        # main.py's ``benchmark.write_metadata()`` runs in a ``finally``
+        # block AFTER ``benchmark.run()`` returns. Without this
+        # pre-write the validator false-positived on every datagen run,
+        # reporting the metadata file missing and refusing to write the
+        # manifest. Errors here are logged but not fatal — if the write
+        # actually fails, the leaf check below will surface the
+        # still-missing metadata file with the same loud error path.
+        try:
+            self.write_metadata()
+        except Exception as e:
             self.logger.warning(
-                f'Datagen output leaf incomplete: {item}'
+                f'Failed to write datagen metadata before leaf check: {e}'
             )
+
+        missing = validate_datagen_leaf(self.run_result_output)
+        if missing:
+            for item in missing:
+                self.logger.error(
+                    f'Datagen output leaf incomplete: {item}'
+                )
+            self.logger.error(
+                f'Datagen leaf under "{self.run_result_output}" is missing '
+                f'{len(missing)} required artifact(s); skipping datagen '
+                f'manifest write. The dataset under "{self.args.data_dir}" '
+                f'is incomplete and must be regenerated.'
+            )
+            return False
 
         dataset_params = (self.combined_params or {}).get("dataset", {})
         manifest_path = write_datagen_manifest(
@@ -995,6 +1080,7 @@ class TrainingBenchmark(DLIOBenchmark):
             source_datagen_result_dir=self.run_result_output,
         )
         self.logger.info(f'Datagen manifest written: {manifest_path}')
+        return True
 
 
 class CheckpointingBenchmark(DLIOBenchmark):
@@ -1080,6 +1166,35 @@ class CheckpointingBenchmark(DLIOBenchmark):
                 return EXIT_CODE.INVALID_ARGUMENTS
         except Exception as e:
             return EXIT_CODE.FAILURE
+        # Post-run loud-fail (storage#761 sibling). Same silent-success
+        # gap as TrainingBenchmark's run branch: execute_command captures
+        # the DLIO rc into self._last_command_rc but the checkpointing
+        # _run returned SUCCESS regardless. A DLIO checkpointing run
+        # that dies without writing summary.json / dlio.log now surfaces
+        # as ERROR here instead of only at ``mlpstorage validate`` time.
+        if self.args.command == "run" and getattr(self.args, 'mode', None) != "whatif":
+            rc = getattr(self, '_last_command_rc', 0)
+            if rc != 0:
+                self.logger.error(
+                    f'DLIO checkpointing-run command exited with non-zero '
+                    f'status ({rc}). Inspect the stdout/stderr logs '
+                    f'under "{self.run_result_output}" for the '
+                    f'underlying failure; this run\'s artifacts are '
+                    f'incomplete and must be re-run.'
+                )
+                return EXIT_CODE.FAILURE
+            missing = validate_checkpoint_leaf(self.run_result_output)
+            if missing:
+                for item in missing:
+                    self.logger.error(f'Checkpointing-run output leaf incomplete: {item}')
+                self.logger.error(
+                    f'Checkpointing-run leaf under "{self.run_result_output}" '
+                    f'is missing {len(missing)} required artifact(s) '
+                    f'despite a zero exit code. This run cannot be '
+                    f'submitted; re-run and inspect the DLIO stdout/'
+                    f'stderr logs for the underlying failure.'
+                )
+                return EXIT_CODE.FAILURE
         return EXIT_CODE.SUCCESS
 
     # ------------------------------------------------------------------

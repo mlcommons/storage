@@ -153,14 +153,23 @@ def _make_mock_benchmark(destination, required_bytes, logger=None):
     We provide an empty hosts list by default so the probe takes its
     SC#8 single-host no-op short-circuit; tests that care about the
     CAP-02 path can override args.hosts and patch run_shared_fs_probe.
+
+    storage#772 (CAP-02b wiring) note: _pre_execution_gate additionally
+    reads self.run_result_output to invoke run_results_dir_shared_probe.
+    The empty hosts list above also silences CAP-02b; we set
+    args.skip_validation to False (the production default) so the
+    CAP-02b block executes and reaches its own short-circuit rather than
+    being suppressed by the opt-out flag.
     """
     bm = MagicMock(spec=Benchmark)
     bm._capacity_gate_destination = MagicMock(return_value=destination)
     bm.required_bytes_for_capacity_gate = MagicMock(return_value=required_bytes)
     bm.logger = logger or MagicMock()
     bm.args = SimpleNamespace(hosts=[], mpi_bin=None,
-                              allow_run_as_root=False, ssh_username=None)
+                              allow_run_as_root=False, ssh_username=None,
+                              skip_validation=False)
     bm._run_uuid = "test-uuid-mock"
+    bm.run_result_output = "/tmp/mlps-cap-test-placeholder"
     # Bind the real method to the mock so it actually executes.
     bm._pre_execution_gate = Benchmark._pre_execution_gate.__get__(bm, MagicMock)
     return bm

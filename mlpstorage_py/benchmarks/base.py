@@ -48,7 +48,8 @@ from typing import Tuple, Dict, Any, List, Optional, Callable, Set, TYPE_CHECKIN
 
 from functools import wraps
 
-from mlpstorage_py._invocation import INVOCATION_START
+from mlpstorage_py import _invocation
+from mlpstorage_py._invocation import INVOCATION_START, mark_invocation_end
 from mlpstorage_py.config import PARAM_VALIDATION, DATETIME_STR, MLPS_DEBUG, EXEC_TYPE
 from mlpstorage_py.errors import ConfigurationError, ErrorCode, FileSystemError
 from mlpstorage_py.run_directory import (
@@ -67,6 +68,7 @@ from mlpstorage_py.cluster_collector import (
     TimeSeriesCollector,
     MultiHostTimeSeriesCollector,
     run_shared_fs_probe,
+    run_results_dir_shared_probe,
 )
 from mlpstorage_py.benchmarks.fs_separation_probe import probe_fs_separation
 from mlpstorage_py.progress import create_stage_progress, progress_context
@@ -444,6 +446,16 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         # §4.7.1 gap origin — ISO local naive to match DLIO summary.json's
         # start/end format so _parse_iso_gap can consume both fields uniformly.
         metadata['invocation_start_time'] = datetime.fromtimestamp(INVOCATION_START).isoformat()
+        # §4.7.1 write-side gap origin — captured after _collect_cluster_end()
+        # returns, i.e. the moment the write nodes are actually released.
+        # Symmetric with invocation_start_time on the read side. Absent when
+        # the invocation exited before mark_invocation_end() ran (e.g. crash
+        # during _run); the submission checker falls back to summary.end_time.
+        # See mlcommons/storage#782.
+        if _invocation.INVOCATION_END is not None:
+            metadata['invocation_end_time'] = datetime.fromtimestamp(
+                _invocation.INVOCATION_END
+            ).isoformat()
         metadata['verification'] = self.verification.name if self.verification else None
         metadata['executed_command'] = getattr(self, 'executed_command', None)
         metadata['command_output_files'] = self.command_output_files
@@ -462,6 +474,17 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         Writes metadata to {metadata_file_path}. In verbose/debug mode,
         also prints metadata to stdout.
         """
+        # §4.7.1 write-side bookend — captured here (as late as possible
+        # while still landing in the persisted file) so the recorded
+        # instant reflects the point at which rank 0 is about to exit,
+        # not merely the end of the timed section. Symmetric with the
+        # read-side invocation_start_time capture at first import of
+        # _invocation.py. Per-invocation teardown that follows this
+        # point (JSON serialization, interpreter shutdown, MPI finalize)
+        # is excluded from the failover-callout budget, mirroring the
+        # framework-startup exclusion on the read side. See
+        # mlcommons/storage#782.
+        mark_invocation_end()
         with open(self.metadata_file_path, 'w+') as fd:
             json.dump(self.metadata, fd, indent=2, cls=MLPSJsonEncoder)
 
@@ -1056,6 +1079,29 @@ class Benchmark(BenchmarkInterface, abc.ABC):
                 mpi_bin=getattr(self.args, 'mpi_bin', None),
                 allow_run_as_root=getattr(self.args, 'allow_run_as_root', False),
                 ssh_username=getattr(self.args, 'ssh_username', None),
+            )
+        # ------------------------------------------------------------------
+        # CAP-02b: --results-dir shared-FS probe (storage#772).
+        # ------------------------------------------------------------------
+        # CAP-02 covers --data-dir. --results-dir has the same
+        # shared-FS requirement (rank 0 writes summary.json/output.json,
+        # each rank writes its own dlio.log) but was previously only
+        # probed for kvcache (issue #521). Storage#772's reporter ran 51
+        # workers with a per-host-local --results-dir; each host wrote
+        # dlio.log to its own copy, only rank 0 wrote summary.json to
+        # its own copy, and the launcher's timestamp leaf came out empty.
+        # Reuses the same --skip-validation opt-out as CAP-02; no new
+        # flag needed (see storage#772 discussion for the opt-out
+        # rationale re: Argonne's srun/PALS auto-skip).
+        if not getattr(self.args, 'skip_validation', False):
+            hosts = getattr(self.args, 'hosts', None) or []
+            run_results_dir_shared_probe(
+                results_dir=self.run_result_output,
+                hosts=hosts,
+                run_uuid=self._run_uuid,
+                logger=self.logger,
+                mpi_bin=getattr(self.args, 'mpi_bin', None),
+                allow_run_as_root=getattr(self.args, 'allow_run_as_root', False),
             )
         # ------------------------------------------------------------------
         # Slice 5 / CAP-03: FS-separation probe (issue #601).

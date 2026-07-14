@@ -7,6 +7,7 @@ by isolating data generation from storage operations using shared memory buffers
 import os
 import time
 import multiprocessing as mp
+from contextlib import contextmanager
 
 
 # Per-node MPI rank count, used to size the dgen-py generator's thread pool.
@@ -170,6 +171,75 @@ from multiprocessing import shared_memory
 from typing import Optional, Dict, Any
 
 from .storage_writers import StorageWriterFactory
+
+
+# Issue #768 / #777: pre-3.13 CPython resource_tracker double-unlink workaround.
+#
+# The tracker daemon's cache is a `set`; REGISTER = idempotent add,
+# UNREGISTER = set.remove (KeyError on absent). SharedMemory(name=...) attach
+# unconditionally sends REGISTER to the tracker, so a writer subprocess that
+# borrows Main-owned buffers ends up double-registered. Without any
+# workaround, the tracker at exit unlinks whatever's left in cache and races
+# Main's own shm.unlink() — one wins, the other raises FileNotFoundError
+# and (on the shm side) killed the owning MPI rank in Main's finally block
+# (#768).
+#
+# The initial #768 fix used the "immediate unregister in child" community
+# pattern (register then unregister right after attach). That pattern is
+# correct only when the parent NEVER explicitly calls shm.unlink() /
+# SemLock finalizer itself — because SharedMemory.unlink() and
+# SemLock._cleanup both end in resource_tracker.unregister() on the same
+# name. Our parent DOES call shm.unlink() per save() cycle (a fresh pool
+# per save() means the previous pool must be released or /dev/shm leaks
+# gigabytes per checkpoint), and Main's SemLock Finalize inevitably fires
+# on Queue/Event GC. The child's immediate UNREGISTER empties the set
+# entry; Main's later UNREGISTER then hits set.remove on an absent name
+# -> KeyError storm at 64 ranks x N save() calls (#777). On the semaphore
+# side the same race + SemLock._cleanup's own sem_unlink produced a
+# 700+/run "sem_unlink -> FileNotFoundError" cascade, correlated with a
+# cluster-wide livelock right after checkpoint 1.
+#
+# The correct shape for our lifecycle is the OTHER well-known variant:
+# skip registration in the child entirely, so the tracker cache holds
+# exactly one entry (Main's) and Main's later unlink -> unregister finds
+# it and removes it cleanly. Functionally equivalent to Python 3.13's
+# SharedMemory(track=False).
+#
+# We only do this for shared_memory. SemLock's __setstate__ registers with
+# the tracker BEFORE our target function runs (it happens during pickle
+# unpickling in the forkserver bootstrap), so a context-manager scope
+# can't catch it. That's OK: pre-#768 semaphore behavior was "alarming
+# SemLock._rebuild warnings but functionally correct" — strictly better
+# than the KeyError + double-sem_unlink cascade #777 reports.
+@contextmanager
+def _child_skips_shm_registration():
+    """Suppress ``resource_tracker.register`` for ``shared_memory`` within
+    the block.
+
+    Used in the writer subprocess so ``SharedMemory(name=...)`` attach
+    does NOT double-register Main-owned buffer names in the tracker
+    daemon's cache. See the module comment above for why this is the
+    correct pattern for our lifecycle and why the "immediate unregister
+    after attach" variant (initial #768 fix) is not.
+
+    Only the ``register`` shim is installed — ``unregister`` is left
+    alone, so the child cannot accidentally send an UNREGISTER for a
+    name it never REGISTERed. The patch is scoped to the ``with`` block
+    and restored in ``finally`` even on exception.
+    """
+    from multiprocessing import resource_tracker
+    orig_register = resource_tracker.register
+
+    def _register_skip_shm(name, rtype):
+        if rtype == "shared_memory":
+            return
+        return orig_register(name, rtype)
+
+    resource_tracker.register = _register_skip_shm
+    try:
+        yield
+    finally:
+        resource_tracker.register = orig_register
 
 # Try to import dgen-py for high-performance data generation
 try:
@@ -409,10 +479,10 @@ class StreamingCheckpointing:
             raise
         
         finally:
-            # Cleanup buffers
-            for shm in buffers:
-                shm.close()
-                shm.unlink()
+            # Cleanup buffers — see _release_buffer_pool for the #768 defensive
+            # FileNotFoundError swallow that keeps a raced writer-side unlink
+            # from crashing the owning MPI rank in Main's finally.
+            self._release_buffer_pool(buffers)
         
         # Collect results
         if stats_queue.empty():
@@ -424,6 +494,35 @@ class StreamingCheckpointing:
         
         return self._format_results(stats, gen_time, time.time() - start_time, total_size_bytes)
     
+    @staticmethod
+    def _release_buffer_pool(buffers):
+        """Release Main's per-save() shared-memory buffer pool.
+
+        Defensive against #768: swallows ``FileNotFoundError`` on
+        ``shm.unlink()`` because a second unlink of an already-unlinked
+        segment is exactly the desired end state (segment gone), not a real
+        failure — that spurious exception is what crashed the owning MPI
+        rank and killed the whole job in the reporter's traceback.
+
+        Other exceptions (``PermissionError``, ``OSError`` from the IO layer)
+        still propagate: they indicate real bugs, not the resource_tracker
+        double-unlink race, and must not be masked by this shim.
+        Non-``FileNotFoundError`` ``close()`` failures on one buffer do not
+        stop cleanup of the rest — segments are independent POSIX names and
+        one bad segment shouldn't strand N-1 others as leaks.
+        """
+        for shm in buffers:
+            try:
+                shm.close()
+            except Exception:
+                pass  # keep unwinding — the remaining unlink still matters
+            try:
+                shm.unlink()
+            except FileNotFoundError:
+                # #768: writer's resource_tracker won the race. Segment is
+                # gone, which is what we wanted. Not a real error.
+                pass
+
     def _create_buffer_pool(self):
         """Create shared memory buffer pool."""
         print(f"\n[Main] Creating {self.num_buffers} buffers...")
@@ -523,12 +622,24 @@ class StreamingCheckpointing:
         print(f"[Writer] DEBUG: AWS_ACCESS_KEY_ID = {aws_key[:4] if aws_key != 'NOT SET' else 'NOT SET'}***")
         print(f"[Writer] DEBUG: AWS_ENDPOINT_URL = {aws_endpoint}")
         
-        # Attach to shared memory buffers
+        # Attach to shared memory buffers.
+        #
+        # #768/#777: suppress this child's tracker REGISTER for each
+        # SharedMemory attach. Main owns these segments and will call
+        # shm.unlink() itself per save() cycle; if we let the child ALSO
+        # register with the tracker daemon, either the tracker unlinks at
+        # exit and races Main's unlink -> FileNotFoundError (#768), or we
+        # "immediate unregister" and Main's later unregister trips
+        # KeyError on an already-empty set (#777). Skipping the register
+        # entirely leaves the daemon holding exactly one entry (Main's),
+        # so Main's unlink -> unregister finds and removes it cleanly.
+        # Equivalent to SharedMemory(track=False) which lands in 3.13.
         buffers = []
-        for name in buffer_names:
-            shm = shared_memory.SharedMemory(name=name)
-            buffers.append(shm)
-        
+        with _child_skips_shm_registration():
+            for name in buffer_names:
+                shm = shared_memory.SharedMemory(name=name)
+                buffers.append(shm)
+
         print(f"[Writer] Attached to {len(buffers)} buffers ({chunk_size / (1024**2):.0f} MB each)")
         
         # Create storage writer

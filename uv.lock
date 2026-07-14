@@ -236,8 +236,8 @@ wheels = [
 
 [[package]]
 name = "dlio-benchmark"
-version = "3.0.2"
-source = { git = "https://github.com/mlcommons/DLIO_local_changes.git?rev=24b13d7630a12e3d08624e5db254694a09f71599#24b13d7630a12e3d08624e5db254694a09f71599" }
+version = "3.0.4"
+source = { git = "https://github.com/mlcommons/DLIO_local_changes.git?rev=edaf4bb3d6343ef2fb6b9f6dbafa6102032ae8bf#edaf4bb3d6343ef2fb6b9f6dbafa6102032ae8bf" }
 dependencies = [
     { name = "dgen-py", marker = "sys_platform == 'linux'" },
     { name = "h5py", marker = "sys_platform == 'linux'" },
@@ -518,7 +518,7 @@ wheels = [
 
 [[package]]
 name = "mlpstorage"
-version = "3.0.38"
+version = "3.0.42"
 source = { editable = "." }
 dependencies = [
     { name = "dlio-benchmark", marker = "sys_platform == 'linux'" },
@@ -583,8 +583,8 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "dlio-benchmark", git = "https://github.com/mlcommons/DLIO_local_changes.git?rev=24b13d7630a12e3d08624e5db254694a09f71599" },
-    { name = "dlio-benchmark", marker = "extra == 'full'", git = "https://github.com/mlcommons/DLIO_local_changes.git?rev=24b13d7630a12e3d08624e5db254694a09f71599" },
+    { name = "dlio-benchmark", git = "https://github.com/mlcommons/DLIO_local_changes.git?rev=edaf4bb3d6343ef2fb6b9f6dbafa6102032ae8bf" },
+    { name = "dlio-benchmark", marker = "extra == 'full'", git = "https://github.com/mlcommons/DLIO_local_changes.git?rev=edaf4bb3d6343ef2fb6b9f6dbafa6102032ae8bf" },
     { name = "elasticsearch", marker = "extra == 'vectordb'", specifier = ">=8.0" },
     { name = "elasticsearch", marker = "extra == 'vectordb-elasticsearch'", specifier = ">=8.0" },
     { name = "minio", specifier = ">=7.2.20" },
@@ -616,7 +616,7 @@ requires-dist = [
     { name = "pyyaml", marker = "extra == 'vectordb-milvus'", specifier = ">=6.0" },
     { name = "pyyaml", marker = "extra == 'vectordb-pgvector'", specifier = ">=6.0" },
     { name = "rich", specifier = ">=13.0" },
-    { name = "s3dlio", specifier = ">=0.9.106" },
+    { name = "s3dlio", specifier = ">=0.9.112" },
     { name = "s3torchconnector", specifier = ">=1.5.0" },
     { name = "tabulate", marker = "extra == 'vectordb'", specifier = ">=0.9" },
     { name = "tabulate", marker = "extra == 'vectordb-elasticsearch'", specifier = ">=0.9" },
@@ -1202,15 +1202,15 @@ wheels = [
 
 [[package]]
 name = "s3dlio"
-version = "0.9.106"
+version = "0.9.112"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "numpy", marker = "sys_platform == 'linux'" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/05/b8/5db92b8687fd6f7a7535c07f3956cf5d469ed4d84a3f15405982e67bb0dd/s3dlio-0.9.106.tar.gz", hash = "sha256:d991b9113813950bd23cebc7ceb03f7dfb0f36fe3704957256f2171b2b5484d9", size = 1599795, upload-time = "2026-07-01T03:27:35.304Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/bb/8c/85f46ccf09cdea309af618a786465dad86fb179cb92ae5229bb377558624/s3dlio-0.9.112.tar.gz", hash = "sha256:f9fa8b419a9e4c35ddc38b31e0639663832153f20f54bf76e459a49055fbc60f", size = 1843933, upload-time = "2026-07-11T20:52:34.254Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/de/43/e5f2aa8948db6c77289c55fdab616c2ad942d3a35e680c1f85ea5443fd0e/s3dlio-0.9.106-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:4a0c129a84761a46e27b0c15faf7725c9795551f3a81e9cf402c4ea4336c11c6", size = 12412558, upload-time = "2026-07-01T03:27:26.375Z" },
-    { url = "https://files.pythonhosted.org/packages/e3/4d/94553e72ffd42441c7e4bf24ede1bbc1caa8af58a9019f35e13e9d742b82/s3dlio-0.9.106-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:f2202d5b6fa0c80b3c0c19819921432259c15abb9110438bddc4501a80ca7aee", size = 12834880, upload-time = "2026-07-01T03:27:28.761Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/1f/f40349919c698484a8de65f145877b493cc2cc5850052474b6ba3975a26f/s3dlio-0.9.112-cp312-cp312-manylinux_2_17_aarch64.manylinux2014_aarch64.whl", hash = "sha256:027fdd61f0c7ab94badbca1f53c9f2f578d582f2e4cc829e82c4e4c0a2e2e6d8", size = 12251926, upload-time = "2026-07-11T20:52:26.522Z" },
+    { url = "https://files.pythonhosted.org/packages/c8/56/7a86a7a9a9f7bc8238176a447fafda8a5c5bf9d00504f4918bfd1fa0021e/s3dlio-0.9.112-cp312-cp312-manylinux_2_17_x86_64.manylinux2014_x86_64.whl", hash = "sha256:c77b4e3afc2fe4633a71b87cb69601c8f891ed2ffea5fd9c0cb568856a2820dd", size = 12670008, upload-time = "2026-07-11T20:52:28.686Z" },
 ]
 
 [[package]]

@@ -1018,6 +1018,28 @@ def capture_or_verify_code_image(args, env, log):
                        f"or point --results-dir at an existing directory",
             code=ErrorCode.CONFIG_INVALID_VALUE,
         )
+    # Issue #778: refuse when results_dir is inside source_root. The pool tmp
+    # lives under org_root = <results_dir>/<orgname>/, so _atomic_capture's
+    # shutil.copytree(source_root, tmp) walks its own destination, copies
+    # itself into itself, and blows out with ENAMETOOLONG. Even without the
+    # recursion, compute_code_tree_md5(source_root) would fold prior-run
+    # outputs and the .mlps-code-image pointer written by the current run
+    # into the source hash, so verify_source_against_image would silently
+    # fail on the next invocation. Refusing here fixes both.
+    source_root = find_source_root()
+    resolved_source = source_root.resolve()
+    resolved_results = results_dir.resolve()
+    if resolved_results == resolved_source or resolved_results.is_relative_to(resolved_source):
+        raise ConfigurationError(
+            f"--results-dir {str(results_dir)!r} lives inside the mlpstorage "
+            f"source tree at {str(source_root)!r} (issue #778); the code-image "
+            f"capture would recursively copy its own destination and fail with "
+            f"ENAMETOOLONG",
+            parameter="--results-dir",
+            suggestion="Point --results-dir at a path OUTSIDE the mlpstorage "
+                       "checkout (e.g., /var/tmp/mlps-results, $HOME/mlps-results)",
+            code=ErrorCode.CONFIG_INVALID_VALUE,
+        )
     # 6. Phase 6 pool + pointer flow (D-63..D-67, CAPVER-01/02/03, POOL-01..04,
     # PTR-01, UX-01). Mode-agnostic org_root per D-64: pool images live under
     # <results_dir>/<orgname>/code-<hash8>/, shared across closed and open.
@@ -1038,7 +1060,7 @@ def capture_or_verify_code_image(args, env, log):
         )
 
     # 6b. Hash the live source tree exactly once (CAPVER-01 predicate).
-    source_root = find_source_root()
+    # source_root was resolved above for the #778 nested-results guard.
     live_hash = compute_code_tree_md5(str(source_root), log)
     if live_hash is None:
         # source_root exists (find_source_root would have raised

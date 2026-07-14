@@ -493,6 +493,38 @@ class TestTrainingRunRulesChecker:
         assert all(i.parameter == "Tool-Injected Parameters" for i in tool_msgs)
         assert all(i.parameter == "Overrode Parameters" for i in closed_msgs)
 
+    def test_check_allowed_params_datasize_total_disk_bytes_not_invalid(self, mock_logger):
+        """Regression for #760: reportgen loading a datasize run's metadata
+        marked the run INVALID because dataset.total_disk_bytes — written by
+        datasize() into params_dict as a sentinel for downstream tools — was
+        not listed as tool-injected."""
+        data = BenchmarkRunData(
+            benchmark_type=BENCHMARK_TYPES.training,
+            model="retinanet",
+            command="datasize",
+            run_datetime="20260710_093802",
+            num_processes=40,
+            parameters={
+                "dataset": {"num_files_train": 160234914, "num_subfolders_train": 0},
+                "reader": {"read_threads": 8}
+            },
+            override_parameters={
+                # The exact key that surfaced in #760's reportgen output.
+                "dataset.total_disk_bytes": 51748987120698,
+            }
+        )
+        run = BenchmarkRun.from_data(data, mock_logger)
+        checker = TrainingRunRulesChecker(run, logger=mock_logger)
+        issues = checker.check_allowed_params()
+
+        assert all(i.validation != PARAM_VALIDATION.INVALID for i in issues), (
+            f"dataset.total_disk_bytes is tool-written by datasize(); it must "
+            f"not be marked INVALID. Got: {[(i.message, i.validation) for i in issues]}"
+        )
+        tool_msgs = [i for i in issues if i.message.startswith("Tool-injected parameter:")]
+        assert len(tool_msgs) == 1
+        assert "dataset.total_disk_bytes" in tool_msgs[0].message
+
     def test_tool_injected_params_constant_includes_storage_keys(self):
         """All known tool-side setters in dlio.py must have their keys listed.
         Drift between the setters and this constant re-introduces #494-class bugs."""
@@ -515,6 +547,12 @@ class TestTrainingRunRulesChecker:
 
         # Key touched by add_datadir_param.
         assert "dataset.data_folder" in TrainingRunRulesChecker.TOOL_INJECTED_PARAMS
+
+        # Key persisted by datasize() into params_dict so the metadata file
+        # captures the sizing sentinel end-to-end (#760). Without this,
+        # reportgen loads the datasize metadata and marks the run INVALID
+        # for a value the tool itself wrote.
+        assert "dataset.total_disk_bytes" in TrainingRunRulesChecker.TOOL_INJECTED_PARAMS
 
     def test_check_odirect_unsupported_model(self, mock_logger):
         """check_odirect_supported_model returns INVALID for non-unet3d."""
