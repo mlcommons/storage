@@ -149,10 +149,32 @@ class GroundTruthBuilder:
             ``result[q]`` contains the IDs of the *k* nearest database
             vectors to query *q*, ordered closest-first.
         """
+        ids, _ = self.build_with_similarities()
+        return ids
+
+    def build_with_similarities(self) -> tuple[np.ndarray, np.ndarray]:
+        """Return the truth table together with its similarities.
+
+        The similarities are the internal "higher is better" inner
+        products (equivalent ranking for COSINE / IP / L2 on
+        L2-normalized vectors) and are required for tie-aware
+        epsilon-recall (issue #625): with random high-dimensional data
+        the gap between the k-th and (k+1)-th neighbor is often below
+        float32 matmul noise, so exact set-intersection recall
+        penalizes ANN results that are numerically indistinguishable
+        from the ground truth.
+
+        Returns
+        -------
+        (ids, similarities) : tuple[np.ndarray, np.ndarray]
+            Both shaped ``(num_queries, k)``, sorted closest-first per
+            query.  ``ids`` is int64, ``similarities`` float32.
+        """
         # Descending similarity -- highest (closest) first.
         order = np.argsort(-self._top_dist, axis=1)
         sorted_ids = np.take_along_axis(self._top_ids, order, axis=1)
-        return sorted_ids
+        sorted_sims = np.take_along_axis(self._top_dist, order, axis=1)
+        return sorted_ids, sorted_sims
 
     # ------------------------------------------------------------------
     # Internals
