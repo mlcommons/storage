@@ -181,13 +181,13 @@ class TestTrain02_MlpstorageFilesystemCheck:
             f"Expected 'same filesystem' in warning; got {mock_logger.warnings[0]!r}"
 
     def test_df_not_found_emits_3_4_2_missing(self, tmp_path, mock_logger):
-        """No sidecar AND no df logfile → hard [3.4.2] violation (D-B8, #601).
+        """No sidecar AND no df logfile → WARN [3.4.2] (D-B8, #601).
 
-        Post-#601 D-B8 contract: when neither the CAP-03 sidecar nor the
-        df block is present, the rule has no evidence of FS separation and
-        must fire a hard violation. The pre-#601 TODO-001 warn-only
-        downgrade is no longer in effect now that the producer side ships
-        the sidecar.
+        D-B8 evidence-gap path: when neither the CAP-03 sidecar nor the
+        df block is present, the rule has no evidence of FS separation.
+        Emitted at WARN (not hard-fail) so pre-#601 legacy submissions
+        without the sidecar are not blocked at ingest — reviewers must
+        confirm separation manually.
         """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(
@@ -198,10 +198,13 @@ class TestTrain02_MlpstorageFilesystemCheck:
         )
         check = _run_training_check(root, mock_logger)
         result = check.mlpstorage_filesystem_check()
-        assert result is False
-        assert len(mock_logger.errors) >= 1
-        assert mock_logger.errors[0].startswith("[3.4.2 trainingMlpstorageFilesystemCheck]"), \
-            f"Expected prefix [3.4.2 trainingMlpstorageFilesystemCheck]; got {mock_logger.errors[0]!r}"
+        assert result is True
+        assert mock_logger.errors == []
+        assert len(mock_logger.warnings) >= 1
+        assert mock_logger.warnings[0].startswith("[3.4.2 trainingMlpstorageFilesystemCheck]"), \
+            f"Expected prefix [3.4.2 trainingMlpstorageFilesystemCheck]; got {mock_logger.warnings[0]!r}"
+        assert "sidecar not found" in mock_logger.warnings[0], \
+            f"Expected 'sidecar not found' in warning; got {mock_logger.warnings[0]!r}"
 
     def test_object_api_silent_passes(self, tmp_path, mock_logger):
         """benchmark_API='object' → silent-pass; no errors emitted (D-B7)."""
@@ -256,10 +259,10 @@ class TestTrain02_DfBlockNotFoundIsRuleIdTagged:
     def test_df_not_found_violation_includes_logfile_path(self, tmp_path, mock_logger):
         """df-not-found violation must include 'training_run.stdout.log' in the message.
 
-        Post-#601 D-B8: df-not-found (with sidecar also absent) is a hard
-        violation on ``mock_logger.errors``. The submitter-grep contract
-        still applies — the logfile path must appear so submitters can
-        locate the failing run.
+        D-B8: df-not-found (with sidecar also absent) is a WARN on
+        ``mock_logger.warnings``. The reviewer-grep contract still applies —
+        the logfile path must appear so reviewers can locate the run that
+        needs manual verification.
         """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(
@@ -269,11 +272,11 @@ class TestTrain02_DfBlockNotFoundIsRuleIdTagged:
         )
         check = _run_training_check(root, mock_logger)
         check.mlpstorage_filesystem_check()
-        assert len(mock_logger.errors) >= 1
+        assert len(mock_logger.warnings) >= 1
         assert any(
             "training_run.stdout.log" in m
-            for m in mock_logger.errors
+            for m in mock_logger.warnings
         ), (
-            f"Expected 'training_run.stdout.log' in at least one error message; "
-            f"got {mock_logger.errors}"
+            f"Expected 'training_run.stdout.log' in at least one warning message; "
+            f"got {mock_logger.warnings}"
         )

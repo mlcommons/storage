@@ -1034,8 +1034,9 @@ class CheckpointingCheck(BaseCheck):
 
         Analog of TRAIN-02 for checkpointing. Per D-B5, shares
         _check_filesystem_separation helper. Per D-B7, silent-passes when
-        benchmark_API == 'object'. Per D-B4, 'df output not found' is itself a
-        violation tagged with this rule ID.
+        benchmark_API == 'object'. D-B8: when both the CAP-03 sidecar and
+        the df block are absent, emit a WARN under this rule ID so pre-#601
+        legacy runs are not blocked at ingest.
         """
         valid = True
         if self.mode != "checkpointing":
@@ -1064,14 +1065,14 @@ class CheckpointingCheck(BaseCheck):
             ok, df_found = _check_filesystem_separation(chkpt_args, logfile_path)
             if not df_found:
                 # D-B8: no CAP-03 sidecar AND no df block → no evidence of
-                # FS separation at all. Fire a hard violation so producers
-                # that predate #601 and never captured df cannot silently
-                # pass 4.4.2.
-                self.log_violation(
+                # FS separation. Emit at WARN so pre-#601 legacy runs are
+                # not silently blocked at ingest; reviewers must confirm
+                # checkpoint_folder / results_dir separation manually.
+                self.warn_violation(
                     "4.4.2", "checkpointFilesystemCheck", logfile_path,
-                    "fs_separation.json sidecar not found; df block also absent",
+                    "fs_separation.json sidecar not found and df block also absent; "
+                    "cannot verify checkpoint_folder/results_dir separation — reviewer must confirm manually",
                 )
-                valid = False
                 continue
             if not ok:
                 self.warn_violation(

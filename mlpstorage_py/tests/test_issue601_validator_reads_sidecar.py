@@ -268,7 +268,11 @@ class TestRule3_4_2_TrainingSidecar:
         assert any("same filesystem" in v for v in violations), violations
 
     def test_no_sidecar_no_df_fires_db8(self, tmp_path):
-        """Missing sidecar AND missing df-block → new D-B8 violation under 3.4.2."""
+        """Missing sidecar AND missing df-block → D-B8 WARN under 3.4.2.
+
+        Downgraded from hard-fail to WARN so pre-#601 legacy runs are not
+        blocked at ingest — reviewers verify separation manually.
+        """
         leaf, ts_dir, run_files = _build_training_tree(
             tmp_path, write_sidecar=False, write_logfile=True,
         )
@@ -276,13 +280,12 @@ class TestRule3_4_2_TrainingSidecar:
 
         result = check.mlpstorage_filesystem_check()
 
-        assert result is False
-        violations = [str(c) for c in check.log.error.call_args_list]
-        # New D-B8 message is acceptable; "df output not found" fallback is also
-        # acceptable for one release. Either way, SOMETHING fires under 3.4.2.
+        assert result is True
+        assert check.log.error.call_args_list == []
+        violations = [str(c) for c in check.log.warning.call_args_list]
         assert any(
             "[3.4.2 trainingMlpstorageFilesystemCheck]" in v for v in violations
-        ), f"expected a 3.4.2 violation; got: {violations}"
+        ), f"expected a 3.4.2 warning; got: {violations}"
 
 
 # ---------------------------------------------------------------------------

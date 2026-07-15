@@ -965,14 +965,14 @@ class TrainingCheck(BaseCheck):
             ok, df_found = _check_filesystem_separation(args, logfile_path)
             if not df_found:
                 # D-B8: no CAP-03 sidecar AND no df block → no evidence of
-                # FS separation at all. Fire a hard violation so producers
-                # that predate #601 and never captured df cannot silently
-                # pass 3.4.2.
-                self.log_violation(
+                # FS separation. Emit at WARN so pre-#601 legacy runs are
+                # not silently blocked at ingest; reviewers must confirm
+                # data_dir / results_dir separation manually.
+                self.warn_violation(
                     "3.4.2", "trainingMlpstorageFilesystemCheck", logfile_path,
-                    "fs_separation.json sidecar not found; df block also absent",
+                    "fs_separation.json sidecar not found and df block also absent; "
+                    "cannot verify data_dir/results_dir separation — reviewer must confirm manually",
                 )
-                valid = False
                 continue
             if not ok:
                 self.warn_violation(
