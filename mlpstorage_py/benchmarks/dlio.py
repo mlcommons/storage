@@ -287,7 +287,7 @@ class DLIOBenchmark(Benchmark, abc.ABC):
             return 1_000
         return 10_000
 
-    def _apply_skip_listing_params(self):
+    def _apply_skip_listing_params(self, num_files_override: Optional[int] = None):
         """Inject skip_listing=True and an adaptive listing_validation_interval.
 
         Applies to both file and object storage.  skip_listing is safe whenever
@@ -302,16 +302,31 @@ class DLIOBenchmark(Benchmark, abc.ABC):
         ~100 s even at 50 M files.
 
         Both params respect user --params overrides.
+
+        storage#795: for the ``datasize`` command the workload YAML default
+        for ``num_files_train`` is *not* what the user will use downstream —
+        ``datasize`` computes a DRAM-derived recommendation that supersedes
+        it. Callers on the datasize path pass ``num_files_override`` after
+        the recommendation is known so the emitted interval and the INFO log
+        agree with the number reported on the ``Number of training files:``
+        result line and the ``num_files_train=`` value in the datagen-command
+        hint.
         """
         if 'dataset.skip_listing' not in self.params_dict:
             self.params_dict['dataset.skip_listing'] = 'True'
 
         if 'dataset.listing_validation_interval' not in self.params_dict:
-            raw = (self.combined_params or {}).get('dataset', {}).get('num_files_train', 0)
-            try:
-                num_files = int(raw)
-            except (ValueError, TypeError):
-                num_files = 0
+            if num_files_override is not None:
+                try:
+                    num_files = int(num_files_override)
+                except (ValueError, TypeError):
+                    num_files = 0
+            else:
+                raw = (self.combined_params or {}).get('dataset', {}).get('num_files_train', 0)
+                try:
+                    num_files = int(raw)
+                except (ValueError, TypeError):
+                    num_files = 0
             interval = self._compute_validation_interval(num_files)
             self.params_dict['dataset.listing_validation_interval'] = str(interval)
             checks = (num_files // interval) + 2 if interval > 0 and num_files > 0 else num_files
@@ -676,7 +691,13 @@ class TrainingBenchmark(DLIOBenchmark):
         self._apply_odirect_params(storage_root=getattr(self.args, 'data_dir', None))
         # Enable skip_listing for all storage types (file and object).  Must be
         # called after _apply_object_storage_params so combined_params is final.
-        self._apply_skip_listing_params()
+        # storage#795: skip during ``datasize`` — the YAML default for
+        # num_files_train is not what the user will use; the interval and
+        # INFO log must be derived from the recommendation, which is not
+        # computed until ``datasize()`` runs. The datasize path calls this
+        # method itself once the recommendation is known.
+        if self.args.command != "datasize":
+            self._apply_skip_listing_params()
 
         if self.args.command not in ("datagen", "datasize"):
             self.verify_benchmark()
@@ -949,6 +970,14 @@ class TrainingBenchmark(DLIOBenchmark):
         # datagen actual bytes) can read the datasize sentinel end-to-end
         # from datasize/<ts>/*_metadata.json. See Rules.md §3.3.1.
         self.params_dict['dataset.total_disk_bytes'] = int(total_disk_bytes)
+
+        # storage#795: now that the DRAM-derived recommendation is known,
+        # inject skip_listing/listing_validation_interval so the INFO log,
+        # the num_files_train value on the result line below, and the
+        # params baked into the emitted datagen-command hint all agree.
+        # The __init__ call was skipped for datasize precisely so this
+        # deferred call could use the correct num_files_train.
+        self._apply_skip_listing_params(num_files_override=num_files_train)
 
         self.logger.result(f'Number of training files: {num_files_train}')
         self.logger.result(f'Number of training subfolders: {num_subfolders_train}')

@@ -8,6 +8,7 @@ from typing import Optional, List
 
 from mlpstorage_py.config import BENCHMARK_TYPES, PARAM_VALIDATION, UNET, DLRM, RETINANET, FLUX, MODELS
 from mlpstorage_py.rules.issues import Issue
+from mlpstorage_py.rules.param_hints import format_typo_hint
 from mlpstorage_py.rules.run_checkers.base import RunRulesChecker
 from mlpstorage_py.rules.utils import calculate_training_data_size
 
@@ -202,9 +203,15 @@ class TrainingRunRulesChecker(RunRulesChecker):
                     actual=value
                 ))
             else:
+                # storage#795: append a "Did you mean X?" hint for known-typo
+                # dotted keys (e.g. flat ``storage.storage_library`` instead
+                # of nested ``storage.storage_options.storage_library``). The
+                # CLI-parse-time gate catches these before the run starts,
+                # but this path still fires when re-validating older results
+                # whose metadata already contains the typo.
                 issues.append(Issue(
                     validation=PARAM_VALIDATION.INVALID,
-                    message=f"Disallowed parameter override: {param} = {value}",
+                    message=f"Disallowed parameter override: {param} = {value}.{format_typo_hint(param)}",
                     parameter="Overrode Parameters",
                     expected="None",
                     actual=value

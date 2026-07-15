@@ -361,6 +361,32 @@ def update_args(args):
                 "  Multiple overrides: --params A=1 B=2 C=3"
             )
             sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
+
+        # storage#795: reject known-typo dotted keys at CLI-parse time so the
+        # user doesn't wait through MPI cluster collection, code-image
+        # capture, and results-directory creation only to be told the
+        # parameter was disallowed. All three keys are auto-injected by the
+        # tool in --object mode, so the user typically does not need to pass
+        # them at all.
+        from mlpstorage_py.rules.param_hints import KNOWN_PARAM_TYPOS
+        typo_hits = []
+        for tok in flattened_params:
+            key = tok.split('=', 1)[0]
+            canonical = KNOWN_PARAM_TYPOS.get(key)
+            if canonical:
+                typo_hits.append((key, canonical))
+        if typo_hits:
+            lines = ["Error: --params contains dotted key(s) that are not real DLIO parameters:"]
+            for typed, canonical in typo_hits:
+                lines.append(f"  '{typed}' → did you mean '{canonical}'?")
+            lines.append(
+                "  Note: storage.storage_options.* keys are auto-injected by "
+                "the tool in --object mode; you typically do not need to pass "
+                "them explicitly."
+            )
+            print("\n".join(lines))
+            sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
+
         setattr(args, 'params', flattened_params)
 
     if hasattr(args, 'mpi_params') and args.mpi_params:
