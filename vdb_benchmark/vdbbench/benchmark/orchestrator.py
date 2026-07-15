@@ -53,7 +53,12 @@ from typing import Any, Dict, Optional
 import numpy as np
 
 from .backends.base import VectorDBBackend
-from .generator import VectorBlock, VectorGenerator, generate_query_vectors
+from .generator import (
+    QUERY_MODES,
+    VectorBlock,
+    VectorGenerator,
+    generate_query_vectors,
+)
 from .ground_truth import GroundTruthBuilder
 from .search_runner import (
     SearchResult,
@@ -88,9 +93,22 @@ class BenchmarkConfig:
     # Query vectors
     num_query_vectors: int = 10_000
     query_seed: int = 99
+    # "independent" (historical) or "planted" (issue #625): queries are
+    # perturbations of database vectors so every query has genuine near
+    # neighbors and recall@k is discriminative on synthetic data.
+    query_mode: str = "independent"
+    # Approximate L2 displacement of a planted query from its base vector.
+    query_noise: float = 0.05
 
     # Ground truth
     truth_k: int = 100
+    # Tie tolerance for recall (issue #625).  0 = exact set-intersection
+    # recall (historical).  > 0 = a returned neighbor counts as a hit if
+    # its ground-truth similarity is within epsilon of the k-th
+    # neighbor's, so float32-level ties are not scored as misses.
+    # Requires precomputed truth mode (similarities are unavailable in
+    # flat_index mode, which falls back to exact recall with a warning).
+    recall_epsilon: float = 0.0
     truth_mode: str = "precomputed"  # "precomputed" or "flat_index"
 
     # Index
@@ -171,6 +189,7 @@ class BenchmarkOrchestrator:
 
         self.query_vectors: Optional[np.ndarray] = None
         self.truth_table: Optional[np.ndarray] = None
+        self.truth_similarities: Optional[np.ndarray] = None
         self.search_result: Optional[SearchResult] = None
 
         # Timing bookkeeping
@@ -189,6 +208,30 @@ class BenchmarkOrchestrator:
             raise ValueError(
                 f"Invalid mode '{mode}'.  Must be one of {MODES}"
             )
+
+        if self.cfg.query_mode not in QUERY_MODES:
+            raise ValueError(
+                f"Invalid query_mode '{self.cfg.query_mode}'.  "
+                f"Must be one of {QUERY_MODES}"
+            )
+        if self.cfg.query_mode == "planted":
+            # Planted queries are perturbations of the first
+            # num_query_vectors database vectors, which are reproduced
+            # bit-exactly by replaying the producer RNG stream.  That
+            # replay covers exactly one block, so the query count must
+            # fit inside it (and inside the dataset).
+            if self.cfg.num_query_vectors > self.cfg.block_size:
+                raise ValueError(
+                    "query_mode='planted' requires num_query_vectors "
+                    f"({self.cfg.num_query_vectors:,}) <= block_size "
+                    f"({self.cfg.block_size:,})"
+                )
+            if self.cfg.num_query_vectors > self.cfg.num_vectors:
+                raise ValueError(
+                    "query_mode='planted' requires num_query_vectors "
+                    f"({self.cfg.num_query_vectors:,}) <= num_vectors "
+                    f"({self.cfg.num_vectors:,})"
+                )
 
         summary: Dict[str, Any] = {}
 
@@ -218,11 +261,13 @@ class BenchmarkOrchestrator:
         # Ground-truth table
         if self.truth_table is not None:
             gtpath = os.path.join(output_dir, "ground_truth.npz")
-            np.savez_compressed(
-                gtpath,
-                truth_table=self.truth_table,
-                query_vectors=self.query_vectors,
-            )
+            gt_arrays: Dict[str, np.ndarray] = {
+                "truth_table": self.truth_table,
+                "query_vectors": self.query_vectors,
+            }
+            if self.truth_similarities is not None:
+                gt_arrays["truth_similarities"] = self.truth_similarities
+            np.savez_compressed(gtpath, **gt_arrays)
             paths["ground_truth"] = gtpath
 
         # Search results
@@ -256,8 +301,9 @@ class BenchmarkOrchestrator:
 
         # ---- 1. Generate query vectors ---------------------------------
         logger.info(
-            "Generating %s query vectors (%s-d, seed=%d) ...",
-            f"{cfg.num_query_vectors:,}", f"{cfg.dimension:,}", cfg.query_seed,
+            "Generating %s query vectors (%s-d, seed=%d, mode=%s) ...",
+            f"{cfg.num_query_vectors:,}", f"{cfg.dimension:,}",
+            cfg.query_seed, cfg.query_mode,
         )
         t0 = time.time()
         self.query_vectors = generate_query_vectors(
@@ -265,6 +311,9 @@ class BenchmarkOrchestrator:
             dimension=cfg.dimension,
             distribution=cfg.distribution,
             seed=cfg.query_seed,
+            query_mode=cfg.query_mode,
+            dataset_seed=cfg.seed,
+            query_noise=cfg.query_noise,
         )
         self._timings["query_gen_sec"] = time.time() - t0
         logger.info(
@@ -427,7 +476,9 @@ class BenchmarkOrchestrator:
         if gt_builder is not None:
             logger.info("Building final truth table (k=%d) ...", cfg.truth_k)
             t0 = time.time()
-            self.truth_table = gt_builder.build()
+            self.truth_table, self.truth_similarities = (
+                gt_builder.build_with_similarities()
+            )
             self._timings["truth_build_sec"] = time.time() - t0
             logger.info(
                 "Ground truth built in %.2f s  (%s queries x k=%s)",
@@ -487,6 +538,8 @@ class BenchmarkOrchestrator:
             num_rounds=cfg.num_search_rounds,
             batch_size=cfg.search_batch_size,
             log_interval=cfg.log_interval,
+            truth_similarities=self.truth_similarities,
+            recall_epsilon=cfg.recall_epsilon,
         )
 
         t0 = time.time()
@@ -531,6 +584,15 @@ class BenchmarkOrchestrator:
         else:
             gt = np.load(gtpath)
             self.truth_table = gt["truth_table"]
+            if "truth_similarities" in gt.files:
+                self.truth_similarities = gt["truth_similarities"]
+            elif self.cfg.recall_epsilon > 0.0:
+                logger.warning(
+                    "recall_epsilon=%.2e requested but '%s' has no "
+                    "truth_similarities (artifact from an older run); "
+                    "exact recall will be used.",
+                    self.cfg.recall_epsilon, gtpath,
+                )
 
         logger.info(
             "Loaded artifacts from '%s': queries=%s, truth=%s",
@@ -560,6 +622,8 @@ class BenchmarkOrchestrator:
             "search_total_queries": r.total_queries,
             "search_qps": r.qps,
             "search_recall_at_k": r.recall_at_k,
+            "search_recall_at_k_exact": r.recall_at_k_exact,
+            "search_recall_epsilon": r.recall_epsilon,
             "search_latency_p50_ms": r.latency_p50_ms,
             "search_latency_p90_ms": r.latency_p90_ms,
             "search_latency_p99_ms": r.latency_p99_ms,

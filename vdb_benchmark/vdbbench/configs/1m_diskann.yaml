@@ -14,6 +14,18 @@ dataset:
   batch_size: 1000
   num_shards: 1
   vector_dtype: FLOAT_VECTOR
+  # Query realism / recall conditioning (issue #625):
+  #   query_mode: planted   -- queries are perturbations of stored vectors,
+  #                            so every query has genuine near neighbors and
+  #                            recall@k is discriminative on synthetic data.
+  #                            Default 'independent' preserves prior behavior.
+  #   query_noise: 0.05     -- L2 displacement of planted queries.
+  #   recall_epsilon: 1e-4  -- tie tolerance for recall@k; float32-level ties
+  #                            with the k-th neighbor are not scored as misses.
+  #                            Default 0.0 keeps exact set-intersection recall.
+  # query_mode: planted
+  # query_noise: 0.05
+  # recall_epsilon: 1e-4
 
 index:
   index_type: DISKANN

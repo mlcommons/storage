@@ -61,6 +61,8 @@ class SearchResult:
     total_wall_sec: float
     qps: float
     recall_at_k: float
+    recall_at_k_exact: float
+    recall_epsilon: float
     search_k: int
     truth_k: int
 
@@ -85,6 +87,8 @@ def _recall_at_k(
     predicted_ids: np.ndarray,
     truth_ids: np.ndarray,
     k: int,
+    truth_similarities: Optional[np.ndarray] = None,
+    epsilon: float = 0.0,
 ) -> float:
     """Compute mean recall@k across all queries.
 
@@ -96,6 +100,20 @@ def _recall_at_k(
         Shape ``(nq, truth_k)`` -- ground-truth nearest IDs.
     k : int
         Evaluate recall using the top-*k* of the truth table.
+    truth_similarities : np.ndarray, optional
+        Shape ``(nq, truth_k)`` -- "higher is better" similarities
+        aligned with ``truth_ids`` (from
+        ``GroundTruthBuilder.build_with_similarities``).  Required for
+        ``epsilon > 0``.
+    epsilon : float
+        Tie tolerance (issue #625).  When > 0, a predicted ID is
+        credited if it appears anywhere in the stored truth window with
+        similarity >= (k-th ground-truth similarity - epsilon), i.e.
+        neighbors numerically tied with the k-th are not counted as
+        misses.  Credited hits are capped at *k* per query so recall
+        stays in [0, 1].  Ties beyond the stored ``truth_k`` window
+        cannot be credited, so configure ``truth_k`` comfortably above
+        ``search_k`` (the defaults, 100 vs 10, are fine).
 
     Returns
     -------
@@ -103,6 +121,19 @@ def _recall_at_k(
         Mean recall in [0, 1].
     """
     nq = predicted_ids.shape[0]
+    if nq == 0:
+        return 0.0
+
+    if epsilon > 0.0 and truth_similarities is not None:
+        total = 0.0
+        for q in range(nq):
+            kth_sim = truth_similarities[q, k - 1]
+            credit_mask = truth_similarities[q] >= (kth_sim - epsilon)
+            credit_set = set(truth_ids[q][credit_mask].tolist())
+            pred_set = set(predicted_ids[q].tolist())
+            total += min(len(credit_set & pred_set), k) / k
+        return total / nq
+
     truth_top_k = truth_ids[:, :k]
     hits = 0
     for q in range(nq):
@@ -251,11 +282,23 @@ class SearchRunner:
         num_rounds: int = 1,
         batch_size: int = 1,
         log_interval: int = 1000,
+        truth_similarities: Optional[np.ndarray] = None,
+        recall_epsilon: float = 0.0,
     ) -> None:
         self.backend = backend
         self.collection_name = collection_name
         self.query_vectors = np.ascontiguousarray(query_vectors, dtype=np.float32)
         self.truth_table = truth_table
+        self.truth_similarities = truth_similarities
+        self.recall_epsilon = float(recall_epsilon)
+        if self.recall_epsilon > 0.0 and self.truth_similarities is None:
+            logger.warning(
+                "recall_epsilon=%.2e requested but no ground-truth "
+                "similarities are available (e.g. flat_index truth mode); "
+                "falling back to exact recall.",
+                self.recall_epsilon,
+            )
+            self.recall_epsilon = 0.0
         self.search_k = search_k
         self.metric_type = metric_type
         self.num_rounds = num_rounds
@@ -295,6 +338,7 @@ class SearchRunner:
         batch_latencies: list[float] = []
         all_predicted: list[np.ndarray] = []
         all_truth: list[np.ndarray] = []
+        all_truth_sims: list[np.ndarray] = []
         intervals: list[IntervalStats] = []
         total_per_query_ms: float = 0.0
         total_batches: int = 0
@@ -303,6 +347,7 @@ class SearchRunner:
         interval_latencies: list[float] = []
         interval_predicted: list[np.ndarray] = []
         interval_truth: list[np.ndarray] = []
+        interval_truth_sims: list[np.ndarray] = []
         interval_query_count: int = 0
         interval_idx = 0
 
@@ -323,6 +368,11 @@ class SearchRunner:
                 batch_idx = order[batch_start:batch_end]
                 batch_queries = self.query_vectors[batch_idx]
                 batch_truth = self.truth_table[batch_idx]
+                batch_truth_sims = (
+                    self.truth_similarities[batch_idx]
+                    if self.truth_similarities is not None
+                    else None
+                )
 
                 # Timed search
                 t0 = time.perf_counter()
@@ -348,6 +398,9 @@ class SearchRunner:
                 all_truth.append(batch_truth)
                 interval_predicted.append(predicted_arr)
                 interval_truth.append(batch_truth)
+                if batch_truth_sims is not None:
+                    all_truth_sims.append(batch_truth_sims)
+                    interval_truth_sims.append(batch_truth_sims)
 
                 total_queries += batch_n
                 interval_query_count += batch_n
@@ -362,6 +415,7 @@ class SearchRunner:
                         interval_latencies=interval_latencies,
                         interval_predicted=interval_predicted,
                         interval_truth=interval_truth,
+                        interval_truth_sims=interval_truth_sims,
                         interval_query_count=interval_query_count,
                     )
                     intervals.append(stats)
@@ -371,6 +425,7 @@ class SearchRunner:
                     interval_latencies = []
                     interval_predicted = []
                     interval_truth = []
+                    interval_truth_sims = []
                     interval_query_count = 0
                     interval_start = time.time()
                     interval_idx += 1
@@ -381,13 +436,26 @@ class SearchRunner:
         lat_arr = np.array(batch_latencies)
         pred_all = np.concatenate(all_predicted, axis=0)
         truth_all = np.concatenate(all_truth, axis=0)
-        recall = _recall_at_k(pred_all, truth_all, k)
+        truth_sims_all = (
+            np.concatenate(all_truth_sims, axis=0) if all_truth_sims else None
+        )
+        recall_exact = _recall_at_k(pred_all, truth_all, k)
+        if self.recall_epsilon > 0.0:
+            recall = _recall_at_k(
+                pred_all, truth_all, k,
+                truth_similarities=truth_sims_all,
+                epsilon=self.recall_epsilon,
+            )
+        else:
+            recall = recall_exact
 
         self.result = SearchResult(
             total_queries=total_queries,
             total_wall_sec=wall_elapsed,
             qps=total_queries / wall_elapsed if wall_elapsed > 0 else 0,
             recall_at_k=recall,
+            recall_at_k_exact=recall_exact,
+            recall_epsilon=self.recall_epsilon,
             search_k=k,
             truth_k=self.truth_table.shape[1],
             latency_p50_ms=float(np.percentile(lat_arr, 50)),
@@ -429,6 +497,7 @@ class SearchRunner:
         interval_latencies: list[float],
         interval_predicted: list[np.ndarray],
         interval_truth: list[np.ndarray],
+        interval_truth_sims: Optional[list[np.ndarray]] = None,
         interval_query_count: int = 0,
     ) -> IntervalStats:
         now = time.time()
@@ -439,7 +508,16 @@ class SearchRunner:
         lat_arr = np.array(interval_latencies)
         pred = np.concatenate(interval_predicted, axis=0)
         truth = np.concatenate(interval_truth, axis=0)
-        recall = _recall_at_k(pred, truth, self.search_k)
+        truth_sims = (
+            np.concatenate(interval_truth_sims, axis=0)
+            if interval_truth_sims
+            else None
+        )
+        recall = _recall_at_k(
+            pred, truth, self.search_k,
+            truth_similarities=truth_sims,
+            epsilon=self.recall_epsilon,
+        )
         # Use actual query count for QPS; fall back to batch count if not provided
         iq = interval_query_count if interval_query_count > 0 else len(interval_latencies)
 

@@ -38,6 +38,7 @@ from typing import Any, Dict, List, Optional, Tuple, Union
 import numpy as np
 from tabulate import tabulate
 
+from vdbbench.benchmark.generator import DEFAULT_QUERY_NOISE, plant_queries
 from vdbbench.config_loader import load_config, merge_config_with_args
 from vdbbench.connection import open_connection
 from vdbbench.disk_stats import build_disk_io_stats, classify_storage_target
@@ -195,6 +196,9 @@ def calc_recall(
     ann_results: Dict[int, List[int]],
     ground_truth: Dict[int, List[int]],
     k: int,
+    ground_truth_scores: Optional[Dict[int, List[float]]] = None,
+    epsilon: float = 0.0,
+    higher_is_better: bool = True,
 ) -> Dict[str, Any]:
     """
     Calculate recall@k by comparing ANN search results against FLAT ground truth.
@@ -204,19 +208,40 @@ def calc_recall(
     The denominator uses the actual ground-truth set size so the metric remains
     valid when k is capped by collection size or Milvus top-k limits.
 
+    Tie-aware epsilon recall (issue #625):
+        With ``epsilon > 0`` and ``ground_truth_scores`` supplied, a returned
+        neighbor is credited if it appears anywhere in the stored ground-truth
+        window with a score within *epsilon* of the k-th neighbor's score.
+        On high-dimensional random data the gap between the k-th and (k+1)-th
+        neighbor is routinely below float32 matmul noise, so exact
+        set-intersection recall scores numerically-tied neighbors as misses.
+        Credited hits are capped at the GT set size so recall stays in [0, 1].
+        The exact recall is always also computed and reported.
+
     Args:
         ann_results:
             Mapping query_index -> ANN result IDs.
         ground_truth:
-            Mapping query_index -> exact FLAT result IDs.
+            Mapping query_index -> exact FLAT result IDs (closest first).
         k:
             Number of top results to evaluate.
+        ground_truth_scores:
+            Optional mapping query_index -> scores aligned with the ground
+            truth IDs (``hit.distance`` from the FLAT search).
+        epsilon:
+            Tie tolerance. 0 (default) preserves historical exact behavior.
+        higher_is_better:
+            Score orientation. True for COSINE / IP (Milvus returns
+            similarity), False for L2 (Milvus returns distance).
 
     Returns:
         Dict containing summary recall metrics plus per-query values, which are
         needed for exact multi-rank aggregation.
     """
+    use_epsilon = epsilon > 0.0 and ground_truth_scores is not None
+
     per_query_recall: List[float] = []
+    per_query_recall_exact: List[float] = []
     recall_by_query: Dict[str, float] = {}
 
     for query_idx in sorted(ann_results.keys()):
@@ -224,18 +249,44 @@ def calc_recall(
             continue
 
         ann_top_k = set(ann_results[query_idx][:k])
-        gt_top_k = set(ground_truth[query_idx][:k])
+        gt_ids = ground_truth[query_idx]
+        gt_top_k = set(gt_ids[:k])
 
         if not gt_top_k:
             continue
 
-        recall_value = len(ann_top_k & gt_top_k) / len(gt_top_k)
+        exact_value = len(ann_top_k & gt_top_k) / len(gt_top_k)
+        per_query_recall_exact.append(exact_value)
+
+        recall_value = exact_value
+        scores = (
+            ground_truth_scores.get(query_idx) if use_epsilon else None
+        )
+        if use_epsilon and scores and len(scores) >= len(gt_top_k):
+            kth_score = scores[len(gt_top_k) - 1]
+            if higher_is_better:
+                credit = {
+                    gt_id
+                    for gt_id, s in zip(gt_ids, scores)
+                    if s >= kth_score - epsilon
+                }
+            else:
+                credit = {
+                    gt_id
+                    for gt_id, s in zip(gt_ids, scores)
+                    if s <= kth_score + epsilon
+                }
+            hits = min(len(ann_top_k & credit), len(gt_top_k))
+            recall_value = hits / len(gt_top_k)
+
         per_query_recall.append(recall_value)
         recall_by_query[str(query_idx)] = recall_value
 
     if not per_query_recall:
         return {
             "recall_at_k": 0.0,
+            "recall_at_k_exact": 0.0,
+            "recall_epsilon": float(epsilon) if use_epsilon else 0.0,
             "num_queries_evaluated": 0,
             "k": k,
             "min_recall": 0.0,
@@ -250,9 +301,12 @@ def calc_recall(
         }
 
     recalls_arr = np.array(per_query_recall, dtype=float)
+    recalls_exact_arr = np.array(per_query_recall_exact, dtype=float)
 
     return {
         "recall_at_k": float(np.mean(recalls_arr)),
+        "recall_at_k_exact": float(np.mean(recalls_exact_arr)),
+        "recall_epsilon": float(epsilon) if use_epsilon else 0.0,
         "num_queries_evaluated": int(len(per_query_recall)),
         "k": int(k),
         "min_recall": float(np.min(recalls_arr)),
@@ -775,11 +829,19 @@ def precompute_ground_truth(
     query_vectors: List[List[float]],
     top_k: int,
     metric_type: str = "COSINE",
+    scores_out: Optional[Dict[int, List[float]]] = None,
 ) -> Dict[int, List[int]]:
     """
     Pre-compute exact nearest-neighbor ground truth using the FLAT collection.
 
     This runs outside the timed benchmark.
+
+    If *scores_out* is provided (an empty dict), it is filled with
+    ``query_index -> [hit.distance, ...]`` aligned with the returned IDs.
+    For COSINE/IP metrics Milvus reports similarity (higher = closer); for
+    L2 it reports distance (lower = closer). The scores enable tie-aware
+    epsilon recall (issue #625). The return type is unchanged for backward
+    compatibility.
     """
     conn_alias = "gt_compute"
 
@@ -828,6 +890,10 @@ def precompute_ground_truth(
             for i, hits in enumerate(results):
                 query_idx = batch_start + i
                 ground_truth[query_idx] = [hit.id for hit in hits]
+                if scores_out is not None:
+                    scores_out[query_idx] = [
+                        float(hit.distance) for hit in hits
+                    ]
 
         gt_elapsed = time.time() - gt_start
 
@@ -881,6 +947,104 @@ def generate_query_vectors(
 
     vectors = vectors / norms
     return vectors.tolist()
+
+
+def fetch_planted_query_bases(
+    host: str,
+    port: str,
+    collection_name: str,
+    num_queries: int,
+    seed: int,
+) -> Optional[np.ndarray]:
+    """
+    Fetch base vectors for planted-query generation (issue #625).
+
+    The vdbbench loaders (load_vdb.py and the orchestrator) assign dense
+    int64 primary keys 0..N-1, so a deterministic seeded sample of that pk
+    range selects a reproducible set of stored vectors. The sampled
+    vectors are fetched with ``Collection.query`` and later perturbed by
+    ``plant_queries`` so every benchmark query has a genuine near
+    neighbor in the corpus.
+
+    Returns None (with a printed reason) if the collection layout does
+    not match (non-int64 pk, sparse pks, or fetch failure); the caller
+    should then abort rather than silently fall back, so the reported
+    query_mode is always truthful.
+    """
+    conn_alias = "planted_query_fetch"
+
+    try:
+        open_connection(alias=conn_alias, host=host, port=port)
+    except Exception as exc:
+        print(f"Failed to connect for planted-query fetch: {exc}")
+        return None
+
+    try:
+        coll = Collection(collection_name, using=conn_alias)
+        pk_field, vec_field, pk_dtype = _detect_schema_fields(coll)
+
+        if pk_dtype != DataType.INT64:
+            print(
+                "ERROR: query_mode='planted' requires dense INT64 primary "
+                f"keys (collection '{collection_name}' has {pk_dtype.name}). "
+                "Use --query-mode independent for this collection."
+            )
+            return None
+
+        coll.load()
+        num_entities = coll.num_entities
+        if num_entities < num_queries:
+            print(
+                f"ERROR: collection has {num_entities} vectors but "
+                f"{num_queries} planted queries were requested."
+            )
+            return None
+
+        rng = np.random.RandomState(seed)
+        sampled_pks = np.sort(
+            rng.choice(num_entities, size=num_queries, replace=False)
+        )
+
+        pk_to_vec: Dict[int, List[float]] = {}
+        fetch_batch = 1000
+        for start in range(0, num_queries, fetch_batch):
+            batch_pks = sampled_pks[start:start + fetch_batch].tolist()
+            rows = coll.query(
+                expr=f"{pk_field} in {batch_pks}",
+                output_fields=[pk_field, vec_field],
+                limit=len(batch_pks),
+            )
+            for row in rows:
+                pk_to_vec[int(row[pk_field])] = row[vec_field]
+
+        missing = [int(pk) for pk in sampled_pks if int(pk) not in pk_to_vec]
+        if missing:
+            print(
+                f"ERROR: {len(missing)} sampled pks not found in "
+                f"'{collection_name}' (e.g. {missing[:5]}). The pk space is "
+                "not dense 0..N-1; use --query-mode independent."
+            )
+            return None
+
+        bases = np.array(
+            [pk_to_vec[int(pk)] for pk in sampled_pks], dtype=np.float32
+        )
+        norms = np.linalg.norm(bases, axis=1, keepdims=True)
+        norms[norms == 0] = 1.0
+        return bases / norms
+
+    except Exception as exc:
+        print(f"Error fetching planted-query base vectors: {exc}")
+        import traceback
+
+        traceback.print_exc()
+        return None
+
+    finally:
+        try:
+            connections.disconnect(conn_alias)
+        except Exception:
+            pass
 
 
 # ===========================================================================
@@ -1566,6 +1730,40 @@ def main():
         help="Random seed for deterministic query-vector generation",
     )
     parser.add_argument(
+        "--query-mode",
+        type=str,
+        choices=["independent", "planted"],
+        default="independent",
+        help=(
+            "Query generation mode (issue #625). 'independent' (default) "
+            "draws i.i.d. random queries; 'planted' perturbs stored "
+            "database vectors so every query has genuine near neighbors "
+            "and recall@k is discriminative on synthetic data. 'planted' "
+            "requires dense INT64 pks 0..N-1 (the vdbbench loader layout)."
+        ),
+    )
+    parser.add_argument(
+        "--query-noise",
+        type=float,
+        default=DEFAULT_QUERY_NOISE,
+        help=(
+            "Approximate L2 displacement of a planted query from its base "
+            "database vector (only used with --query-mode planted)."
+        ),
+    )
+    parser.add_argument(
+        "--recall-epsilon",
+        type=float,
+        default=0.0,
+        help=(
+            "Tie tolerance for recall@k (issue #625). 0 (default) keeps "
+            "exact set-intersection recall. > 0 credits returned "
+            "neighbors whose ground-truth score is within epsilon of the "
+            "k-th neighbor's, so float32-level ties are not scored as "
+            "misses. Exact recall is always reported alongside."
+        ),
+    )
+    parser.add_argument(
         "--data-path",
         type=str,
         default=None,
@@ -1702,6 +1900,9 @@ def main():
             source_index_type = str(detected_index_type).upper()
 
     config["recall_k"] = recall_k
+    config["query_mode"] = args.query_mode
+    config["query_noise"] = args.query_noise
+    config["recall_epsilon"] = args.recall_epsilon
     config["metric_type"] = metric_type
     config["index_type"] = source_index_type
     config["search_params"] = build_search_params(
@@ -1746,14 +1947,34 @@ def main():
 
     print(
         f"\nGenerating {args.num_query_vectors} query vectors "
-        f"(dim={args.vector_dim}, seed={args.seed})..."
+        f"(dim={args.vector_dim}, seed={args.seed}, "
+        f"mode={args.query_mode})..."
     )
 
-    pre_generated_queries = generate_query_vectors(
-        args.num_query_vectors,
-        args.vector_dim,
-        seed=args.seed,
-    )
+    if args.query_mode == "planted":
+        base_vectors = fetch_planted_query_bases(
+            host=args.host,
+            port=args.port,
+            collection_name=args.collection_name,
+            num_queries=args.num_query_vectors,
+            seed=args.seed,
+        )
+        if base_vectors is None:
+            print(
+                "ERROR: planted-query base fetch failed. "
+                "Re-run with --query-mode independent, or verify the "
+                "collection uses dense INT64 pks 0..N-1."
+            )
+            sys.exit(1)
+        pre_generated_queries = plant_queries(
+            base_vectors, seed=args.seed, query_noise=args.query_noise,
+        ).tolist()
+    else:
+        pre_generated_queries = generate_query_vectors(
+            args.num_query_vectors,
+            args.vector_dim,
+            seed=args.seed,
+        )
 
     print(f"Generated {len(pre_generated_queries)} query vectors.")
 
@@ -1797,6 +2018,7 @@ def main():
         )
         sys.exit(1)
 
+    ground_truth_scores: Dict[int, List[float]] = {}
     ground_truth = precompute_ground_truth(
         host=args.host,
         port=args.port,
@@ -1804,6 +2026,7 @@ def main():
         query_vectors=pre_generated_queries,
         top_k=recall_k,
         metric_type=metric_type,
+        scores_out=ground_truth_scores,
     )
 
     if not ground_truth:
@@ -1961,7 +2184,14 @@ def main():
         if query_idx not in ann_results_by_query:
             ann_results_by_query[query_idx] = list(ids)
 
-    recall_stats = calc_recall(ann_results_by_query, ground_truth, recall_k)
+    recall_stats = calc_recall(
+        ann_results_by_query,
+        ground_truth,
+        recall_k,
+        ground_truth_scores=ground_truth_scores or None,
+        epsilon=args.recall_epsilon,
+        higher_is_better=metric_type.upper() != "L2",
+    )
 
     recall_output_file = os.path.join(output_dir, "recall_stats.json")
     with open(recall_output_file, "w", encoding="utf-8") as f:

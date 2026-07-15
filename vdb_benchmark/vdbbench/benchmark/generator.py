@@ -55,22 +55,101 @@ def _generate_block(
     return vectors
 
 
+# Valid query_mode values (issue #625)
+QUERY_MODES = ("independent", "planted")
+
+# Default L2 displacement of a planted query from its base database vector.
+DEFAULT_QUERY_NOISE = 0.05
+
+
+def plant_queries(
+    base_vectors: np.ndarray,
+    seed: int,
+    query_noise: float = DEFAULT_QUERY_NOISE,
+) -> np.ndarray:
+    """Derive query vectors from database vectors by small perturbation.
+
+    Each query is ``normalize(base + query_noise * u)`` where *u* is a
+    deterministic unit-norm Gaussian direction drawn from *seed*.  This
+    "plants" a genuine near neighbor for every query, so recall@k is
+    well-conditioned even when the database vectors themselves are
+    i.i.d. random (issue #625): with independent queries over uniform
+    1536-d vectors, the query-to-corpus similarity distribution
+    concentrates (relative contrast ~1.1) and the true top-K boundary
+    falls within float32 noise, making recall non-discriminative.
+
+    Parameters
+    ----------
+    base_vectors : np.ndarray
+        Shape ``(nq, dim)``, L2-normalized database vectors to perturb.
+    seed : int
+        Seed for the perturbation directions (independent of the
+        dataset seed).
+    query_noise : float
+        Approximate L2 displacement of each query from its base vector.
+        0 reproduces the base vectors exactly; ~0.05 keeps the base
+        vector as the clear nearest neighbor while still exercising
+        the index.
+
+    Returns
+    -------
+    np.ndarray
+        Shape ``(nq, dim)``, dtype float32, L2-normalized.
+    """
+    base = np.ascontiguousarray(base_vectors, dtype=np.float32)
+    nq, dim = base.shape
+    rng = np.random.RandomState(seed)
+    noise = rng.normal(0, 1, (nq, dim)).astype(np.float32)
+    noise_norms = np.linalg.norm(noise, axis=1, keepdims=True)
+    noise_norms[noise_norms == 0] = 1.0
+    vectors = base + np.float32(query_noise) * (noise / noise_norms)
+    norms = np.linalg.norm(vectors, axis=1, keepdims=True)
+    norms[norms == 0] = 1.0
+    return (vectors / norms).astype(np.float32)
+
+
 def generate_query_vectors(
     num_queries: int,
     dimension: int,
     distribution: str = "uniform",
     seed: int = 99,
+    query_mode: str = "independent",
+    dataset_seed: int = 42,
+    query_noise: float = DEFAULT_QUERY_NOISE,
 ) -> np.ndarray:
     """Deterministically generate a set of query vectors.
 
-    Uses a *separate* seed from the database vectors so that the query
-    set is independent of the dataset.
+    Two modes are supported (issue #625):
+
+    * ``independent`` (default, preserves historical behavior) -- an
+      i.i.d. draw from *seed*, fully independent of the dataset.
+    * ``planted`` -- queries are perturbations of the first
+      ``num_queries`` **database** vectors.  Because the producer's
+      RNG stream is deterministic, regenerating the first rows with
+      ``dataset_seed`` reproduces the stored vectors bit-exactly
+      (requires ``num_queries <= block_size``; the orchestrator
+      validates this).  Perturbation directions come from *seed* so
+      the query set is still distinct from the stored data.
 
     Returns
     -------
     np.ndarray
         Shape ``(num_queries, dimension)``, dtype float32, L2-normalized.
     """
+    if query_mode not in QUERY_MODES:
+        raise ValueError(
+            f"Invalid query_mode '{query_mode}'.  Must be one of {QUERY_MODES}"
+        )
+
+    if query_mode == "planted":
+        # Bit-exact reproduction of the first `num_queries` database
+        # vectors: _generate_block consumes the RNG stream in row-major
+        # order, so a fresh RandomState(dataset_seed) draw of shape
+        # (num_queries, dim) equals the first rows of block 0.
+        base_rng = np.random.RandomState(dataset_seed)
+        base = _generate_block(num_queries, dimension, distribution, base_rng)
+        return plant_queries(base, seed=seed, query_noise=query_noise)
+
     rng = np.random.RandomState(seed)
     return _generate_block(num_queries, dimension, distribution, rng)
 
