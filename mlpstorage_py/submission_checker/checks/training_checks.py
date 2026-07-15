@@ -20,6 +20,7 @@ from .helpers import (
 from mlpstorage_py.rules.run_checkers.training import (
     TrainingRunRulesChecker as _TrainingRunRulesChecker,
 )
+from mlpstorage_py.rules.param_hints import format_typo_hint
 _TOOL_INJECTED_PARAMS = _TrainingRunRulesChecker.TOOL_INJECTED_PARAMS
 
 import math
@@ -793,10 +794,16 @@ class TrainingCheck(BaseCheck):
                     if param_key in _TOOL_INJECTED_PARAMS:
                         continue
                     if param_key not in allowed_params:
+                        # storage#795: append "Did you mean X?" for known
+                        # typo keys so ``mlpstorage validate`` on a stored
+                        # submission that carries the typo surfaces the
+                        # same suggestion the CLI-parse gate emits for new
+                        # runs.
                         self.log_violation(
                             "3.6.2", "trainingClosedSubmissionParameters", self.path,
-                            "CLOSED submission modifies disallowed parameter: %s",
+                            "CLOSED submission modifies disallowed parameter: %s%s",
                             param_key,
+                            format_typo_hint(param_key),
                         )
                         valid = False
 
@@ -856,10 +863,12 @@ class TrainingCheck(BaseCheck):
                     if param_key in _TOOL_INJECTED_PARAMS:
                         continue
                     if param_key not in allowed_params:
+                        # storage#795: same "Did you mean X?" hint as 3.6.2.
                         self.log_violation(
                             "3.6.3", "trainingOpenSubmissionParameters", self.path,
-                            "OPEN submission modifies disallowed parameter: %s",
+                            "OPEN submission modifies disallowed parameter: %s%s",
                             param_key,
+                            format_typo_hint(param_key),
                         )
                         valid = False
 
