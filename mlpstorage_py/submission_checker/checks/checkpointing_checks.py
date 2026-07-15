@@ -505,6 +505,16 @@ class CheckpointingCheck(BaseCheck):
         """
         For subset runs, verify exactly 8 accelerators and not 8B model.
         (Rules.md 4.3.5)
+
+        Note (mlcommons/storage#792): ``checkpoint.mode == "subset"`` in
+        ``override_parameters`` is auto-set by
+        ``mlpstorage_py.benchmarks.dlio.CheckpointingBenchmark.add_checkpoint_params``
+        for *any* run where ``num_processes < ClosedGPUs`` — not just genuine
+        8-accelerator subset runs. So this branch also fires for CLOSED
+        misconfigurations that landed between subset (8) and full
+        (ClosedGPUs) — e.g. 51 hosts × 8 ranks = 408 processes for 405b. The
+        error message calls out both valid submission forms so the user isn't
+        misled into thinking they explicitly opted into subset mode.
         """
         valid = True
         if self.mode != "checkpointing":
@@ -519,11 +529,32 @@ class CheckpointingCheck(BaseCheck):
                 model_name = metadata.get("args", {}).get("model", "").lower()
 
                 if num_accelerators != 8:
-                    self.log_violation(
-                        "4.3.5", "checkpointSubsetRunValidation", self.path,
-                        "subset run requires exactly 8 accelerators, got %d",
-                        num_accelerators,
-                    )
+                    model_size = re.search(r"(8b|70b|405b|1t)", model_name)
+                    if model_size:
+                        model_key = model_size.group(1)
+                        try:
+                            required_closed = self.config.get_closed_mpi_processes(model_key)
+                        except (KeyError, AttributeError):
+                            required_closed = None
+                    else:
+                        required_closed = None
+
+                    if required_closed is not None:
+                        self.log_violation(
+                            "4.3.5", "checkpointSubsetRunValidation", self.path,
+                            "num_accelerators=%d does not match any valid CLOSED "
+                            "submission form for %s: Rules.md 4.6.1 requires "
+                            "exactly 8 (subset run per 4.3.5) or %d (full run). "
+                            "The 'subset' label was auto-set by mlpstorage for "
+                            "this downscaled run — see mlcommons/storage#792.",
+                            num_accelerators, model_name, required_closed,
+                        )
+                    else:
+                        self.log_violation(
+                            "4.3.5", "checkpointSubsetRunValidation", self.path,
+                            "subset run requires exactly 8 accelerators, got %d",
+                            num_accelerators,
+                        )
                     valid = False
 
                 if "8b" in model_name:
