@@ -5,6 +5,7 @@ This module contains helper functions used by rules checkers and other
 components for calculating requirements and generating output paths.
 """
 
+import math
 import os
 import re
 import sys
@@ -181,12 +182,17 @@ def calculate_training_data_size(args, cluster_information, dataset_params, read
     file_size_bytes = dataset_params['num_samples_per_file'] * record_length_bytes
 
     if file_size_bytes > 0:
-        min_num_files_by_bytes = dataset_size_bytes // file_size_bytes
+        # Ceil, not floor: the rule requires *at least* dataset_size_bytes
+        # (5x total host memory). Floor division would silently produce a
+        # dataset one file short of the minimum whenever dataset_size_bytes
+        # is not an exact multiple of file_size_bytes, which the submission
+        # checker (float compare in rule 3.1.2) then rejects.
+        min_num_files_by_bytes = math.ceil(dataset_size_bytes / file_size_bytes)
     else:
         min_num_files_by_bytes = 0
     num_samples_by_bytes = min_num_files_by_bytes * dataset_params['num_samples_per_file']
     min_samples = 500 * num_processes * reader_params['batch_size']
-    min_num_files_by_samples = min_samples // dataset_params['num_samples_per_file']
+    min_num_files_by_samples = math.ceil(min_samples / dataset_params['num_samples_per_file'])
 
     required_file_count = max(min_num_files_by_bytes, min_num_files_by_samples)
     total_disk_bytes = required_file_count * file_size_bytes

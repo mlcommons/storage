@@ -22,6 +22,7 @@ from mlpstorage_py.rules.run_checkers.training import (
 )
 _TOOL_INJECTED_PARAMS = _TrainingRunRulesChecker.TOOL_INJECTED_PARAMS
 
+import math
 import os
 import hashlib
 import re
@@ -191,9 +192,14 @@ class TrainingCheck(BaseCheck):
                 min_samples_memory = (total_host_memory * HOST_MEMORY_MULTIPLIER *
                                     1024 * 1024 * 1024 / record_length)
 
-                # Take max of both constraints
+                # Take max of both constraints. The memory-derived branch is
+                # a float, so ceil (not floor/int cast) to stay in lockstep
+                # with datagen (rules/utils.py) — otherwise a dataset sized
+                # to the floor passes runtime but fails this check by a
+                # single file, and the message would read "N < N" because
+                # int(min_total_files) truncates the float.
                 min_samples = max(min_samples_steps, min_samples_memory)
-                min_total_files = min_samples / num_samples_per_file
+                min_total_files = math.ceil(min_samples / num_samples_per_file)
                 min_files_size_gb = min_samples * record_length / 1024 / 1024 / 1024
 
                 # Verify actual matches expected
@@ -203,7 +209,7 @@ class TrainingCheck(BaseCheck):
                         "3.1.2", "trainingRecalculateDatasetSize", self.path,
                         "dataset size mismatch: actual files %d < minimum required %d",
                         actual_num_files,
-                        int(min_total_files),
+                        min_total_files,
                     )
                     valid = False
 
