@@ -51,6 +51,9 @@ The `mlpstorage` path is recommended for standard benchmark workflows.
 - [8. End-to-End Examples](#8-end-to-end-examples)
 - [9. Enhanced Benchmark Full Reference](#9-enhanced-benchmark-full-reference)
 - [10. Metrics and Measurement](#10-metrics-and-measurement)
+  - [Recall Measurement](#recall-measurement)
+  - [Query Modes and Recall Semantics (Issue #625)](#query-modes-and-recall-semantics-issue-625)
+  - [Guidance for Submitters: Comparability and Reruns](#guidance-for-submitters-comparability-and-reruns)
 - [11. Testing and Validation](#11-testing-and-validation)
 - [12. Troubleshooting](#12-troubleshooting)
 - [13. Contributing](#13-contributing)
@@ -661,6 +664,29 @@ uv run enhanced-bench \
 ```
 
 See [Section 9](#9-enhanced-benchmark-full-reference) for full parameter reference and execution paths.
+
+#### Optional: planted queries and tie-aware recall
+
+Both `simple_bench.py` and `enhanced_bench.py` accept three optional flags
+that improve recall measurement on synthetic datasets (see
+[Query Modes and Recall Semantics](#query-modes-and-recall-semantics-issue-625)):
+
+```bash
+uv run vdbbench \
+  --host 127.0.0.1 \
+  --port 19530 \
+  --collection-name mlps_1m_1536dim_uniform_diskann \
+  --processes 4 \
+  --batch-size 10 \
+  --runtime 120 \
+  --query-mode planted \
+  --query-noise 0.05 \
+  --recall-epsilon 1e-4 \
+  --output-dir /tmp/vdbbench_results
+```
+
+Defaults (`--query-mode independent`, `--recall-epsilon 0`) reproduce the
+historical behavior exactly.
 
 ---
 
@@ -1608,6 +1634,9 @@ python vdbbench/enhanced_bench.py \
 | `--search-ef` | `200` | Search parameter override |
 | `--num-query-vectors` | `1000` | Pre-generated query vectors for recall |
 | `--recall-k` | `--search-limit` | k for recall@k |
+| `--query-mode` | `independent` | `independent` or `planted` — see [Query Modes](#query-modes-and-recall-semantics-issue-625) |
+| `--query-noise` | `0.05` | L2 displacement of planted queries from their base vectors |
+| `--recall-epsilon` | `0.0` | Tie tolerance for recall@k; `0` = exact set-intersection recall |
 | `--gt-collection` | `_flat_gt` | FLAT GT collection name |
 | `--auto-create-flat` | `False` | Auto-create FLAT GT collection from source |
 | `--no-create-flat` | `False` | Validate and reuse existing FLAT GT collection |
@@ -1660,6 +1689,9 @@ statistics.json
 Recall fields include:
 
 ```text
+recall_at_k              # normative recall (equals recall_at_k_exact when epsilon = 0)
+recall_at_k_exact        # strict set-intersection recall, always reported
+recall_epsilon           # tie tolerance used for recall_at_k (0 = exact)
 mean_recall
 median_recall
 min_recall
@@ -1673,6 +1705,73 @@ recall_by_query
 ```
 
 The `per_query_recall` and `recall_by_query` fields are used for exact multi-rank aggregation.
+`query_mode`, `query_noise`, and `recall_epsilon` are also recorded in each run's
+`config.json` / `benchmark_meta.json`, so every result is self-describing about
+which recall definition produced it.
+
+### Query Modes and Recall Semantics (Issue #625)
+
+The benchmark generates synthetic vectors. With the historical defaults —
+i.i.d. random database vectors *and* i.i.d. random, independent query
+vectors — recall@k is computed correctly (ground truth is exact brute
+force) but carries almost no signal at high dimension: at 1536-d the
+query-to-corpus cosine similarity concentrates so tightly (relative
+contrast ≈ 1.1) that the true top-k boundary sits within float32 noise,
+recall barely responds to search effort, and results do not transfer to
+real embedding workloads
+([issue #625](https://github.com/mlcommons/storage/issues/625)).
+
+Two opt-in mechanisms address this. Both default **off**, and the defaults
+are identical to the previous behavior.
+
+**Planted queries (`--query-mode planted` / `query_mode: planted`).**
+Each query is a small deterministic perturbation (`--query-noise`, default
+0.05 L2 displacement) of a stored database vector, so every query has a
+genuine planted near neighbor. Stored vectors, ingest, index build, and
+the load-phase I/O profile are unchanged — only the query set differs.
+Measured effect at 1536-d: nearest-neighbor relative contrast rises from
+~1.1 to >100, giving a recall/QPS operating curve that actually responds
+to search parameters. Requires the standard vdbbench data layout (dense
+INT64 primary keys 0..N-1); the benchmark fails loudly, never silently
+falls back, if the collection does not conform.
+
+**Tie-aware epsilon recall (`--recall-epsilon` / `recall_epsilon`).**
+Following the big-ann-benchmarks convention, a returned neighbor whose
+ground-truth score is within epsilon of the k-th neighbor's is credited
+rather than scored as a miss, so float32-level ties do not add noise to
+the metric. `recall_at_k_exact` is always reported alongside, and
+`recall_epsilon` is recorded with every result.
+
+**Note on `search_list_size` / `--search-ef`:** raising the search effort
+is *not* an equivalent workaround. On structureless random data with
+independent queries, even large search-list values move recall only
+marginally while inflating read I/O — and at the extreme the graph search
+degenerates toward an exhaustive scan, distorting the very storage
+access pattern this benchmark exists to measure. Search-effort parameters
+tune a run *within* a recall definition; `query_mode` and
+`recall_epsilon` change the definition itself, and are labeled
+accordingly.
+
+### Guidance for Submitters: Comparability and Reruns
+
+Classification: these features are an **opt-in methodology enhancement**.
+They are **not** a bug fix — the previous pipeline computed recall
+correctly against exact ground truth, and no previously published result
+is wrong or invalidated. When the new modes are *enabled*, they are a
+**metric definition change**, and results are treated the way
+MLPerf treats any definition change between rounds:
+
+* **Existing and in-flight submissions:** no rerun and no restatement
+  required. The defaults are identical to prior behavior (verified by
+  regression test down to the query RNG stream), so this change can merge
+  without affecting anyone.
+* **Current round:** `planted` / epsilon runs are available as a
+  diagnostic mode. Official results remain on the existing definition
+  until the Working Group rules say otherwise.
+* **Comparing runs:** only compare recall numbers produced with the same
+  `query_mode` and `recall_epsilon`. Check `config.json` /
+  `benchmark_meta.json` when in doubt; when epsilon recall is enabled,
+  `recall_at_k_exact` provides the strict metric for cross-checking.
 
 ### Disk I/O Metrics
 
@@ -2073,6 +2172,15 @@ Also check that rank-local `recall_stats.json` files contain non-empty:
 per_query_recall
 recall_by_query
 ```
+
+### Recall is low and does not improve with `search_list` / `ef`
+
+This is expected with the default `--query-mode independent` on
+high-dimensional random data — the recall metric is correct but poorly
+conditioned, not broken. See
+[Query Modes and Recall Semantics](#query-modes-and-recall-semantics-issue-625)
+and re-run with `--query-mode planted` (optionally `--recall-epsilon 1e-4`)
+to obtain a discriminative recall/QPS curve.
 
 ### Milvus is not reachable from worker hosts
 
