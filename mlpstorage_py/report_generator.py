@@ -1354,7 +1354,17 @@ class ReportGenerator:
         # while preserving accelerator-scoped grouping for multi-
         # accelerator submissions (b200 + mi355 datasize runs stay in
         # separate groups per accelerator).
-        if bt == BENCHMARK_TYPES.training and benchmark_run.command != 'run':
+        #
+        # Issue #791: checkpointing ``datasize`` has the same collision
+        # shape — it carries the same (model, accelerator) as the
+        # ``run`` invocations, so under the plain 5-tuple key it lands
+        # in the same workload group and inflates the invocation count
+        # past the 1-or-2 Rules.md §4.7.1 bound. Extend the
+        # discriminator to cover checkpointing for the same reason.
+        if (
+            bt in (BENCHMARK_TYPES.training, BENCHMARK_TYPES.checkpointing)
+            and benchmark_run.command != 'run'
+        ):
             return (
                 category, orgname, systemname, model, accelerator,
                 str(benchmark_run.command),

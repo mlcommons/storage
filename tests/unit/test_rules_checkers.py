@@ -784,6 +784,118 @@ class TestCheckpointSubmissionRulesChecker:
         # All should be CLOSED
         assert all(i.validation == PARAM_VALIDATION.CLOSED for i in issues)
 
+    def create_checkpointing_run_with_command(
+        self, mock_logger, num_reads, num_writes, command
+    ):
+        """Helper: build a checkpointing run with an explicit ``command``.
+
+        ``create_checkpointing_run`` hard-codes ``command='run'``; the
+        Issue #791 tests need to build ``datasize`` runs too.
+        """
+        data = BenchmarkRunData(
+            benchmark_type=BENCHMARK_TYPES.checkpointing,
+            model="llama3-8b",
+            command=command,
+            run_datetime="20250111_143022",
+            num_processes=8,
+            parameters={
+                "checkpoint": {
+                    "num_checkpoints_read": num_reads,
+                    "num_checkpoints_write": num_writes,
+                }
+            },
+            override_parameters={},
+        )
+        run = BenchmarkRun.from_data(data, mock_logger)
+        run.category = PARAM_VALIDATION.CLOSED
+        return run
+
+    def test_check_num_runs_ignores_datasize_command(self, mock_logger):
+        """Issue #791: ``datasize`` runs MUST NOT contribute to read/write totals.
+
+        The CLI defaults ``--num-checkpoints-read`` and ``--num-checkpoints-write``
+        to 10 for every checkpointing subcommand — including ``datasize``,
+        which performs no I/O. Before the fix, a ``datasize`` run bundled
+        alongside a valid two-invocation write/read pair added a phantom
+        10/10 to the totals, producing the ``found 20`` INVALID that the
+        issue reporter hit.
+        """
+        write_run = self.create_checkpointing_run_with_command(
+            mock_logger, num_reads=0, num_writes=10, command="run"
+        )
+        read_run = self.create_checkpointing_run_with_command(
+            mock_logger, num_reads=10, num_writes=0, command="run"
+        )
+        datasize_run = self.create_checkpointing_run_with_command(
+            mock_logger, num_reads=10, num_writes=10, command="datasize"
+        )
+
+        checker = CheckpointSubmissionRulesChecker(
+            [write_run, read_run, datasize_run], logger=mock_logger
+        )
+        issues = checker.check_num_runs()
+
+        invalid = [i for i in issues if i.validation == PARAM_VALIDATION.INVALID]
+        assert invalid == [], (
+            f"Issue #791 regression: datasize inflated read/write totals; "
+            f"got INVALID issues: {[i.message for i in invalid]}"
+        )
+        # All three CLOSED confirmations should be present (reads, writes, combined).
+        closed = [i for i in issues if i.validation == PARAM_VALIDATION.CLOSED]
+        assert len(closed) == 3
+
+    def test_check_invocation_structure_ignores_datasize_command(self, mock_logger):
+        """Issue #791: ``datasize`` MUST NOT count as a §4.7.1 invocation.
+
+        A valid two-invocation CLOSED submission (write phase + read
+        phase) bundled with a ``datasize`` preflight run must NOT trip
+        the ``got 3`` invocation-structure error.
+        """
+        # Two-invocation split: write (10/0) then read (0/10) within 30 s.
+        write_run = self.create_checkpointing_run_with_command(
+            mock_logger, num_reads=0, num_writes=10, command="run"
+        )
+        write_run._data.run_datetime = "20260715_071751"
+        write_run._data.end_datetime = "20260715_071800"
+        read_run = self.create_checkpointing_run_with_command(
+            mock_logger, num_reads=10, num_writes=0, command="run"
+        )
+        read_run._data.run_datetime = "20260715_071810"
+        datasize_run = self.create_checkpointing_run_with_command(
+            mock_logger, num_reads=10, num_writes=10, command="datasize"
+        )
+
+        checker = CheckpointSubmissionRulesChecker(
+            [datasize_run, write_run, read_run], logger=mock_logger
+        )
+        issues = checker.check_invocation_structure()
+
+        invalid = [i for i in issues if i.validation == PARAM_VALIDATION.INVALID]
+        assert invalid == [], (
+            f"Issue #791 regression: datasize counted as an invocation; "
+            f"got INVALID issues: {[i.message for i in invalid]}"
+        )
+
+    def test_check_invocation_structure_datasize_only_group_is_no_op(self, mock_logger):
+        """Issue #791: a group containing ONLY a ``datasize`` run emits no issues.
+
+        After the report-generator workload-key discriminator fix (parallel
+        to Issue #771), ``datasize`` runs land in their own workload
+        group. The checker must treat that group as a no-op rather than
+        rubber-stamp it as a valid single-invocation submission just
+        because the CLI defaults happen to be 10/10.
+        """
+        datasize_run = self.create_checkpointing_run_with_command(
+            mock_logger, num_reads=10, num_writes=10, command="datasize"
+        )
+
+        checker = CheckpointSubmissionRulesChecker(
+            [datasize_run], logger=mock_logger
+        )
+
+        assert checker.check_invocation_structure() == []
+        assert checker.check_num_runs() == []
+
 
 class TestRulesCheckerInitialization:
     """Tests for rules checker initialization order.
