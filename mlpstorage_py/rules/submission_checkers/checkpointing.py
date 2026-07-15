@@ -37,6 +37,24 @@ class CheckpointSubmissionRulesChecker(MultiRunRulesChecker):
     REQUIRED_WRITES = 10
     REQUIRED_READS = 10
 
+    def _submission_invocations(self):
+        """Return checkpointing runs that count as submission invocations.
+
+        Issue #791: only ``command == 'run'`` invocations perform checkpoint
+        reads/writes and count toward the Rules.md §4.7.1 invocation
+        structure. Auxiliary commands like ``datasize`` are preflight
+        helpers — they emit a results directory but carry the CLI defaults
+        for ``--num-checkpoints-read``/``--num-checkpoints-write`` (both
+        10) in their parameters, which would otherwise double-count into
+        ``check_num_runs`` and inflate the invocation count past the
+        1-or-2 bound.
+        """
+        return [
+            run for run in self.benchmark_runs
+            if run.benchmark_type == BENCHMARK_TYPES.checkpointing
+            and run.command == 'run'
+        ]
+
     def check_num_runs(self) -> List[Issue]:
         """
         Require 10 total writes and 10 total reads for checkpointing benchmarks.
@@ -49,11 +67,14 @@ class CheckpointSubmissionRulesChecker(MultiRunRulesChecker):
         issues = []
         num_writes = num_reads = 0
 
-        for run in self.benchmark_runs:
-            if run.benchmark_type == BENCHMARK_TYPES.checkpointing:
-                checkpoint_params = run.parameters.get('checkpoint', {})
-                num_writes += checkpoint_params.get('num_checkpoints_write', 0)
-                num_reads += checkpoint_params.get('num_checkpoints_read', 0)
+        submission_runs = self._submission_invocations()
+        if not submission_runs:
+            return issues
+
+        for run in submission_runs:
+            checkpoint_params = run.parameters.get('checkpoint', {})
+            num_writes += checkpoint_params.get('num_checkpoints_write', 0)
+            num_reads += checkpoint_params.get('num_checkpoints_read', 0)
 
         # Check reads
         if num_reads != self.REQUIRED_READS:
@@ -118,10 +139,7 @@ class CheckpointSubmissionRulesChecker(MultiRunRulesChecker):
         """
         issues = []
 
-        checkpoint_runs = [
-            run for run in self.benchmark_runs
-            if run.benchmark_type == BENCHMARK_TYPES.checkpointing
-        ]
+        checkpoint_runs = self._submission_invocations()
         if not checkpoint_runs:
             return issues
 
