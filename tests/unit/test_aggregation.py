@@ -1239,6 +1239,91 @@ class TestInvalidRulesStrict:
             f"{list(gen.workload_results.keys())!r}"
         )
 
+    def test_checkpointing_datasize_does_not_inflate_run_group_count(self, tmp_path):
+        """Issue #791: checkpointing ``datasize`` MUST NOT collide with the run-group key.
+
+        Rules.md §4.7.1 bounds a CLOSED checkpointing submission at 1
+        or 2 ``run`` invocations. ``datasize`` is a preflight helper
+        that emits a results directory but performs no checkpoint
+        reads/writes. Because its parameters inherit the CLI defaults
+        (``--num-checkpoints-read=10``/``--num-checkpoints-write=10``),
+        grouping it with the real ``run`` invocations both inflates the
+        invocation count past the 1-or-2 bound AND doubles the summed
+        read/write totals — exactly the failure the issue reporter
+        observed.
+
+        Parallels the Issue #771 training fix: the workload key adds
+        ``command`` as a 6th discriminator for non-``run`` commands so
+        datasize lands in its own group.
+        """
+        gen = _make_bare_generator(tmp_path)
+        model = "llama3-8b"
+        model_root = (
+            tmp_path / "closed" / "acme" / "results" / "sys-a"
+            / "checkpointing" / model
+        )
+
+        write_ts = "20260715_071751"
+        read_ts = "20260715_072104"
+        write_leaf = model_root / "run" / write_ts
+        read_leaf = model_root / "run" / read_ts
+        write_leaf.mkdir(parents=True)
+        read_leaf.mkdir(parents=True)
+
+        write_run = _make_run(
+            benchmark_type=BENCHMARK_TYPES.checkpointing,
+            model=model,
+            result_dir=str(write_leaf),
+            metrics={},
+            parameters={"checkpoint": {
+                "num_checkpoints_write": 10, "num_checkpoints_read": 0,
+            }},
+            accelerator=None,
+            run_datetime=write_ts,
+            command="run",
+        )
+        read_run = _make_run(
+            benchmark_type=BENCHMARK_TYPES.checkpointing,
+            model=model,
+            result_dir=str(read_leaf),
+            metrics={},
+            parameters={"checkpoint": {
+                "num_checkpoints_write": 0, "num_checkpoints_read": 10,
+            }},
+            accelerator=None,
+            run_datetime=read_ts,
+            command="run",
+        )
+
+        datasize_ts = "20260715_071658"
+        datasize_leaf = model_root / "datasize" / datasize_ts
+        datasize_leaf.mkdir(parents=True)
+        datasize_run = _make_run(
+            benchmark_type=BENCHMARK_TYPES.checkpointing,
+            model=model,
+            result_dir=str(datasize_leaf),
+            metrics={},
+            # datasize inherits the CLI defaults of 10/10 even though it
+            # performs no I/O — this is what previously double-counted.
+            parameters={"checkpoint": {
+                "num_checkpoints_write": 10, "num_checkpoints_read": 10,
+            }},
+            accelerator=None,
+            run_datetime=datasize_ts,
+            command="datasize",
+        )
+
+        _run_process_workload_groups(gen, [datasize_run, write_run, read_run])
+
+        # Two workload groups: one for ``run`` (2 invocations), one for
+        # ``datasize`` (1). Pre-fix produced a single 3-invocation group
+        # with 20 writes / 20 reads.
+        assert len(gen.workload_results) == 2, (
+            f"Issue #791 regression: expected 2 workload groups "
+            f"(run + datasize), got {len(gen.workload_results)} — "
+            f"keys={list(gen.workload_results.keys())!r}"
+        )
+
     def test_statistics_error_not_swallowed(self, tmp_path):
         """D-23 loud-failure: helper propagates ``StatisticsError`` on empty metric list.
 
