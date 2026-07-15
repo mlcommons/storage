@@ -423,3 +423,24 @@ No mlpstorage-level code change landed in this range. The DLIO pin advanced once
 **Other Significant**
 - DLIO: opaque `RuntimeError: concurrent range chunk failed` on undersized hosts now emits a proactive workload-shape warning at read start (FD/RAM/CPU projections) and chains a live resource snapshot (fd, RSS, load-avg) onto any RuntimeError. Diagnostic-only. (#755; DLIO PR #50)
 - s3dlio: FFI-boundary hardening (Tiers 1-5) preserves anyhow error chains across the Rust/Python boundary, so a Python-side `RuntimeError` now shows the real underlying cause instead of a bare "concurrent range chunk failed". (s3dlio v0.9.112 / PR #163)
+
+---
+
+## Version 3.0.43 (July 12 – 15, 2026)
+
+Nine mlpstorage-level fixes landed in this range. The DLIO pin and s3dlio floor did not move.
+
+**Score-Affecting**
+- Rule 3.1.2's memory-derived minimum is a float; datagen and runtime accepted floor(N.x) but `mlpstorage validate` re-derived N.x and rejected by exactly one file — runs looked valid then failed submission with a truncated "N < N" message. All three sites now use `math.ceil`. (#796)
+- Split-mode checkpoint submissions failed §4.7.1's 30s failover-callout gap: the write phase's post-benchmark teardown (30–60s of multi-node collection + JSON serialization + rank-0 exit at scale) was charged against the budget. New `INVOCATION_END` bookend excludes teardown, symmetric to #714's read-side fix. (#782, #783, #787)
+- `datasize` sized against `--client-host-memory-in-gb` only, but runtime `check_num_files_train` and rule 3.1.2 use MPI-measured host RAM — when measured > declared, datasize under-recommended `num_files_train` and the run failed the check. Now takes `max(declared, measured)` with a WARNING when measured wins. (#785, #786)
+
+**Invocation**
+- Multi-node llama3-70b checkpoint runs livelocked cluster-wide after checkpoint 1 — the #768 child-side immediate-unregister pattern collided with mlpstorage's per-`save()` `_release_buffer_pool` unlinks, producing a 700+ `sem_unlink → FileNotFoundError` cascade. Now skips the child's REGISTER via a scoped monkey-patch. (#777, #780)
+- `--results-dir` inside the mlpstorage source tree caused `capture_or_verify_code_image` to `shutil.copytree` its own destination into itself, recursing until `[Errno 36] File name too long`. Now refuses up front with a `ConfigurationError` naming `--results-dir`. (#778, #781)
+- CLOSED checkpointing accepted `--num-processes` values that were neither the subset (8) nor the full-model count, ran the full write+read pair, and only `mlpstorage validate` later rejected with a misleading "subset requires exactly 8". New pre-run gate rejects with both valid forms named. (#792, #794)
+
+**Other Significant**
+- `reports reportgen` on a CLOSED checkpointing submission bundled with a `checkpointing datasize` preflight reported "got 3 invocations, expected 1 or 2" and "expected 10 ops, found 20" — datasize inherits the default 10/10 for `--num-checkpoints-*` and the workload-key lumped it with `run`. Now excluded. (#791, #793)
+- Rules 3.4.2 / 4.4.2 / 5.4.2 flagged shared-mount `<data-dir>` / `<results-dir>` as ERROR — many valid layouts share the two paths. Findings now emit at WARN and no longer fail the check; the D-B8 evidence-gap path (no CAP-03 sidecar and no `df` block) still fires as ERROR. Re-validate submissions previously flagged INVALID for this. (#779, #788)
+- VDB uniform-random query recall was non-discriminative at 1536-d (query-corpus similarity concentrates at ~1.1, top-k boundary within float32 noise) — results didn't transfer across index configs. New `query_mode=planted` (contrast >100) and `recall_epsilon` (tie-aware credit); defaults unchanged. (#625, #789)
