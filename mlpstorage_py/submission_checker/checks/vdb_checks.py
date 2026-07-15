@@ -664,11 +664,15 @@ class VdbCheck(BaseCheck):
                     shim_args["data_dir"] = storage_root
             ok, df_found = _check_filesystem_separation(shim_args, logfile_path)
             if not df_found:
-                self.log_violation(
+                # D-B8: no CAP-03 sidecar AND no df block → no evidence of
+                # FS separation. Emit at WARN so pre-#601 legacy runs are
+                # not silently blocked at ingest; reviewers must confirm
+                # storage_root / results_dir separation manually.
+                self.warn_violation(
                     "5.4.2", "vdbFilesystemCheck", logfile_path,
-                    "df output not found",
+                    "fs_separation.json sidecar not found and df block also absent; "
+                    "cannot verify vdb storage_root/results_dir separation — reviewer must confirm manually",
                 )
-                valid = False
                 continue
             if not ok:
                 self.warn_violation(
