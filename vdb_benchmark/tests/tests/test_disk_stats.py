@@ -1,7 +1,19 @@
-"""Unit tests for vdbbench.disk_stats (issue #591)."""
+"""Unit tests for vdbbench.disk_stats (issue #591).
+
+Relocated from vdb_benchmark/test_disk_stats.py so the suite is collected by
+CI (`pytest vdb_benchmark/tests`); the old top-level path was never run. The
+``sys.path`` bootstrap is anchored to the package root so the tests import the
+same way whether invoked by pytest from the repo root or run standalone.
+"""
+import os
 import sys
-sys.path.insert(0, ".")
-from vdbbench.disk_stats import (
+
+# Make the vdbbench package importable regardless of pytest's invocation dir.
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from vdbbench.disk_stats import (  # noqa: E402
     build_disk_io_stats, classify_storage_target, find_mount_for_path,
     is_network_fs, list_network_mounts,
 )
@@ -80,4 +92,3 @@ if __name__ == "__main__":
     for f in fns:
         f(); print(f"PASS {f.__name__}")
     print(f"\n{len(fns)} tests passed")
-
