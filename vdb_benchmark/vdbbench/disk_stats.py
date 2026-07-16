@@ -20,10 +20,15 @@ from typing import Any, Dict, List, Optional
 MOUNTS_FILE = "/proc/self/mounts"
 
 # Partition-name patterns used to collapse /proc/diskstats double-counting
-# (issue #801). nvme0n1p1 -> nvme0n1, mmcblk0p1 -> mmcblk0; sda1 -> sda,
-# vdb2 -> vdb, xvda1 -> xvda.
-_NVME_MMC_PARTITION_RE = re.compile(r"^(nvme\d+n\d+|mmcblk\d+)p\d+$")
-_SCSI_PARTITION_RE = re.compile(r"^([a-z]+)\d+$")
+# (issue #801). Linux names a partition by appending its number to the whole
+# disk, inserting a 'p' separator when the disk name already ends in a digit:
+#   - digit-ending disks use 'p': nvme0n1 -> nvme0n1p1, mmcblk0 -> mmcblk0p1
+#   - traditional letter-named disks append directly: sda -> sda1, vdb -> vdb2
+# The direct-suffix form is anchored to the sd/vd/hd/xvd families so whole
+# disks whose own name ends in a digit (mmcblk0, loop0, md0) are not mistaken
+# for partitions.
+_PSEP_PARTITION_RE = re.compile(r"^(.+\d)p\d+$")
+_DIRECT_PARTITION_RE = re.compile(r"^((?:sd|vd|hd|xvd)[a-z]+)\d+$")
 
 # Filesystem types that indicate the mount is network / remote-attached.
 # /proc/diskstats has no local block device for these targets.
@@ -272,10 +277,10 @@ def parent_disk(device: str) -> Optional[str]:
     back to its parent so duplicate counters can be collapsed (issue #801).
     Whole disks and non-partition entries (``dm-0``, ``loop0``) return ``None``.
     """
-    m = _NVME_MMC_PARTITION_RE.match(device)
+    m = _PSEP_PARTITION_RE.match(device)
     if m:
         return m.group(1)
-    m = _SCSI_PARTITION_RE.match(device)
+    m = _DIRECT_PARTITION_RE.match(device)
     if m:
         return m.group(1)
     return None
