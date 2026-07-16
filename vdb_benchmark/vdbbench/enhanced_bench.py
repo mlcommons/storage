@@ -51,7 +51,7 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
 import numpy as np
 
 from vdbbench.benchmark.generator import DEFAULT_QUERY_NOISE, plant_queries
-from vdbbench.disk_stats import classify_storage_target
+from vdbbench.disk_stats import classify_storage_target, collapse_partition_duplicates
 
 try:
     from pymilvus import (
@@ -1544,6 +1544,9 @@ def _disk_totals(
         devs = {d: diff[d] for d in disk_devices if d in diff}
     else:
         devs = filter_real_disk_devices(diff)
+    # Issue #801: drop whole-disk/partition duplicates so one physical drive
+    # is not summed once per partition.
+    devs = collapse_partition_duplicates(devs)
 
     rd = wr = rio = wio = 0
     for s in devs.values():
@@ -2929,6 +2932,10 @@ def main() -> None:
         print("Reading final disk statistics...")
         end_disk_stats = read_disk_stats()
         disk_io_diff = calculate_disk_io_diff(start_disk_stats, end_disk_stats)
+        # Issue #801: /proc/diskstats reports a whole disk and each of its
+        # partitions with identical counters; collapse the duplicates so a
+        # single physical drive is not counted twice in the totals below.
+        disk_io_diff = collapse_partition_duplicates(disk_io_diff)
 
         print("\nCalculating recall from per-worker JSONL files...")
         ann_results_by_query = load_recall_hits(output_dir)
