@@ -14,9 +14,16 @@ as N/A in statistics.json instead of emitting empty or misleading values.
 The QPS score is unaffected: this is purely a reporting-clarity change.
 """
 
+import re
 from typing import Any, Dict, List, Optional
 
 MOUNTS_FILE = "/proc/self/mounts"
+
+# Partition-name patterns used to collapse /proc/diskstats double-counting
+# (issue #801). nvme0n1p1 -> nvme0n1, mmcblk0p1 -> mmcblk0; sda1 -> sda,
+# vdb2 -> vdb, xvda1 -> xvda.
+_NVME_MMC_PARTITION_RE = re.compile(r"^(nvme\d+n\d+|mmcblk\d+)p\d+$")
+_SCSI_PARTITION_RE = re.compile(r"^([a-z]+)\d+$")
 
 # Filesystem types that indicate the mount is network / remote-attached.
 # /proc/diskstats has no local block device for these targets.
@@ -257,6 +264,43 @@ def classify_storage_target(
     return result
 
 
+def parent_disk(device: str) -> Optional[str]:
+    """Return the whole-disk device a partition belongs to, else ``None``.
+
+    ``/proc/diskstats`` lists both whole block devices (``nvme0n1``, ``sda``)
+    and their partitions (``nvme0n1p1``, ``sda1``). This maps a partition name
+    back to its parent so duplicate counters can be collapsed (issue #801).
+    Whole disks and non-partition entries (``dm-0``, ``loop0``) return ``None``.
+    """
+    m = _NVME_MMC_PARTITION_RE.match(device)
+    if m:
+        return m.group(1)
+    m = _SCSI_PARTITION_RE.match(device)
+    if m:
+        return m.group(1)
+    return None
+
+
+def collapse_partition_duplicates(
+    disk_io_diff: Dict[str, Dict[str, int]],
+) -> Dict[str, Dict[str, int]]:
+    """Drop partition entries whose parent whole-disk device is also present.
+
+    ``/proc/diskstats`` reports I/O counters for a whole block device *and*
+    separately for each of its partitions, so the same bytes are counted twice
+    when every entry is summed (issue #801). When a partition's parent device
+    appears in the same snapshot we keep the parent — whose counters already
+    cover all partition I/O — and drop the partition. An orphan partition whose
+    parent is absent is retained so its I/O is not lost.
+    """
+    present = set(disk_io_diff)
+    return {
+        device: stats
+        for device, stats in disk_io_diff.items()
+        if parent_disk(device) not in present
+    }
+
+
 def build_disk_io_stats(
     disk_io_diff: Dict[str, Dict[str, int]],
     duration_seconds: float,
@@ -302,6 +346,10 @@ def build_disk_io_stats(
             "storage_target": target_summary,
             "error": "Disk I/O statistics not available",
         }
+
+    # Issue #801: collapse whole-disk/partition duplicates before summing so a
+    # single physical drive is not counted once per partition.
+    disk_io_diff = collapse_partition_duplicates(disk_io_diff)
 
     total_bytes_read = sum(d["bytes_read"] for d in disk_io_diff.values())
     total_bytes_written = sum(d["bytes_written"] for d in disk_io_diff.values())
