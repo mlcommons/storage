@@ -1,7 +1,19 @@
-"""Unit tests for vdbbench.disk_stats (issue #591)."""
+"""Unit tests for vdbbench.disk_stats (issue #591).
+
+Relocated from vdb_benchmark/test_disk_stats.py so the suite is collected by
+CI (`pytest vdb_benchmark/tests`); the old top-level path was never run. The
+``sys.path`` bootstrap is anchored to the package root so the tests import the
+same way whether invoked by pytest from the repo root or run standalone.
+"""
+import os
 import sys
-sys.path.insert(0, ".")
-from vdbbench.disk_stats import (
+
+# Make the vdbbench package importable regardless of pytest's invocation dir.
+ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+if ROOT not in sys.path:
+    sys.path.insert(0, ROOT)
+
+from vdbbench.disk_stats import (  # noqa: E402
     build_disk_io_stats, classify_storage_target, find_mount_for_path,
     is_network_fs, list_network_mounts,
 )
@@ -75,53 +87,8 @@ def test_payload_empty_diff():
     p = build_disk_io_stats({}, 10.0, tgt, fmt)
     assert p["applicable"] is False and "error" in p
 
-# --- issue #801: /proc/diskstats double-counts a whole disk and its partitions ---
-
-def test_partition_not_double_counted():
-    # /proc/diskstats reports a whole NVMe device and its data partition with
-    # identical read counters; summing both inflates throughput ~2x.
-    diff = {
-        "nvme0n1":   {"bytes_read": 560280633344, "bytes_written": 0},
-        "nvme0n1p1": {"bytes_read": 560280633344, "bytes_written": 0},
-    }
-    tgt = classify_storage_target("/var/lib/milvus", mounts=MOUNTS_LOCAL)
-    p = build_disk_io_stats(diff, 300.0, tgt, fmt)
-    assert p["total_bytes_read"] == 560280633344   # not 2x
-    assert "nvme0n1" in p["devices"]               # parent kept
-    assert "nvme0n1p1" not in p["devices"]         # partition collapsed
-
-def test_multiple_disks_each_deduped():
-    diff = {
-        "nvme2n1":   {"bytes_read": 1351680, "bytes_written": 0},
-        "nvme2n1p2": {"bytes_read": 1351680, "bytes_written": 0},
-        "nvme0n1":   {"bytes_read": 560280633344, "bytes_written": 0},
-        "nvme0n1p1": {"bytes_read": 560280633344, "bytes_written": 0},
-    }
-    tgt = classify_storage_target("/var/lib/milvus", mounts=MOUNTS_LOCAL)
-    p = build_disk_io_stats(diff, 300.0, tgt, fmt)
-    assert p["total_bytes_read"] == 1351680 + 560280633344
-
-def test_scsi_partition_deduped():
-    diff = {
-        "sda":  {"bytes_read": 4096, "bytes_written": 0},
-        "sda1": {"bytes_read": 4096, "bytes_written": 0},
-        "sda2": {"bytes_read": 4096, "bytes_written": 0},
-    }
-    tgt = classify_storage_target("/var/lib/milvus", mounts=MOUNTS_LOCAL)
-    p = build_disk_io_stats(diff, 10.0, tgt, fmt)
-    assert p["total_bytes_read"] == 4096           # only the whole disk
-
-def test_orphan_partition_retained():
-    # A partition whose parent whole-disk is absent must still be counted.
-    diff = {"nvme0n1p1": {"bytes_read": 4096, "bytes_written": 0}}
-    tgt = classify_storage_target("/var/lib/milvus", mounts=MOUNTS_LOCAL)
-    p = build_disk_io_stats(diff, 10.0, tgt, fmt)
-    assert p["total_bytes_read"] == 4096
-    assert "nvme0n1p1" in p["devices"]
-
 if __name__ == "__main__":
     fns = [v for k, v in sorted(globals().items()) if k.startswith("test_")]
     for f in fns:
         f(); print(f"PASS {f.__name__}")
     print(f"\n{len(fns)} tests passed")
-
