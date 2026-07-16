@@ -76,8 +76,12 @@ class TrainingRunRulesChecker(RunRulesChecker):
         # entry, so without this line reportgen loading a datasize run's
         # metadata marks the run INVALID for a value the tool itself wrote.
         # (num_files_train / num_subfolders_train are also tool-written on
-        # datasize runs but appear in CLOSED_ALLOWED_PARAMS for run commands
-        # where they are genuine user overrides — leave those to that path.)
+        # datasize runs, and num_files_train is additionally auto-resolved to
+        # the datasize minimum on run/configview when the user does not pass it
+        # explicitly — see _resolve_num_files_train, storage#795. Both cases
+        # are covered by its CLOSED_ALLOWED_PARAMS entry, which accepts the
+        # value whether it originated from the user or the tool, so no
+        # TOOL_INJECTED entry is needed here.)
         'dataset.total_disk_bytes',
     })
 
