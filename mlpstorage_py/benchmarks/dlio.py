@@ -336,6 +336,106 @@ class DLIOBenchmark(Benchmark, abc.ABC):
                 f'(~{checks:,} HEAD checks at startup)'
             )
 
+    def _resolve_num_files_train(self):
+        """storage#795: default ``dataset.num_files_train`` to the datasize
+        minimum for THIS run instead of the workload YAML reference value.
+
+        The ``num_files_train`` in the workload YAML is a reference placeholder
+        (retinanet_b200: 1,170,301) sized for a large system — it is *not* the
+        count a given submitter should read. ``datasize`` computes the real
+        per-system minimum from the 5x-memory and 500-step rules
+        (rules/utils.calculate_training_data_size). When the user has not
+        explicitly passed ``--params dataset.num_files_train``, resolve it to
+        that minimum so the run reads exactly the dataset ``datasize``
+        recommended (and that the ``datasize``-emitted ``datagen`` hint was
+        told to generate).
+
+        Why this matters now: ``skip_listing`` (forced on by
+        ``_apply_skip_listing_params``) makes every rank reconstruct filenames
+        as ``{prefix}_{idx}_of_{num_files_train}.{ext}`` rather than listing the
+        directory. If the run's ``num_files_train`` differs from the value the
+        dataset was generated with, the reconstructed ``_of_{total}`` names
+        match no object and the startup HEAD checks all miss — exactly the
+        storage#795 abort, where the run defaulted to the YAML 1,170,301 while
+        the reporter had generated the (smaller) datasize-recommended set.
+
+        Deliberately scoped:
+          * Never touches datagen. The generation host set (and its memory)
+            typically differs from the run host set, and submitters routinely
+            over-generate (up to ~10x) to reuse one dataset across
+            experiments; generation size is the submitter's choice, threaded
+            explicitly via the datasize->datagen hint. datagen has no
+            ``cluster_information`` here (dlio.py __init__ skips host-info
+            collection for datagen), so the guard below no-ops for it.
+          * Respects an explicit ``--params dataset.num_files_train`` — a
+            submitter running against a deliberately larger generated set (or
+            any specific count) sets it themselves and that value wins.
+
+        Computes against the same ``cluster_information`` (and the same
+        declared-vs-measured reconciliation) that ``datasize`` used, so the
+        resolved value matches the generated dataset's ``_of_{total}`` naming
+        and satisfies ``check_num_files_train``'s ``configured >= required``
+        gate by construction.
+        """
+        # An explicit user override always wins — never second-guess it.
+        if 'dataset.num_files_train' in self.params_dict:
+            return
+
+        cluster_info = getattr(self, 'cluster_information', None)
+        if not cluster_info:
+            # No memory basis to size against (datagen path). Leave the YAML
+            # default in place; generation size is the submitter's call.
+            return
+
+        # Recompute silently: check_num_files_train (during verify_benchmark)
+        # logs the authoritative "Minimum file count dictated by..." RESULT a
+        # moment later, so a second copy here — plus the storage#785
+        # reconciliation warning, which runs never emit today — would just be
+        # noise. Our own INFO below carries the "why".
+        import logging as _logging
+        quiet = _logging.getLogger("mlpstorage_py.num_files_train.resolve")
+        if not quiet.handlers:
+            quiet.addHandler(_logging.NullHandler())
+        quiet.setLevel(_logging.CRITICAL + 1)
+        quiet.propagate = False
+
+        try:
+            computed, _, _ = calculate_training_data_size(
+                self.args,
+                cluster_info,
+                self.combined_params['dataset'],
+                self.combined_params['reader'],
+                quiet,
+            )
+        except (ValueError, KeyError) as exc:
+            self.logger.debug(f'num_files_train auto-resolution skipped: {exc}')
+            return
+
+        dataset_params = self.combined_params.setdefault('dataset', {})
+        try:
+            yaml_default = int(dataset_params.get('num_files_train'))
+        except (TypeError, ValueError):
+            yaml_default = None
+
+        if computed == yaml_default:
+            # YAML default already equals the minimum — nothing to change.
+            return
+
+        self.params_dict['dataset.num_files_train'] = computed
+        dataset_params['num_files_train'] = computed
+
+        default_note = (
+            f' (workload YAML default was {yaml_default:,})'
+            if yaml_default is not None else ''
+        )
+        self.logger.info(
+            f'num_files_train not set; defaulting to the datasize minimum for '
+            f'this system: {computed:,}{default_note}. The run reads this many '
+            f'files from --data-dir; if you generated a different count (e.g. '
+            f'an over-generated dataset), pass --params '
+            f'dataset.num_files_train=<N>. See storage#795.'
+        )
+
     @staticmethod
     def _strip_uri_scheme(value):
         # DLIO obj_store_lib treats storage_root as a bare bucket/prefix and
@@ -697,6 +797,11 @@ class TrainingBenchmark(DLIOBenchmark):
         # computed until ``datasize()`` runs. The datasize path calls this
         # method itself once the recommendation is known.
         if self.args.command != "datasize":
+            # storage#795: default num_files_train to the datasize-computed
+            # minimum (not the YAML reference) BEFORE skip_listing derives its
+            # validation interval, so the interval, the INFO log, the DLIO run,
+            # and check_num_files_train all agree on the count the run reads.
+            self._resolve_num_files_train()
             self._apply_skip_listing_params()
 
         if self.args.command not in ("datagen", "datasize"):
