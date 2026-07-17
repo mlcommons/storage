@@ -131,11 +131,43 @@ class VectorDBBenchmark(Benchmark):
 
         self.yaml_params = read_config_from_file(self.config_file)
 
+        self._resolve_storage_args()
+
         if not getattr(args, "what_if", False) and self.command != "datasize":
             self._validate_vdb_dependencies()
 
         self.verify_benchmark()
         self.logger.status("Instantiated the VectorDB Benchmark...")
+
+    def _resolve_storage_args(self):
+        """Record the VDB storage location on ``self.args`` (storage#802).
+
+        The vector-database storage path is server-side — the operator tells us
+        where the engine keeps its data — so unlike training/checkpointing it is
+        not an I/O argument the query client uses. But Rules.md §5.4.1 / §5.6.4
+        require it in the run metadata, and ``metadata['args'] = vars(self.args)``
+        only carries whatever argparse produced. Resolve it here so a
+        ``storage_root``/``storage_type`` key always lands in the metadata.
+
+        Precedence: CLI ``--storage-root``/``--storage-type`` win over the config
+        YAML ``storage:`` section, which wins over the default. ``storage_type``
+        defaults to ``local_fs``; ``storage_root`` has no default and stays
+        ``None`` when neither CLI nor config provides one (§5.4.1 then reports
+        it).
+        """
+        storage_cfg = (self.yaml_params or {}).get("storage") or {}
+
+        cli_root = getattr(self.args, "storage_root", None)
+        self.args.storage_root = (
+            cli_root if cli_root is not None else storage_cfg.get("storage_root")
+        )
+
+        cli_type = getattr(self.args, "storage_type", None)
+        self.args.storage_type = (
+            cli_type
+            if cli_type is not None
+            else storage_cfg.get("storage_type", "local_fs")
+        )
 
     # ------------------------------------------------------------------
     # Dependency validation

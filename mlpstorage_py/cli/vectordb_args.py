@@ -463,6 +463,31 @@ def _add_vectordb_core_args(parser, command, index_choices):
 
     if command in ("datagen", "run"):
         add_storage_type_arguments(parser, required=True)
+        # The VDB storage location is server-side (the operator tells us where
+        # the engine keeps its data); it is recorded in run metadata for
+        # Rules.md §5.4.1 / §5.6.4 rather than passed to the query client
+        # (storage#802). CLI values override the config YAML `storage:` section.
+        storage_group = parser.add_argument_group("VDB Storage Location")
+        storage_group.add_argument(
+            "--storage-root",
+            type=str,
+            default=None,
+            help=(
+                "Filesystem path where the vector database engine stores its "
+                "data. Recorded in run metadata (Rules.md 5.4.1); must differ "
+                "from --results-dir. Overrides the config storage.storage_root."
+            ),
+        )
+        storage_group.add_argument(
+            "--storage-type",
+            type=str,
+            default=None,
+            help=(
+                "Storage medium backing the vector database data (e.g. "
+                "local_fs, s3). Defaults to local_fs. Overrides the config "
+                "storage.storage_type."
+            ),
+        )
 
     if command == "run":
         add_timeseries_arguments(parser)
