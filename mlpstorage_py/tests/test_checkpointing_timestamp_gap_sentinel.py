@@ -98,3 +98,113 @@ def test_bug_t4_single_checkpoint_does_not_crash(tmp_path):
     check = _make_directory_check(tmp_path, checkpoint_files)
     valid = check.checkpointing_timestamp_gap_check()
     assert valid is True
+
+
+# ---------------------------------------------------------------------------
+# storage#812 / #813: 2.1.24 must measure the gap from the invocation bookends
+# (metadata.invocation_start_time / invocation_end_time), not the DLIO summary
+# start/end. The bookends envelope the DLIO loop, so the summary-based gap is
+# inflated by read-side framework startup + write-side cluster collection —
+# overhead that grows with node count and produced spurious violations on
+# otherwise-valid paired submissions (the same class as #714 / #782, which
+# fixed the formula but left the source on the summary fields).
+# ---------------------------------------------------------------------------
+
+
+def _paired_invocations_with_inflated_summary():
+    """A valid write+read pair where the true quiet window (invocation bookends)
+    is 5 s but the DLIO summary window is inflated to a 65 s apparent gap.
+
+    Bookends envelope the DLIO loop: invocation_start < summary.start (framework
+    startup) and summary.end < invocation_end (post-benchmark cluster
+    collection). Summary durations are 8 s; bookend durations are 40 s.
+
+      bookend gap  = read.invocation_start(19:50:45) - write.invocation_end(19:50:40) = 5 s
+                     vs slower bookend duration 40 s  -> PASS
+      summary gap  = read.summary.start(19:51:15) - write.summary.end(19:50:10)       = 65 s
+                     vs slower summary duration 8 s   -> would FALSE-FAIL (pre-#813)
+    """
+    write = (
+        {"start": "2025-07-11T19:50:02", "end": "2025-07-11T19:50:10"},
+        {"invocation_start_time": "2025-07-11T19:50:00",
+         "invocation_end_time": "2025-07-11T19:50:40"},
+        "20250711_195000",
+    )
+    read = (
+        {"start": "2025-07-11T19:51:15", "end": "2025-07-11T19:51:23"},
+        {"invocation_start_time": "2025-07-11T19:50:45",
+         "invocation_end_time": "2025-07-11T19:51:25"},
+        "20250711_195045",
+    )
+    return [write, read]
+
+
+def test_issue_812_gap_uses_invocation_bookends_not_summary(tmp_path):
+    """Regression for #812: a paired submission whose real quiet window is small
+    must NOT trip 2.1.24 just because the DLIO summary window is inflated by
+    startup/collection overhead.
+
+    Pre-#813 this measured read.summary.start - write.summary.end (65 s) against
+    the 8 s summary duration and raised a spurious violation. Post-#813 it
+    measures the invocation bookends (5 s gap vs 40 s duration) and passes.
+    """
+    check = _make_directory_check(
+        tmp_path, _paired_invocations_with_inflated_summary()
+    )
+    check.log.error.reset_mock()
+    valid = check.checkpointing_timestamp_gap_check()
+    assert valid is True, (
+        "2.1.24 must read the invocation bookends, not the DLIO summary "
+        "start/end; the summary window is inflated by read startup + write "
+        "cluster collection (storage#812)"
+    )
+    check.log.error.assert_not_called()
+
+
+def test_issue_812_bookend_gap_still_flags_a_genuine_long_pause(tmp_path):
+    """The #813 source-swap must not neuter the check: a genuinely long quiet
+    window measured on the *bookends* must still fail 2.1.24.
+
+    Here the bookend gap is 5 minutes against 10 s invocations — a real pause
+    that could hide discardable benchmark activity — so the run is invalid.
+    """
+    write = (
+        {"start": "2025-07-11T19:49:58", "end": "2025-07-11T19:50:12"},
+        {"invocation_start_time": "2025-07-11T19:49:50",
+         "invocation_end_time": "2025-07-11T19:50:00"},
+        "20250711_194950",
+    )
+    read = (
+        {"start": "2025-07-11T19:54:58", "end": "2025-07-11T19:55:12"},
+        {"invocation_start_time": "2025-07-11T19:55:00",
+         "invocation_end_time": "2025-07-11T19:55:10"},
+        "20250711_195500",
+    )
+    check = _make_directory_check(tmp_path, [write, read])
+    valid = check.checkpointing_timestamp_gap_check()
+    assert valid is False, (
+        "a 5-minute bookend gap against 10 s invocations must still trip 2.1.24"
+    )
+
+
+def test_issue_812_falls_back_to_summary_when_bookends_absent(tmp_path):
+    """Results dirs predating the invocation bookends (metadata without the
+    keys) must still validate via the DLIO summary fallback — no crash, no
+    parse-failure violation. Here the summary gap (2 min) is short relative to
+    the ~3.5 min invocations, so it passes on the fallback path.
+    """
+    checkpoint_files = [
+        (
+            {"start": "2025-07-11T19:50:50", "end": "2025-07-11T19:54:25"},
+            {},
+            "20250711_195047",
+        ),
+        (
+            {"start": "2025-07-11T19:56:25", "end": "2025-07-11T20:00:00"},
+            {},
+            "20250711_195625",
+        ),
+    ]
+    check = _make_directory_check(tmp_path, checkpoint_files)
+    valid = check.checkpointing_timestamp_gap_check()
+    assert valid is True
