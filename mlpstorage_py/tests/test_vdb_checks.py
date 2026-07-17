@@ -485,6 +485,159 @@ class Test_5_3_2_VdbRecallReported:
         assert any("no recall value" in v for v in viol), viol
 
 
+class Test_5_3_2_VdbRecallZeroGate:
+    """Issue #805: a run whose recall is 0.0 must be flagged invalid.
+
+    A stale/mismatched FLAT ground truth or a broken index build drives
+    recall to exactly 0.0 on every query while QPS/latency still look
+    healthy (the AISAQ Recall@10 = 0.00 signature). §5.3.2 previously only
+    checked that a recall value was *present*, so 0.0 passed as valid. This
+    zero gate is deliberately separate from the deferred minimum-recall
+    target table: 0.0 is a broken measurement, never an under-target tuning
+    result, so it hard-fails regardless of the (still-deferred) per-scale
+    threshold.
+    """
+
+    def test_zero_scalar_recall_is_invalid(self, tmp_path, mock_logger):
+        leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "DISKANN")
+        run_files = [
+            (_summary_run(recall=0.0), _metadata(), ts)
+            for ts in _DEFAULT_RUN_TIMESTAMPS
+        ]
+        check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
+        assert check.vdb_recall_reported() is False
+        viol = _violations(mock_logger, "5.3.2", "vdbRecallReported")
+        assert any("recall is 0.0" in v for v in viol), viol
+        assert any("issue #805" in v for v in viol), viol
+        # One zero violation per affected run (mirrors the 5-run #805 report).
+        zero_viol = [v for v in viol if "recall is 0.0" in v]
+        assert len(zero_viol) == len(_DEFAULT_RUN_TIMESTAMPS), zero_viol
+
+    def test_zero_recall_stats_dict_is_invalid(self, tmp_path, mock_logger):
+        # calculate_statistics() writes summary["recall"] as the whole
+        # recall_stats dict (simple_bench.py: '"recall": recall_stats'), so
+        # the gate must coerce a scalar from max_recall/mean_recall/recall_at_k.
+        zero_recall = {
+            "recall_at_k": 0.0,
+            "mean_recall": 0.0,
+            "min_recall": 0.0,
+            "max_recall": 0.0,
+            "num_queries_evaluated": 1000,
+        }
+        leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "AISAQ")
+        run_files = [
+            (_summary_run(recall=zero_recall), _metadata(), _DEFAULT_RUN_TIMESTAMPS[0])
+        ]
+        check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
+        assert check.vdb_recall_reported() is False
+        assert any(
+            "recall is 0.0" in v
+            for v in _violations(mock_logger, "5.3.2", "vdbRecallReported")
+        )
+
+    def test_nonzero_scalar_recall_stays_valid(self, tmp_path, mock_logger):
+        leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "DISKANN")
+        run_files = [
+            (_summary_run(recall=0.57), _metadata(), ts)
+            for ts in _DEFAULT_RUN_TIMESTAMPS
+        ]
+        check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
+        assert check.vdb_recall_reported() is True
+        assert _violations(mock_logger, "5.3.2", "vdbRecallReported") == []
+
+    def test_nonzero_recall_dict_stays_valid(self, tmp_path, mock_logger):
+        good = {
+            "recall_at_k": 0.61,
+            "mean_recall": 0.61,
+            "min_recall": 0.2,
+            "max_recall": 1.0,
+            "num_queries_evaluated": 1000,
+        }
+        leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "HNSW")
+        run_files = [(_summary_run(recall=good), _metadata(), _DEFAULT_RUN_TIMESTAMPS[0])]
+        check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
+        assert check.vdb_recall_reported() is True
+        assert _violations(mock_logger, "5.3.2", "vdbRecallReported") == []
+
+    def test_low_but_nonzero_recall_stays_valid(self, tmp_path, mock_logger):
+        # Mirrors PR #806: tiny-but-real recall is a tuning problem, not a
+        # broken measurement — it stays valid.
+        leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "DISKANN")
+        run_files = [
+            (_summary_run(recall=0.001), _metadata(), _DEFAULT_RUN_TIMESTAMPS[0])
+        ]
+        check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
+        assert check.vdb_recall_reported() is True
+
+    def test_zero_recall_via_recall_stats_fallback_is_invalid(self, tmp_path, mock_logger):
+        leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "AISAQ")
+        ts = _DEFAULT_RUN_TIMESTAMPS[0]
+        # summary.json has no recall key; the rank-local recall_stats.json is
+        # the fallback the checker consults for presence — now also for value.
+        (leaf / "run" / ts / "recall_stats.json").write_text(
+            json.dumps(
+                {
+                    "recall_at_k": 0.0,
+                    "mean_recall": 0.0,
+                    "max_recall": 0.0,
+                    "num_queries_evaluated": 1000,
+                }
+            ),
+            encoding="utf-8",
+        )
+        bad_summary = _summary_run()
+        bad_summary.pop("recall")
+        run_files = [(bad_summary, _metadata(), ts)]
+        check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
+        assert check.vdb_recall_reported() is False
+        assert any(
+            "recall is 0.0" in v
+            for v in _violations(mock_logger, "5.3.2", "vdbRecallReported")
+        )
+
+    def test_nonzero_recall_stats_fallback_stays_valid(self, tmp_path, mock_logger):
+        leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "AISAQ")
+        ts = _DEFAULT_RUN_TIMESTAMPS[0]
+        (leaf / "run" / ts / "recall_stats.json").write_text(
+            json.dumps(
+                {
+                    "recall_at_k": 0.9,
+                    "mean_recall": 0.9,
+                    "max_recall": 1.0,
+                    "num_queries_evaluated": 1000,
+                }
+            ),
+            encoding="utf-8",
+        )
+        good_summary = _summary_run()
+        good_summary.pop("recall")
+        run_files = [(good_summary, _metadata(), ts)]
+        check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
+        assert check.vdb_recall_reported() is True
+        # Presence is satisfied by the file; the coerced value is nonzero, so
+        # no zero violation either.
+        assert _violations(mock_logger, "5.3.2", "vdbRecallReported") == []
+
+    def test_unparseable_recall_stats_fallback_does_not_false_flag(
+        self, tmp_path, mock_logger
+    ):
+        # A present-but-unreadable recall_stats.json keeps legacy behavior:
+        # presence is satisfied and the value is unknown, so the run is not
+        # invalidated by the zero gate (we never manufacture a 0.0 verdict
+        # from missing data).
+        leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "AISAQ")
+        ts = _DEFAULT_RUN_TIMESTAMPS[0]
+        (leaf / "run" / ts / "recall_stats.json").write_text(
+            "{ not json", encoding="utf-8"
+        )
+        summary = _summary_run()
+        summary.pop("recall")
+        run_files = [(summary, _metadata(), ts)]
+        check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
+        assert check.vdb_recall_reported() is True
+        assert _violations(mock_logger, "5.3.2", "vdbRecallReported") == []
+
+
 # ===========================================================================
 # §5.3.3 vdbQueryCountMinimum
 # ===========================================================================
