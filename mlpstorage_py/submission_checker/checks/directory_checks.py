@@ -464,12 +464,26 @@ class DirectoryCheck(BaseCheck):
         time with the inter-phase quiet window and produced spurious
         violations on otherwise-valid paired submissions.
 
-        4.7.1 ``checkpoint_invocation_structure`` owns the upper bound on
-        the gap (30 seconds, plus the no-overlap rule); 2.1.24 just
-        enforces the qualitative "short enough" requirement Rules.md
-        states. A gap that exceeds the slower of the two invocations'
-        durations would imply a long pause large enough to swamp the
-        timing model, so that remains the threshold.
+        **Timestamp origin (storage#714 / #782).** The end→start gap is
+        measured from the invocation bookends captured by
+        ``mlpstorage_py/_invocation.py``: ``metadata.invocation_end_time``
+        on the earlier invocation and ``metadata.invocation_start_time`` on
+        the later one. These exclude read-side framework startup (Python
+        imports, MPI spawn, CAP env-validation) and write-side
+        post-benchmark cluster collection, neither of which is benchmark
+        activity in the quiet window. The older revision measured against
+        the DLIO summary ``start``/``end`` fields, which charge that
+        startup/collection overhead against the gap and produce spurious
+        violations on large topologies. This mirrors the origin selection in
+        4.7.1 ``cache_flush_validation``. Results dirs produced by an
+        mlpstorage predating either bookend fall back to the corresponding
+        summary field so older submissions still validate.
+
+        4.7.1 ``cache_flush_validation`` owns the hard upper bound on the
+        gap (30 seconds); 2.1.24 just enforces the qualitative "short
+        enough" requirement Rules.md states. A gap that exceeds the slower
+        of the two invocations' durations would imply a long pause large
+        enough to swamp the timing model, so that remains the threshold.
 
         (Rules.md 2.1.24 checkpointingTimestampGap)
         """
@@ -479,15 +493,28 @@ class DirectoryCheck(BaseCheck):
             self.log.warning("No checkpointing files found in submission logs")
             return valid
 
-        # Collect (start, end, timestamp_dir) per valid invocation.
+        # Collect (start, end, timestamp_dir) per valid invocation. Prefer the
+        # invocation bookends from metadata.json (storage #714 / #782); fall
+        # back to the DLIO summary fields for pre-bookend results dirs.
         invocations = []
-        for checkpoint_dict, _, timestamp_dir in self.submissions_logs.checkpoint_files:
+        for checkpoint_dict, metadata, timestamp_dir in self.submissions_logs.checkpoint_files:
             if checkpoint_dict is None:
                 # Missing summary.json — reported under 2.1.22; skip silently.
                 continue
+            metadata = metadata or {}
+            start_str = (
+                metadata.get("invocation_start_time")
+                or checkpoint_dict.get("start")
+            )
+            end_str = (
+                metadata.get("invocation_end_time")
+                or checkpoint_dict.get("end")
+            )
             try:
-                start_time = datetime.fromisoformat(checkpoint_dict["start"])
-                end_time = datetime.fromisoformat(checkpoint_dict["end"])
+                if start_str is None or end_str is None:
+                    raise KeyError("start/end")
+                start_time = datetime.fromisoformat(start_str)
+                end_time = datetime.fromisoformat(end_str)
             except (ValueError, KeyError, TypeError) as e:
                 self.log_violation(
                     "2.1.24", "checkpointingTimestampGap", timestamp_dir,
