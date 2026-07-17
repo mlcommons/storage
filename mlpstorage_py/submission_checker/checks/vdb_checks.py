@@ -27,6 +27,7 @@ loader gains a vdb branch, the warn paths drop out automatically and the
 real checks fire.
 """
 
+import json
 import os
 
 from .base import BaseCheck
@@ -49,6 +50,37 @@ _REQUIRED_METRIC_FIELDS = (
     "p99_latency_ms",
     "p999_latency_ms",
 )
+
+
+# Keys, in preference order, from which a scalar recall is extracted when the
+# recall field is the whole recall_stats dict rather than a bare float. The
+# engine writes both shapes: a scalar in some paths and the full dict in
+# calculate_statistics (``"recall": recall_stats``). ``max_recall`` is first
+# because max recall == 0 is the exact "every query missed the ground truth"
+# signature the §5.3.2 zero gate targets (issue #805).
+_RECALL_SCALAR_KEYS = ("max_recall", "mean_recall", "recall_at_k", "recall")
+
+
+def _coerce_recall_value(recall):
+    """Return a float recall from either a scalar or a recall_stats dict.
+
+    Returns ``None`` for anything from which a number cannot be read (None, a
+    string, an empty/foreign dict). ``None`` means "value unknown" — callers
+    must never manufacture a 0.0 verdict from it. ``bool`` is rejected on
+    purpose so a stray ``True``/``False`` is not read as ``1.0``/``0.0``.
+    """
+    if isinstance(recall, bool):
+        return None
+    if isinstance(recall, (int, float)):
+        return float(recall)
+    if isinstance(recall, dict):
+        for key in _RECALL_SCALAR_KEYS:
+            value = recall.get(key)
+            if isinstance(value, bool):
+                continue
+            if isinstance(value, (int, float)):
+                return float(value)
+    return None
 
 
 # Allowed CLOSED tunable parameters per Rules.md §5.6.4 table.
@@ -473,11 +505,54 @@ class VdbCheck(BaseCheck):
                         self.path, ts,
                     )
                     valid = False
+                    continue
+                # The file exists, so presence is satisfied; read its value for
+                # the zero gate below. An unreadable file leaves recall None,
+                # which the gate treats as "value unknown" (never a
+                # manufactured 0.0) — legacy present-but-unread behavior.
+                recall = self._read_recall_stats(recall_stats_path)
+
+            # Zero-recall gate (issue #805): recall 0.0 on every evaluated query
+            # means the ANN results share no IDs with the FLAT ground truth — a
+            # stale/mismatched GT or a broken index build, not a low-quality
+            # tuning result. Such a run is invalid regardless of the (still
+            # deferred) per-scale minimum-recall table warned above.
+            recall_value = _coerce_recall_value(recall)
+            if recall_value is not None and recall_value <= 0.0:
+                self.log_violation(
+                    "5.3.2", "vdbRecallReported", self.path,
+                    "vdbRecallReported: recall is 0.0 for every evaluated query "
+                    "at %s/%s — ANN results share no IDs with the FLAT ground "
+                    "truth (stale/mismatched ground-truth collection or a broken "
+                    "index build); the run is invalid and must not be submitted "
+                    "(issue #805)",
+                    self.path, ts,
+                )
+                valid = False
 
         if not any_run:
             self._vdb_loader_gap_warning("5.3.2", "vdbRecallReported")
 
         return valid
+
+    def _read_recall_stats(self, path):
+        """Load a rank-local recall_stats.json for the §5.3.2 zero gate.
+
+        Returns the parsed object (typically the recall_stats dict) or ``None``
+        when the file cannot be read/parsed. ``None`` means "value unknown":
+        presence is already satisfied by the file existing, and the zero gate
+        must not invalidate a run on data it could not read (issue #805).
+        """
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, ValueError) as exc:
+            self.log.debug(
+                "[5.3.2] %s: could not read recall_stats.json for the zero "
+                "gate (%s); treating recall value as unknown",
+                path, exc,
+            )
+            return None
 
     @rule("5.3.3", "vdbQueryCountMinimum")
     def vdb_query_count_minimum(self):
