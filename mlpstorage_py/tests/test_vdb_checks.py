@@ -216,11 +216,11 @@ def _warnings(mock_logger, rule_id: str, rule_name: str):
 
 
 # ===========================================================================
-# Mode-guard sweep — proves all 16 rules no-op on non-vdb submissions
+# Mode-guard sweep — proves all 17 rules no-op on non-vdb submissions
 # ===========================================================================
 
 class TestModeGuardNoOpsOnNonVdbSubmissions:
-    """All 16 §5 rule methods must no-op when mode != "vector_database".
+    """All 17 §5 rule methods must no-op when mode != "vector_database".
 
     Proves the post-Plan-04-01 guard string is "vector_database" (not
     "vector_database"). A regression to the old guard string would
@@ -242,6 +242,7 @@ class TestModeGuardNoOpsOnNonVdbSubmissions:
             "vdb_collection_populated", "vdb_index_build_completed",
             "vdb_run_count", "vdb_recall_reported",
             "vdb_query_count_minimum", "vdb_metrics_reported",
+            "vdb_ground_truth_integrity",
             "vdb_path_args", "vdb_filesystem_check",
             "vdb_object_storage_backend", "vdb_closed_submission_checksum",
             "vdb_closed_database_backend", "vdb_closed_index_types",
