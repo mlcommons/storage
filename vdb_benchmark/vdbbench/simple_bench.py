@@ -113,6 +113,7 @@ def emit_result_verdict(
     *,
     flat_result: Optional["FlatSetupResult"],
     num_queries_evaluated: int,
+    recall_stats: Optional[Dict[str, Any]] = None,
 ) -> str:
     """
     Emit a single unambiguous validity verdict for the whole run.
@@ -129,11 +130,34 @@ def emit_result_verdict(
       * valid    - full coverage and queries actually evaluated.
       * degraded - coverage >= MIN_FLAT_COVERAGE but < 100% (recall computed on
                    an incomplete ground truth; numbers are not trustworthy).
-      * invalid  - no queries evaluated, or a caught error left coverage below
-                   the minimum threshold.
+      * invalid  - no queries evaluated, a caught error left coverage below
+                   the minimum threshold, or every evaluated query scored
+                   recall 0.0 (issue #805).
+
+    The zero-recall gate (issue #805): recall exactly 0.0 on *every* evaluated
+    query means the ANN results share no IDs at all with the FLAT ground
+    truth. That is not a "low quality" configuration — it is the signature of
+    a stale/mismatched ground-truth collection or a broken index build, and
+    the accompanying QPS/latency numbers describe a no-hit workload. Such a
+    run must never be reported as valid.
     """
+    all_zero_recall = False
+    if recall_stats is not None and num_queries_evaluated > 0:
+        try:
+            all_zero_recall = float(recall_stats.get("max_recall", 1.0)) <= 0.0
+        except (TypeError, ValueError):
+            all_zero_recall = False
+
     if num_queries_evaluated <= 0:
         verdict = "invalid: 0 queries had valid ground truth"
+    elif all_zero_recall:
+        verdict = (
+            f"invalid: recall is 0.0 for every one of {num_queries_evaluated} "
+            f"evaluated queries — ANN results share no IDs with the FLAT "
+            f"ground truth (stale/mismatched ground-truth collection or a "
+            f"broken index build); QPS/latency numbers do not represent a "
+            f"real search workload"
+        )
     elif flat_result is None:
         # No FLAT setup ran in this process (e.g. --no-create-flat worker that
         # only validated a pre-existing collection). Coverage was checked
@@ -155,11 +179,26 @@ def emit_result_verdict(
     else:
         verdict = "valid"
 
+    recall_summary = None
+    if recall_stats is not None:
+        recall_summary = {
+            key: recall_stats.get(key)
+            for key in (
+                "recall_at_k",
+                "mean_recall",
+                "min_recall",
+                "max_recall",
+                "num_queries_evaluated",
+            )
+            if key in recall_stats
+        }
+
     payload = {
         "result": verdict,
         "valid": verdict.startswith("valid"),
         "num_queries_evaluated": int(num_queries_evaluated),
         "flat_setup": flat_result.to_dict() if flat_result else None,
+        "recall_summary": recall_summary,
     }
     try:
         with open(
@@ -368,6 +407,110 @@ def _detect_schema_fields(collection: Collection) -> Tuple[str, str, DataType]:
     return pk_field, vec_field, pk_dtype
 
 
+# Number of sampled vectors compared between the source and FLAT collections
+# when deciding whether an existing FLAT ground truth can be reused, and the
+# element-wise tolerance for that comparison (issue #805).
+GT_CONTENT_SAMPLE_SIZE = 8
+GT_CONTENT_ATOL = 1e-4
+
+
+def verify_flat_matches_source(
+    source_coll: Collection,
+    flat_coll: Collection,
+    sample_size: int = GT_CONTENT_SAMPLE_SIZE,
+    atol: float = GT_CONTENT_ATOL,
+) -> Tuple[bool, str]:
+    """
+    Verify that a FLAT ground-truth collection contains the *source
+    collection's* vectors, not merely the same number of rows (issue #805).
+
+    An equal entity count is not identity: if the source collection is dropped
+    and re-generated (new random vectors, same size — e.g. rebuilding the same
+    collection name with a different index type or seed) while an old
+    ``<name>_flat_gt`` survives on the server, the count-only reuse guard
+    silently pairs the new ANN collection with a ground truth computed from
+    unrelated vectors. Every ANN result ID then misses the GT set, recall
+    collapses to exactly 0.00 for every query, and QPS/latency still look
+    healthy — the failure signature of issue #805 (AISAQ Recall@10 = 0.00
+    across all runs).
+
+    The check samples a few PKs from the FLAT collection and compares their
+    vectors element-wise against the same PKs in the source collection. Both
+    collections must be loaded by the caller.
+
+    Returns ``(matches, detail)``. Any error during verification is reported
+    as a mismatch so callers rebuild (or fail loudly) instead of trusting an
+    unverifiable ground truth.
+    """
+    try:
+        flat_pk, flat_vec, flat_pk_dtype = _detect_schema_fields(flat_coll)
+        src_pk, src_vec, _ = _detect_schema_fields(source_coll)
+
+        is_int_pk = flat_pk_dtype in (
+            DataType.INT64,
+            DataType.INT32,
+            DataType.INT16,
+            DataType.INT8,
+        )
+
+        # Benchmark IDs are >= 0; "-1" is a safe in-range int64 sentinel
+        # (see the pk-cursor fallback note above about INT64_MIN parsing).
+        first_expr = f"{flat_pk} > -1" if is_int_pk else f'{flat_pk} >= ""'
+
+        flat_rows = flat_coll.query(
+            expr=first_expr,
+            output_fields=[flat_pk, flat_vec],
+            limit=sample_size,
+        )
+        if not flat_rows:
+            return False, "FLAT collection returned no sample rows"
+
+        sample_pks = [row[flat_pk] for row in flat_rows]
+
+        if is_int_pk:
+            src_filter = f"{src_pk} in {[int(v) for v in sample_pks]}"
+        else:
+            escaped = [str(v).replace('"', '\\"') for v in sample_pks]
+            src_filter = (
+                f"{src_pk} in ["
+                + ",".join(f'"{v}"' for v in escaped)
+                + "]"
+            )
+
+        src_rows = source_coll.query(
+            expr=src_filter,
+            output_fields=[src_pk, src_vec],
+            limit=len(sample_pks),
+        )
+        src_map = {row[src_pk]: row[src_vec] for row in src_rows}
+
+        for row in flat_rows:
+            pk_value = row[flat_pk]
+            src_vector = src_map.get(pk_value)
+            if src_vector is None:
+                return (
+                    False,
+                    f"pk {pk_value} exists in the FLAT collection but not in "
+                    f"the source collection",
+                )
+            flat_arr = np.asarray(row[flat_vec], dtype=np.float32)
+            src_arr = np.asarray(src_vector, dtype=np.float32)
+            if flat_arr.shape != src_arr.shape or not np.allclose(
+                flat_arr, src_arr, atol=atol
+            ):
+                return (
+                    False,
+                    f"vector content mismatch at pk {pk_value}; the FLAT "
+                    f"ground truth was built from different data than the "
+                    f"current source collection",
+                )
+
+        return True, f"{len(flat_rows)} sampled vectors match the source"
+
+    except Exception as exc:
+        return False, f"content verification failed: {exc}"
+
+
 def validate_existing_flat_collection(
     host: str,
     port: str,
@@ -418,9 +561,23 @@ def validate_existing_flat_collection(
             return False
 
         flat_coll.load()
+        source_coll.load()
+
+        matches, detail = verify_flat_matches_source(source_coll, flat_coll)
+        if not matches:
+            print(
+                f"ERROR: FLAT collection '{flat_collection_name}' has a "
+                f"matching row count but its content does not match source "
+                f"collection '{source_collection_name}' ({detail}). It is "
+                f"stale and would drive recall to 0.00 (issue #805). "
+                f"Drop it and re-run without --no-create-flat on one rank to "
+                f"rebuild the ground truth."
+            )
+            return False
+
         print(
             f"Using existing FLAT collection '{flat_collection_name}' "
-            f"with {flat_count} vectors."
+            f"with {flat_count} vectors (content check: {detail})."
         )
         return True
 
@@ -476,24 +633,45 @@ def create_flat_collection(
             if flat_coll.num_entities > 0 and (
                 flat_coll.num_entities == source_coll.num_entities
             ):
-                print(
-                    f"FLAT collection '{flat_collection_name}' already exists "
-                    f"with {flat_coll.num_entities} vectors, reusing it."
-                )
+                # A matching row count alone is NOT sufficient to reuse the
+                # FLAT collection: a stale GT left over from a regenerated
+                # source collection has the same size but unrelated vectors,
+                # which silently drives recall to 0.00 (issue #805). Verify
+                # actual content before trusting it.
                 flat_coll.load()
-                return FlatSetupResult(
-                    ok=True,
-                    coverage=1.0,
-                    total_vectors=source_coll.num_entities,
-                    copied_vectors=flat_coll.num_entities,
-                    reused=True,
+                source_coll.load()
+                matches, detail = verify_flat_matches_source(
+                    source_coll, flat_coll
                 )
+                if matches:
+                    print(
+                        f"FLAT collection '{flat_collection_name}' already "
+                        f"exists with {flat_coll.num_entities} vectors and "
+                        f"passed the content check ({detail}), reusing it."
+                    )
+                    return FlatSetupResult(
+                        ok=True,
+                        coverage=1.0,
+                        total_vectors=source_coll.num_entities,
+                        copied_vectors=flat_coll.num_entities,
+                        reused=True,
+                    )
 
-            print(
-                f"FLAT collection exists but has {flat_coll.num_entities} vs "
-                f"{source_coll.num_entities} vectors. Dropping and recreating..."
-            )
-            utility.drop_collection(flat_collection_name, using=conn_alias)
+                print(
+                    f"WARNING: FLAT collection '{flat_collection_name}' has a "
+                    f"matching row count but its content does not match the "
+                    f"source collection ({detail}). It is stale — likely left "
+                    f"over from a previous data generation of "
+                    f"'{source_collection_name}'. Dropping and recreating "
+                    f"(issue #805)."
+                )
+                utility.drop_collection(flat_collection_name, using=conn_alias)
+            else:
+                print(
+                    f"FLAT collection exists but has {flat_coll.num_entities} vs "
+                    f"{source_coll.num_entities} vectors. Dropping and recreating..."
+                )
+                utility.drop_collection(flat_collection_name, using=conn_alias)
 
         print(
             f"Creating FLAT collection '{flat_collection_name}' "
@@ -2224,6 +2402,7 @@ def main():
         output_dir,
         flat_result=flat_result,
         num_queries_evaluated=num_queries_evaluated,
+        recall_stats=recall_stats,
     )
     if not verdict.startswith("valid"):
         print(
