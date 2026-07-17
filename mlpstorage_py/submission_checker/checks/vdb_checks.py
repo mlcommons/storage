@@ -152,7 +152,7 @@ class VdbCheck(BaseCheck):
         self.init_checks()
 
     def init_checks(self):
-        """Register all 16 §5 rule methods (Phase 4 D-01 full implementation)."""
+        """Register all 17 §5 rule methods (Phase 4 D-01 + §5.3.5, storage#808)."""
         self.checks = [
             self.vdb_dataset_scale,                # 5.1.1
             self.vdb_dimension_consistency,        # 5.1.2
@@ -162,6 +162,7 @@ class VdbCheck(BaseCheck):
             self.vdb_recall_reported,              # 5.3.2
             self.vdb_query_count_minimum,          # 5.3.3
             self.vdb_metrics_reported,             # 5.3.4
+            self.vdb_ground_truth_integrity,       # 5.3.5
             self.vdb_path_args,                    # 5.4.1
             self.vdb_filesystem_check,             # 5.4.2
             self.vdb_object_storage_backend,       # 5.5.1
@@ -629,6 +630,114 @@ class VdbCheck(BaseCheck):
             self._vdb_loader_gap_warning("5.3.4", "vdbMetricsReported")
 
         return valid
+
+    @rule("5.3.5", "vdbGroundTruthIntegrity")
+    def vdb_ground_truth_integrity(self):
+        """Verify each run's recall was measured against a complete, correctly
+        built ground truth. (Rules.md 5.3.5)
+
+        The benchmark records FLAT ground-truth setup per run in
+        ``result_verdict.json`` (``flat_setup.ok`` and ``flat_setup.coverage``).
+        ``ok == false`` means the ground truth failed to build; ``coverage <
+        1.0`` means recall was scored against an incomplete ground truth (the
+        benchmark's "degraded" state). Either makes the recall untrustworthy,
+        so the run is invalid (issue #808).
+
+        The raw ``flat_setup`` fields are read directly; the stored
+        ``valid``/``result`` verdict is deliberately not trusted — issue #805
+        showed a buggy run can record ``valid: true`` over a broken
+        measurement. A run whose ``result_verdict.json`` is absent, unreadable,
+        or carries no ``flat_setup`` record (e.g. a ``--no-create-flat`` worker
+        that validated the ground truth elsewhere) cannot be assessed here and
+        is warned, never failed.
+        """
+        valid = True
+        if self.mode != "vector_database":
+            return valid
+
+        any_run = False
+        for summary, metadata, ts in self._iter_run_files():
+            any_run = True
+            verdict_path = os.path.join(self.run_path, ts, "result_verdict.json")
+            if not os.path.isfile(verdict_path):
+                self.warn_violation(
+                    "5.3.5", "vdbGroundTruthIntegrity", self.path,
+                    "no result_verdict.json at %s/%s; FLAT ground-truth "
+                    "coverage cannot be assessed (run predates the integrity "
+                    "record)",
+                    self.path, ts,
+                )
+                continue
+
+            verdict = self._read_result_verdict(verdict_path)
+            if verdict is None:
+                self.warn_violation(
+                    "5.3.5", "vdbGroundTruthIntegrity", self.path,
+                    "result_verdict.json at %s/%s could not be read; FLAT "
+                    "ground-truth coverage not assessed",
+                    self.path, ts,
+                )
+                continue
+
+            flat_setup = verdict.get("flat_setup") if isinstance(verdict, dict) else None
+            if not isinstance(flat_setup, dict):
+                self.warn_violation(
+                    "5.3.5", "vdbGroundTruthIntegrity", self.path,
+                    "result_verdict.json at %s/%s carries no flat_setup record; "
+                    "FLAT ground-truth coverage not asserted for this run",
+                    self.path, ts,
+                )
+                continue
+
+            if flat_setup.get("ok") is False:
+                reason = flat_setup.get("reason") or "FLAT ground-truth setup failed"
+                self.log_violation(
+                    "5.3.5", "vdbGroundTruthIntegrity", self.path,
+                    "FLAT ground-truth setup failed for run %s/%s (%s); recall "
+                    "was not measured against a valid ground truth — the run is "
+                    "invalid (issue #808)",
+                    self.path, ts, reason,
+                )
+                valid = False
+                continue
+
+            coverage = flat_setup.get("coverage")
+            if (
+                isinstance(coverage, (int, float))
+                and not isinstance(coverage, bool)
+                and coverage < 1.0
+            ):
+                self.log_violation(
+                    "5.3.5", "vdbGroundTruthIntegrity", self.path,
+                    "FLAT ground-truth coverage is %.4f (< 1.0) for run %s/%s; "
+                    "recall was computed against an incomplete ground truth — "
+                    "the run is invalid (issue #808)",
+                    coverage, self.path, ts,
+                )
+                valid = False
+
+        if not any_run:
+            self._vdb_loader_gap_warning("5.3.5", "vdbGroundTruthIntegrity")
+
+        return valid
+
+    def _read_result_verdict(self, path):
+        """Load a run's result_verdict.json for the §5.3.5 integrity gate.
+
+        Returns the parsed object, or ``None`` when the file cannot be
+        read/parsed. The caller treats ``None`` (and a missing ``flat_setup``)
+        as "not assessable" and warns rather than failing, so an unreadable
+        record never false-fails a run (issue #808).
+        """
+        try:
+            with open(path, "r", encoding="utf-8") as fh:
+                return json.load(fh)
+        except (OSError, ValueError) as exc:
+            self.log.debug(
+                "[5.3.5] %s: could not read result_verdict.json (%s)",
+                path, exc,
+            )
+            return None
 
     # -----------------------------------------------------------------------
     # 5.4 POSIX-API options
