@@ -708,6 +708,138 @@ class Test_5_3_4_VdbMetricsReported:
 
 
 # ===========================================================================
+# §5.3.5 vdbGroundTruthIntegrity
+# ===========================================================================
+
+class Test_5_3_5_VdbGroundTruthIntegrity:
+    """Issue #808: a run whose FLAT ground truth was incomplete or failed to
+    build must be flagged invalid.
+
+    The engine records FLAT ground-truth setup in result_verdict.json
+    (flat_setup.ok / flat_setup.coverage). coverage < 1.0 means recall was
+    computed against a partial ground truth — the engine's own "degraded"
+    (valid: false) — and ok == false means setup failed outright; either
+    invalidates the run. The raw flat_setup fields are read directly; the
+    stored verdict string is not trusted (issue #805 showed it can be wrong).
+
+    A missing/unreadable result_verdict.json (pre-#806 artifacts, or a
+    --no-create-flat worker whose verdict carries flat_setup: null) is "not
+    assessable": it warns but never false-fails a run.
+    """
+
+    def _write_verdict(self, leaf, ts, flat_setup, valid=True):
+        payload = {
+            "result": "valid" if valid else "invalid",
+            "valid": valid,
+            "num_queries_evaluated": 1000,
+            "flat_setup": flat_setup,
+        }
+        (leaf / "run" / ts / "result_verdict.json").write_text(
+            json.dumps(payload), encoding="utf-8"
+        )
+
+    def test_full_coverage_ok_passes(self, tmp_path, mock_logger):
+        leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "AISAQ")
+        for ts in _DEFAULT_RUN_TIMESTAMPS:
+            self._write_verdict(
+                leaf, ts,
+                {"ok": True, "coverage": 1.0,
+                 "total_vectors": 1000, "copied_vectors": 1000},
+            )
+        run_files = [(_summary_run(), _metadata(), ts) for ts in _DEFAULT_RUN_TIMESTAMPS]
+        check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
+        assert check.vdb_ground_truth_integrity() is True
+        assert _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity") == []
+
+    def test_incomplete_coverage_is_invalid(self, tmp_path, mock_logger):
+        leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "AISAQ")
+        ts = _DEFAULT_RUN_TIMESTAMPS[0]
+        self._write_verdict(
+            leaf, ts,
+            {"ok": True, "coverage": 0.8,
+             "total_vectors": 1000, "copied_vectors": 800},
+            valid=False,
+        )
+        run_files = [(_summary_run(), _metadata(), ts)]
+        check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
+        assert check.vdb_ground_truth_integrity() is False
+        viol = _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity")
+        assert any("coverage" in v for v in viol), viol
+        assert any("issue #808" in v for v in viol), viol
+
+    def test_failed_flat_setup_is_invalid(self, tmp_path, mock_logger):
+        leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "AISAQ")
+        ts = _DEFAULT_RUN_TIMESTAMPS[0]
+        self._write_verdict(
+            leaf, ts,
+            {"ok": False, "coverage": 0.0,
+             "reason": "could not connect to Milvus for FLAT setup"},
+            valid=False,
+        )
+        run_files = [(_summary_run(), _metadata(), ts)]
+        check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
+        assert check.vdb_ground_truth_integrity() is False
+        viol = _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity")
+        assert any("setup failed" in v for v in viol), viol
+        assert any("issue #808" in v for v in viol), viol
+
+    def test_all_five_runs_incomplete_each_flagged(self, tmp_path, mock_logger):
+        leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "AISAQ")
+        for ts in _DEFAULT_RUN_TIMESTAMPS:
+            self._write_verdict(
+                leaf, ts,
+                {"ok": True, "coverage": 0.5,
+                 "total_vectors": 1000, "copied_vectors": 500},
+                valid=False,
+            )
+        run_files = [(_summary_run(), _metadata(), ts) for ts in _DEFAULT_RUN_TIMESTAMPS]
+        check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
+        assert check.vdb_ground_truth_integrity() is False
+        viol = _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity")
+        assert len([v for v in viol if "coverage" in v]) == len(_DEFAULT_RUN_TIMESTAMPS)
+
+    def test_missing_result_verdict_warns_not_fails(self, tmp_path, mock_logger):
+        # No result_verdict.json — a pre-#806 artifact. Not assessable.
+        leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "AISAQ")
+        run_files = [(_summary_run(), _metadata(), _DEFAULT_RUN_TIMESTAMPS[0])]
+        check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
+        assert check.vdb_ground_truth_integrity() is True
+        assert _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity") == []
+        assert _warnings(mock_logger, "5.3.5", "vdbGroundTruthIntegrity")
+
+    def test_null_flat_setup_warns_not_fails(self, tmp_path, mock_logger):
+        # --no-create-flat worker path: verdict present, flat_setup null.
+        leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "AISAQ")
+        ts = _DEFAULT_RUN_TIMESTAMPS[0]
+        self._write_verdict(leaf, ts, None)
+        run_files = [(_summary_run(), _metadata(), ts)]
+        check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
+        assert check.vdb_ground_truth_integrity() is True
+        assert _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity") == []
+        assert _warnings(mock_logger, "5.3.5", "vdbGroundTruthIntegrity")
+
+    def test_unreadable_result_verdict_warns_not_fails(self, tmp_path, mock_logger):
+        leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "AISAQ")
+        ts = _DEFAULT_RUN_TIMESTAMPS[0]
+        (leaf / "run" / ts / "result_verdict.json").write_text(
+            "{ not json", encoding="utf-8"
+        )
+        run_files = [(_summary_run(), _metadata(), ts)]
+        check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
+        assert check.vdb_ground_truth_integrity() is True
+        assert _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity") == []
+
+    def test_noop_on_non_vdb_mode(self, tmp_path, mock_logger):
+        leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "AISAQ")
+        check = _make_vdb_check(
+            leaf, "closed", mock_logger, run_files=[], mode="training"
+        )
+        assert check.vdb_ground_truth_integrity() is True
+        assert mock_logger.errors == []
+        assert mock_logger.warnings == []
+
+
+# ===========================================================================
 # §5.4.1 vdbPathArgs
 # ===========================================================================
 
