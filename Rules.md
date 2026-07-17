@@ -559,6 +559,8 @@ System:
 
 5.3.4. **vdbMetricsReported** -- Each run's `summary.json` must report `throughput_qps` and the latency percentile set (`mean_latency_ms`, `p95_latency_ms`, `p99_latency_ms`, `p999_latency_ms`). The *submission validator* must verify these fields exist and are populated.
 
+5.3.5. **vdbGroundTruthIntegrity** -- Each run's recall must be measured against a complete, correctly built ground truth: the exact (brute-force) reference used to score recall must cover every vector in the queried dataset. A run whose ground truth failed to build, or that covers fewer than all of the dataset's vectors, does not yield a trustworthy recall measurement and is invalid. The *submission validator* must fail any such run.
+
 ## 5.4. VDB Access Via POSIX API Options
 
 5.4.1. **vdbPathArgs** -- The arguments to `mlpstorage` that set the storage path for the vector database data and the directory where output logfiles/results are stored must both be set and must be set to different values.
