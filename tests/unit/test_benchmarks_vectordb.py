@@ -728,3 +728,59 @@ class TestVectorDBEffectiveIndexUse:
 
         with pytest.raises(ValueError, match='must match'):
             benchmark._effective_index_type()
+
+
+class TestVectorDBStorageRootResolution:
+    """storage#802: --storage-root / --storage-type resolve onto self.args so
+    the run metadata records them (metadata['args'] = vars(self.args)).
+
+    Precedence: CLI wins over the config YAML ``storage:`` section, which wins
+    over the built-in default (storage_type=local_fs; storage_root has no
+    default and stays unset when neither CLI nor config provides one).
+    """
+
+    def _make(self, tmp_path, yaml_params, **overrides):
+        base = dict(
+            debug=False, verbose=False, what_if=False, stream_log_level='INFO',
+            mode='closed', orgname='Acme', systemname='sys-v1',
+            results_dir=str(tmp_path), command='run', config='default',
+            vdb_engine='milvus', vdb_index='DISKANN',
+            host='127.0.0.1', port=19530, collection='c', category=None,
+            num_query_processes=1, batch_size=1, runtime=60, queries=None,
+            report_count=100, storage_root=None, storage_type=None,
+        )
+        base.update(overrides)
+        args = Namespace(**base)
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location',
+                   return_value=str(tmp_path / "out")), \
+             patch('mlpstorage_py.benchmarks.vectordbbench.read_config_from_file',
+                   return_value=yaml_params), \
+             patch('mlpstorage_py.benchmarks.vectordbbench.VectorDBBenchmark.verify_benchmark'), \
+             patch('mlpstorage_py.benchmarks.vectordbbench.VectorDBBenchmark._validate_vdb_dependencies'):
+            from mlpstorage_py.benchmarks.vectordbbench import VectorDBBenchmark
+            return VectorDBBenchmark(args)
+
+    def test_cli_storage_root_wins_over_config(self, tmp_path):
+        bm = self._make(
+            tmp_path,
+            {"storage": {"storage_root": "/yaml/root", "storage_type": "s3"}},
+            storage_root="/cli/root", storage_type="local_fs",
+        )
+        assert bm.args.storage_root == "/cli/root"
+        assert bm.args.storage_type == "local_fs"
+
+    def test_config_storage_root_used_when_no_cli(self, tmp_path):
+        bm = self._make(tmp_path, {"storage": {"storage_root": "/yaml/root"}})
+        assert bm.args.storage_root == "/yaml/root"
+        assert bm.args.storage_type == "local_fs"
+
+    def test_defaults_when_absent_everywhere(self, tmp_path):
+        bm = self._make(tmp_path, {})
+        assert bm.args.storage_root is None
+        assert bm.args.storage_type == "local_fs"
+
+    def test_storage_root_lands_in_metadata_args(self, tmp_path):
+        bm = self._make(tmp_path, {"storage": {"storage_root": "/vdb/data"}})
+        meta = bm.metadata
+        assert meta["args"]["storage_root"] == "/vdb/data"
+        assert meta["args"]["storage_type"] == "local_fs"
