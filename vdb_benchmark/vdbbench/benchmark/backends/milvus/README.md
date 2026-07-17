@@ -72,7 +72,9 @@ compressed index format.
 | `max_degree` | int | 32 | Maximum out-degree of each graph node |
 | `search_list_size` | int | 100 | Candidate-list size during build |
 
-No search-time parameters.
+| Search Parameter | Type | Default | Description |
+|-----------------|------|---------|-------------|
+| `search_list` | int | 16 | Candidate-pool size during graph traversal; must be >= top_k. The benchmark maps `--search-ef` to this key for AISAQ, clamped to the search limit (same as DISKANN). |
 
 ### FLAT
 

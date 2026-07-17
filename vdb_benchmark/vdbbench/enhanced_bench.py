@@ -874,18 +874,36 @@ def create_flat_collection(
             source_coll = Collection(source_collection_name, using=conn_alias)
 
             if flat_coll.num_entities > 0 and flat_coll.num_entities == source_coll.num_entities:
-                print(
-                    f"FLAT collection '{flat_collection_name}' already exists "
-                    f"with {flat_coll.num_entities} vectors, reusing it."
-                )
-                flat_coll.load()
-                return True
+                # Count equality alone is not identity — a stale FLAT GT from
+                # a regenerated source collection silently drives recall to
+                # exactly 0.00 (issue #805). Verify content before reuse.
+                from vdbbench.simple_bench import verify_flat_matches_source
 
-            print(
-                f"FLAT collection exists but has {flat_coll.num_entities} vs "
-                f"{source_coll.num_entities} vectors. Dropping and recreating..."
-            )
-            utility.drop_collection(flat_collection_name, using=conn_alias)
+                flat_coll.load()
+                source_coll.load()
+                matches, detail = verify_flat_matches_source(
+                    source_coll, flat_coll
+                )
+                if matches:
+                    print(
+                        f"FLAT collection '{flat_collection_name}' already "
+                        f"exists with {flat_coll.num_entities} vectors and "
+                        f"passed the content check ({detail}), reusing it."
+                    )
+                    return True
+
+                print(
+                    f"WARNING: FLAT collection '{flat_collection_name}' has a "
+                    f"matching row count but stale content ({detail}). "
+                    f"Dropping and recreating (issue #805)."
+                )
+                utility.drop_collection(flat_collection_name, using=conn_alias)
+            else:
+                print(
+                    f"FLAT collection exists but has {flat_coll.num_entities} vs "
+                    f"{source_coll.num_entities} vectors. Dropping and recreating..."
+                )
+                utility.drop_collection(flat_collection_name, using=conn_alias)
 
         print(
             f"Creating FLAT collection '{flat_collection_name}' "
