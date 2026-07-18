@@ -563,7 +563,7 @@ System:
 
 ## 5.4. VDB Access Via POSIX API Options
 
-5.4.1. **vdbPathArgs** -- The arguments to `mlpstorage` that set the storage path for the vector database data and the directory where output logfiles/results are stored must both be set and must be set to different values.
+5.4.1. **vdbPathArgs** -- For file-API submissions, the vector database data storage path (`--storage-root`, config key `storage.storage_root`) and the output logfile/results directory (`--results-dir`) must both be set and must be different, so that logfiles are not written onto the storage system under test. For object-API submissions the vector database data does not live on a submitter-owned local path, so a storage root is not required and the storage backend is validated under §5.5.1 instead.
 
 5.4.2. **vdbFilesystemCheck** -- The `mlpstorage` command should do a "df" command on the directory pathname where the vector database stores its data and another on the directory pathname where the output logfiles are stored, and record those values in the logfile. The *submission validator* must find those entries in the run's logfile and verify that they are different filesystems, so that logfiles are not accidentally placed on the storage system under test.
 
@@ -628,8 +628,8 @@ System:
 | dataset.vector_dtype       | `--vector-dtype`     | Vector data type (e.g. FLOAT_VECTOR)                             | FLOAT_VECTOR |
 |                            |                      |                                                                  |              |
 | *Storage parameters*       |                      |                                                                  |              |
-| storage.storage_root       | --                   | The storage root directory for VDB data                          | --           |
-| storage.storage_type       | --                   | The storage type (e.g. local_fs, s3)                            | local_fs     |
+| storage.storage_root       | `--storage-root`     | The storage root directory for VDB data                          | --           |
+| storage.storage_type       | `--storage-type`     | The storage type (e.g. local_fs, s3)                            | local_fs     |
 
 5.6.5. **vdbOpenSubmissionParameters** -- For OPEN submissions of this benchmark, the submitter may additionally run against vector database backends other than Milvus — including **Elasticsearch** and **pgvector** — in addition to everything already permitted in CLOSED. The *submission validator* must verify that the recorded `database.database` is one of the supported backends. OPEN submissions may use any index types, metrics, and parameters native to the chosen backend (including the full `VDB_INDEX_TYPES` set such as `IVF_FLAT`, `IVF_SQ8`, and `FLAT` on Milvus), but must still meet the recall target (5.3.2) and report the required metrics (5.3.4). Any parameter not listed here or in the CLOSED table, when modified, must generate a message and fail the validation.
 

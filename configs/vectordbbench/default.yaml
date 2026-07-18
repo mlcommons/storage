@@ -33,3 +33,10 @@ benchmark:
   recall_k: 10
   search_limit: 10
 
+storage:
+  # Path where the vector database engine stores its data (server-side). Set
+  # this here or pass --storage-root so the run is recorded for Rules.md 5.4.1;
+  # it must differ from --results-dir. Left unset by default.
+  storage_root:
+  storage_type: local_fs
+

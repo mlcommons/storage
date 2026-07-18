@@ -114,6 +114,13 @@ _CLOSED_ALLOWED_PARAMS = frozenset({
 })
 
 
+# Ruleset versions for which §5.4.1 vdbPathArgs reports a missing/duplicate VDB
+# storage path as a WARNING rather than a hard failure. The storage-root
+# recording (storage#802) shipped mid-v3.0, so pre-fix v3.0 submissions cannot
+# carry it; a later round restores the hard error by dropping v3.0 from this set.
+_VDB_PATH_ARGS_WARN_VERSIONS = frozenset({"v3.0"})
+
+
 # Additional OPEN params beyond the CLOSED set (Rules.md §5.6.5 table).
 # Backend-specific params (pgvector lists/probes, Elasticsearch m / ef_construction
 # / num_candidates, etc.) are NOT enumerable up-front; non-Milvus backends are
@@ -745,12 +752,35 @@ class VdbCheck(BaseCheck):
 
     @rule("5.4.1", "vdbPathArgs")
     def vdb_path_args(self):
-        """Verify vdb data path and results dir args are both set and differ.
+        """Verify the VDB data storage path and results dir are both set and differ.
         (Rules.md 5.4.1)
+
+        File-API submissions must record a storage root (``storage_root``, set
+        by ``--storage-root`` or the config ``storage.storage_root``) distinct
+        from ``results_dir`` so logfiles are not written onto the storage system
+        under test. Object-API submissions keep their data in a remote/object
+        backend with no submitter-owned local path, so a storage root is not
+        required here — the backend is validated under §5.5.1.
+
+        Severity (storage#802): the storage-root plumbing shipped mid-v3.0, so
+        for the v3.0 ruleset a missing or duplicate path is a WARNING and the
+        run stays valid; a later ruleset version restores the hard error (see
+        ``_VDB_PATH_ARGS_WARN_VERSIONS``). A correctly configured run emits no
+        message at all.
         """
         valid = True
         if self.mode != "vector_database":
             return valid
+
+        # Object-API: no submitter-owned local storage path to require
+        # (Rules.md 5.4.1); §5.5.1 owns the backend check. Silent pass, matching
+        # 5.4.2's object-API handling.
+        if self._get_benchmark_api() == "object":
+            return valid
+
+        warn_only = (
+            getattr(self.config, "version", None) in _VDB_PATH_ARGS_WARN_VERSIONS
+        )
 
         any_run = False
         for summary, metadata, ts in self._iter_run_files():
@@ -762,7 +792,7 @@ class VdbCheck(BaseCheck):
                 )
                 continue
             args = metadata.get("args", {})
-            # The vdb runner uses storage-root for the data path; data_dir is the
+            # The vdb runner uses storage_root for the data path; data_dir is the
             # generic mlpstorage name. Honor either to keep the rule resilient
             # to the args-shape refactor that lands alongside Phase 4.
             data_path = (
@@ -773,31 +803,44 @@ class VdbCheck(BaseCheck):
             results_dir = args.get("results_dir")
 
             if not data_path:
-                self.log_violation(
-                    "5.4.1", "vdbPathArgs", self.path,
-                    "vdbPathArgs: vdb data path arg not set in metadata at %s/%s",
+                if self._emit_path_arg_finding(
+                    warn_only,
+                    "vdbPathArgs: vdb data path (storage_root) not set in "
+                    "metadata at %s/%s",
                     self.path, ts,
-                )
-                valid = False
+                ):
+                    valid = False
             if not results_dir:
-                self.log_violation(
-                    "5.4.1", "vdbPathArgs", self.path,
+                if self._emit_path_arg_finding(
+                    warn_only,
                     "vdbPathArgs: results_dir not set in metadata at %s/%s",
                     self.path, ts,
-                )
-                valid = False
+                ):
+                    valid = False
             if data_path and results_dir and data_path == results_dir:
-                self.log_violation(
-                    "5.4.1", "vdbPathArgs", self.path,
+                if self._emit_path_arg_finding(
+                    warn_only,
                     "vdbPathArgs: vdb data path %s and results_dir %s must differ",
                     data_path, results_dir,
-                )
-                valid = False
+                ):
+                    valid = False
 
         if not any_run:
             self._vdb_loader_gap_warning("5.4.1", "vdbPathArgs")
 
         return valid
+
+    def _emit_path_arg_finding(self, warn_only, msg, *args):
+        """Emit a §5.4.1 finding at WARN (v3.0 round) or ERROR (later rulesets).
+
+        Returns ``True`` when the finding is a hard failure that must flip
+        ``valid`` to False; ``False`` when it was emitted as an advisory warning.
+        """
+        if warn_only:
+            self.warn_violation("5.4.1", "vdbPathArgs", self.path, msg, *args)
+            return False
+        self.log_violation("5.4.1", "vdbPathArgs", self.path, msg, *args)
+        return True
 
     @rule("5.4.2", "vdbFilesystemCheck")
     def vdb_filesystem_check(self):
