@@ -455,3 +455,9 @@ Three fixes landed in this range, all closing the #805 VDB ground-truth-integrit
 - AISAQ Recall@10 = 0.00 on every query: `create_flat_collection` reused an existing FLAT ground-truth collection whenever its entity *count* matched the source, so a stale ground truth left over from a regenerated collection (same size, different vectors) was silently paired with the new index — every ANN result missed the ground truth and recall was exactly 0.00, while QPS/latency and `coverage: 1.0` still looked healthy. Content is now verified (sampled-vector comparison) before reuse, and any all-zero-recall run aborts at run time instead of writing `valid: true`. (#805; #806)
 - `mlpstorage validate` marked 0.0-recall runs valid: rule §5.3.2 (`vdbRecallReported`) checked only that a recall value was *present*, never its magnitude, so the broken AISAQ artifacts passed submission. It now reads the recall value and invalidates any run whose recall is 0.0, independent of the deferred per-scale minimum-recall table. (#807)
 - `mlpstorage validate` was blind to ground-truth completeness: it never read `result_verdict.json`, so a run whose FLAT ground truth was incomplete (`coverage < 1.0`, the benchmark's "degraded" state) or failed to build passed validation. New rule §5.3.5 (`vdbGroundTruthIntegrity`) reads the raw ground-truth-setup fields and fails such runs; a missing or older record warns rather than false-failing. (#808; #809)
+
+---
+
+## Version 3.0.45 (July 18, 2026)
+
+VDB runs failed submission validation (§5.4.1) because `storage_root` was not recorded in run metadata. Measured scores — QPS, latency, recall — are unaffected, so no rerun is needed; existing v3.0.42 VDB submissions now validate. (#802, #815)
