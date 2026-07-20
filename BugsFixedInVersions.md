@@ -461,3 +461,22 @@ Three fixes landed in this range, all closing the #805 VDB ground-truth-integrit
 ## Version 3.0.45 (July 18, 2026)
 
 VDB runs failed submission validation (§5.4.1) because `storage_root` was not recorded in run metadata. Measured scores — QPS, latency, recall — are unaffected, so no rerun is needed; existing v3.0.42 VDB submissions now validate. (#802, #815)
+
+---
+
+## Version 3.0.46 (July 20, 2026) — Release Candidate `v3.0-rc1`
+
+This is the release-candidate cut of the v3.0 line: the tree is promoted and tagged `v3.0-rc1` to signal
+that v3.0 is feature-complete and under submission-window freeze. Two HPE/Cray PALS launcher fixes landed
+over 3.0.45. Both are strictly PALS-specific: if you launch with `mpirun` (OpenMPI) or run single-node,
+these changes are a complete no-op — nothing about your runs changes. They matter only on HPE/Cray PALS
+`mpiexec` systems (ALCF Crux/Polaris/Aurora), where they are invocation fixes: on those systems the run
+never started, so no completed run produced wrong numbers. The DLIO pin and s3dlio floor did not move.
+
+**Invocation**
+- kvcache multi-node runs on HPE/Cray PALS (ALCF Crux/Polaris/Aurora) failed to launch: the benchmark appended OpenMPI-only `--mca orte_abort_on_non_zero_status 0` to PALS `mpiexec`, which rejected it with "unrecognized option '--mca'". The `--mca` params are now emitted only on the mpirun/OpenMPI path. (#819)
+- Multi-node runs on HPE/Cray PALS failed the CAP-02b `--results-dir` shared-FS probe: its launcher passed OpenMPI-only `--map-by`/`--bind-to` flags to PALS `mpiexec` ("unrecognized option --map-by"). It now takes the PALS-native `--ppn` + bare `--hosts` branch its sibling probe already used. (#818)
+
+Scores from any 3.0.45 run are unaffected, so no rerun is needed relative to 3.0.45. If you are on an
+older release, review the significant issues fixed between your version and 3.0.46 in the sections above
+to determine whether your prior runs need a rerun or one is merely recommended.
