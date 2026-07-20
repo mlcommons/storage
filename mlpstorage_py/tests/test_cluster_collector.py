@@ -809,3 +809,42 @@ class TestIntegration:
 
 if __name__ == "__main__":
     pytest.main([__file__, "-v"])
+
+
+# --- CAP-02b results-dir probe: PALS-native launcher (ALCF) — regression for
+# --- "mpiexec: unrecognized option '--map-by'" (storage#772; mirrors #549) ---
+def _cap02b_capture_cmd(mpi_bin, tmp_path):
+    import mlpstorage_py.cluster_collector as cc
+    from unittest.mock import patch, MagicMock
+    cap = {}
+    class _Stop(Exception):
+        pass
+    def _fake_run(cmd, **kw):
+        cap["cmd"] = cmd
+        raise _Stop()
+    with patch.object(cc.subprocess, "run", side_effect=_fake_run):
+        try:
+            cc.run_results_dir_shared_probe(
+                str(tmp_path), ["h1", "h2"], "0" * 12, MagicMock(),
+                mpi_bin=mpi_bin, allow_run_as_root=True,
+            )
+        except _Stop:
+            pass
+    return cap.get("cmd", "")
+
+
+def test_cap02b_results_probe_pals_mpiexec_no_map_by(tmp_path):
+    import mlpstorage_py.cluster_collector as cc
+    cmd = _cap02b_capture_cmd(cc.MPIEXEC, tmp_path)
+    assert "--ppn 1" in cmd
+    assert "--cpu-bind" not in cmd
+    assert "--hosts h1,h2" in cmd
+    assert "--map-by" not in cmd
+    assert "--bind-to" not in cmd
+
+
+def test_cap02b_results_probe_mpirun_unchanged(tmp_path):
+    import mlpstorage_py.cluster_collector as cc
+    cmd = _cap02b_capture_cmd(cc.MPIRUN, tmp_path)
+    assert "--map-by node" in cmd
+    assert "--bind-to none" in cmd
