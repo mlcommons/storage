@@ -70,6 +70,20 @@ WORKLOAD_PARAMS = {
 }
 
 
+def _abort_suppression_mpi_params(mpi_bin: str) -> List[str]:
+    """OpenMPI abort-suppression MPI params; empty for HPE Cray PALS mpiexec.
+
+    kvcache expects per-rank non-zero exits, so on OpenMPI we pass
+    ``--mca orte_abort_on_non_zero_status 0`` to stop the launcher aborting the
+    whole job on the first non-zero rank. ``--mca`` is OpenMPI-only; HPE Cray
+    PALS ``mpiexec`` (ALCF Crux/Polaris/Aurora) rejects it and the launch fails
+    with "mpiexec: unrecognized option '--mca'", so emit no extra params there.
+    """
+    if mpi_bin == 'mpiexec':
+        return []
+    return ['--mca', 'orte_abort_on_non_zero_status', '0']
+
+
 class KVCacheBenchmark(Benchmark):
     """KV Cache benchmark for LLM inference storage.
 
@@ -281,7 +295,8 @@ class KVCacheBenchmark(Benchmark):
         # the abort-suppression flag authoritative even if the user supplies a
         # conflicting value (kvcache expects per-rank non-zero exits).
         user_mpi_params = list(getattr(self.args, 'mpi_params', None) or [])
-        mpi_params = user_mpi_params + ['--mca', 'orte_abort_on_non_zero_status', '0']
+        mpi_params = user_mpi_params + _abort_suppression_mpi_params(
+            getattr(self.args, 'mpi_bin', 'mpirun'))
 
         mpi_prefix = generate_mpi_prefix_cmd(
             mpi_cmd=getattr(self.args, 'mpi_bin', 'mpirun'),

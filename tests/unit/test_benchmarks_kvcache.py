@@ -2363,3 +2363,17 @@ class TestKVCacheSystemnameYamlHook:
             f"KVCacheBenchmark.run() should have written systemname.yaml at "
             f"{target}; this is the LIFE-01 non-DLIO regression coverage."
         )
+
+
+# --- ALCF PALS mpiexec launcher: OpenMPI-only --mca must not leak to Cray PALS ---
+from mlpstorage_py.benchmarks.kvcache import _abort_suppression_mpi_params
+
+
+def test_abort_suppression_params_openmpi_mpirun():
+    assert _abort_suppression_mpi_params("mpirun") == [
+        "--mca", "orte_abort_on_non_zero_status", "0"]
+
+
+def test_abort_suppression_params_pals_mpiexec():
+    # HPE Cray PALS mpiexec rejects --mca; emit no extra params.
+    assert _abort_suppression_mpi_params("mpiexec") == []

@@ -4042,13 +4042,27 @@ def run_results_dir_shared_probe(results_dir, hosts, run_uuid, logger,
         f"(d/('{probe_id}__rank'+r+'__'+h+'.ok')).write_text(h)"
     )
 
-    probe_hosts_arg = ",".join(f"{h}:1" for h in unique_hosts)
-    prefix = (
-        f"{mpi_bin} -n {len(unique_hosts)} -host {probe_hosts_arg} "
-        f"--map-by node --bind-to none"
-    )
-    if allow_run_as_root:
-        prefix += " --allow-run-as-root"
+    # HPE Cray PALS mpiexec (ALCF Crux/Polaris/Aurora) vs OpenMPI mpirun.
+    if mpi_bin == MPIEXEC:
+        # PALS rejects OpenMPI's -host h:slots / --map-by / --bind-to /
+        # --allow-run-as-root; it uses --ppn + a bare --hosts list. The
+        # 1-rank-per-node sentinel write needs no CPU affinity, so --cpu-bind
+        # is left at the PALS default. Mirrors run_shared_fs_probe (#549);
+        # without this, CAP-02b (storage#772) fails every ALCF multi-node run:
+        # mpiexec: unrecognized option '--map-by'.
+        prefix = (
+            f"{MPI_EXEC_BIN} -n {len(unique_hosts)} --ppn 1 "
+            f"--hosts {','.join(unique_hosts)}"
+        )
+    else:
+        mpi_executable = MPI_RUN_BIN if mpi_bin == MPIRUN else mpi_bin
+        probe_hosts_arg = ",".join(f"{h}:1" for h in unique_hosts)
+        prefix = (
+            f"{mpi_executable} -n {len(unique_hosts)} -host {probe_hosts_arg} "
+            f"--map-by node --bind-to none"
+        )
+        if allow_run_as_root:
+            prefix += " --allow-run-as-root"
 
     import shlex as _shlex
     cmd = f"{prefix} {sys.executable} -c {_shlex.quote(inline)}"
