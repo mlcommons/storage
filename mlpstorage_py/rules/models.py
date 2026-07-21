@@ -25,6 +25,27 @@ if TYPE_CHECKING:
     from mlpstorage_py.rules.issues import Issue
 
 
+def _compute_final_collection_time(metadata: Optional[Dict], summary_end: str) -> str:
+    """Return the write-side node-release proxy for the §4.7.1 gap.
+
+    The latest post-benchmark cluster ``collection_timestamp`` in
+    ``metadata`` (at or after ``summary_end``) marks when the write nodes are
+    released, and stands in for ``invocation_end_time`` on results dirs that
+    predate that bookend (pre-#787). Reuses the same helper the standalone
+    submission checker uses so the reportgen path selects an identical
+    write-side origin. Returns ``""`` when unavailable.
+
+    Imported lazily to avoid a top-level circular import between
+    ``rules/models.py`` and ``submission_checker``.
+    """
+    if not metadata or not summary_end:
+        return ""
+    from mlpstorage_py.submission_checker.checks.helpers import (
+        _latest_final_collection_timestamp,
+    )
+    return _latest_final_collection_timestamp(metadata, summary_end) or ""
+
+
 @dataclass(frozen=True)
 class RunID:
     """Identifier for a benchmark run."""
@@ -84,6 +105,23 @@ class BenchmarkRunData:
     result_dir: Optional[str] = None
     accelerator: Optional[str] = None
     end_datetime: str = ""
+    # Invocation bookends captured by mlpstorage_py/_invocation.py
+    # (metadata.invocation_start_time / invocation_end_time). These exclude
+    # read-side framework startup and write-side post-benchmark cluster
+    # collection, and are the authoritative origins for the Rules.md §4.7.1
+    # inter-phase cache-flush gap (storage#714 / #782). Empty when a
+    # pre-bookend results dir is read; consumers fall back to
+    # run_datetime / end_datetime (the DLIO summary start / end).
+    invocation_start_time: str = ""
+    invocation_end_time: str = ""
+    # Write-side node-release proxy for pre-#787 results dirs that lack
+    # invocation_end_time: the latest post-benchmark cluster
+    # collection_timestamp in metadata.json (see
+    # submission_checker/checks/helpers._latest_final_collection_timestamp).
+    # This is the middle §4.7.1 write-origin tier between invocation_end_time
+    # and the summary end; empty when no post-benchmark collection timestamp
+    # is recorded.
+    final_collection_time: str = ""
 
 
 @dataclass
@@ -828,12 +866,14 @@ class DLIOResultParser:
             ci_data = metadata.get('cluster_information')
             if ci_data:
                 system_info = ClusterInformation.from_dict(ci_data, self.logger)
+        metadata = metadata or {}
+        summary_end = summary.get("end", "")
         return BenchmarkRunData(
             benchmark_type=benchmark_type,
             model=model,
             command=command,
             run_datetime=summary.get("start", ""),
-            end_datetime=summary.get("end", ""),
+            end_datetime=summary_end,
             num_processes=summary.get("num_accelerators", 0),
             parameters=hydra_workload_config,
             override_parameters=override_parameters,
@@ -841,6 +881,9 @@ class DLIOResultParser:
             metrics=summary.get("metric"),
             result_dir=result_dir,
             accelerator=accelerator,
+            invocation_start_time=metadata.get("invocation_start_time", ""),
+            invocation_end_time=metadata.get("invocation_end_time", ""),
+            final_collection_time=_compute_final_collection_time(metadata, summary_end),
         )
 
     def _load_summary(self, result_dir: str) -> Optional[Dict]:
@@ -962,6 +1005,9 @@ class ResultFilesExtractor:
             metrics=run_metrics,
             result_dir=result_dir,
             accelerator=metadata.get('accelerator'),
+            invocation_start_time=metadata.get('invocation_start_time', ''),
+            invocation_end_time=metadata.get('invocation_end_time', ''),
+            final_collection_time=_compute_final_collection_time(metadata, end_datetime),
         )
 
     def _load_summary(self, result_dir: str) -> Optional[Dict]:
@@ -1064,6 +1110,18 @@ class BenchmarkRun:
     @property
     def end_datetime(self):
         return self._data.end_datetime
+
+    @property
+    def invocation_start_time(self):
+        return self._data.invocation_start_time
+
+    @property
+    def invocation_end_time(self):
+        return self._data.invocation_end_time
+
+    @property
+    def final_collection_time(self):
+        return self._data.final_collection_time
 
     @property
     def num_processes(self):
