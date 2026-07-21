@@ -213,14 +213,23 @@ class CheckpointSubmissionRulesChecker(MultiRunRulesChecker):
             # (metadata.invocation_end_time / invocation_start_time). These
             # exclude write-side post-benchmark cluster collection and
             # read-side framework startup, and are the authoritative origins
-            # for the §4.7.1 cache-flush gap. Fall back to the DLIO summary
-            # end/start fields only for pre-bookend results dirs. This mirrors
-            # the origin selection in the submission checker's 2.1.24 /
-            # 4.7.1 checks (storage#714 / #782); measuring from the summary
-            # fields charges that startup/collection overhead against the
-            # quiet window and produces spurious >30s violations.
+            # for the §4.7.1 cache-flush gap. This mirrors the origin selection
+            # in the submission checker's 2.1.24 / 4.7.1 checks (storage#714 /
+            # #782); measuring from the summary fields charges that
+            # startup/collection overhead against the quiet window and produces
+            # spurious >30s violations.
+            #
+            # Write side, in priority order (matches
+            # checkpointing_checks.cache_flush_validation):
+            #   1. invocation_end_time — #787+ bookend (excludes teardown).
+            #   2. final_collection_time — latest post-benchmark
+            #      collection_timestamp; node-release proxy for pre-#787
+            #      results dirs (which are eligible for v3.0 without
+            #      regeneration and carry no invocation_end_time).
+            #   3. summary end — oldest fallback (charges teardown to the gap).
             write_end = (
                 _parse_summary_timestamp(ordered[0].invocation_end_time)
+                or _parse_summary_timestamp(ordered[0].final_collection_time)
                 or _parse_summary_timestamp(ordered[0].end_datetime)
             )
             read_start = (
@@ -238,7 +247,7 @@ class CheckpointSubmissionRulesChecker(MultiRunRulesChecker):
                     parameter="checkpoint.invocation_structure",
                     expected="parseable write-phase end and read-phase start",
                     actual=(
-                        f"write_end={(ordered[0].invocation_end_time or ordered[0].end_datetime)!r}, "
+                        f"write_end={(ordered[0].invocation_end_time or ordered[0].final_collection_time or ordered[0].end_datetime)!r}, "
                         f"read_start={(ordered[1].invocation_start_time or ordered[1].run_datetime)!r}"
                     ),
                 ))
