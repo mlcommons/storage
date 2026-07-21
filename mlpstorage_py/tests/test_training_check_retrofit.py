@@ -193,30 +193,122 @@ def test_3_3_5_distributed_data_accessibility_logs_info_returns_true(tmp_path, m
 
 
 # ---------------------------------------------------------------------------
-# Satisfied-by-construction: 3.3.7 node_capability_consistency_check
+# 3.3.7 node_capability_consistency_check — warnings-only node divergence
 # ---------------------------------------------------------------------------
 
-def test_3_3_7_node_capability_consistency_logs_info_returns_true(tmp_path, mock_logger):
-    """3.3.7 is satisfied by construction at runtime via cluster start/end
-    snapshots (Benchmark._collect_cluster_start / _collect_cluster_end).
-    Any component drift during the run is captured in
-    metadata['cluster_snapshots'] and surfaced to the operator.
+_GB = 1024 ** 3
 
-    The rule body preserves the @rule binding and emits a single INFO
-    line carrying the "satisfied by construction" marker.
-    """
+
+def _cluster_info(mem_totals, core_counts, consistency_issues=None):
+    """Build a ClusterInformation.as_dict-shaped block with per-host vectors."""
+    hosts = [
+        {
+            "hostname": f"host{i}",
+            "memory": {"total": mem},
+            "cpu": {"num_cores": cores},
+        }
+        for i, (mem, cores) in enumerate(zip(mem_totals, core_counts))
+    ]
+    ci = {
+        "num_hosts": len(hosts),
+        "min_memory_bytes": min(mem_totals),
+        "max_memory_bytes": max(mem_totals),
+        "hosts": hosts,
+    }
+    if consistency_issues:
+        ci["host_consistency_issues"] = consistency_issues
+    return ci
+
+
+def _3_3_7_warnings(mock_logger):
+    return [
+        m for m in mock_logger.warnings
+        if m.startswith("[3.3.7 trainingNodeCapabilityConsistency]")
+    ]
+
+
+def test_3_3_7_no_cluster_information_silent_pass(tmp_path, mock_logger):
+    """No cluster_information to assess → returns True, no warning/error."""
     from mlpstorage_py.tests.conftest import build_submission
     root = build_submission(tmp_path)
     check = _run_training_check(root, mock_logger)
     result = check.node_capability_consistency_check()
-    assert result is True, f"expected True; got {result!r}"
-    matching = [
-        m for m in mock_logger.infos
-        if m.startswith("[3.3.7 trainingNodeCapabilityConsistency]")
-    ]
-    assert matching, (
-        f"expected info starting with [3.3.7 trainingNodeCapabilityConsistency]; "
-        f"got infos={mock_logger.infos}"
+    assert result is True
+    assert mock_logger.errors == []
+    assert _3_3_7_warnings(mock_logger) == []
+
+
+def test_3_3_7_uniform_hosts_no_warning(tmp_path, mock_logger):
+    """Hosts with matching memory + cores → no divergence warning."""
+    from mlpstorage_py.tests.conftest import build_submission
+    root = build_submission(
+        tmp_path,
+        run_metadata_cluster_information=_cluster_info(
+            [256 * _GB, 256 * _GB], [64, 64]
+        ),
+    )
+    check = _run_training_check(root, mock_logger)
+    result = check.node_capability_consistency_check()
+    assert result is True
+    assert mock_logger.errors == []
+    assert _3_3_7_warnings(mock_logger) == []
+
+
+def test_3_3_7_warns_on_wide_memory_divergence(tmp_path, mock_logger):
+    """Hosts differing 2x in memory → warns (never fails)."""
+    from mlpstorage_py.tests.conftest import build_submission
+    root = build_submission(
+        tmp_path,
+        run_metadata_cluster_information=_cluster_info(
+            [256 * _GB, 512 * _GB], [64, 64]
+        ),
+    )
+    check = _run_training_check(root, mock_logger)
+    result = check.node_capability_consistency_check()
+    assert result is True
+    assert mock_logger.errors == []
+    warns = _3_3_7_warnings(mock_logger)
+    assert any("memory" in m for m in warns), (
+        f"expected a memory-divergence warning; got {mock_logger.warnings}"
+    )
+
+
+def test_3_3_7_warns_on_wide_cpu_divergence(tmp_path, mock_logger):
+    """Hosts differing 2x in CPU cores → warns (never fails)."""
+    from mlpstorage_py.tests.conftest import build_submission
+    root = build_submission(
+        tmp_path,
+        run_metadata_cluster_information=_cluster_info(
+            [256 * _GB, 256 * _GB], [32, 64]
+        ),
+    )
+    check = _run_training_check(root, mock_logger)
+    result = check.node_capability_consistency_check()
+    assert result is True
+    assert mock_logger.errors == []
+    warns = _3_3_7_warnings(mock_logger)
+    assert any("CPU cores" in m for m in warns), (
+        f"expected a CPU-core-divergence warning; got {mock_logger.warnings}"
+    )
+
+
+def test_3_3_7_surfaces_host_consistency_issues(tmp_path, mock_logger):
+    """Collector-recorded host_consistency_issues are surfaced as a warning."""
+    from mlpstorage_py.tests.conftest import build_submission
+    root = build_submission(
+        tmp_path,
+        run_metadata_cluster_information=_cluster_info(
+            [256 * _GB, 256 * _GB], [64, 64],
+            consistency_issues=["kernel version mismatch across hosts"],
+        ),
+    )
+    check = _run_training_check(root, mock_logger)
+    result = check.node_capability_consistency_check()
+    assert result is True
+    assert mock_logger.errors == []
+    warns = _3_3_7_warnings(mock_logger)
+    assert any("kernel version mismatch" in m for m in warns), (
+        f"expected host-consistency-issue warning; got {mock_logger.warnings}"
     )
     assert any("satisfied by construction" in m for m in matching), (
         f"expected 'satisfied by construction' in 3.3.7 info line; got {matching}"

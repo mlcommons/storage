@@ -459,6 +459,7 @@ def build_submission(tmp_path, **overrides) -> Path:
     run_logfile_df_block = overrides.pop("run_logfile_df_block", None)
     chkpt_logfile_df_block = overrides.pop("chkpt_logfile_df_block", None)
     run_metadata_hosts = overrides.pop("run_metadata_hosts", None)
+    run_metadata_cluster_information = overrides.pop("run_metadata_cluster_information", None)
     chkpt_summary_timestamps = overrides.pop("chkpt_summary_timestamps", False)
     chkpt_split_mode = overrides.pop("chkpt_split_mode", False)
     chkpt_cache_flush_gap_seconds = overrides.pop("chkpt_cache_flush_gap_seconds", 25)
@@ -706,6 +707,11 @@ def build_submission(tmp_path, **overrides) -> Path:
                     run_meta["args"]["data_dir"] = run_data_dir
                 if run_results_dir is not None:
                     run_meta["args"]["results_dir"] = run_results_dir
+                # 3.3.7: inject a cluster_information block (ClusterInformation
+                # .as_dict shape) so node-capability-consistency tests can
+                # exercise divergent / uniform per-host capability vectors.
+                if run_metadata_cluster_information is not None:
+                    run_meta["cluster_information"] = run_metadata_cluster_information
                 (ts_dir / "metadata.json").write_text(
                     json.dumps(run_meta), encoding="utf-8"
                 )
