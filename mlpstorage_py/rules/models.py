@@ -84,6 +84,10 @@ class BenchmarkRunData:
     result_dir: Optional[str] = None
     accelerator: Optional[str] = None
     end_datetime: str = ""
+    # Persisted per-run ``metadata['args']`` snapshot (vars(self.args) at run
+    # time). reportgen uses it as a fallback source for identity columns when
+    # the structured ``parameters`` block is empty (legacy packages).
+    run_args: Dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -758,6 +762,7 @@ class BenchmarkInstanceExtractor:
             override_parameters=override_parameters,
             system_info=system_info,
             accelerator=getattr(benchmark.args, 'accelerator_type', None),
+            run_args=vars(benchmark.args) if hasattr(benchmark, 'args') else {},
             result_dir=benchmark.run_result_output if hasattr(benchmark, 'run_result_output') else None,
             metrics=None,
         )
@@ -841,6 +846,7 @@ class DLIOResultParser:
             metrics=summary.get("metric"),
             result_dir=result_dir,
             accelerator=accelerator,
+            run_args=(metadata or {}).get('args', {}) or {},
         )
 
     def _load_summary(self, result_dir: str) -> Optional[Dict]:
@@ -962,6 +968,7 @@ class ResultFilesExtractor:
             metrics=run_metrics,
             result_dir=result_dir,
             accelerator=metadata.get('accelerator'),
+            run_args=metadata.get('args', {}) or {},
         )
 
     def _load_summary(self, result_dir: str) -> Optional[Dict]:
@@ -1076,6 +1083,16 @@ class BenchmarkRun:
     @property
     def override_parameters(self):
         return self._data.override_parameters
+
+    @property
+    def run_args(self):
+        """Persisted per-run ``metadata['args']`` snapshot (or ``{}``).
+
+        reportgen uses this as a fallback source for VDB identity columns
+        when the structured ``parameters`` block is empty (legacy packages
+        that predate the ``combined_params`` fix).
+        """
+        return self._data.run_args
 
     @property
     def system_info(self):

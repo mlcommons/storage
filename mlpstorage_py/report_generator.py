@@ -1236,7 +1236,7 @@ class ReportGenerator:
         for CLI/YAML args on disk).
         """
         run = runs[0]
-        summary = self._load_workload_summary(run)
+        summary = self._load_vdb_summary(run)
 
         _VDB_METRIC_FIELDS = (
             "throughput_qps",
@@ -1250,8 +1250,12 @@ class ReportGenerator:
             out[f"vdb_{field_name}"] = summary.get(field_name)
 
         # Recall (D-21) — first summary.json, then recall_stats.json fallback
-        # (per submission_checker/checks/vdb_checks.py:462-469).
+        # (per submission_checker/checks/vdb_checks.py:462-469). A dict recall
+        # block is reduced to its scalar ``mean_recall``; the value is emitted
+        # as a PERCENTAGE (0-100) to match the "Recall Percentage" column.
         recall = summary.get("recall")
+        if isinstance(recall, dict):
+            recall = recall.get("mean_recall")
         if recall is None and run.result_dir:
             recall_stats_path = os.path.join(run.result_dir, "recall_stats.json")
             if os.path.isfile(recall_stats_path):
@@ -1259,19 +1263,92 @@ class ReportGenerator:
                     with open(recall_stats_path, "r") as f:
                         recall_stats = json.load(f)
                     recall = recall_stats.get("recall")
+                    if isinstance(recall, dict):
+                        recall = recall.get("mean_recall")
                 except (OSError, ValueError) as e:
                     self.logger.warning(
                         f"vdb: could not read recall_stats.json at "
                         f"{recall_stats_path}: {e}"
                     )
-        out["vdb_recall"] = recall
+        out["vdb_recall"] = (recall * 100) if isinstance(recall, (int, float)) else None
 
-        # Identity columns (D-15). ``BenchmarkRun`` exposes CLI/YAML args
-        # via ``.parameters``; use ``.get`` so missing keys emit ``None``.
-        params = run.parameters or {}
-        out["vdb_engine"] = params.get("engine")
-        out["vdb_index_type"] = params.get("index_type")
+        # Read B/W + # Client Nodes derive from the ``disk_io`` sub-block.
+        # Read B/W is converted bytes/sec -> GiB/s (binary, /1024**3).
+        disk_io = summary.get("disk_io")
+        read_bps = disk_io.get("total_bytes_read_per_sec") if isinstance(disk_io, dict) else None
+        out["vdb_read_bw_gibps"] = (
+            read_bps / (1024 ** 3) if isinstance(read_bps, (int, float)) else None
+        )
+        out["vdb_num_client_nodes"] = (
+            disk_io.get("host_count") if isinstance(disk_io, dict) else None
+        )
+        # Storage IOPs is not measured (disk_io carries bytes, not op counts) —
+        # emit the column present-but-blank so the table has it (submitter or a
+        # future instrumentation task fills it).
+        out["vdb_storage_iops"] = None
+
+        # Identity columns (D-15). Prefer the structured ``parameters`` block
+        # (the combined_params fix); fall back to the persisted per-run
+        # ``metadata['args']`` snapshot for legacy packages whose parameters
+        # block is empty. Blank only when truly absent from both.
+        out["vdb_num_vectors"] = self._vdb_identity(run, "num_vectors", ("num_vectors",))
+        out["vdb_dimension"] = self._vdb_identity(run, "dimension", ("dimension",))
+        out["vdb_engine"] = self._vdb_identity(run, "engine", ("vdb_engine", "engine"))
+        out["vdb_index_type"] = self._vdb_identity(
+            run, "index_type", ("index_type", "vdb_index")
+        )
         return out
+
+    @staticmethod
+    def _vdb_identity(run: BenchmarkRun, param_key: str, arg_keys: tuple) -> Any:
+        """Resolve a VDB identity value: parameters first, then persisted args.
+
+        ``param_key`` is looked up in ``run.parameters`` (the combined_params
+        block). If absent/None, ``arg_keys`` are tried in order against
+        ``run.run_args`` (the persisted ``metadata['args']`` snapshot).
+        Returns ``None`` when the value is in neither.
+        """
+        params = run.parameters or {}
+        value = params.get(param_key)
+        if value is not None:
+            return value
+        args = getattr(run, "run_args", None) or {}
+        for ak in arg_keys:
+            candidate = args.get(ak)
+            if candidate is not None:
+                return candidate
+        return None
+
+    def _load_vdb_summary(self, run: BenchmarkRun) -> Dict[str, Any]:
+        """Load a VDB run's ``summary.json``, backfilling legacy packages.
+
+        Fresh submissions ship ``summary.json`` (written by the producer).
+        Legacy packages predate that write — they carry only the native
+        ``statistics.json``. For those, derive the summary IN MEMORY via
+        ``vdb_summary.build_vdb_summary``; NEVER write into the submission
+        package (it may be read-only or owned by another submitter).
+        """
+        summary = self._load_workload_summary(run)
+        if summary:
+            return summary
+        if run.result_dir:
+            try:
+                from mlpstorage_py.benchmarks.vdb_summary import build_vdb_summary
+
+                built = build_vdb_summary(run.result_dir)
+            except Exception as e:  # noqa: BLE001 — backfill is best-effort
+                self.logger.warning(
+                    f"vdb: could not derive summary from native stats at "
+                    f"{run.result_dir!r}: {e}"
+                )
+                built = None
+            if built:
+                self.logger.verbose(
+                    f"vdb: derived summary in-memory from native stats at "
+                    f"{run.result_dir!r} (legacy package, no summary.json)."
+                )
+                return built
+        return {}
 
     def _aggregate_kvcache(
         self,
