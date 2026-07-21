@@ -121,6 +121,50 @@ class TestSutBlockCsv:
         assert row["sut_rus"] == str(_RACK_UNITS)
 
 
+_CODE_HASH = "0123456789abcdef0123456789abcdef"  # md5-tree-v2 32-hex
+_CODE_DIR = "code-01234567"  # code-<first8>
+_ACME_LEAF = ("closed/acme/results/system-a/training/unet3d/run/20260706_100000")
+
+
+def _inject_code_pointer(root: pathlib.Path) -> None:
+    leaf = root / _ACME_LEAF
+    (leaf / ".mlps-code-image").write_text(f"md5-tree-v2:{_CODE_HASH}\n")
+
+
+class TestSutCodeLogsLinks:
+    """Task F-b: Code/Logs anchors resolved from the run's .mlps-code-image."""
+
+    def test_json_code_logs_hyperlinks(self, tmp_path):
+        root = _prepare_tree(tmp_path)
+        _inject_code_pointer(root)
+        _run_reportgen(root)
+        rows = json.loads((_acme_per_model_dir(root) / "results.json").read_text())
+        row = rows[0]
+        expected_href = f"closed/acme/{_CODE_DIR}/"
+        assert row["sut_code"] == {"text": "code", "href": expected_href}
+        # Logs is a placeholder pointing at the same code-image dir for now.
+        assert row["sut_logs"] == {"text": "logs", "href": expected_href}
+
+    def test_csv_code_logs_anchor(self, tmp_path):
+        root = _prepare_tree(tmp_path)
+        _inject_code_pointer(root)
+        _run_reportgen(root)
+        with open(_acme_per_model_dir(root) / "results.csv", newline="") as fh:
+            row = next(csv.DictReader(fh))
+        href = f"closed/acme/{_CODE_DIR}/"
+        assert row["sut_code"] == f'<a href="{href}">code</a>'
+        assert row["sut_logs"] == f'<a href="{href}">logs</a>'
+
+    def test_missing_pointer_leaves_code_logs_blank(self, tmp_path):
+        # No pointer injected → graceful blank, no crash.
+        root = _prepare_tree(tmp_path)
+        _run_reportgen(root)
+        rows = json.loads((_acme_per_model_dir(root) / "results.json").read_text())
+        row = rows[0]
+        assert row["sut_code"] == ""
+        assert row["sut_logs"] == ""
+
+
 class TestSutBlockDoesNotBreakColumnInvariants:
     def test_prefix_first_issues_last_sut_in_between(self, tmp_path):
         root = _prepare_tree(tmp_path)
