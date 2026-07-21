@@ -452,6 +452,116 @@ class TestTrainingAggregation:
 
 
 # --------------------------------------------------------------------------- #
+# TestTrainingFinalTableColumns — Slice-Training (v3.0 final results tables)   #
+# --------------------------------------------------------------------------- #
+
+
+def _write_training_result_dir(
+    parent: pathlib.Path,
+    ts: str,
+    *,
+    io_mean_mibps: Optional[float],
+    num_hosts: int = 2,
+    num_accelerators: int = 8,
+) -> str:
+    """Materialize a realistic training run dir and return its path.
+
+    The written ``summary.json`` mirrors real DLIO output: top-level
+    ``num_hosts`` / ``num_accelerators`` and a ``metric`` block carrying
+    list-valued series PLUS the scalar ``train_io_mean_MB_per_second``
+    (DLIO's per-run I/O bandwidth, MiB/s despite the ``MB`` label — see
+    ``dlio_benchmark/utils/statscounter.py``, logged as "MiB/second").
+    ``io_mean_mibps=None`` omits the scalar (legacy / partial run).
+    """
+    run_dir = parent / ts
+    run_dir.mkdir(parents=True, exist_ok=True)
+    metric: Dict[str, Any] = {
+        "train_au_percentage": [95.0, 95.5, 95.2],
+        "train_throughput_samples_per_second": [12500.0, 12480.0, 12510.0],
+    }
+    if io_mean_mibps is not None:
+        metric["train_io_mean_MB_per_second"] = io_mean_mibps
+    summary = {
+        "start": ts,
+        "end": ts,
+        "num_accelerators": num_accelerators,
+        "num_hosts": num_hosts,
+        "metric": metric,
+    }
+    (run_dir / "summary.json").write_text(json.dumps(summary))
+    return str(run_dir)
+
+
+class TestTrainingFinalTableColumns:
+    """Slice-Training: v3.0 final-table columns (issue #823).
+
+    ``# Client Nodes`` (num_hosts), ``# Simulated Accelerators``
+    (num_accelerators) and ``Read B/W (GiB/s)`` all come from summary.json
+    top-level / the DLIO scalar ``train_io_mean_MB_per_second`` — fields
+    the metadata-complete parse path drops (system_info unreconstructed;
+    scalar metrics filtered out). reportgen reads them straight from
+    summary.json, like the vdb / kvcache branches.
+    """
+
+    def _five_runs(self, tmp_path, io_values):
+        """Build 5 training BenchmarkRuns; run.metrics is list-filtered
+        (as production's ``_from_metadata`` delivers it) while each run's
+        on-disk summary.json carries the full realistic payload."""
+        runs_root = tmp_path / "workload"
+        runs: List[BenchmarkRun] = []
+        for i, io in enumerate(io_values):
+            ts = f"202607010{i}1500"
+            result_dir = _write_training_result_dir(
+                runs_root, ts, io_mean_mibps=io
+            )
+            # Production delivers only list-valued metric keys to
+            # _aggregate_training; the scalar io_mean lives in summary.json.
+            runs.append(
+                _make_run(
+                    benchmark_type=BENCHMARK_TYPES.training,
+                    model="unet3d",
+                    result_dir=result_dir,
+                    metrics={
+                        "train_au_percentage": [95.0, 95.5, 95.2],
+                        "train_throughput_samples_per_second": [
+                            12500.0, 12480.0, 12510.0
+                        ],
+                    },
+                    accelerator="h100",
+                    run_datetime=ts,
+                )
+            )
+        return runs
+
+    def test_read_bw_client_nodes_and_accelerators(self, tmp_path):
+        """Read B/W (MiB/s scalar mean ÷1024), # Client Nodes, # Sim Accelerators."""
+        gen = _make_bare_generator(tmp_path)
+        io_values = [4096.0, 4096.0, 2048.0, 2048.0, 3072.0]  # MiB/s per run
+        runs = self._five_runs(tmp_path, io_values)
+
+        result = gen._aggregate_workload_metrics(runs, warmup_set=set())
+
+        # MiB/s mean -> GiB/s (binary, /1024).
+        expected_gibps = (sum(io_values) / len(io_values)) / 1024.0
+        assert result["train_read_bw_gibps"] == pytest.approx(expected_gibps)
+        assert result["train_num_client_nodes"] == 2
+        assert result["train_num_simulated_accelerators"] == 8
+
+    def test_read_bw_blank_when_scalar_absent(self, tmp_path):
+        """A run missing ``train_io_mean_MB_per_second`` -> present-but-blank B/W."""
+        gen = _make_bare_generator(tmp_path)
+        io_values = [4096.0, None, 2048.0, 2048.0, 3072.0]
+        runs = self._five_runs(tmp_path, io_values)
+
+        result = gen._aggregate_workload_metrics(runs, warmup_set=set())
+
+        assert result["train_read_bw_gibps"] is None
+        # Identity columns still resolve from the runs that do report them.
+        assert result["train_num_client_nodes"] == 2
+        assert result["train_num_simulated_accelerators"] == 8
+
+
+# --------------------------------------------------------------------------- #
 # TestCheckpointingAggregation — TEST-15 / D-20 / D-28 / AGG-02               #
 # --------------------------------------------------------------------------- #
 
