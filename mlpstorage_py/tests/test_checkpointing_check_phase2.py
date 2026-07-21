@@ -595,18 +595,27 @@ class TestChkpt05_SimultaneousRwSupport:
     """
 
     def test_both_true_no_emission(self, tmp_path, mock_logger):
-        """Default capabilities (sim_write=True, sim_read=True) → True, no errors, info emitted."""
+        """Default capabilities (sim_write=True, sim_read=True) → True, no errors/warnings, info emitted."""
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(tmp_path)
         check = _run_checkpointing_check(root, mock_logger)
         result = check.simultaneous_rw_support()
         assert result is True
         assert mock_logger.errors == []
-        # Default: emits info with the "satisfied by construction" marker
+        # Both capabilities declared-supported → satisfied by construction:
+        # info emitted, and NO false-positive warning.
+        assert mock_logger.warnings == []
         assert len(mock_logger.infos) >= 1
 
-    def test_sim_write_false_emits_info(self, tmp_path, mock_logger):
-        """sim_write=False → returns True, emits info with [4.7.4 ...] prefix."""
+    def test_sim_write_false_emits_warning(self, tmp_path, mock_logger):
+        """sim_write=False → warnings-only: returns True, emits a [4.7.4 ...] WARNING.
+
+        A completed checkpointing run has already demonstrated simultaneous
+        R/W via the CAP-02 runtime probe, so a system description that
+        declares simultaneous_write=false contradicts the run it accompanies
+        (Rules.md 4.7.4). Surface that inconsistency to reviewers as a
+        warning — never a hard failure.
+        """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(
             tmp_path,
@@ -618,14 +627,17 @@ class TestChkpt05_SimultaneousRwSupport:
         assert mock_logger.errors == []
         assert any(
             m.startswith("[4.7.4 checkpointSimultaneousRwSupport]")
-            for m in mock_logger.infos
-        ), f"Expected info starting with [4.7.4 ...]; got {mock_logger.infos}"
+            and "simultaneous_write" in m
+            for m in mock_logger.warnings
+        ), f"Expected a warning starting with [4.7.4 ...]; got {mock_logger.warnings}"
 
     def test_missing_field_silently_passes(self, tmp_path, mock_logger):
-        """Missing simultaneous_write field → silent-pass per D-A3.
+        """Missing simultaneous_write field → silent-pass, NO warning, per D-A3.
 
-        SystemYamlSchemaCheck handles the missing-field violation.
-        CHKPT-05 silent-skips when _get_capability returns None.
+        SystemYamlSchemaCheck owns the missing-field violation; 4.7.4
+        silent-skips when _get_capability returns None to avoid double-emit.
+        The warnings-only inconsistency check fires only for an explicitly
+        declared ``false``, not for an absent field.
         """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(
@@ -637,6 +649,7 @@ class TestChkpt05_SimultaneousRwSupport:
         result = check.simultaneous_rw_support()
         assert result is True
         assert mock_logger.errors == []
+        assert mock_logger.warnings == []
 
 
 # ---------------------------------------------------------------------------
@@ -880,13 +893,13 @@ class TestChkpt05SatisfiedByConstruction:
     check trips these assertions.
     """
 
-    def test_sim_write_false_emits_info_with_satisfied_marker(self, tmp_path, mock_logger):
-        """sim_write=False → log.info with 'satisfied by construction' marker; no errors.
+    def test_sim_write_false_emits_warning_not_error(self, tmp_path, mock_logger):
+        """sim_write=False → a [4.7.4 ...] WARNING (not an error, not an info-satisfied line).
 
-        The rule doesn't inspect the capability values to decide pass/fail —
-        the runtime gate (CAP-02) has already enforced the invariant before
-        the validator runs. The capability values are still logged for
-        auditability.
+        The rule never fails the submission (warnings-only): the runtime
+        gate (CAP-02) already enforced the invariant. But a declared
+        simultaneous_write=false contradicts that, so the validator surfaces
+        it to reviewers as a warning rather than mislabelling it "satisfied".
         """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(
@@ -897,23 +910,23 @@ class TestChkpt05SatisfiedByConstruction:
         result = check.simultaneous_rw_support()
         assert result is True
         assert mock_logger.errors == [], \
-            f"CHKPT-05 must not emit errors (satisfied by CAP-02 at runtime); got {mock_logger.errors}"
-        matching_infos = [
-            m for m in mock_logger.infos
+            f"4.7.4 must not emit errors (warnings-only); got {mock_logger.errors}"
+        matching_warnings = [
+            m for m in mock_logger.warnings
             if "[4.7.4 checkpointSimultaneousRwSupport]" in m
-            and "satisfied by construction" in m
         ]
-        assert len(matching_infos) >= 1, (
-            f"Expected at least one info message with [4.7.4 ...] and "
-            f"'satisfied by construction' marker; got infos: {mock_logger.infos}"
+        assert len(matching_warnings) >= 1, (
+            f"Expected at least one warning with [4.7.4 ...]; "
+            f"got warnings: {mock_logger.warnings}"
         )
 
     def test_returns_true_regardless_of_capability_values(self, tmp_path, mock_logger):
-        """CHKPT-05 returns True regardless of declared capability values.
+        """4.7.4 returns True regardless of declared capability values (warnings-only).
 
         The runtime gate (CAP-02 shared-FS probe) is the authoritative
-        enforcement point; declared simultaneous_write / simultaneous_read
-        values are audit-only from the validator's perspective.
+        enforcement point, so the validator never fails. When both
+        simultaneous_write and simultaneous_read are declared false, it emits
+        a warning naming both but still returns True.
         """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(
@@ -923,4 +936,10 @@ class TestChkpt05SatisfiedByConstruction:
         check = _run_checkpointing_check(root, mock_logger)
         result = check.simultaneous_rw_support()
         assert result is True, \
-            "CHKPT-05 must return True (satisfied by CAP-02) even when both sim_* are False"
+            "4.7.4 must return True (warnings-only) even when both sim_* are False"
+        assert mock_logger.errors == []
+        assert any(
+            "[4.7.4 checkpointSimultaneousRwSupport]" in m
+            and "simultaneous_write" in m and "simultaneous_read" in m
+            for m in mock_logger.warnings
+        ), f"Expected a warning naming both fields; got {mock_logger.warnings}"
