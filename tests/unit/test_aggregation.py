@@ -565,7 +565,9 @@ class TestVdbPassThrough:
         assert result["vdb_p95_latency_ms"] == summary["p95_latency_ms"]
         assert result["vdb_p99_latency_ms"] == summary["p99_latency_ms"]
         assert result["vdb_p999_latency_ms"] == summary["p999_latency_ms"]
-        assert result["vdb_recall"] == summary["recall"]
+        # Recall is emitted as a PERCENTAGE (0-100), not the source fraction
+        # — the final-table column header is "Recall Percentage".
+        assert result["vdb_recall"] == pytest.approx(summary["recall"] * 100)
         # D-15 identity columns.
         assert result["vdb_engine"] == "milvus"
         assert result["vdb_index_type"] == "hnsw"
@@ -599,7 +601,214 @@ class TestVdbPassThrough:
         assert result["vdb_recall"] is not None, (
             "vdb_recall must be populated via the recall_stats.json fallback"
         )
-        assert result["vdb_recall"] == recall_stats["recall"]
+        # Percentage form (0-100), consistent with the in-summary recall path.
+        assert result["vdb_recall"] == pytest.approx(recall_stats["recall"] * 100)
+
+
+def _write_vdb_result_dir(
+    parent: pathlib.Path,
+    ts: str,
+    *,
+    summary: Optional[Dict[str, Any]] = None,
+    statistics: Optional[Dict[str, Any]] = None,
+    args: Optional[Dict[str, Any]] = None,
+    parameters: Optional[Dict[str, Any]] = None,
+) -> pathlib.Path:
+    """Materialize a VDB run dir on disk for from_result_dir-based tests.
+
+    Writes a ``<type>_<ts>_metadata.json`` so ``BenchmarkRun.from_result_dir``
+    routes through ``ResultFilesExtractor._from_metadata``. Optionally writes
+    a canonical ``summary.json`` and/or a native ``statistics.json``.
+    """
+    run_dir = parent / ts
+    run_dir.mkdir(parents=True, exist_ok=True)
+    metadata = {
+        "benchmark_type": "vector_database",
+        "run_datetime": ts,
+        "num_processes": 4,
+        "parameters": parameters if parameters is not None else {},
+        "model": "milvus_HNSW",
+        "command": "run",
+    }
+    if args is not None:
+        metadata["args"] = args
+    (run_dir / f"vector_database_{ts}_metadata.json").write_text(json.dumps(metadata))
+    if summary is not None:
+        (run_dir / "summary.json").write_text(json.dumps(summary))
+    if statistics is not None:
+        (run_dir / "statistics.json").write_text(json.dumps(statistics))
+    return run_dir
+
+
+class TestVdbFinalTableColumns:
+    """Slice-VDB: the v3.0 final-table metric/identity columns (issue #823)."""
+
+    def test_read_bw_and_client_nodes_from_disk_io(self, tmp_path):
+        """Read B/W (GiB/s) and # Client Nodes derive from ``disk_io``.
+
+        ``disk_io.total_bytes_read_per_sec`` -> ``vdb_read_bw_gibps`` divided
+        by 1024**3 (GiB, binary). ``disk_io.host_count`` -> #Client Nodes.
+        Storage IOPs is not measured -> present-but-blank.
+        """
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        summary = {
+            "throughput_qps": 900.0,
+            "mean_latency_ms": 3.0,
+            "p95_latency_ms": 5.0,
+            "p99_latency_ms": 7.0,
+            "p999_latency_ms": 9.0,
+            "recall": 0.95,
+            "disk_io": {
+                "total_bytes_read_per_sec": 2 * 1024 ** 3,  # 2 GiB/s
+                "host_count": 4,
+            },
+        }
+        run_dir = _write_vdb_result_dir(runs_root, "20260704_130000", summary=summary)
+        run = BenchmarkRun.from_result_dir(str(run_dir))
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        assert result["vdb_read_bw_gibps"] == pytest.approx(2.0)
+        assert result["vdb_num_client_nodes"] == 4
+        assert result["vdb_storage_iops"] is None
+
+    def test_recall_percentage(self, tmp_path):
+        """Scalar recall in summary.json is emitted as a percentage."""
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        summary = {"throughput_qps": 1.0, "recall": 0.9421}
+        run_dir = _write_vdb_result_dir(runs_root, "20260704_131000", summary=summary)
+        run = BenchmarkRun.from_result_dir(str(run_dir))
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        assert result["vdb_recall"] == pytest.approx(94.21)
+
+    def test_dict_recall_coerced_then_percentage(self, tmp_path):
+        """A dict recall in summary.json is reduced to mean_recall then ×100."""
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        summary = {"throughput_qps": 1.0, "recall": {"mean_recall": 0.88, "k": 10}}
+        run_dir = _write_vdb_result_dir(runs_root, "20260704_132000", summary=summary)
+        run = BenchmarkRun.from_result_dir(str(run_dir))
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        assert result["vdb_recall"] == pytest.approx(88.0)
+
+    def test_legacy_backfill_from_statistics_json_in_memory(self, tmp_path):
+        """A legacy package with native statistics.json but NO summary.json.
+
+        reportgen must backfill the metrics IN MEMORY (via build_vdb_summary)
+        and must NOT write summary.json into the submission package.
+        """
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        statistics = {
+            "throughput_qps": 321.0,
+            "p99_latency_ms": 11.0,
+            "recall": {"mean_recall": 0.97},
+            "disk_io": {"total_bytes_read_per_sec": 1024 ** 3, "host_count": 2},
+        }
+        run_dir = _write_vdb_result_dir(
+            runs_root, "20260704_133000", statistics=statistics
+        )
+        # Fixture invariant: no canonical summary.json exists yet.
+        assert not (run_dir / "summary.json").exists()
+        run = BenchmarkRun.from_result_dir(str(run_dir))
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        assert result["vdb_throughput_qps"] == 321.0
+        assert result["vdb_p99_latency_ms"] == 11.0
+        assert result["vdb_recall"] == pytest.approx(97.0)
+        assert result["vdb_read_bw_gibps"] == pytest.approx(1.0)
+        assert result["vdb_num_client_nodes"] == 2
+        # reportgen must NOT mutate the submission package.
+        assert not (run_dir / "summary.json").exists(), (
+            "reportgen must derive summary in-memory, never write into the package"
+        )
+
+    def test_identity_columns_fall_back_to_persisted_args(self, tmp_path):
+        """Legacy packages have empty parameters; identity comes from metadata['args'].
+
+        engine/index_type/num_vectors/dimension fall back to the persisted
+        per-run ``metadata['args']`` snapshot (keys ``vdb_engine`` /
+        ``vdb_index`` / ``num_vectors`` / ``dimension``) when the
+        ``parameters`` block lacks them.
+        """
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        summary = {"throughput_qps": 1.0}
+        run_dir = _write_vdb_result_dir(
+            runs_root,
+            "20260704_134000",
+            summary=summary,
+            parameters={},  # legacy: no reportgen params block
+            args={
+                "vdb_engine": "milvus",
+                "vdb_index": "HNSW",
+                "num_vectors": 5000000,
+                "dimension": 768,
+            },
+        )
+        run = BenchmarkRun.from_result_dir(str(run_dir))
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        assert result["vdb_engine"] == "milvus"
+        assert result["vdb_index_type"] == "HNSW"
+        assert result["vdb_num_vectors"] == 5000000
+        assert result["vdb_dimension"] == 768
+
+    def test_parameters_win_over_args_for_identity(self, tmp_path):
+        """When present, the parameters block wins over the args fallback."""
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        summary = {"throughput_qps": 1.0}
+        run_dir = _write_vdb_result_dir(
+            runs_root,
+            "20260704_135000",
+            summary=summary,
+            parameters={"engine": "milvus", "index_type": "DISKANN",
+                        "num_vectors": 10, "dimension": 128},
+            args={"vdb_engine": "WRONG", "vdb_index": "WRONG",
+                  "num_vectors": 999, "dimension": 999},
+        )
+        run = BenchmarkRun.from_result_dir(str(run_dir))
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        assert result["vdb_engine"] == "milvus"
+        assert result["vdb_index_type"] == "DISKANN"
+        assert result["vdb_num_vectors"] == 10
+        assert result["vdb_dimension"] == 128
+
+
+class TestBenchmarkRunArgs:
+    """``BenchmarkRun.run_args`` surfaces the persisted metadata['args']."""
+
+    def test_run_args_populated_from_metadata(self, tmp_path):
+        run_dir = _write_vdb_result_dir(
+            tmp_path / "workload",
+            "20260704_140000",
+            summary={"throughput_qps": 1.0},
+            args={"vdb_engine": "milvus", "num_vectors": 42},
+        )
+        run = BenchmarkRun.from_result_dir(str(run_dir))
+
+        assert run.run_args == {"vdb_engine": "milvus", "num_vectors": 42}
+
+    def test_run_args_defaults_empty_when_absent(self, tmp_path):
+        run_dir = _write_vdb_result_dir(
+            tmp_path / "workload",
+            "20260704_141000",
+            summary={"throughput_qps": 1.0},
+        )
+        run = BenchmarkRun.from_result_dir(str(run_dir))
+
+        assert run.run_args == {}
 
 
 # --------------------------------------------------------------------------- #
