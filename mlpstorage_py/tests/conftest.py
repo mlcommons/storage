@@ -475,6 +475,7 @@ def build_submission(tmp_path, **overrides) -> Path:
     chkpt_checkpoint_folder = overrides.pop("chkpt_checkpoint_folder", None)
     chkpt_results_dir = overrides.pop("chkpt_results_dir", None)
     chkpt_summary_checkpoint_size_GB = overrides.pop("chkpt_summary_checkpoint_size_GB", None)
+    chkpt_summary_num_accelerators = overrides.pop("chkpt_summary_num_accelerators", None)
     run_data_dir = overrides.pop("run_data_dir", None)
     run_results_dir = overrides.pop("run_results_dir", None)
 
@@ -818,6 +819,8 @@ def build_submission(tmp_path, **overrides) -> Path:
                     metric = dict(chkpt_summary.get("metric", {}))
                     metric["checkpoint_size_GB"] = chkpt_summary_checkpoint_size_GB
                     chkpt_summary["metric"] = metric
+                if chkpt_summary_num_accelerators is not None:
+                    chkpt_summary["num_accelerators"] = chkpt_summary_num_accelerators
 
                 (ts_dir / "summary.json").write_text(
                     json.dumps(chkpt_summary), encoding="utf-8"

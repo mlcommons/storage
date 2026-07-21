@@ -137,6 +137,52 @@ def test_4_3_1_undersized_checkpoint_emits_warn_prefix_not_error(tmp_path, mock_
 
 
 # ---------------------------------------------------------------------------
+# 4.3.4 aggregate_accelerator_memory — warnings-only (C2)
+# ---------------------------------------------------------------------------
+
+def test_4_3_4_insufficient_memory_warns_not_errors(tmp_path, mock_logger):
+    """4.3.4: aggregate accelerator memory < checkpoint size → WARNING, never fail.
+
+    Late-stage submission-window doctrine: this check must not flip a
+    submission INVALID. With 8 accelerators (× the 80 GiB baseline = 640 GiB)
+    and a 1000 GiB checkpoint, the aggregate is insufficient, so the rule
+    warns via warn_violation and still returns True.
+    """
+    from mlpstorage_py.tests.conftest import build_submission
+    root = build_submission(
+        tmp_path,
+        chkpt_summary_num_accelerators=8,
+        chkpt_summary_checkpoint_size_GB=1000,
+    )
+    check = _run_checkpointing_check(root, mock_logger)
+    result = check.aggregate_accelerator_memory()
+    assert result is True
+    assert any(
+        m.startswith("[4.3.4 checkpointAggregateAcceleratorMemory]")
+        for m in mock_logger.warnings
+    ), f"expected [4.3.4 ...] warning; got warnings={mock_logger.warnings}"
+    assert not any(
+        m.startswith("[4.3.4 ") for m in mock_logger.errors
+    ), f"4.3.4 must warn, not error; got errors={mock_logger.errors}"
+
+
+def test_4_3_4_sufficient_memory_no_warning(tmp_path, mock_logger):
+    """Aggregate accelerator memory >= checkpoint size → no warning, returns True."""
+    from mlpstorage_py.tests.conftest import build_submission
+    root = build_submission(
+        tmp_path,
+        chkpt_summary_num_accelerators=8,
+        chkpt_summary_checkpoint_size_GB=100,  # 8*80=640 GiB >= 100
+    )
+    check = _run_checkpointing_check(root, mock_logger)
+    result = check.aggregate_accelerator_memory()
+    assert result is True
+    assert not any(
+        m.startswith("[4.3.4 ") for m in mock_logger.warnings + mock_logger.errors
+    ), f"expected no 4.3.4 violation; got {mock_logger.warnings + mock_logger.errors}"
+
+
+# ---------------------------------------------------------------------------
 # Behavior-preservation: 4.4.1 checkpointPathArgs
 # ---------------------------------------------------------------------------
 
