@@ -118,10 +118,17 @@ class TestReportGeneratorWriteJson:
                 return ReportGenerator(str(results_dir), validate_structure=False)
 
     def test_writes_json_file(self, generator):
-        """Should write results to JSON file."""
+        """Should write results to JSON file as fixed-schema rows.
+
+        Column-parity: write_json_file projects each internal row onto the
+        fixed webpage-parity schema. Every emitted row carries exactly the
+        _FINAL_SCHEMA keys; internal-only keys (run_id, model) are dropped
+        unless they map to a fixed column.
+        """
+        from mlpstorage_py.report_generator import _FINAL_SCHEMA
         results = [
-            {'run_id': 'run1', 'model': 'unet3d'},
-            {'run_id': 'run2', 'model': 'resnet50'}
+            {'benchmark_type': 'training', 'orgname': 'acme'},
+            {'benchmark_type': 'vector_database', 'orgname': 'beta'},
         ]
         generator.write_json_file(results)
 
@@ -132,7 +139,10 @@ class TestReportGeneratorWriteJson:
             loaded = json.load(f)
 
         assert len(loaded) == 2
-        assert loaded[0]['run_id'] == 'run1'
+        assert list(loaded[0].keys()) == _FINAL_SCHEMA
+        assert loaded[0]['Benchmark Type'] == 'training'
+        assert loaded[0]['Organization'] == 'acme'
+        assert 'run_id' not in loaded[0]
 
     def test_json_has_proper_formatting(self, generator):
         """JSON should be properly formatted with indent."""
@@ -177,8 +187,15 @@ class TestReportGeneratorWriteCsv:
 
         assert len(rows) == 2
 
-    def test_flattens_nested_dicts(self, generator):
-        """Should flatten nested dictionaries."""
+    def test_projects_to_fixed_schema_dropping_unknown_keys(self, generator):
+        """Column-parity: the writer projects onto the fixed schema.
+
+        Supersedes the old nested-dict flattening behavior. Unknown /
+        internal-only keys (including nested dicts) are NOT emitted — the
+        header is exactly the fixed webpage-parity schema regardless of
+        input row shape.
+        """
+        from mlpstorage_py.report_generator import _FINAL_SCHEMA
         results = [
             {'run_id': 'run1', 'metrics': {'throughput': 100.0, 'au': 95.0}}
         ]
@@ -186,11 +203,11 @@ class TestReportGeneratorWriteCsv:
 
         csv_file = os.path.join(generator.results_dir, 'results.csv')
         with open(csv_file, 'r') as f:
-            reader = csv.DictReader(f)
-            rows = list(reader)
+            header = next(csv.reader(f))
 
-        # Should have flattened keys
-        assert 'metrics.throughput' in rows[0] or 'throughput' in rows[0]
+        assert header == _FINAL_SCHEMA
+        for banned in ('metrics', 'metrics.throughput', 'throughput', 'run_id'):
+            assert banned not in header
 
     def test_handles_nan_values(self, generator):
         """Should remove NaN values."""

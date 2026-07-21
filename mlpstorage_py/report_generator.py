@@ -27,7 +27,7 @@ from mlpstorage_py.rules.datagen_hierarchy import (
     validate_supported_model,
 )
 from mlpstorage_py.errors import ConfigurationError
-from mlpstorage_py.utils import flatten_nested_dict, remove_nan_values, MLPSJsonEncoder
+from mlpstorage_py.utils import MLPSJsonEncoder
 from mlpstorage_py.reporting import (
     ResultsDirectoryValidator,
     ValidationMessageFormatter,
@@ -80,6 +80,156 @@ class Hyperlink:
     def __eq__(self, other: Any) -> bool:
         return (isinstance(other, Hyperlink)
                 and self.text == other.text and self.href == other.href)
+
+
+# --------------------------------------------------------------------------- #
+# Column-parity fixed output schema (Results Table Structure.xlsx, v3.0).      #
+#                                                                              #
+# ``results.{csv,json}`` is a FIXED contract: exactly the reference webpage    #
+# columns for all 8 tables (2 training + 4 checkpointing + 1 kvcache + 1 vdb)  #
+# sharing a System-Under-Test block, plus 3 agreed discriminator columns       #
+# (Division / Benchmark Type / Model) so a single flat file can carry every    #
+# table's rows. A MLCommons staff member opens results.csv in Excel and         #
+# reduces it to any one table by deleting the workload blocks + discriminators  #
+# that don't apply.                                                            #
+#                                                                              #
+# The schema is FIXED — never data-driven. reportgen cherry-picks each column  #
+# from the in-memory row (``_final_row``); a run that lacks a metric leaves    #
+# that cell blank rather than dropping/adding a column. Metric-block names are  #
+# unique per column (a row is a dict keyed by column name), so the shared      #
+# reference names (# Client Nodes, Code, Read B/W, …) are workload-qualified.  #
+# --------------------------------------------------------------------------- #
+
+# Model column display labels (reference table titles). Blank for the
+# single-table workloads (kvcache, vdb) — the Benchmark Type column
+# identifies those.
+_MODEL_DISPLAY_LABELS = {
+    "unet3d": "Unet3D",
+    "retinanet": "RetinaNet",
+    "llama3-8b": "8B",
+    "llama3-70b": "70B",
+    "llama3-405b": "405B",
+    "llama3-1t": "1250B",
+}
+
+# Left edge + shared System-Under-Test block. Each entry is
+# (final_column_name, internal_row_key_or_None). ``None`` => manual /
+# present-but-blank placeholder (Public ID + the 5 submitter-filled cells).
+# Division / Benchmark Type / Model are computed in ``_final_row``.
+_SUT_FINAL_COLUMNS = [
+    ("Public ID", None),
+    ("Organization", "orgname"),
+    ("Division", "__division__"),
+    ("Benchmark Type", "__benchmark_type__"),
+    ("Model", "__model__"),
+    ("Name", "sut_name"),
+    ("Description", "sut_description"),
+    ("Type", None),
+    ("Access Protocol", None),
+    ("Availability", None),
+    ("RU's", "sut_rus"),
+    ("Integrated Client Storage", None),
+    ("Usable Capacity (TiB)", None),
+]
+
+# Per-workload metric/param blocks. ``__code__`` / ``__logs__`` are the
+# per-row code-image hyperlinks (routed from the internal ``sut_code`` /
+# ``sut_logs`` values into THIS row's own workload block; the reference
+# places Code/Logs in each workload's Test-Parameters group because an
+# OPEN row may ship its own code). Every other value is an internal
+# ``_aggregate_*`` output key.
+_TRAINING_BLOCK = [
+    ("Accelerator Type", "accelerator"),
+    ("# Client Nodes", "train_num_client_nodes"),
+    ("Code", "__code__"),
+    ("Logs", "__logs__"),
+    ("# Simulated Accelerators", "train_num_simulated_accelerators"),
+    ("Read B/W (GiB/s)", "train_read_bw_gibps"),
+]
+_CHECKPOINTING_BLOCK = [
+    ("Checkpoint Mode", "checkpoint_mode"),
+    ("# Client Nodes", "checkpoint_num_client_nodes"),
+    ("DP Instances", "checkpoint_dp_instances"),
+    ("Code", "__code__"),
+    ("Logs", "__logs__"),
+    ("Write B/W (GiB/s)", "checkpoint_write_bw_gibps"),
+    ("Write Duration (secs)", "checkpoint_write_duration_secs"),
+    ("Read B/W (GiB/s)", "checkpoint_read_bw_gibps"),
+    ("Read Duration (secs)", "checkpoint_read_duration_secs"),
+]
+_VDB_BLOCK = [
+    ("# Client Nodes", "vdb_num_client_nodes"),
+    ("Code", "__code__"),
+    ("Logs", "__logs__"),
+    ("Vector Count", "vdb_num_vectors"),
+    ("Vector Dimension", "vdb_dimension"),
+    ("Index Type", "vdb_index_type"),
+    ("Queries per Sec", "vdb_throughput_qps"),
+    ("Query Latency (ms)", "vdb_p99_latency_ms"),
+    ("Recall Percentage", "vdb_recall"),
+    ("Storage IOPs", "vdb_storage_iops"),
+    ("Read B/W (GiB/s)", "vdb_read_bw_gibps"),
+]
+# KVCache: 3 shared columns + 3 option-groups x 4 metrics. Groups map to
+# the fixed kv-cache.py WORKLOAD_PARAMS option numbers (1/2/3). summary.json
+# deserializes those keys as strings, so the internal column key uses the
+# string option number.
+_KVCACHE_SHARED_BLOCK = [
+    ("# Client Nodes", "kvcache_num_client_nodes"),
+    ("Code", "__code__"),
+    ("Logs", "__logs__"),
+]
+_KVCACHE_GROUPS = [
+    ("1", "llama3.1-8b Storage Only"),
+    ("2", "llama3.1-8b Storage + Mem"),
+    ("3", "llama3.1-70b Storage Only"),
+]
+_KVCACHE_GROUP_METRICS = [
+    ("Throughput (tok/s)", "aggregated_avg_throughput_tokens_per_sec"),
+    ("Read B/W (GiB/s)", "aggregated_read_bandwidth_gbps"),
+    ("Write B/W (GiB/s)", "aggregated_write_bandwidth_gbps"),
+    ("P95 Read Latency (ms)", "aggregated_p95_latency_ms"),
+]
+
+# Which workload block a row fills, keyed by the internal benchmark_type
+# value. A row fills exactly one block; every other block stays blank.
+_WORKLOAD_BLOCK_BY_TYPE = {
+    "training": ("Training", _TRAINING_BLOCK),
+    "checkpointing": ("Checkpointing", _CHECKPOINTING_BLOCK),
+    "vector_database": ("VDB", _VDB_BLOCK),
+    "kv_cache": ("KVCache", _KVCACHE_SHARED_BLOCK),  # + groups, see _final_row
+}
+
+
+def _build_final_schema():
+    """Assemble the ordered fixed column list from the block definitions.
+
+    Building the header from the SAME structures the projection reads keeps
+    the two from drifting.
+    """
+    cols = [name for name, _ in _SUT_FINAL_COLUMNS]
+    cols += [f"Training - {name}" for name, _ in _TRAINING_BLOCK]
+    cols += [f"Checkpointing - {name}" for name, _ in _CHECKPOINTING_BLOCK]
+    cols += [f"VDB - {name}" for name, _ in _VDB_BLOCK]
+    cols += [f"KVCache - {name}" for name, _ in _KVCACHE_SHARED_BLOCK]
+    for _opt, label in _KVCACHE_GROUPS:
+        cols += [f"KVCache {label} - {name}" for name, _ in _KVCACHE_GROUP_METRICS]
+    return cols
+
+
+_FINAL_SCHEMA = _build_final_schema()
+
+
+def _blank_if_nan(value: Any) -> Any:
+    """Coerce a NaN float to ``""`` (JSON has no NaN literal; CSV wants blank).
+
+    NaN is the only value not equal to itself, so this needs no ``math``
+    import. Keeps every fixed column present-but-blank rather than dropping
+    it (which ``remove_nan_values`` would do, breaking schema completeness).
+    """
+    if isinstance(value, float) and value != value:
+        return ""
+    return value
 
 
 @dataclass
@@ -593,11 +743,13 @@ class ReportGenerator:
 
         if category and orgname and systemname:
             base = f"{category}/{orgname}/systems/{systemname}"
-            submission_name, rack_units = self._read_system_description(
+            _submission_name, rack_units = self._read_system_description(
                 first_run, systemname)
-            name_text = submission_name or systemname
-            cols['sut_name'] = Hyperlink(name_text, f"{base}.yaml")
-            cols['sut_description'] = Hyperlink(name_text, f"{base}.pdf")
+            # Visible text (user-confirmed 2026-07-21): Name shows the
+            # system name and links to the system-description.yaml;
+            # Description shows literal "PDF" and links to the .pdf.
+            cols['sut_name'] = Hyperlink(systemname, f"{base}.yaml")
+            cols['sut_description'] = Hyperlink("PDF", f"{base}.pdf")
             if rack_units is not None:
                 cols['sut_rus'] = rack_units
 
@@ -2159,77 +2311,89 @@ class ReportGenerator:
                 print(f"\n    {checklist}")
 
 
+    def _final_row(self, row: Dict[str, Any]) -> Dict[str, Any]:
+        """Project one internal (machine-key) row onto the fixed
+        ``_FINAL_SCHEMA`` (column-parity contract).
+
+        The emitted column set is decided HERE and nowhere else — it is the
+        fixed reference schema, never data-driven. Each fixed column is
+        cherry-picked from the in-memory row; a column that does not apply
+        to this row's workload (or whose metric is absent) stays blank.
+        Code/Logs are routed into the row's OWN workload block. The internal
+        aggregation (``*_mean_of_*``, the D-24 INVALID gate, etc.) is left
+        untouched upstream — those values are simply not emitted here.
+        """
+        bt = row.get("benchmark_type") or ""
+        out: Dict[str, Any] = {col: "" for col in _FINAL_SCHEMA}
+
+        # Left edge + shared SUT block.
+        for final_name, key in _SUT_FINAL_COLUMNS:
+            if key is None:
+                continue  # manual placeholder — present-but-blank
+            if key == "__division__":
+                out[final_name] = (row.get("category") or "").upper()
+            elif key == "__benchmark_type__":
+                out[final_name] = bt
+            elif key == "__model__":
+                # Reference display label; blank for the single-table
+                # workloads (kvcache, vdb) — Benchmark Type identifies those.
+                if bt in ("kv_cache", "vector_database"):
+                    out[final_name] = ""
+                else:
+                    model = row.get("model") or ""
+                    out[final_name] = _MODEL_DISPLAY_LABELS.get(model, model)
+            else:
+                out[final_name] = row.get(key, "")
+
+        # The row's own workload block (exactly one is populated).
+        block = _WORKLOAD_BLOCK_BY_TYPE.get(bt)
+        if block is not None:
+            prefix, columns = block
+            self._fill_block(out, row, prefix, columns)
+            if bt == "kv_cache":
+                # Fixed option-groups: option N -> its reference group.
+                for opt, label in _KVCACHE_GROUPS:
+                    for metric_name, metric_suffix in _KVCACHE_GROUP_METRICS:
+                        final_name = f"KVCache {label} - {metric_name}"
+                        src = f"kvcache_option_{opt}_{metric_suffix}"
+                        out[final_name] = row.get(src, "")
+
+        return {k: _blank_if_nan(v) for k, v in out.items()}
+
+    @staticmethod
+    def _fill_block(out: Dict[str, Any], row: Dict[str, Any],
+                    prefix: str, columns) -> None:
+        """Fill one workload block. ``__code__`` / ``__logs__`` route the
+        row's per-run code-image hyperlinks (``sut_code`` / ``sut_logs``)
+        into this block's Code/Logs columns."""
+        for name, key in columns:
+            final_name = f"{prefix} - {name}"
+            if key == "__code__":
+                out[final_name] = row.get("sut_code", "")
+            elif key == "__logs__":
+                out[final_name] = row.get("sut_logs", "")
+            else:
+                out[final_name] = row.get(key, "")
+
     def write_json_file(self, results, target_dir: Optional[str] = None):
         out_dir = target_dir if target_dir is not None else self.results_dir
         json_file = os.path.join(out_dir, 'results.json')
         self.logger.info(f'Writing results to {json_file}')
+        projected = [self._final_row(r) for r in results]
         with open(json_file, 'w') as f:
-            json.dump(results, f, indent=2, cls=MLPSJsonEncoder)
+            json.dump(projected, f, indent=2, cls=MLPSJsonEncoder)
 
     def write_csv_file(self, results, target_dir: Optional[str] = None):
         out_dir = target_dir if target_dir is not None else self.results_dir
         csv_file = os.path.join(out_dir, 'results.csv')
         self.logger.info(f'Writing results to {csv_file}')
-        flattened_results = [flatten_nested_dict(r) for r in results]
-        flattened_results = [remove_nan_values(r) for r in flattened_results]
-
-        # D-11 grouped-ordering assembly. Replaces the pure alphabetical
-        # field-name sort — that would put `checkpoint_*` before
-        # `train_*` and break the invariant 06-05's TestColumnOrdering
-        # test-locks.
-        ordered_fieldnames = self._ordered_fieldnames(flattened_results)
-
+        # Project each internal row onto the fixed column-parity schema.
+        # ``_final_row`` returns EXACTLY the _FINAL_SCHEMA keys (NaN already
+        # blanked), so no flatten/field-discovery is needed — the header is
+        # the fixed schema regardless of input (header-only when empty).
+        projected = [self._final_row(r) for r in results]
         with open(csv_file, 'w+', newline='') as file_object:
-            csv_writer = csv.DictWriter(f=file_object, fieldnames=ordered_fieldnames, lineterminator='\n')
+            csv_writer = csv.DictWriter(
+                f=file_object, fieldnames=_FINAL_SCHEMA, lineterminator='\n')
             csv_writer.writeheader()
-            csv_writer.writerows(flattened_results)
-
-    def _ordered_fieldnames(self, rows: List[dict]) -> List[str]:
-        """D-11 grouped-ordering CSV header assembly.
-
-        Layout (exact):
-
-        1. Fixed 6-column prefix, in this exact order:
-           ``['category', 'orgname', 'systemname', 'benchmark_type',
-              'model', 'accelerator']``
-        2. Sorted ``train_*`` columns.
-        3. Sorted ``checkpoint_*`` columns.
-        4. Sorted ``vdb_*`` columns.
-        5. Sorted ``kvcache_*`` columns.
-        6. Any remaining un-prefixed columns, sorted (defensive: catches
-           new columns future refactors may introduce).
-        7. Trailing ``['issues']`` (D-12 last-position invariant).
-
-        For an EMPTY ``rows`` list this returns the prefix + trailing
-        columns only — the minimal header shape D-03 requires for
-        empty-model-dir emission (``results.csv`` = header row only).
-        """
-        prefix = ['category', 'orgname', 'systemname',
-                  'benchmark_type', 'model', 'accelerator']
-        trailing = ['issues']
-
-        all_keys: Set[str] = set()
-        for r in rows:
-            all_keys.update(r.keys())
-
-        prefix_set = set(prefix)
-        trailing_set = set(trailing)
-        remaining = all_keys - prefix_set - trailing_set
-
-        # Task F: shared SUT block leads the body (right after the D-10
-        # prefix, before the metric groups). Ordered by _SUT_COLUMNS, not
-        # alphabetically, so the block reads in spreadsheet order.
-        sut_cols = [k for k in self._SUT_COLUMNS if k in remaining]
-        train_cols = sorted(k for k in remaining if k.startswith('train_'))
-        checkpoint_cols = sorted(k for k in remaining if k.startswith('checkpoint_'))
-        vdb_cols = sorted(k for k in remaining if k.startswith('vdb_'))
-        kvcache_cols = sorted(k for k in remaining if k.startswith('kvcache_'))
-
-        grouped = sut_cols + train_cols + checkpoint_cols + vdb_cols + kvcache_cols
-        other = sorted(k for k in remaining if k not in set(grouped))
-
-        # `other` catches any un-prefixed column not covered by the
-        # fixed prefix / trailing sets — should be empty in practice.
-        # Sorted-appending keeps behavior deterministic if a future
-        # row-shape change introduces such a column.
-        return prefix + grouped + other + trailing
+            csv_writer.writerows(projected)

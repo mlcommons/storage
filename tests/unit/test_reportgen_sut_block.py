@@ -85,21 +85,22 @@ class TestSutBlockJson:
         assert len(rows) == 1
         row = rows[0]
 
-        assert row["sut_organization"] == "acme"
-        assert row["sut_rus"] == _RACK_UNITS
-        # Hyperlinks serialize as {"text","href"} objects in JSON.
-        assert row["sut_name"] == {
-            "text": _SUBMISSION_NAME,
+        assert row["Organization"] == "acme"
+        assert row["RU's"] == _RACK_UNITS
+        # Column-parity: Name shows the system name and links to the .yaml;
+        # Description shows literal "PDF" and links to the .pdf.
+        assert row["Name"] == {
+            "text": "system-a",
             "href": "closed/acme/systems/system-a.yaml",
         }
-        assert row["sut_description"] == {
-            "text": _SUBMISSION_NAME,
+        assert row["Description"] == {
+            "text": "PDF",
             "href": "closed/acme/systems/system-a.pdf",
         }
         # Blank placeholders present-but-empty (manual fill).
-        for blank in ("sut_public_id", "sut_type", "sut_access_protocol",
-                      "sut_availability", "sut_integrated_client_storage",
-                      "sut_usable_capacity_tib"):
+        for blank in ("Public ID", "Type", "Access Protocol",
+                      "Availability", "Integrated Client Storage",
+                      "Usable Capacity (TiB)"):
             assert row[blank] == "", f"{blank} should be blank, got {row[blank]!r}"
 
 
@@ -111,14 +112,14 @@ class TestSutBlockCsv:
             rows = list(csv.DictReader(fh))
         assert len(rows) == 1
         row = rows[0]
-        assert row["sut_name"] == (
-            f'<a href="closed/acme/systems/system-a.yaml">{_SUBMISSION_NAME}</a>'
+        assert row["Name"] == (
+            '<a href="closed/acme/systems/system-a.yaml">system-a</a>'
         )
-        assert row["sut_description"] == (
-            f'<a href="closed/acme/systems/system-a.pdf">{_SUBMISSION_NAME}</a>'
+        assert row["Description"] == (
+            '<a href="closed/acme/systems/system-a.pdf">PDF</a>'
         )
-        assert row["sut_organization"] == "acme"
-        assert row["sut_rus"] == str(_RACK_UNITS)
+        assert row["Organization"] == "acme"
+        assert row["RU's"] == str(_RACK_UNITS)
 
 
 _CODE_HASH = "0123456789abcdef0123456789abcdef"  # md5-tree-v2 32-hex
@@ -135,15 +136,17 @@ class TestSutCodeLogsLinks:
     """Task F-b: Code/Logs anchors resolved from the run's .mlps-code-image."""
 
     def test_json_code_logs_hyperlinks(self, tmp_path):
+        # Column-parity: Code/Logs are per-workload. This is a training
+        # fixture, so they land in the Training block.
         root = _prepare_tree(tmp_path)
         _inject_code_pointer(root)
         _run_reportgen(root)
         rows = json.loads((_acme_per_model_dir(root) / "results.json").read_text())
         row = rows[0]
         expected_href = f"closed/acme/{_CODE_DIR}/"
-        assert row["sut_code"] == {"text": "code", "href": expected_href}
+        assert row["Training - Code"] == {"text": "code", "href": expected_href}
         # Logs is a placeholder pointing at the same code-image dir for now.
-        assert row["sut_logs"] == {"text": "logs", "href": expected_href}
+        assert row["Training - Logs"] == {"text": "logs", "href": expected_href}
 
     def test_csv_code_logs_anchor(self, tmp_path):
         root = _prepare_tree(tmp_path)
@@ -152,8 +155,8 @@ class TestSutCodeLogsLinks:
         with open(_acme_per_model_dir(root) / "results.csv", newline="") as fh:
             row = next(csv.DictReader(fh))
         href = f"closed/acme/{_CODE_DIR}/"
-        assert row["sut_code"] == f'<a href="{href}">code</a>'
-        assert row["sut_logs"] == f'<a href="{href}">logs</a>'
+        assert row["Training - Code"] == f'<a href="{href}">code</a>'
+        assert row["Training - Logs"] == f'<a href="{href}">logs</a>'
 
     def test_missing_pointer_leaves_code_logs_blank(self, tmp_path):
         # No pointer injected → graceful blank, no crash.
@@ -161,22 +164,22 @@ class TestSutCodeLogsLinks:
         _run_reportgen(root)
         rows = json.loads((_acme_per_model_dir(root) / "results.json").read_text())
         row = rows[0]
-        assert row["sut_code"] == ""
-        assert row["sut_logs"] == ""
+        assert row["Training - Code"] == ""
+        assert row["Training - Logs"] == ""
 
 
 class TestSutBlockDoesNotBreakColumnInvariants:
-    def test_prefix_first_issues_last_sut_in_between(self, tmp_path):
+    def test_fixed_schema_left_edge_and_sut_columns(self, tmp_path):
+        from mlpstorage_py.report_generator import _FINAL_SCHEMA
         root = _prepare_tree(tmp_path)
         _run_reportgen(root)
         with open(_acme_per_model_dir(root) / "results.csv", newline="") as fh:
             header = next(csv.reader(fh))
-        assert header[:6] == [
-            "category", "orgname", "systemname",
-            "benchmark_type", "model", "accelerator",
-        ], f"D-10 prefix broken: {header[:6]}"
-        assert header[-1] == "issues", f"D-12 trailing issues broken: {header[-1]}"
-        # sut_ columns exist and sit strictly between prefix and issues.
-        sut_idxs = [i for i, c in enumerate(header) if c.startswith("sut_")]
-        assert sut_idxs, f"no sut_ columns in header: {header}"
-        assert min(sut_idxs) >= 6 and max(sut_idxs) < len(header) - 1
+        # Column-parity: the emitted header is EXACTLY the fixed schema.
+        assert header == _FINAL_SCHEMA, f"header != fixed schema: {header}"
+        # SUT columns present in the left-edge block; no machine-key
+        # prefix or trailing issues column.
+        for col in ("Organization", "Name", "Description", "RU's"):
+            assert col in header
+        for banned in ("orgname", "systemname", "benchmark_type", "issues"):
+            assert banned not in header

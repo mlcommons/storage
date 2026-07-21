@@ -145,10 +145,21 @@ def _synthetic_rows() -> List[Dict[str, Any]]:
 # --------------------------------------------------------------------------- #
 
 
-class TestSixColumnPrefix:
-    """D-10: fixed 6-column prefix in exact order at CSV header + JSON keys."""
+_LEFT_EDGE = [
+    'Public ID', 'Organization', 'Division', 'Benchmark Type', 'Model',
+]
 
-    def test_csv_header_starts_with_six_column_prefix(self, tmp_path):
+
+class TestFixedSchemaLeftEdge:
+    """Column-parity: fixed left-edge (SUT + discriminators) at CSV + JSON.
+
+    Replaces the SUPERSEDED D-10 machine-key 6-column prefix. The emitted
+    file is now the fixed webpage-parity schema; the first five columns are
+    the identity + discriminator block (Public ID, Organization, Division,
+    Benchmark Type, Model).
+    """
+
+    def test_csv_header_starts_with_fixed_left_edge(self, tmp_path):
         gen = _bare_generator(tmp_path)
         out_dir = tmp_path / "csv_prefix_out"
         out_dir.mkdir()
@@ -158,15 +169,15 @@ class TestSixColumnPrefix:
         assert csv_path.exists(), f"expected {csv_path} to exist"
         with open(csv_path, "r", newline="") as fh:
             header = next(csv.reader(fh))
-        assert header[:6] == [
-            'category', 'orgname', 'systemname', 'benchmark_type', 'model', 'accelerator'
-        ], (
-            "D-10 6-column prefix violated. First 6 header columns must be exactly "
-            "['category', 'orgname', 'systemname', 'benchmark_type', 'model', 'accelerator']. "
-            f"Got: {header[:6]}"
+        assert header[:5] == _LEFT_EDGE, (
+            "Fixed-schema left edge violated. First 5 header columns must be "
+            f"{_LEFT_EDGE}. Got: {header[:5]}"
         )
+        # The old machine-key identity columns must be gone.
+        for banned in ('category', 'orgname', 'systemname', 'benchmark_type'):
+            assert banned not in header
 
-    def test_json_row_dict_starts_with_six_column_prefix_keys(self, tmp_path):
+    def test_json_row_dict_starts_with_fixed_left_edge(self, tmp_path):
         gen = _bare_generator(tmp_path)
         out_dir = tmp_path / "json_prefix_out"
         out_dir.mkdir()
@@ -177,21 +188,11 @@ class TestSixColumnPrefix:
         with open(json_path, "r") as fh:
             loaded = json.load(fh)
 
-        # Every emitted row must at minimum carry the 6 prefix keys.
-        # Python 3.7+ preserves dict insertion order and json.load
-        # preserves that order too, so we assert the first 6 KEYS in
-        # order match the D-10 prefix.
-        prefix = ['category', 'orgname', 'systemname',
-                  'benchmark_type', 'model', 'accelerator']
         for row in loaded:
             keys = list(row.keys())
-            for col in prefix:
-                assert col in row, (
-                    f"D-10 prefix key '{col}' missing from row: {keys}"
-                )
-            assert keys[:6] == prefix, (
-                f"D-10 prefix ORDER violated in JSON row. Expected first "
-                f"6 keys to be {prefix}, got {keys[:6]}."
+            assert keys[:5] == _LEFT_EDGE, (
+                f"Fixed-schema left-edge ORDER violated in JSON row. Expected "
+                f"first 5 keys to be {_LEFT_EDGE}, got {keys[:5]}."
             )
 
 
@@ -200,10 +201,17 @@ class TestSixColumnPrefix:
 # --------------------------------------------------------------------------- #
 
 
-class TestTrailingIssuesColumn:
-    """D-12: 'issues' is the last column. D-25: '; '-joined at write time."""
+class TestNoIssuesColumn:
+    """Column-parity: the 'issues' column is NOT emitted.
 
-    def test_csv_header_ends_with_issues(self, tmp_path):
+    Supersedes D-12/D-25 (trailing 'issues' column, '; '-joined). The
+    fixed webpage-parity schema carries only the reference columns +
+    discriminators; validation issues are not a reference column. The
+    internal '; ' join in _workload_result_to_row still runs (it feeds
+    the on-screen report), it is just no longer emitted to the file.
+    """
+
+    def test_csv_header_has_no_issues_column(self, tmp_path):
         gen = _bare_generator(tmp_path)
         out_dir = tmp_path / "csv_trailing_out"
         out_dir.mkdir()
@@ -213,41 +221,20 @@ class TestTrailingIssuesColumn:
         assert csv_path.exists()
         with open(csv_path, "r", newline="") as fh:
             header = next(csv.reader(fh))
-        assert header[-1] == 'issues', (
-            f"D-12 trailing issues column violated. Last header column must be "
-            f"'issues'; got {header[-1]!r}. Full header: {header}"
+        assert 'issues' not in header, (
+            f"'issues' must not be a results.csv column. Full header: {header}"
         )
 
-    def test_multi_issue_row_joined_by_semicolon_space(self, tmp_path):
-        # The '; ' join happens inside _workload_result_to_row (not
-        # inside write_csv_file). To exercise the join at the writer
-        # boundary we pre-join in the synthetic row and assert the
-        # written cell round-trips verbatim.
+    def test_json_rows_have_no_issues_key(self, tmp_path):
         gen = _bare_generator(tmp_path)
-        out_dir = tmp_path / "csv_multi_issue_out"
+        out_dir = tmp_path / "json_no_issues_out"
         out_dir.mkdir()
+        gen.write_json_file(_synthetic_rows(), target_dir=str(out_dir))
 
-        rows = [{
-            "category": "INVALID",
-            "orgname": "acme",
-            "systemname": "system-a",
-            "benchmark_type": "training",
-            "model": "unet3d",
-            "accelerator": "h100",
-            "train_mean_of_au_percentage": 95.0,
-            "issues": "issue1; issue2; issue3",
-        }]
-        gen.write_csv_file(rows, target_dir=str(out_dir))
-
-        csv_path = out_dir / "results.csv"
-        with open(csv_path, "r", newline="") as fh:
-            reader = csv.DictReader(fh)
-            got_rows = list(reader)
-        assert len(got_rows) == 1
-        assert got_rows[0]['issues'] == "issue1; issue2; issue3", (
-            f"D-25 '; ' join format violated. Expected 'issue1; issue2; issue3', "
-            f"got {got_rows[0]['issues']!r}"
-        )
+        with open(out_dir / "results.json", "r") as fh:
+            loaded = json.load(fh)
+        for row in loaded:
+            assert 'issues' not in row, f"'issues' must not be a JSON key: {row}"
 
 
 # --------------------------------------------------------------------------- #
@@ -368,30 +355,36 @@ class TestWhatifCategoryValue:
         with open(top_json, "r") as fh:
             rows = json.load(fh)
 
-        # D-29: at least one row must have category='whatif'.
-        whatif_rows = [r for r in rows if r.get('category') == 'whatif']
+        # D-29: the whatif category surfaces in the fixed-schema Division
+        # column (category.upper()). Division is the emitted successor to
+        # the machine-key 'category' prefix column.
+        whatif_rows = [r for r in rows if r.get('Division') == 'WHATIF']
         assert whatif_rows, (
-            f"D-29 violated: expected at least one row with category='whatif' "
+            f"D-29 violated: expected at least one row with Division='WHATIF' "
             f"in {top_json}. Got rows: {rows}"
         )
 
-        # D-29 also mandates whatif SKIPS the rules-strict INVALID
-        # gates. The whatif fixture has 3 runs (not 6) — if the gates
-        # fired, the D-24 training count-mismatch template would land
-        # in the issues column. Assert it does NOT.
+        # D-29 also mandates whatif SKIPS the rules-strict INVALID gates.
+        # The 'issues' column is no longer emitted (column-parity), so
+        # assert the skip at the internal Result layer instead: no whatif
+        # workload Result carries a D-24 INVALID substring.
         d24_substrings = [
             "expected 6 training invocations per Rules.md",
             "expected exactly 1 warmup invocation to be detected",
             "expected 10 checkpoint operations per Rules.md",
             "cannot aggregate",
         ]
-        for row in whatif_rows:
-            issues_val = row.get('issues', '') or ''
+        for wk, wr in gen.workload_results.items():
+            cat = getattr(wr.category, 'value', wr.category)
+            if str(cat) != 'whatif' and 'whatif' not in str(wk):
+                continue
+            issue_text = '; '.join(
+                str(getattr(i, 'message', i)) for i in (wr.issues or []))
             for sub in d24_substrings:
-                assert sub not in issues_val, (
-                    f"D-29 violated: whatif row contains D-24 INVALID substring "
-                    f"{sub!r} — whatif MUST skip the rules-strict gates. "
-                    f"Row: {row}"
+                assert sub not in issue_text, (
+                    f"D-29 violated: whatif workload {wk} carries D-24 INVALID "
+                    f"substring {sub!r} — whatif MUST skip the rules-strict "
+                    f"gates. Issues: {issue_text}"
                 )
 
 
@@ -472,13 +465,13 @@ class TestMultiOrgnameCollection:
         assert len(beta_rows) == 1, (
             f"expected 1 beta_corp workload row in per-model file, got {len(beta_rows)}"
         )
-        assert acme_rows[0].get('orgname') == 'acme', (
-            f"expected acme orgname in acme's per-model row, got "
-            f"{acme_rows[0].get('orgname')!r}"
+        assert acme_rows[0].get('Organization') == 'acme', (
+            f"expected acme in acme's per-model row Organization, got "
+            f"{acme_rows[0].get('Organization')!r}"
         )
-        assert beta_rows[0].get('orgname') == 'beta_corp', (
-            f"expected beta_corp orgname in beta's per-model row, got "
-            f"{beta_rows[0].get('orgname')!r}"
+        assert beta_rows[0].get('Organization') == 'beta_corp', (
+            f"expected beta_corp in beta's per-model row Organization, got "
+            f"{beta_rows[0].get('Organization')!r}"
         )
 
         # D-08 core assertion: the top-level file exists and its rows
@@ -507,17 +500,17 @@ class TestMultiOrgnameCollection:
         # acme OR beta_corp — never blank/other). This still catches
         # any regression that would COLLAPSE cross-org rows or drop
         # the orgname column.
-        top_orgnames = {r.get('orgname') for r in top_rows}
+        # The fixed-schema 'Organization' column is the emitted successor
+        # to the machine-key 'orgname' — it distinguishes cross-org rows.
+        top_orgnames = {r.get('Organization') for r in top_rows}
         assert top_orgnames, (
             f"top-level results.json is empty; expected at least one org's rows"
         )
-        # Every row must carry a real orgname (not empty) — D-08
-        # invariant that the orgname column distinguishes rows.
         assert '' not in top_orgnames, (
-            f"D-08 violated: top-level rows include empty orgname. "
-            f"Orgnames seen: {top_orgnames}"
+            f"D-08 violated: top-level rows include empty Organization. "
+            f"Organizations seen: {top_orgnames}"
         )
         assert top_orgnames.issubset({'acme', 'beta_corp'}), (
-            f"D-08 violated: top-level rows include unexpected orgnames "
+            f"D-08 violated: top-level rows include unexpected Organizations "
             f"{top_orgnames - {'acme', 'beta_corp'}}"
         )

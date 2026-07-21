@@ -84,15 +84,19 @@ def _read_csv_header(path: pathlib.Path) -> List[str]:
         return next(reader)
 
 
-def _row_identity(row: Dict[str, Any]) -> Tuple[str, str, str, str, str, str]:
-    """Extract the 6-column identity tuple from a row dict."""
+def _row_identity(row: Dict[str, Any]) -> Tuple[str, str, str, str]:
+    """Extract a stable identity tuple from a fixed-schema row dict.
+
+    Column-parity: the emitted file no longer carries the machine-key
+    identity prefix. Identity now reads the fixed-schema discriminator
+    columns (Division / Organization / Benchmark Type / Model). systemname
+    and accelerator are no longer standalone emitted columns.
+    """
     return (
-        str(row.get('category', '') or ''),
-        str(row.get('orgname', '') or ''),
-        str(row.get('systemname', '') or ''),
-        str(row.get('benchmark_type', '') or ''),
-        str(row.get('model', '') or ''),
-        str(row.get('accelerator', '') or ''),
+        str(row.get('Division', '') or ''),
+        str(row.get('Organization', '') or ''),
+        str(row.get('Benchmark Type', '') or ''),
+        str(row.get('Model', '') or ''),
     )
 
 
@@ -241,14 +245,14 @@ class TestDeleteAndRerun:
             f"{len(rows_after)}. Before: {rows_before}. After: {rows_after}"
         )
 
-        # The deleted workload's identity carried orgname='beta_corp',
-        # benchmark_type='training', model='unet3d'. Any row bearing
-        # ('beta_corp', 'training', 'unet3d') must be absent.
+        # The deleted workload's identity carried Organization='beta_corp',
+        # Benchmark Type='training', Model='Unet3D' (display label). Any row
+        # bearing ('beta_corp', 'training', 'Unet3D') must be absent.
         for row in rows_after:
             assert not (
-                row.get('orgname') == 'beta_corp'
-                and row.get('benchmark_type') == 'training'
-                and row.get('model') == 'unet3d'
+                row.get('Organization') == 'beta_corp'
+                and row.get('Benchmark Type') == 'training'
+                and row.get('Model') == 'Unet3D'
             ), (
                 f"D-03 violated: deleted workload row still present in "
                 f"top-level after rerun. Row: {row}"
@@ -260,9 +264,9 @@ class TestDeleteAndRerun:
         beta_identity = next(
             (
                 ident for ident in identities_before
-                if ident[1] == 'beta_corp'  # orgname
-                and ident[3] == 'training'  # benchmark_type
-                and ident[4] == 'unet3d'    # model
+                if ident[1] == 'beta_corp'  # Organization
+                and ident[2] == 'training'  # Benchmark Type
+                and ident[3] == 'Unet3D'    # Model (display label)
             ),
             None,
         )
@@ -327,21 +331,19 @@ class TestEmptyModelDir:
             f"Directory: {list(per_model_dir.iterdir())}"
         )
 
-        # CSV: header row only — exactly one line, non-empty, with the
-        # D-10 6-column prefix present.
+        # CSV: header row only — exactly one line, non-empty, carrying the
+        # full fixed webpage-parity schema (column-parity: header is fixed
+        # even for an empty model dir).
+        from mlpstorage_py.report_generator import _FINAL_SCHEMA
         with open(csv_path, "r", newline="") as fh:
             lines = [line.rstrip("\r\n") for line in fh if line.strip()]
         assert len(lines) == 1, (
             f"D-03 corner violated: expected 1 header line in {csv_path}, "
             f"got {len(lines)} lines: {lines}"
         )
-        # The header must include the prefix columns.
         header = _read_csv_header(csv_path)
-        assert header[:6] == [
-            'category', 'orgname', 'systemname', 'benchmark_type', 'model', 'accelerator'
-        ], f"empty-model CSV header does not carry D-10 prefix: {header}"
-        assert header[-1] == 'issues', (
-            f"empty-model CSV header does not end with 'issues': {header}"
+        assert header == _FINAL_SCHEMA, (
+            f"empty-model CSV header must be the fixed schema: {header}"
         )
 
         # JSON: contents == [].

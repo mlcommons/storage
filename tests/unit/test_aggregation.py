@@ -1989,25 +1989,20 @@ class TestDatagenReportgenValidation:
 
 
 class TestColumnOrdering:
-    """CSV column-ordering test-lock (D-14 / D-18).
+    """CSV column-schema test-lock (column-parity contract).
 
-    Defends against a future PR reverting to pure
-    ``sorted(fieldnames)`` — which would put ``checkpoint_*`` before
-    ``train_*`` and break D-11 grouped ordering. Layout invariant:
-
-    1. Fixed 6-column prefix: ``[category, orgname, systemname,
-       benchmark_type, model, accelerator]`` (D-10).
-    2. Then ``train_*`` cols sorted.
-    3. Then ``checkpoint_*`` cols sorted.
-    4. Then ``vdb_*`` cols sorted.
-    5. Then ``kvcache_*`` cols sorted (including flattened
-       ``kvcache_option_<opt>_*`` columns).
-    6. Trailing ``issues`` (D-12).
+    Supersedes the D-10/D-11 machine-key grouped-ordering lock (and the
+    removed ``_ordered_fieldnames`` helper). ``write_csv_file`` now emits
+    the FIXED webpage-parity schema regardless of the input row's keys —
+    the columns are the reference tables' union + discriminators, never
+    data-driven. This defends against a future PR reintroducing a
+    data-driven / machine-key header.
     """
 
-    def test_ordered_fieldnames_prefix_is_exact(self, tmp_path):
-        """The 6-column prefix appears at exactly positions [0..5]."""
+    def test_csv_header_written_by_write_csv_file_is_fixed_schema(self, tmp_path):
+        from mlpstorage_py.report_generator import _FINAL_SCHEMA
         gen = _make_bare_generator(tmp_path)
+        # Internal machine-key row (as _workload_result_to_row produces).
         rows = [
             {
                 "category": "closed",
@@ -2017,124 +2012,7 @@ class TestColumnOrdering:
                 "model": "unet3d",
                 "accelerator": "h100",
                 "train_mean_of_au_percentage": 95.0,
-                "issues": "",
-            }
-        ]
-        header = gen._ordered_fieldnames(rows)
-        assert header[:6] == [
-            "category",
-            "orgname",
-            "systemname",
-            "benchmark_type",
-            "model",
-            "accelerator",
-        ], f"6-column prefix wrong: {header[:6]!r}"
-        assert header[-1] == "issues", (
-            f"Trailing column must be 'issues'; got {header[-1]!r}"
-        )
-
-    def test_ordered_fieldnames_group_order_train_checkpoint_vdb_kvcache(self, tmp_path):
-        """max(train) < min(checkpoint) < min(vdb) < min(kvcache) (D-11 group order)."""
-        gen = _make_bare_generator(tmp_path)
-        rows = [
-            {
-                "category": "closed",
-                "orgname": "acme",
-                "systemname": "sys-a",
-                "benchmark_type": "training",
-                "model": "unet3d",
-                "accelerator": "h100",
-                "train_a": 1.0,
-                "train_b": 2.0,
-                "checkpoint_a": 3.0,
-                "checkpoint_z": 4.0,
-                "vdb_a": 5.0,
-                "kvcache_a": 6.0,
-                "kvcache_option_x_y": 7.0,
-                "issues": "",
-            }
-        ]
-        header = gen._ordered_fieldnames(rows)
-
-        def indices(prefix: str) -> List[int]:
-            return [i for i, k in enumerate(header) if k.startswith(prefix)]
-
-        train_idx = indices("train_")
-        checkpoint_idx = indices("checkpoint_")
-        vdb_idx = indices("vdb_")
-        kvcache_idx = indices("kvcache_")
-
-        assert train_idx and checkpoint_idx and vdb_idx and kvcache_idx, (
-            f"Every group must contribute at least one column: header={header}"
-        )
-        assert max(train_idx) < min(checkpoint_idx), (
-            f"D-11 violated: train indices {train_idx} must precede "
-            f"checkpoint indices {checkpoint_idx}."
-        )
-        assert max(checkpoint_idx) < min(vdb_idx), (
-            f"D-11 violated: checkpoint indices {checkpoint_idx} must precede "
-            f"vdb indices {vdb_idx}."
-        )
-        assert max(vdb_idx) < min(kvcache_idx), (
-            f"D-11 violated: vdb indices {vdb_idx} must precede "
-            f"kvcache indices {kvcache_idx}."
-        )
-
-    def test_within_group_alphabetical(self, tmp_path):
-        """Within each group, column names are in alphabetical order."""
-        gen = _make_bare_generator(tmp_path)
-        rows = [
-            {
-                "category": "closed",
-                "orgname": "acme",
-                "systemname": "sys-a",
-                "benchmark_type": "training",
-                "model": "unet3d",
-                "accelerator": "h100",
-                "train_c": 1.0,
-                "train_a": 2.0,
-                "train_b": 3.0,
-                "checkpoint_z": 4.0,
-                "checkpoint_a": 5.0,
-                "vdb_z": 6.0,
-                "vdb_a": 7.0,
-                "kvcache_z": 8.0,
-                "kvcache_a": 9.0,
-                "kvcache_option_b_x": 10.0,
-                "kvcache_option_a_y": 11.0,
-                "issues": "",
-            }
-        ]
-        header = gen._ordered_fieldnames(rows)
-
-        def group_cols(prefix: str) -> List[str]:
-            return [k for k in header if k.startswith(prefix)]
-
-        for prefix in ("train_", "checkpoint_", "vdb_", "kvcache_"):
-            cols = group_cols(prefix)
-            assert cols == sorted(cols), (
-                f"Group {prefix}* not alphabetical: {cols}"
-            )
-
-    def test_csv_header_written_by_write_csv_file_uses_ordered_fieldnames(self, tmp_path):
-        """End-to-end: ``write_csv_file`` writes the D-11 grouped header.
-
-        Reads back the written ``results.csv`` header row and pins
-        both the 6-column prefix at [0..5] and the trailing ``issues``
-        at [-1]. This catches drift in the writer surface (D-10 +
-        D-12) — the individual ``_ordered_fieldnames`` tests above
-        pin the helper; this one pins the writer's use of it.
-        """
-        gen = _make_bare_generator(tmp_path)
-        rows = [
-            {
-                "category": "closed",
-                "orgname": "acme",
-                "systemname": "sys-a",
-                "benchmark_type": "training",
-                "model": "unet3d",
-                "accelerator": "h100",
-                "train_mean_of_au_percentage": 95.0,
+                "train_read_bw_gibps": 12.5,
                 "issues": "",
             }
         ]
@@ -2147,15 +2025,14 @@ class TestColumnOrdering:
         with open(csv_path, "r") as f:
             header_line = f.readline().rstrip("\n")
         columns = header_line.split(",")
-        assert columns[:6] == [
-            "category",
-            "orgname",
-            "systemname",
-            "benchmark_type",
-            "model",
-            "accelerator",
-        ]
-        assert columns[-1] == "issues"
+        assert columns == _FINAL_SCHEMA, (
+            f"write_csv_file must emit the fixed webpage-parity schema.\n"
+            f"Expected: {_FINAL_SCHEMA}\nGot:      {columns}"
+        )
+        # No machine-key identity/dynamic/issues columns leak into output.
+        for banned in ("category", "orgname", "systemname", "benchmark_type",
+                       "issues", "train_mean_of_au_percentage"):
+            assert banned not in columns
 
 
 # --------------------------------------------------------------------------- #
