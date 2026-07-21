@@ -768,6 +768,42 @@ class BenchmarkInstanceExtractor:
         )
 
 
+def _filter_list_metrics(metric_block, logger=None, context: str = ""):
+    """Filter a DLIO summary ``metric`` block to list-valued keys only.
+
+    The report-generator aggregation paths call ``fmean()`` over each metric
+    value, so scalar/string entries (``train_au_mean_percentage``,
+    ``train_au_meet_expectation``, ...) must be dropped or ``fmean`` raises
+    ``TypeError`` on a non-iterable. Returns the filtered dict, or ``None`` if
+    ``metric_block`` is not a dict or nothing survives the filter.
+
+    A diagnostic is logged (never silent) both when non-list keys are dropped
+    and when the block collapses to nothing, so a blank ``metrics`` column is
+    always traceable to a logged reason rather than disappearing quietly.
+    """
+    if not isinstance(metric_block, dict):
+        return None
+
+    filtered = {k: v for k, v in metric_block.items() if isinstance(v, list)}
+    dropped = [k for k, v in metric_block.items() if not isinstance(v, list)]
+
+    if dropped and logger:
+        logger.warning(
+            f"{context}dropped {len(dropped)} non-list metric key(s) not "
+            f"usable for aggregation: {sorted(dropped)}"
+        )
+
+    if not filtered:
+        if logger:
+            logger.warning(
+                f"{context}no list-valued metrics remain after filtering; "
+                f"metrics will be blank for this run"
+            )
+        return None
+
+    return filtered
+
+
 class DLIOResultParser:
     """Parses DLIO benchmark result files into BenchmarkRunData."""
 
@@ -843,7 +879,12 @@ class DLIOResultParser:
             parameters=hydra_workload_config,
             override_parameters=override_parameters,
             system_info=system_info,
-            metrics=summary.get("metric"),
+            # Filter to list-valued keys (matching the metadata-complete
+            # path) so report_generator's fmean(metric_list) never receives
+            # a scalar; dropped/blanked keys are logged, not silent.
+            metrics=_filter_list_metrics(
+                summary.get("metric"), self.logger, context=f"{result_dir}: "
+            ),
             result_dir=result_dir,
             accelerator=accelerator,
             run_args=(metadata or {}).get('args', {}) or {},
@@ -891,7 +932,7 @@ class ResultFilesExtractor:
         metadata = self._load_metadata(result_dir, logger)
 
         if metadata and self._is_complete_metadata(metadata):
-            return self._from_metadata(metadata, result_dir)
+            return self._from_metadata(metadata, result_dir, logger=logger)
 
         if self.result_parser is None:
             self.result_parser = DLIOResultParser(logger=logger)
@@ -916,7 +957,7 @@ class ResultFilesExtractor:
         required_fields = ['benchmark_type', 'run_datetime', 'num_processes', 'parameters']
         return all(field in metadata for field in required_fields)
 
-    def _from_metadata(self, metadata: Dict, result_dir: str) -> BenchmarkRunData:
+    def _from_metadata(self, metadata: Dict, result_dir: str, logger=None) -> BenchmarkRunData:
         """Create BenchmarkRunData from a complete metadata dict."""
         benchmark_type_str = metadata.get('benchmark_type', '')
         benchmark_type = None
@@ -944,16 +985,14 @@ class ResultFilesExtractor:
                 if not end_datetime:
                     end_datetime = summary.get('end_time') or summary.get('end', '')
                 if not run_metrics:
-                    metric_block = summary.get('metric')
-                    if isinstance(metric_block, dict):
-                        # Filter to list-valued keys so _aggregate_training's
-                        # fmean(metric_list) doesn't blow up on scalars like
-                        # train_au_mean_percentage or strings like
-                        # train_au_meet_expectation.
-                        run_metrics = {
-                            k: v for k, v in metric_block.items()
-                            if isinstance(v, list)
-                        } or None
+                    # Filter to list-valued keys so _aggregate_training's
+                    # fmean(metric_list) doesn't blow up on scalars like
+                    # train_au_mean_percentage or strings like
+                    # train_au_meet_expectation. Dropped/blanked keys are
+                    # logged rather than silently discarded.
+                    run_metrics = _filter_list_metrics(
+                        summary.get('metric'), logger, context=f"{result_dir}: "
+                    )
 
         return BenchmarkRunData(
             benchmark_type=benchmark_type,
