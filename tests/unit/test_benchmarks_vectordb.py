@@ -262,6 +262,35 @@ class TestVectorDBMetadata:
         assert meta['index_type'] == 'HNSW'
         assert meta['model'] == 'milvus_HNSW'
 
+    def test_metadata_parameters_block_populated_for_reportgen(
+        self, datagen_args, tmp_path
+    ):
+        """metadata['parameters'] must carry the VDB reportgen identity keys.
+
+        reportgen reads ``run.parameters`` (= ``metadata['parameters']``,
+        sourced from ``self.combined_params``) for the VDB final-table
+        identity columns Vector Count / Vector Dimension / Index Type /
+        Engine. VectorDBBenchmark historically never set
+        ``combined_params`` so this block was ``{}`` — leaving all four
+        columns blank. Pin the exact keys reportgen consumes.
+        """
+        with patch('mlpstorage_py.benchmarks.base.generate_output_location') as mock_gen, \
+             patch('mlpstorage_py.benchmarks.vectordbbench.read_config_from_file', return_value={}), \
+             patch('mlpstorage_py.benchmarks.vectordbbench.VectorDBBenchmark.verify_benchmark'), \
+             patch('mlpstorage_py.benchmarks.vectordbbench.VectorDBBenchmark._validate_vdb_dependencies'):
+            output_dir = str(tmp_path / "output")
+            mock_gen.return_value = output_dir
+
+            from mlpstorage_py.benchmarks.vectordbbench import VectorDBBenchmark
+            bm = VectorDBBenchmark(datagen_args)
+            meta = bm.metadata
+
+        params = meta['parameters']
+        assert params.get('engine') == 'milvus'
+        assert params.get('index_type') == 'HNSW'
+        assert params.get('num_vectors') == 5000000
+        assert params.get('dimension') == 768
+
     def test_metadata_connection_info(self, run_args, tmp_path):
         """Verify host/port connection info in metadata."""
         run_args.host = '10.0.0.50'
