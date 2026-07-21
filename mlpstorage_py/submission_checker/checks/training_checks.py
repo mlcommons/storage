@@ -692,34 +692,81 @@ class TrainingCheck(BaseCheck):
 
         return valid
 
+    # Above this per-host max/min capability ratio, the physical nodes are
+    # "widely enough different" to warrant reviewer attention per Rules.md
+    # 3.3.7. Advisory only — a heterogeneous cluster is not itself illegal.
+    _NODE_CAPABILITY_DIVERGENCE_RATIO = 1.5
+
     @rule("3.3.7", "trainingNodeCapabilityConsistency")
     def node_capability_consistency_check(self):
-        """Rules.md 3.3.7 — node capability consistency (advisory).
+        """Rules.md 3.3.7 — node capability consistency (warnings-only).
 
-        Satisfied by construction at runtime: the cluster collector
-        captures per-host system information twice per run — once at
-        run start (``Benchmark._collect_cluster_start`` in
-        ``benchmarks/base.py:646``) and once at run end
-        (``_collect_cluster_end`` at ``:674``) — and stores both
-        snapshots in ``metadata['cluster_snapshots']`` via
-        ``rules.models.ClusterSnapshots.as_dict()``. Any component drift
-        during the run (CPU count, memory, network ports, kernel, etc.)
-        is therefore captured in the artifact tree; the cluster collector
-        also emits a warning on significant drift so operators can spot
-        stability issues before submission.
+        Rules.md 3.3.7 asks the validator to **warn (not fail)** when the
+        physical nodes in a distributed submission differ widely in
+        capability. Each run's ``metadata['cluster_information']`` (the
+        ``ClusterInformation.as_dict`` snapshot) carries per-host memory and
+        CPU-core vectors plus any collector-recorded
+        ``host_consistency_issues``. This check assesses the first run that
+        reports a usable multi-host cluster and emits a
+        ``warn_violation`` when the per-host max/min ratio for memory or CPU
+        cores exceeds ``_NODE_CAPABILITY_DIVERGENCE_RATIO``, or when the
+        collector already flagged inconsistencies. It always returns valid —
+        node heterogeneity is advisory, never a hard failure (submission-
+        window doctrine).
 
-        The rule body preserves the ``@rule`` binding for coverage
-        discovery and emits an INFO line so tooling that greps by rule
-        ID surfaces the rule as "visited and satisfied".
+        No cluster_information, or a single-host cluster, is silently
+        passed — there is nothing to compare.
         """
-        self.log.info(
-            "[3.3.7 trainingNodeCapabilityConsistency] %s: "
-            "satisfied by construction — cluster collector captures "
-            "start/end cluster snapshots (Benchmark._collect_cluster_start / "
-            "_collect_cluster_end); component drift is surfaced at runtime",
-            self.path,
-        )
-        return True
+        valid = True
+        if self.mode != "training":
+            return valid
+
+        for _summary, metadata, ts in self.submissions_logs.run_files:
+            if metadata is None:
+                continue
+            cluster = metadata.get("cluster_information")
+            if not isinstance(cluster, dict):
+                continue
+            hosts = cluster.get("hosts")
+            if not isinstance(hosts, list) or len(hosts) < 2:
+                continue
+
+            # Per-host capability vectors. Missing/partial fields are simply
+            # excluded from the comparison for that metric.
+            mem_totals = [
+                (h.get("memory") or {}).get("total")
+                for h in hosts if isinstance(h, dict)
+            ]
+            core_counts = [
+                (h.get("cpu") or {}).get("num_cores")
+                for h in hosts if isinstance(h, dict)
+            ]
+            for label, values in (("memory", mem_totals), ("CPU cores", core_counts)):
+                nums = [v for v in values if isinstance(v, (int, float)) and v > 0]
+                if len(nums) < 2:
+                    continue
+                lo, hi = min(nums), max(nums)
+                if hi / lo > self._NODE_CAPABILITY_DIVERGENCE_RATIO:
+                    self.warn_violation(
+                        "3.3.7", "trainingNodeCapabilityConsistency", self.path,
+                        "run %s: hosts differ widely in %s — min=%s, max=%s "
+                        "(%.2fx); confirm the physical nodes are intended to "
+                        "be heterogeneous (Rules.md 3.3.7).",
+                        ts, label, lo, hi, hi / lo,
+                    )
+
+            issues = cluster.get("host_consistency_issues")
+            if issues:
+                self.warn_violation(
+                    "3.3.7", "trainingNodeCapabilityConsistency", self.path,
+                    "run %s: cluster collector flagged host inconsistencies: %s",
+                    ts, "; ".join(str(i) for i in issues),
+                )
+
+            # Node capability is a property of the physical cluster, identical
+            # across the measured runs — one representative run suffices.
+            return valid
+        return valid
 
     @rule("3.6.1", "trainingClosedSubmissionChecksum")
     def closed_submission_checksum(self):

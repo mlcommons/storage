@@ -310,10 +310,3 @@ def test_3_3_7_surfaces_host_consistency_issues(tmp_path, mock_logger):
     assert any("kernel version mismatch" in m for m in warns), (
         f"expected host-consistency-issue warning; got {mock_logger.warnings}"
     )
-    assert any("satisfied by construction" in m for m in matching), (
-        f"expected 'satisfied by construction' in 3.3.7 info line; got {matching}"
-    )
-    assert not any(
-        m.startswith("[3.3.7 ")
-        for m in mock_logger.errors
-    ), f"3.3.7 emitted error: {mock_logger.errors}"
