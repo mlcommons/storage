@@ -346,6 +346,59 @@ class TestDLIOResultParser:
         # From workload=unet3d_h100, should extract h100
         assert result.accelerator == "h100"
 
+    def test_parse_filters_non_list_metrics_with_diagnostic(
+        self, mock_logger, tmp_path,
+    ):
+        """P6b: the DLIOResultParser fallback path stored the summary
+        `metric` block UNFILTERED, so scalar/string entries could reach
+        report_generator's `fmean(metric_list)` and raise TypeError. The
+        parse path must filter to list-valued keys — like the
+        metadata-complete path — and log a diagnostic rather than dropping
+        the scalars silently.
+        """
+        import yaml
+
+        result_dir = tmp_path / "training_run"
+        result_dir.mkdir()
+        summary = {
+            "start": "2026-07-01 10:00:00",
+            "end": "2026-07-01 10:15:00",
+            "num_accelerators": 8,
+            "workload": "unet3d_h100",
+            "metric": {
+                "train_au_percentage": [96.1, 95.8, 96.4],
+                "train_throughput_samples_per_second": [128.0, 130.0],
+                "train_au_mean_percentage": 96.1,        # scalar
+                "train_au_meet_expectation": "success",  # string
+            },
+        }
+        with open(result_dir / "summary.json", 'w') as f:
+            json.dump(summary, f)
+
+        hydra_dir = result_dir / "dlio_config"
+        hydra_dir.mkdir()
+        with open(hydra_dir / "config.yaml", 'w') as f:
+            yaml.dump({"workload": {
+                "model": {"name": "unet3d"},
+                "workflow": {"generate_data": False, "train": True, "checkpoint": False},
+            }}, f)
+        with open(hydra_dir / "overrides.yaml", 'w') as f:
+            yaml.dump(["workload=unet3d_h100"], f)
+
+        parser = DLIOResultParser(logger=mock_logger)
+        result = parser.parse(str(result_dir))
+
+        assert result.metrics is not None
+        assert "train_au_percentage" in result.metrics
+        assert "train_throughput_samples_per_second" in result.metrics
+        # Non-list entries must be filtered so fmean() never sees a scalar.
+        assert "train_au_mean_percentage" not in result.metrics
+        assert "train_au_meet_expectation" not in result.metrics
+        # Dropped keys are surfaced, not silently discarded.
+        assert mock_logger.warning.called, (
+            "dropped non-list metric keys must emit a diagnostic"
+        )
+
 
 class TestResultFilesExtractor:
     """Tests for ResultFilesExtractor class."""
@@ -627,6 +680,48 @@ class TestResultFilesExtractor:
         result = extractor._from_metadata(metadata, str(result_dir))
 
         assert result.metrics == {"checkpoint_save_time": [1.2, 1.3, 1.1]}
+
+    def test_extract_logs_when_metrics_collapse_to_none(
+        self, mock_logger, tmp_path,
+    ):
+        """P6a: when the summary `metric` fallback contains NO list-valued
+        keys, metrics collapses to None. That must not happen silently — a
+        diagnostic is logged so a blank metrics column is traceable to a
+        reason. Exercised via the public `extract()`, which threads the
+        logger down to the metadata-complete path.
+        """
+        result_dir = tmp_path / "training_run"
+        result_dir.mkdir()
+
+        metadata = {
+            "benchmark_type": "training",
+            "model": "unet3d",
+            "command": "run",
+            "run_datetime": "20260701_100000",
+            "num_processes": 8,
+            "parameters": {},
+        }
+        with open(result_dir / "training_20260701_100000_metadata.json", 'w') as f:
+            json.dump(metadata, f)
+
+        # All-scalar / all-string metric block: nothing survives the
+        # list-only filter, so metrics becomes None.
+        summary = {
+            "metric": {
+                "train_au_mean_percentage": 96.1,
+                "train_au_meet_expectation": "success",
+            },
+        }
+        with open(result_dir / "summary.json", 'w') as f:
+            json.dump(summary, f)
+
+        extractor = ResultFilesExtractor()
+        result = extractor.extract(str(result_dir), logger=mock_logger)
+
+        assert result.metrics is None
+        assert mock_logger.warning.called, (
+            "collapsing metrics to None must emit a diagnostic, not blank silently"
+        )
 
 
 class TestExtractorIntegration:
