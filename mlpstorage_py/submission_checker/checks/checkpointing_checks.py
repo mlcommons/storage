@@ -1006,9 +1006,14 @@ class CheckpointingCheck(BaseCheck):
         ``SCHEMA_ERROR_RULE_MAP`` tagged with 4.7.4 — those catch
         declaration-side defects that surface before any benchmark runs).
 
-        The rule body preserves the ``@rule`` binding for coverage
-        discovery and emits an INFO line so tooling that greps by rule
-        ID surfaces the rule as "visited and satisfied".
+        Warnings-only enforcement (never fails — submission-window
+        doctrine): a completed checkpointing run has already demonstrated
+        simultaneous R/W on the shared namespace via the CAP-02 probe, so a
+        system description that declares either capability as ``false``
+        CONTRADICTS the run it accompanies. The validator surfaces that
+        inconsistency to reviewers via ``warn_violation`` and still returns
+        valid. Missing capability fields are owned by SystemYamlSchemaCheck
+        (D-A3) and are silent-skipped here to avoid double-emit.
         """
         valid = True
         if self.mode != "checkpointing":
@@ -1016,7 +1021,28 @@ class CheckpointingCheck(BaseCheck):
         sim_write = self._get_capability("simultaneous_write")
         sim_read = self._get_capability("simultaneous_read")
         if sim_write is None or sim_read is None:
+            # SystemYamlSchemaCheck owns the missing-field violation (D-A3).
             return valid
+        # An explicitly-declared ``false`` contradicts the completed run.
+        denied = [
+            name
+            for name, value in (
+                ("simultaneous_write", sim_write),
+                ("simultaneous_read", sim_read),
+            )
+            if value is False
+        ]
+        if denied:
+            self.warn_violation(
+                "4.7.4", "checkpointSimultaneousRwSupport", self.path,
+                "system YAML declares %s = false, but a completed "
+                "checkpointing run requires simultaneous read/write on a "
+                "shared namespace (Rules.md 4.7.4); the system description "
+                "is likely incorrect.",
+                " and ".join(denied),
+            )
+            return valid
+        # Both capabilities declared-supported — satisfied by construction.
         self.log.info(
             "[4.7.4 checkpointSimultaneousRwSupport] %s: "
             "satisfied by construction — CAP-02 shared-FS probe "
