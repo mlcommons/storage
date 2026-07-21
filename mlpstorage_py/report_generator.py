@@ -569,6 +569,8 @@ class ReportGenerator:
         'sut_rus',
         'sut_integrated_client_storage',
         'sut_usable_capacity_tib',
+        'sut_code',
+        'sut_logs',
     ]
 
     def _sut_columns(
@@ -598,7 +600,42 @@ class ReportGenerator:
             cols['sut_description'] = Hyperlink(name_text, f"{base}.pdf")
             if rack_units is not None:
                 cols['sut_rus'] = rack_units
+
+            # Task F-b: Code/Logs anchors -> the run's content-addressed
+            # code-image pool dir (repo-root-relative). Logs is a
+            # placeholder pointing at the same dir for now (future change
+            # will retarget it). Blank when the pointer is absent/malformed.
+            code_href = self._code_image_href(category, orgname, first_run)
+            if code_href:
+                cols['sut_code'] = Hyperlink("code", code_href)
+                cols['sut_logs'] = Hyperlink("logs", code_href)
         return cols
+
+    def _code_image_href(
+        self, category: str, orgname: str, first_run: Any,
+    ) -> Optional[str]:
+        """Repo-root-relative URL of the run's ``code-<hash8>`` pool dir.
+
+        Resolves the run leaf's ``.mlps-code-image`` pointer via the
+        canonical code_image helpers (D-61 pointer parse, D-62 pool-dir
+        name). Returns ``None`` when the pointer is absent or unreadable —
+        the caller then leaves Code/Logs blank.
+        """
+        result_dir = getattr(first_run, 'result_dir', None)
+        if not result_dir:
+            return None
+        from pathlib import Path
+        from mlpstorage_py.submission_checker.tools.code_image import (
+            _read_pointer, _pool_dir_name, CodeImageError,
+        )
+        try:
+            _alg, full_hash = _read_pointer(Path(result_dir), self.logger)
+        except (FileNotFoundError, CodeImageError, OSError) as e:
+            self.logger.warning(
+                "reportgen: no/invalid code-image pointer at %s: %s; "
+                "Code/Logs will be blank.", result_dir, e)
+            return None
+        return f"{category}/{orgname}/{_pool_dir_name(full_hash)}/"
 
     def _read_system_description(self, first_run: Any, systemname: str):
         """Locate + parse ``systems/<systemname>.yaml`` for a workload.
