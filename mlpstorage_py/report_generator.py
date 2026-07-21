@@ -20,7 +20,7 @@ from statistics import fmean, StatisticsError
 from typing import List, Dict, Any, Optional, Set
 
 from mlpstorage_py.mlps_logging import setup_logging, apply_logging_options
-from mlpstorage_py.config import MLPS_DEBUG, BENCHMARK_TYPES, EXIT_CODE, PARAM_VALIDATION, LLM_MODELS, MODELS, ACCELERATORS
+from mlpstorage_py.config import MLPS_DEBUG, BENCHMARK_TYPES, EXIT_CODE, PARAM_VALIDATION, LLM_MODELS, LLM_ALLOWED_VALUES, MODELS, ACCELERATORS
 from mlpstorage_py.rules import get_runs_files, BenchmarkVerifier, BenchmarkRun, Issue, RunID
 from mlpstorage_py.rules.datagen_hierarchy import (
     validate_datagen_leaf,
@@ -1245,6 +1245,81 @@ class ReportGenerator:
             if basename.startswith("checkpoint_"):
                 basename = basename[len("checkpoint_"):]
             out[f"checkpoint_mean_of_{basename}"] = outer
+
+        # Slice-Checkpointing: v3.0 final-table columns. Write/Read B/W and
+        # durations come from DLIO's per-run SCALAR keys
+        # (save_/load_checkpoint_io_mean_GB_per_second, _duration_mean_
+        # seconds) — already GiB/s BINARY (checkpoint_size is in GiB and
+        # throughput = size / seconds; DLIO logs it "GiB/second"), so NO
+        # conversion. These scalars are dropped by the metadata-complete
+        # parse path (list-only metric filter) and are absent from the
+        # fabricated fixtures, so read them straight from each run's
+        # summary.json — consistent with the training / vdb / kvcache
+        # branches. num_hosts is summary top-level; Checkpoint Mode is a
+        # param; DP Instances is a per-model constant.
+        summaries = [self._load_workload_summary(r) for r in runs]
+
+        def _first_present(field: str) -> Any:
+            for s in summaries:
+                value = s.get(field)
+                if value is not None:
+                    return value
+            return None
+
+        out["checkpoint_num_client_nodes"] = _first_present("num_hosts")
+
+        # Checkpoint Mode (Full / Subset). The benchmark writes
+        # ``checkpoint.mode = "subset"`` only for subset runs
+        # (benchmarks/dlio.py:add_checkpoint_params); a "default" / absent
+        # mode is a full-model run. Handle both the nested params dict and
+        # a flattened ``checkpoint.mode`` key defensively.
+        params = runs[0].parameters or {}
+        mode_raw = None
+        ckpt_params = params.get("checkpoint")
+        if isinstance(ckpt_params, dict):
+            mode_raw = ckpt_params.get("mode")
+        if mode_raw is None:
+            mode_raw = params.get("checkpoint.mode")
+        out["checkpoint_mode"] = "Subset" if mode_raw == "subset" else "Full"
+
+        # DP Instances — configured data parallelism int(ClosedGPUs /
+        # GPUpDP) from LLM_ALLOWED_VALUES (the same value
+        # benchmarks/dlio.py:add_checkpoint_params computes). Per-model
+        # constant; blank when the model is unknown.
+        allowed = LLM_ALLOWED_VALUES.get(runs[0].model)
+        if allowed:
+            _min_procs, _zero_level, gpu_per_dp, closed_gpus = allowed
+            out["checkpoint_dp_instances"] = (
+                int(closed_gpus / gpu_per_dp) if gpu_per_dp else None
+            )
+        else:
+            out["checkpoint_dp_instances"] = None
+
+        # B/W (verbatim GiB/s) + durations — mean of DLIO's per-run scalar
+        # across invocations (Rules.md §2.1.23 permits 1-2). Present-but-
+        # blank when any invocation omits a field (blank only when truly
+        # absent — no silent partial-mean).
+        def _scalar_mean(field: str) -> Optional[float]:
+            values = [(s.get("metric") or {}).get(field) for s in summaries]
+            if values and all(
+                isinstance(v, (int, float)) and not isinstance(v, bool)
+                for v in values
+            ):
+                return fmean(values)
+            return None
+
+        out["checkpoint_write_bw_gibps"] = _scalar_mean(
+            "save_checkpoint_io_mean_GB_per_second"
+        )
+        out["checkpoint_write_duration_secs"] = _scalar_mean(
+            "save_checkpoint_duration_mean_seconds"
+        )
+        out["checkpoint_read_bw_gibps"] = _scalar_mean(
+            "load_checkpoint_io_mean_GB_per_second"
+        )
+        out["checkpoint_read_duration_secs"] = _scalar_mean(
+            "load_checkpoint_duration_mean_seconds"
+        )
         return out
 
     def _aggregate_vdb(
