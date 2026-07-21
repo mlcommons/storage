@@ -581,6 +581,138 @@ class TestTrainingFinalTableColumns:
 
 
 # --------------------------------------------------------------------------- #
+# TestCheckpointingFinalTableColumns — Slice-Checkpointing (v3.0 tables)       #
+# --------------------------------------------------------------------------- #
+
+
+def _write_checkpointing_result_dir(
+    parent: pathlib.Path,
+    ts: str,
+    *,
+    write_bw: Optional[float],
+    write_dur: Optional[float],
+    read_bw: Optional[float],
+    read_dur: Optional[float],
+    num_hosts: int = 4,
+    num_accelerators: int = 64,
+) -> str:
+    """Materialize a realistic checkpointing run dir; return its path.
+
+    The written ``summary.json`` mirrors REAL DLIO checkpointing output:
+    top-level ``num_hosts`` / ``num_accelerators`` and a ``metric`` block
+    of SCALARS — ``save_/load_checkpoint_io_mean_GB_per_second`` (already
+    GiB/s binary: checkpoint_size in GiB / seconds, DLIO logs "GiB/second")
+    and ``save_/load_checkpoint_duration_mean_seconds``. NOT the fabricated
+    list keys the shared fixtures use. A ``None`` omits that scalar.
+    """
+    run_dir = parent / ts
+    run_dir.mkdir(parents=True, exist_ok=True)
+    metric: Dict[str, Any] = {}
+    if write_bw is not None:
+        metric["save_checkpoint_io_mean_GB_per_second"] = write_bw
+    if write_dur is not None:
+        metric["save_checkpoint_duration_mean_seconds"] = write_dur
+    if read_bw is not None:
+        metric["load_checkpoint_io_mean_GB_per_second"] = read_bw
+    if read_dur is not None:
+        metric["load_checkpoint_duration_mean_seconds"] = read_dur
+    summary = {
+        "start": ts,
+        "end": ts,
+        "num_accelerators": num_accelerators,
+        "num_hosts": num_hosts,
+        "metric": metric,
+    }
+    (run_dir / "summary.json").write_text(json.dumps(summary))
+    return str(run_dir)
+
+
+class TestCheckpointingFinalTableColumns:
+    """Slice-Checkpointing: v3.0 final-table columns (issue #823).
+
+    Write/Read B/W (already GiB/s, no conversion) and Write/Read Duration
+    come from DLIO's per-run SCALAR keys read straight from summary.json
+    (dropped by the list-only metric filter; absent from the fabricated
+    fixtures). # Client Nodes = num_hosts; Checkpoint Mode = param;
+    DP Instances = int(ClosedGPUs / GPUpDP) per model.
+    """
+
+    def _run(self, tmp_path, *, model, parameters, ts="20260703_100000",
+             write_bw=45.0, write_dur=12.0, read_bw=52.0, read_dur=9.0):
+        runs_root = tmp_path / "workload"
+        result_dir = _write_checkpointing_result_dir(
+            runs_root, ts,
+            write_bw=write_bw, write_dur=write_dur,
+            read_bw=read_bw, read_dur=read_dur,
+            num_hosts=4, num_accelerators=64,
+        )
+        # Production delivers empty run.metrics for checkpointing (all DLIO
+        # keys are scalars, filtered out by _from_metadata's list filter).
+        return _make_run(
+            benchmark_type=BENCHMARK_TYPES.checkpointing,
+            model=model,
+            result_dir=result_dir,
+            metrics={},
+            parameters=parameters,
+            accelerator=None,
+            run_datetime=ts,
+        )
+
+    def test_bw_durations_client_nodes_and_dp(self, tmp_path):
+        """B/W (verbatim GiB/s), durations, # Client Nodes, DP Instances."""
+        gen = _make_bare_generator(tmp_path)
+        # llama3-70b -> ClosedGPUs=64, GPUpDP=8 -> DP = 8.
+        run = self._run(
+            tmp_path, model="llama3-70b",
+            parameters={"checkpoint": {"mode": "default"}},
+        )
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        # B/W already GiB/s binary — verbatim, no conversion.
+        assert result["checkpoint_write_bw_gibps"] == pytest.approx(45.0)
+        assert result["checkpoint_read_bw_gibps"] == pytest.approx(52.0)
+        assert result["checkpoint_write_duration_secs"] == pytest.approx(12.0)
+        assert result["checkpoint_read_duration_secs"] == pytest.approx(9.0)
+        assert result["checkpoint_num_client_nodes"] == 4
+        assert result["checkpoint_dp_instances"] == 8
+        # Non-subset / default mode -> Full.
+        assert result["checkpoint_mode"] == "Full"
+
+    def test_subset_mode_and_dp_for_1t(self, tmp_path):
+        """checkpoint.mode='subset' -> 'Subset'; 1250B (llama3-1t) DP = 2."""
+        gen = _make_bare_generator(tmp_path)
+        # llama3-1t -> ClosedGPUs=1024, GPUpDP=512 -> DP = 2.
+        run = self._run(
+            tmp_path, model="llama3-1t",
+            parameters={"checkpoint": {"mode": "subset"}},
+        )
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        assert result["checkpoint_mode"] == "Subset"
+        assert result["checkpoint_dp_instances"] == 2
+
+    def test_bw_blank_when_scalar_absent(self, tmp_path):
+        """A run missing the DLIO scalar -> present-but-blank B/W/duration."""
+        gen = _make_bare_generator(tmp_path)
+        run = self._run(
+            tmp_path, model="llama3-8b",
+            parameters={"checkpoint": {"mode": "default"}},
+            write_bw=None, read_dur=None,
+        )
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        assert result["checkpoint_write_bw_gibps"] is None
+        assert result["checkpoint_read_duration_secs"] is None
+        # Fields that ARE present still resolve.
+        assert result["checkpoint_read_bw_gibps"] == pytest.approx(52.0)
+        assert result["checkpoint_num_client_nodes"] == 4
+        assert result["checkpoint_dp_instances"] == 1  # llama3-8b
+
+
+# --------------------------------------------------------------------------- #
 # TestCheckpointingAggregation — TEST-15 / D-20 / D-28 / AGG-02               #
 # --------------------------------------------------------------------------- #
 
