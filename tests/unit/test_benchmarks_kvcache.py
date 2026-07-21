@@ -620,7 +620,9 @@ class TestAggregateOptionResults:
         assert result['partial_failure'] is False
 
     def test_none_p95_when_no_successful_reads(self, tmp_path):
-        """aggregated_p95_latency_ms is 0.0 when all rank files are missing."""
+        """P5: aggregated_p95_latency_ms is None when all rank files are
+        missing (total data loss) — a trial that produced no rank data must
+        not contribute a fake 0.0."""
         bm = _make_run_benchmark(tmp_path)
         trial_dir = tmp_path / 'trial_0'
         # Both rank dirs exist but have no json files
@@ -629,8 +631,48 @@ class TestAggregateOptionResults:
 
         result = bm._aggregate_option_results(1, [str(trial_dir)], expected_rank_count=2)
 
-        # Empty trial contributes 0.0; fmean([0.0]) = 0.0
-        assert result['aggregated_p95_latency_ms'] == pytest.approx(0.0)
+        # Total loss -> None (blank), not a misleading measured 0.0.
+        assert result['aggregated_p95_latency_ms'] is None
+        assert result['partial_failure'] is True
+
+    def test_total_data_loss_emits_none_not_zero(self, tmp_path):
+        """P5: when NO rank produced data across all trials (total loss),
+        every aggregated bandwidth/throughput field must be None (blank),
+        not a misleading measured 0.0 that reportgen surfaces verbatim."""
+        bm = _make_run_benchmark(tmp_path)
+        trial_dir = tmp_path / 'trial_0'
+        # Rank dirs exist but carry no result JSON -> nothing parsed.
+        (trial_dir / 'rank_0').mkdir(parents=True)
+        (trial_dir / 'rank_1').mkdir(parents=True)
+
+        result = bm._aggregate_option_results(1, [str(trial_dir)], expected_rank_count=2)
+
+        assert result['aggregated_read_bandwidth_gbps'] is None
+        assert result['aggregated_write_bandwidth_gbps'] is None
+        assert result['aggregated_avg_throughput_tokens_per_sec'] is None
+        assert result['aggregated_storage_throughput_tokens_per_sec'] is None
+        assert result['aggregated_p95_latency_ms'] is None
+        assert result['partial_failure'] is True
+
+    def test_empty_trial_not_diluted_into_mean(self, tmp_path):
+        """P5: a trial where every rank is missing must not fold a 0.0 into
+        the across-trial mean — the mean is taken over the trials that
+        actually produced data."""
+        bm = _make_run_benchmark(tmp_path)
+        good = tmp_path / 'trial_0'
+        self._make_rank_file(good / 'rank_0', bw=3.0, p95=10.0)
+        self._make_rank_file(good / 'rank_1', bw=1.0, p95=12.0)  # trial sum = 4.0
+        empty = tmp_path / 'trial_1'
+        (empty / 'rank_0').mkdir(parents=True)
+        (empty / 'rank_1').mkdir(parents=True)
+
+        result = bm._aggregate_option_results(
+            1, [str(good), str(empty)], expected_rank_count=2
+        )
+
+        # Old behavior folded the empty trial's 0.0 in: fmean([4.0, 0.0]) = 2.0.
+        # Correct: mean over the single trial that had data = 4.0.
+        assert result['aggregated_read_bandwidth_gbps'] == pytest.approx(4.0)
         assert result['partial_failure'] is True
 
 
