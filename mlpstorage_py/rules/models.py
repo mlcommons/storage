@@ -84,6 +84,15 @@ class BenchmarkRunData:
     result_dir: Optional[str] = None
     accelerator: Optional[str] = None
     end_datetime: str = ""
+    # Invocation bookends captured by mlpstorage_py/_invocation.py
+    # (metadata.invocation_start_time / invocation_end_time). These exclude
+    # read-side framework startup and write-side post-benchmark cluster
+    # collection, and are the authoritative origins for the Rules.md §4.7.1
+    # inter-phase cache-flush gap (storage#714 / #782). Empty when a
+    # pre-bookend results dir is read; consumers fall back to
+    # run_datetime / end_datetime (the DLIO summary start / end).
+    invocation_start_time: str = ""
+    invocation_end_time: str = ""
 
 
 @dataclass
@@ -828,6 +837,7 @@ class DLIOResultParser:
             ci_data = metadata.get('cluster_information')
             if ci_data:
                 system_info = ClusterInformation.from_dict(ci_data, self.logger)
+        metadata = metadata or {}
         return BenchmarkRunData(
             benchmark_type=benchmark_type,
             model=model,
@@ -841,6 +851,8 @@ class DLIOResultParser:
             metrics=summary.get("metric"),
             result_dir=result_dir,
             accelerator=accelerator,
+            invocation_start_time=metadata.get("invocation_start_time", ""),
+            invocation_end_time=metadata.get("invocation_end_time", ""),
         )
 
     def _load_summary(self, result_dir: str) -> Optional[Dict]:
@@ -962,6 +974,8 @@ class ResultFilesExtractor:
             metrics=run_metrics,
             result_dir=result_dir,
             accelerator=metadata.get('accelerator'),
+            invocation_start_time=metadata.get('invocation_start_time', ''),
+            invocation_end_time=metadata.get('invocation_end_time', ''),
         )
 
     def _load_summary(self, result_dir: str) -> Optional[Dict]:
@@ -1064,6 +1078,14 @@ class BenchmarkRun:
     @property
     def end_datetime(self):
         return self._data.end_datetime
+
+    @property
+    def invocation_start_time(self):
+        return self._data.invocation_start_time
+
+    @property
+    def invocation_end_time(self):
+        return self._data.invocation_end_time
 
     @property
     def num_processes(self):
