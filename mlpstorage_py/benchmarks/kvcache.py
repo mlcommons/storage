@@ -858,11 +858,19 @@ class KVCacheBenchmark(Benchmark):
                 except Exception as e:
                     self.logger.warning(f"Failed to parse {result_file}: {e}")
                     missing_files.append(str(result_file))
-            all_read_bw.append(sum(trial_read_bw))
-            all_write_bw.append(sum(trial_write_bw))
-            all_avg_throughput.append(sum(trial_avg_throughput))
-            all_storage_throughput.append(sum(trial_storage_throughput))
-            all_p95_latency.append(max(trial_p95_latency) if trial_p95_latency else 0.0)
+            # A trial that produced no rank data (every rank file missing or
+            # unparseable) must not contribute a sum([])==0.0 into the
+            # across-trial aggregate — that 0.0 is a total-loss sentinel, not
+            # a measured value, and reportgen surfaces it verbatim (P5). The
+            # five per-rank lists are populated together, so any one being
+            # non-empty means the trial had at least one parsed rank; a
+            # present-rank 0.0 (CPU tier) is legitimate and still counted.
+            if trial_read_bw:
+                all_read_bw.append(sum(trial_read_bw))
+                all_write_bw.append(sum(trial_write_bw))
+                all_avg_throughput.append(sum(trial_avg_throughput))
+                all_storage_throughput.append(sum(trial_storage_throughput))
+                all_p95_latency.append(max(trial_p95_latency))
         if missing_files:
             hosts = getattr(self.args, 'hosts', None) or []
             multi_host = any(not _is_localhost(h.split(':')[0]) for h in hosts)
@@ -879,10 +887,12 @@ class KVCacheBenchmark(Benchmark):
                 )
         return {
             'option': option,
-            'aggregated_read_bandwidth_gbps': fmean(all_read_bw) if all_read_bw else 0.0,
-            'aggregated_write_bandwidth_gbps': fmean(all_write_bw) if all_write_bw else 0.0,
-            'aggregated_avg_throughput_tokens_per_sec': fmean(all_avg_throughput) if all_avg_throughput else 0.0,
-            'aggregated_storage_throughput_tokens_per_sec': fmean(all_storage_throughput) if all_storage_throughput else 0.0,
+            # Total loss across every trial -> None (blank), never a fake 0.0
+            # (P5). aggregated_p95_latency_ms already did this.
+            'aggregated_read_bandwidth_gbps': fmean(all_read_bw) if all_read_bw else None,
+            'aggregated_write_bandwidth_gbps': fmean(all_write_bw) if all_write_bw else None,
+            'aggregated_avg_throughput_tokens_per_sec': fmean(all_avg_throughput) if all_avg_throughput else None,
+            'aggregated_storage_throughput_tokens_per_sec': fmean(all_storage_throughput) if all_storage_throughput else None,
             'aggregated_p95_latency_ms': max(all_p95_latency) if all_p95_latency else None,
             'rank_count': expected_rank_count,
             'trial_count': len(trial_dirs),
