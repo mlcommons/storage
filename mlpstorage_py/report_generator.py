@@ -1391,6 +1391,12 @@ class ReportGenerator:
         params = run.parameters or {}
         out["kvcache_performance_profile"] = params.get("performance_profile")
 
+        # Slice-KVCache: shared ``# Client Nodes`` column for the v3.0
+        # final table. Source is the top-level ``host_count`` field that
+        # kvcache's ``_write_run_summary`` persists (benchmarks/kvcache.py).
+        # This is a run-wide count, not per-option, so it is emitted once.
+        out["kvcache_num_client_nodes"] = summary.get("host_count")
+
         # Top-level per-run aggregates (D-14). Copy verbatim from source;
         # Zero sentinels from kvcache's "fmean-or-zero" idiom are
         # preserved (D-22 boundary — do NOT re-interpret).
