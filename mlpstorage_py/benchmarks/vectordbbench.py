@@ -136,8 +136,34 @@ class VectorDBBenchmark(Benchmark):
         if not getattr(args, "what_if", False) and self.command != "datasize":
             self._validate_vdb_dependencies()
 
+        # Surface the VDB reportgen identity keys into metadata['parameters']
+        # (base.get_metadata sources that block from self.combined_params).
+        # reportgen reads run.parameters for the final-table identity columns
+        # Vector Count / Vector Dimension / Index Type / Engine.
+        self.combined_params = self._reportgen_params()
+
         self.verify_benchmark()
         self.logger.status("Instantiated the VectorDB Benchmark...")
+
+    def _reportgen_params(self) -> Dict[str, Any]:
+        """Identity keys reportgen reads from ``metadata['parameters']``.
+
+        Keys match exactly what ``report_generator._aggregate_vdb`` looks up
+        (``engine`` / ``index_type`` / ``num_vectors`` / ``dimension``). A
+        value not present on ``self.args`` (e.g. ``num_vectors`` on a bare
+        ``run`` invocation) stays ``None`` — reportgen emits the column
+        present-but-blank rather than dropping it.
+        """
+        index_type = (
+            getattr(self.args, "index_type", None)
+            or getattr(self.args, "vdb_index", None)
+        )
+        return {
+            "engine": getattr(self.args, "vdb_engine", None),
+            "index_type": index_type,
+            "num_vectors": getattr(self.args, "num_vectors", None),
+            "dimension": getattr(self.args, "dimension", None),
+        }
 
     def _resolve_storage_args(self):
         """Record the VDB storage location on ``self.args`` (storage#802).
@@ -920,9 +946,31 @@ class VectorDBBenchmark(Benchmark):
             enhanced_bench via enhanced-bench
         """
         if self._is_distributed():
-            return self._execute_run_distributed()
+            rc = self._execute_run_distributed()
+        else:
+            rc = self._execute_run_single_node()
 
-        return self._execute_run_single_node()
+        # Emit the canonical reportgen summary.json at the run root so fresh
+        # submissions ship it (reportgen backfills legacy packages in-memory).
+        # Best-effort: a missing native stats file or write error must not
+        # fail an otherwise-successful run.
+        if not getattr(self.args, "what_if", False):
+            try:
+                from mlpstorage_py.benchmarks.vdb_summary import write_vdb_summary
+
+                written = write_vdb_summary(self.run_result_output)
+                if written:
+                    self.logger.status(f"Wrote reportgen summary: {written}")
+                else:
+                    self.logger.verbose(
+                        "No native VDB query stats found; summary.json not written."
+                    )
+            except Exception as exc:  # noqa: BLE001 — best-effort, never fatal
+                self.logger.warning(
+                    f"Could not write reportgen summary.json: {exc}"
+                )
+
+        return rc
 
     def _execute_run_single_node(self) -> int:
         """Execute existing single-node VectorDB run path."""
