@@ -1153,6 +1153,45 @@ class ReportGenerator:
             if basename.startswith("train_"):
                 basename = basename[len("train_"):]
             out[f"train_mean_of_{basename}"] = outer
+
+        # Slice-Training: v3.0 final-table columns the list-valued metric
+        # aggregation above does not carry. num_hosts / num_accelerators
+        # live at summary.json top level; Read B/W is DLIO's scalar
+        # ``train_io_mean_MB_per_second`` (MiB/s despite the ``MB`` label —
+        # DLIO's statscounter.py computes ``samples/s * record_size / 1024
+        # / 1024`` and logs it as "MiB/second"). All three are dropped by
+        # the metadata-complete parse path (system_info is never
+        # reconstructed; scalar metrics are filtered out), so read them
+        # straight from each run's summary.json — consistent with the
+        # vdb / kvcache branches.
+        summaries = [self._load_workload_summary(inv) for inv in non_warmup]
+
+        # Identity columns — run configuration, identical across the
+        # measured invocations; take the first invocation that reports each.
+        def _first_present(field: str) -> Any:
+            for s in summaries:
+                value = s.get(field)
+                if value is not None:
+                    return value
+            return None
+
+        out["train_num_client_nodes"] = _first_present("num_hosts")
+        out["train_num_simulated_accelerators"] = _first_present(
+            "num_accelerators"
+        )
+
+        # Read B/W (GiB/s): mean of DLIO's per-run MiB/s scalar across all
+        # non-warmup invocations, MiB -> GiB (binary, /1024). Present-but-
+        # blank when any invocation omits the scalar (blank only when
+        # truly absent — no silent partial-mean).
+        io_mibps = [
+            (s.get("metric") or {}).get("train_io_mean_MB_per_second")
+            for s in summaries
+        ]
+        if io_mibps and all(isinstance(v, (int, float)) for v in io_mibps):
+            out["train_read_bw_gibps"] = fmean(io_mibps) / 1024.0
+        else:
+            out["train_read_bw_gibps"] = None
         return out
 
     def _aggregate_checkpointing(

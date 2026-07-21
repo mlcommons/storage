@@ -419,13 +419,19 @@ class TestTrainingAggregation:
         )
 
     def test_training_output_keys_use_train_mean_of_prefix(self, tmp_path):
-        """Every emitted training key carries the ``train_mean_of_`` prefix (D-13/D-14).
+        """Metric-mean keys carry ``train_mean_of_``; all keys carry ``train_`` (D-13/D-14).
 
         D-13 rule: ``<group>_<mean_of_>?<basename>``. Training source
         metric keys are ``train_au_percentage``,
         ``train_throughput_samples_per_second``,
         ``train_io_throughput_MB_per_second``; the emitted output keys
         strip the redundant ``train_`` and insert ``mean_of_``.
+
+        Slice-Training additionally emits v3.0 final-table columns
+        (``train_num_client_nodes``, ``train_num_simulated_accelerators``,
+        ``train_read_bw_gibps``) that are NOT metric means — they keep the
+        ``train_`` group prefix (so they sort into the training column
+        group) but do not carry ``mean_of_``.
         """
         gen = _make_bare_generator(tmp_path)
         runs_root = tmp_path / "workload"
@@ -443,12 +449,25 @@ class TestTrainingAggregation:
         assert expected_keys <= set(result), (
             f"Expected {expected_keys} <= keys, got {set(result)}"
         )
-        # Every emitted training column starts with train_mean_of_.
+        # Slice-Training final-table columns are new non-mean training cols.
+        final_table_cols = {
+            "train_num_client_nodes",
+            "train_num_simulated_accelerators",
+            "train_read_bw_gibps",
+        }
+        # Every training column keeps the ``train_`` group prefix (column
+        # ordering invariant); metric-mean columns additionally carry
+        # ``mean_of_``.
         for k in result:
-            assert k.startswith("train_mean_of_"), (
+            assert k.startswith("train_"), (
                 f"Training result key {k!r} does not carry the "
-                f"``train_mean_of_`` prefix (D-13/D-14)."
+                f"``train_`` group prefix (column-ordering invariant)."
             )
+            if k not in final_table_cols:
+                assert k.startswith("train_mean_of_"), (
+                    f"Training metric key {k!r} does not carry the "
+                    f"``train_mean_of_`` prefix (D-13/D-14)."
+                )
 
 
 # --------------------------------------------------------------------------- #
