@@ -291,15 +291,19 @@ class CheckpointingCheck(BaseCheck):
     @rule("4.3.4", "checkpointAggregateAcceleratorMemory")
     def aggregate_accelerator_memory(self):
         """
-        Verify total accelerator memory >= checkpoint size.
-        H100 has 80GB per accelerator.
+        Verify total accelerator memory >= checkpoint size (warnings-only).
+
+        The per-accelerator memory baseline is the H100's 80 GiB; checkpointing
+        metadata carries no accelerator-type field, so this is advisory. A
+        shortfall is surfaced to reviewers via ``warn_violation`` and never
+        flips a submission INVALID (late-window doctrine). Always returns True.
         (Rules.md 4.3.4)
         """
         valid = True
         if self.mode != "checkpointing":
             return valid
 
-        ACCELERATOR_MEMORY_GB = 80  # H100
+        ACCELERATOR_MEMORY_GB = 80  # H100 baseline (advisory)
 
         for summary, metadata, _ in self._iter_valid_files():
             checkpoint_size_gb = summary.get("metric", {}).get("checkpoint_size_GB", 0)
@@ -308,13 +312,15 @@ class CheckpointingCheck(BaseCheck):
             total_accelerator_memory = num_accelerators * ACCELERATOR_MEMORY_GB
 
             if total_accelerator_memory < checkpoint_size_gb:
-                self.log_violation(
+                self.warn_violation(
                     "4.3.4", "checkpointAggregateAcceleratorMemory", self.path,
-                    "aggregate accelerator memory %.2fGiB < checkpoint size %.2fGiB",
+                    "aggregate accelerator memory %.2fGiB (%d accelerators x 80 GiB "
+                    "H100 baseline) < checkpoint size %.2fGiB; verify against the "
+                    "actual accelerator's memory (Rules.md 4.3.4).",
                     total_accelerator_memory,
+                    num_accelerators,
                     checkpoint_size_gb,
                 )
-                valid = False
 
         return valid
     
