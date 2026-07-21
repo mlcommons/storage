@@ -1014,10 +1014,10 @@ class ReportGenerator:
     # ------------------------------------------------------------------
     #
     # ``_aggregate_workload_metrics`` is the single point where per-workload
-    # aggregation math lives. It is added here (Plan 06-02) but not yet
-    # wired into ``_process_workload_groups``; wiring happens in Plan 06-04
-    # (the TODO at ``metrics={}`` in this file's ``_process_workload_groups``
-    # is the eventual call site).
+    # aggregation math lives. It is wired into the reporting pass at the
+    # ``aggregated_metrics = self._aggregate_workload_metrics(...)`` call in
+    # ``accumulate_results`` (the ``metrics={}`` in ``_model_group_folder``'s
+    # proxy Result is a throwaway for folder derivation, not this call site).
     #
     # Dispatch on ``runs[0].benchmark_type``:
     #   - training       -> ``_aggregate_training``  (D-19, 5-run mean)
@@ -1040,8 +1040,8 @@ class ReportGenerator:
         Compute aggregated metrics for one workload (per D-19..D-22).
 
         Dispatches on ``runs[0].benchmark_type`` and returns the aggregated
-        metric dict that eventually populates the ``metrics=`` slot on the
-        workload ``Result`` (see the TODO at ``_process_workload_groups``).
+        metric dict that populates the ``metrics=`` slot on the workload
+        ``Result`` (wired in ``accumulate_results``).
 
         Args:
             runs: The workload's ``BenchmarkRun`` invocations. For training,
@@ -1330,9 +1330,10 @@ class ReportGenerator:
         VDB-branch aggregation (D-21) — pass-through, NOT math.
 
         vdb's internal ``vdb-aggregate`` tool (see
-        ``benchmarks/vectordbbench.py:508``) owns the math contract per
-        the D-22 boundary; this helper copies pre-computed values from
-        the workload's ``summary.json`` into ``vdb_*`` columns.
+        ``VectorDBBenchmark._run_aggregate`` in ``benchmarks/vectordbbench.py``)
+        owns the math contract per the D-22 boundary; this helper copies
+        pre-computed values from the workload's ``summary.json`` into
+        ``vdb_*`` columns.
 
         Read fields (per ``submission_checker/checks/vdb_checks.py:44-51``
         ``_REQUIRED_METRIC_FIELDS``): ``throughput_qps``,
