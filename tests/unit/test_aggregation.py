@@ -923,6 +923,33 @@ class TestKvCachePassThrough:
         assert result[col] is not None
         assert isinstance(result[col], float)
 
+    def test_kvcache_num_client_nodes_from_host_count(self, tmp_path):
+        """Slice-KVCache: ``# Client Nodes`` derives from ``summary['host_count']``.
+
+        The v3.0 kvcache final table carries a shared ``# Client Nodes``
+        column (not per-option). Its source is the top-level ``host_count``
+        field kvcache's ``_write_run_summary`` already persists
+        (``benchmarks/kvcache.py:926``). reportgen must surface it as
+        ``kvcache_num_client_nodes``.
+
+        Note on B/W units (resolved 2026-07-21): the per-option
+        ``aggregated_read/write_bandwidth_gbps`` values are ALREADY GiB/s
+        binary — kvcache's ``cache.py:990-991`` computes them as
+        ``(bytes / 1024**3) / duration`` despite the ``_gbps`` name. So the
+        final table's "Read/Write B/W (GiB/s)" columns flow verbatim from
+        the existing per-option columns with NO conversion; only
+        ``# Client Nodes`` was missing.
+        """
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        runs_root.mkdir()
+        run = _kvcache_run(runs_root, "20260704_140000")
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        summary = _load_summary(runs_root / "20260704_140000" / "summary.json")
+        assert result["kvcache_num_client_nodes"] == summary["host_count"]
+
 
 # --------------------------------------------------------------------------- #
 # TestInvalidRulesStrict — D-23 / D-24 / D-26 / D-27 / D-29                   #
