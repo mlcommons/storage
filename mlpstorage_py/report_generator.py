@@ -27,7 +27,7 @@ from mlpstorage_py.rules.datagen_hierarchy import (
     validate_supported_model,
 )
 from mlpstorage_py.errors import ConfigurationError
-from mlpstorage_py.utils import flatten_nested_dict, remove_nan_values
+from mlpstorage_py.utils import flatten_nested_dict, remove_nan_values, MLPSJsonEncoder
 from mlpstorage_py.reporting import (
     ResultsDirectoryValidator,
     ValidationMessageFormatter,
@@ -50,6 +50,36 @@ _INVALID_MSG_CHECKPOINT_COUNT = (
 _INVALID_MSG_EMPTY_METRIC = (
     "metric {key} is empty in invocation {basename}; cannot aggregate"
 )
+
+
+class Hyperlink:
+    """A results-table cell that is a (visible-text, href) pair.
+
+    Renders differently per output format (Task F, v3.0 results table):
+
+    - CSV: ``str(link)`` yields an HTML anchor ``<a href="...">text</a>``
+      (``csv.DictWriter`` str-coerces non-string cell values, and
+      ``flatten_nested_dict`` treats this non-dict object as a leaf).
+    - JSON: ``MLPSJsonEncoder`` serializes it via its ``__dict__`` branch
+      to ``{"text": ..., "href": ...}``.
+
+    ``href`` is a repo-root-relative URL (the aggregated-submissions repo
+    root == ``<results-dir>``); a future change prepends the full repo URL.
+    """
+
+    def __init__(self, text: str, href: str) -> None:
+        self.text = text
+        self.href = href
+
+    def __str__(self) -> str:
+        return f'<a href="{self.href}">{self.text}</a>'
+
+    def __repr__(self) -> str:
+        return f"Hyperlink(text={self.text!r}, href={self.href!r})"
+
+    def __eq__(self, other: Any) -> bool:
+        return (isinstance(other, Hyperlink)
+                and self.text == other.text and self.href == other.href)
 
 
 @dataclass
@@ -506,6 +536,11 @@ class ReportGenerator:
             'model': model_val,
             'accelerator': accelerator_val,
         }
+        # Task F: shared System-Under-Test block (from system-description.yaml),
+        # inserted after the D-10 prefix and before metric groups so the
+        # prefix stays first / issues stays last.
+        row.update(self._sut_columns(
+            category_val, orgname_key, systemname_key, first_run))
         # Aggregated metric columns (D-11 grouped body).
         for metric_key, metric_val in (workload_result.metrics or {}).items():
             row[metric_key] = metric_val
@@ -520,6 +555,85 @@ class ReportGenerator:
         row['issues'] = '; '.join(issue_texts)
 
         return row
+
+    # Task F: shared System-Under-Test column order (v3.0 results table).
+    # Group prefix `sut_`; placed after the D-10 prefix by _ordered_fieldnames.
+    _SUT_COLUMNS = [
+        'sut_public_id',
+        'sut_organization',
+        'sut_name',
+        'sut_description',
+        'sut_type',
+        'sut_access_protocol',
+        'sut_availability',
+        'sut_rus',
+        'sut_integrated_client_storage',
+        'sut_usable_capacity_tib',
+    ]
+
+    def _sut_columns(
+        self,
+        category: str,
+        orgname: str,
+        systemname: str,
+        first_run: Any,
+    ) -> Dict[str, Any]:
+        """Build the shared SUT block for a workload row (Task F).
+
+        AUTO-filled: ``sut_organization`` (path), ``sut_name`` /
+        ``sut_description`` (Hyperlinks to the system-description
+        ``.yaml`` / ``.pdf``), ``sut_rus`` (``total_rack_units``). The
+        remaining six cells are present-but-blank placeholders the
+        submitter fills manually. Hrefs are repo-root-relative (Option A).
+        """
+        cols: Dict[str, Any] = {key: "" for key in self._SUT_COLUMNS}
+        cols['sut_organization'] = orgname or ""
+
+        if category and orgname and systemname:
+            base = f"{category}/{orgname}/systems/{systemname}"
+            submission_name, rack_units = self._read_system_description(
+                first_run, systemname)
+            name_text = submission_name or systemname
+            cols['sut_name'] = Hyperlink(name_text, f"{base}.yaml")
+            cols['sut_description'] = Hyperlink(name_text, f"{base}.pdf")
+            if rack_units is not None:
+                cols['sut_rus'] = rack_units
+        return cols
+
+    def _read_system_description(self, first_run: Any, systemname: str):
+        """Locate + parse ``systems/<systemname>.yaml`` for a workload.
+
+        Walks up from the run's ``result_dir`` to the first ancestor that
+        contains ``systems/<systemname>.yaml`` (the ``<org>`` level of the
+        submission tree). Returns ``(submission_name, total_rack_units)``,
+        each ``None`` when the file is absent/unreadable — the caller then
+        falls back to the systemname text and a blank RU cell.
+        """
+        result_dir = getattr(first_run, 'result_dir', None)
+        if not result_dir:
+            return None, None
+        import yaml  # local import: pyyaml is a runtime dep, keep top clean
+        from pathlib import Path
+        start = Path(result_dir)
+        for ancestor in [start, *start.parents]:
+            candidate = ancestor / "systems" / f"{systemname}.yaml"
+            if candidate.is_file():
+                try:
+                    with open(candidate, "r") as fh:
+                        data = yaml.safe_load(fh) or {}
+                    sut = data.get('system_under_test') or {}
+                    solution = sut.get('solution') or {}
+                    return (solution.get('submission_name'),
+                            sut.get('total_rack_units'))
+                except (OSError, yaml.YAMLError) as e:
+                    self.logger.warning(
+                        "reportgen: could not read system description %s: %s",
+                        candidate, e)
+                    return None, None
+        self.logger.warning(
+            "reportgen: no systems/%s.yaml found above %s; SUT block will "
+            "fall back to systemname + blank RUs.", systemname, result_dir)
+        return None, None
 
     def _model_group_folder_for_workload(
         self, workload_result: 'Result'
@@ -1815,7 +1929,7 @@ class ReportGenerator:
         json_file = os.path.join(out_dir, 'results.json')
         self.logger.info(f'Writing results to {json_file}')
         with open(json_file, 'w') as f:
-            json.dump(results, f, indent=2)
+            json.dump(results, f, indent=2, cls=MLPSJsonEncoder)
 
     def write_csv_file(self, results, target_dir: Optional[str] = None):
         out_dir = target_dir if target_dir is not None else self.results_dir
@@ -1867,12 +1981,16 @@ class ReportGenerator:
         trailing_set = set(trailing)
         remaining = all_keys - prefix_set - trailing_set
 
+        # Task F: shared SUT block leads the body (right after the D-10
+        # prefix, before the metric groups). Ordered by _SUT_COLUMNS, not
+        # alphabetically, so the block reads in spreadsheet order.
+        sut_cols = [k for k in self._SUT_COLUMNS if k in remaining]
         train_cols = sorted(k for k in remaining if k.startswith('train_'))
         checkpoint_cols = sorted(k for k in remaining if k.startswith('checkpoint_'))
         vdb_cols = sorted(k for k in remaining if k.startswith('vdb_'))
         kvcache_cols = sorted(k for k in remaining if k.startswith('kvcache_'))
 
-        grouped = train_cols + checkpoint_cols + vdb_cols + kvcache_cols
+        grouped = sut_cols + train_cols + checkpoint_cols + vdb_cols + kvcache_cols
         other = sorted(k for k in remaining if k not in set(grouped))
 
         # `other` catches any un-prefixed column not covered by the
