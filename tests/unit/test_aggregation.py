@@ -711,6 +711,119 @@ class TestCheckpointingFinalTableColumns:
         assert result["checkpoint_num_client_nodes"] == 4
         assert result["checkpoint_dp_instances"] == 1  # llama3-8b
 
+    # ----------------------------------------------------------------- #
+    # Two-invocation topologies (Rules.md §2.1.23 permits 1-2 timestamp #
+    # dirs; §4.7.1 MANDATES a write→read split when checkpoint-per-node #
+    # < 3x client RAM). Each score column must come from the phase that #
+    # actually produced it — a `None` from the *other* phase is         #
+    # expected, not data loss — while a `None` from a phase that WAS    #
+    # configured to produce the metric stays a loud blank.              #
+    # ----------------------------------------------------------------- #
+
+    def _ckpt_run(self, result_dir, *, model, write, read, ts):
+        """Build a checkpointing BenchmarkRun whose config self-declares
+        its phase via ``checkpoint.num_checkpoints_{write,read}`` (CLOSED
+        forces each to 10 or 0; never both 0 — checkpointing_args.py)."""
+        return _make_run(
+            benchmark_type=BENCHMARK_TYPES.checkpointing,
+            model=model,
+            result_dir=result_dir,
+            metrics={},
+            parameters={"checkpoint": {
+                "mode": "default",
+                "num_checkpoints_write": write,
+                "num_checkpoints_read": read,
+            }},
+            accelerator=None,
+            run_datetime=ts,
+        )
+
+    def test_split_write_read_invocations_populate_all_four(self, tmp_path):
+        """Reporter's bug (Alluxio CLOSED v3.0, llama3-8b): a write-phase
+        dir (write=10, read=0; only ``save_*`` scalars) plus a read-phase
+        dir (write=0, read=10; only ``load_*`` scalars). All four score
+        columns must resolve from the phase that produced each — the
+        current all-summaries-must-be-numeric gate blanks them because the
+        opposite phase legitimately omits the field."""
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        write_dir = _write_checkpointing_result_dir(
+            runs_root, "20260703_100000",
+            write_bw=4.64, write_dur=22.6, read_bw=None, read_dur=None,
+        )
+        read_dir = _write_checkpointing_result_dir(
+            runs_root, "20260703_101500",
+            write_bw=None, write_dur=None, read_bw=5.68, read_dur=18.4,
+        )
+        write_run = self._ckpt_run(
+            write_dir, model="llama3-8b", write=10, read=0,
+            ts="20260703_100000")
+        read_run = self._ckpt_run(
+            read_dir, model="llama3-8b", write=0, read=10,
+            ts="20260703_101500")
+
+        result = gen._aggregate_workload_metrics(
+            [write_run, read_run], warmup_set=set())
+
+        assert result["checkpoint_write_bw_gibps"] == pytest.approx(4.64)
+        assert result["checkpoint_read_bw_gibps"] == pytest.approx(5.68)
+        assert result["checkpoint_write_duration_secs"] == pytest.approx(22.6)
+        assert result["checkpoint_read_duration_secs"] == pytest.approx(18.4)
+        assert result["checkpoint_num_client_nodes"] == 4
+        assert result["checkpoint_mode"] == "Full"
+
+    def test_two_combined_invocations_average_per_direction(self, tmp_path):
+        """Two full write+read invocations (both write=read=10). Each
+        direction is the inter-invocation mean of its producers."""
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        d1 = _write_checkpointing_result_dir(
+            runs_root, "20260703_100000",
+            write_bw=4.0, write_dur=20.0, read_bw=5.0, read_dur=18.0)
+        d2 = _write_checkpointing_result_dir(
+            runs_root, "20260703_101500",
+            write_bw=6.0, write_dur=24.0, read_bw=7.0, read_dur=22.0)
+        r1 = self._ckpt_run(d1, model="llama3-8b", write=10, read=10,
+                            ts="20260703_100000")
+        r2 = self._ckpt_run(d2, model="llama3-8b", write=10, read=10,
+                            ts="20260703_101500")
+
+        result = gen._aggregate_workload_metrics([r1, r2], warmup_set=set())
+
+        assert result["checkpoint_write_bw_gibps"] == pytest.approx(5.0)
+        assert result["checkpoint_read_bw_gibps"] == pytest.approx(6.0)
+        assert result["checkpoint_write_duration_secs"] == pytest.approx(22.0)
+        assert result["checkpoint_read_duration_secs"] == pytest.approx(20.0)
+
+    def test_missing_metric_in_producing_phase_blanks_not_silent(self, tmp_path):
+        """Loud-failure guard — the behavior the per-direction design
+        protects. Two invocations BOTH configured to write (write=10): a
+        ``save_*`` missing from one is real data loss, so the write column
+        must blank, NEVER silently report the surviving invocation's value
+        (which a naive 'average over whatever's present' fix would do). The
+        read direction, present in both, still resolves."""
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        complete = _write_checkpointing_result_dir(
+            runs_root, "20260703_100000",
+            write_bw=4.0, write_dur=20.0, read_bw=5.0, read_dur=18.0)
+        lost_write = _write_checkpointing_result_dir(
+            runs_root, "20260703_101500",
+            write_bw=None, write_dur=None, read_bw=6.0, read_dur=22.0)
+        r1 = self._ckpt_run(complete, model="llama3-8b", write=10, read=10,
+                            ts="20260703_100000")
+        r2 = self._ckpt_run(lost_write, model="llama3-8b", write=10, read=10,
+                            ts="20260703_101500")
+
+        result = gen._aggregate_workload_metrics([r1, r2], warmup_set=set())
+
+        # A producer lost its scalar -> blank, NOT the surviving 4.0.
+        assert result["checkpoint_write_bw_gibps"] is None
+        assert result["checkpoint_write_duration_secs"] is None
+        # Read direction fully present in both -> inter-invocation mean.
+        assert result["checkpoint_read_bw_gibps"] == pytest.approx(5.5)
+        assert result["checkpoint_read_duration_secs"] == pytest.approx(20.0)
+
 
 # --------------------------------------------------------------------------- #
 # TestCheckpointingAggregation — TEST-15 / D-20 / D-28 / AGG-02               #
