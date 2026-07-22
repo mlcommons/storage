@@ -1447,30 +1447,67 @@ class ReportGenerator:
         else:
             out["checkpoint_dp_instances"] = None
 
-        # B/W (verbatim GiB/s) + durations — mean of DLIO's per-run scalar
-        # across invocations (Rules.md §2.1.23 permits 1-2). Present-but-
-        # blank when any invocation omits a field (blank only when truly
-        # absent — no silent partial-mean).
-        def _scalar_mean(field: str) -> Optional[float]:
-            values = [(s.get("metric") or {}).get(field) for s in summaries]
-            if values and all(
-                isinstance(v, (int, float)) and not isinstance(v, bool)
-                for v in values
-            ):
-                return fmean(values)
-            return None
+        # B/W (verbatim GiB/s) + durations — mean of DLIO's per-run scalar,
+        # taken PER DIRECTION over the invocations that were configured to
+        # produce it (Rules.md §2.1.23 permits 1-2 timestamp dirs; §4.7.1
+        # MANDATES a write→read split when checkpoint-per-node < 3x client
+        # RAM). In a split, the write dir carries only save_* and the read
+        # dir only load_*, so a field's None in the OPPOSITE phase is
+        # expected — not data loss — and must not blank the column.
+        #
+        # Each invocation self-declares its phase via
+        # ``checkpoint.num_checkpoints_{write,read}`` (CLOSED forces each to
+        # 10 or 0, never both 0 — cli/checkpointing_args.py). We keep the
+        # loud-failure guard (D-23 / PITFALLS #3: no silent partial-mean)
+        # but scope it to the producing phase: a save_* missing from an
+        # invocation that WAS configured to write is real data loss and
+        # still blanks. When the phase signal is absent (legacy / OPEN
+        # packages that don't persist the counts) we cannot classify, so we
+        # fall back to a present-only mean rather than regress those rows.
+        def _phase_count(run: BenchmarkRun, which: str) -> Any:
+            params = run.parameters or {}
+            key = f"num_checkpoints_{which}"
+            ckpt = params.get("checkpoint")
+            if isinstance(ckpt, dict) and key in ckpt:
+                return ckpt.get(key)
+            return params.get(f"checkpoint.{key}")
 
-        out["checkpoint_write_bw_gibps"] = _scalar_mean(
-            "save_checkpoint_io_mean_GB_per_second"
+        def _is_number(v: Any) -> bool:
+            return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+        def _directional_mean(field: str, which: str) -> Optional[float]:
+            # Classify each invocation as a producer of `which` direction
+            # from its configured count. If ANY invocation lacks the signal
+            # the set is unclassifiable -> present-only fallback.
+            counts = [_phase_count(r, which) for r in runs]
+            if all(_is_number(c) for c in counts):
+                producers = [
+                    s for s, c in zip(summaries, counts) if c > 0
+                ]
+                if not producers:
+                    return None
+                values = [(s.get("metric") or {}).get(field) for s in producers]
+                # Strict within the producing phase: a missing scalar here
+                # is data loss -> blank (loud), never a partial mean.
+                if values and all(_is_number(v) for v in values):
+                    return fmean(values)
+                return None
+            # Unclassifiable: mean over whatever's present, blank if none.
+            values = [(s.get("metric") or {}).get(field) for s in summaries]
+            present = [v for v in values if _is_number(v)]
+            return fmean(present) if present else None
+
+        out["checkpoint_write_bw_gibps"] = _directional_mean(
+            "save_checkpoint_io_mean_GB_per_second", "write"
         )
-        out["checkpoint_write_duration_secs"] = _scalar_mean(
-            "save_checkpoint_duration_mean_seconds"
+        out["checkpoint_write_duration_secs"] = _directional_mean(
+            "save_checkpoint_duration_mean_seconds", "write"
         )
-        out["checkpoint_read_bw_gibps"] = _scalar_mean(
-            "load_checkpoint_io_mean_GB_per_second"
+        out["checkpoint_read_bw_gibps"] = _directional_mean(
+            "load_checkpoint_io_mean_GB_per_second", "read"
         )
-        out["checkpoint_read_duration_secs"] = _scalar_mean(
-            "load_checkpoint_duration_mean_seconds"
+        out["checkpoint_read_duration_secs"] = _directional_mean(
+            "load_checkpoint_duration_mean_seconds", "read"
         )
         return out
 
