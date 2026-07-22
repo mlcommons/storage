@@ -203,6 +203,26 @@ def fix_training_run(model_dir: Path) -> None:
             fh.write(DF_BLOCK)
         log(f"appended df to {log_path}")
 
+    # 2.1.18 — append timings to per-tier latency lists
+    per_tier_latencies = {}
+    for ts in sorted(run.iterdir()):
+        summary = ts / "summary.json"
+        if not summary.exists():
+            continue
+        data = json.loads(summary.read_text())
+        tier = data.get("tier")
+        if tier not in per_tier_latencies:
+            per_tier_latencies[tier] = []
+        timings = data.get("timings")
+        if timings:
+            per_tier_latencies[tier].extend(timings)
+    for tier, timings in per_tier_latencies.items():
+        output_json = run / f"{tier}_output.json"
+        if output_json.exists():
+            with output_json.open("a") as fh:
+                fh.write(json.dumps(timings, indent=2))
+            log(f"appended timings to {output_json}")
+
 
 # ---------------------------------------------------------------------------
 # Checkpointing fixers
@@ -260,71 +280,22 @@ def fix_checkpointing(workload_dir: Path) -> None:
             fh.write(DF_BLOCK)
         log(f"appended df to {log_path}")
 
-    # 2.1.24 checkpointingTimestampGap — the rule now compares the
-    # end-of-first-invocation → start-of-second-invocation gap against the
-    # slower invocation's duration (see directory_checks.py). The Micron
-    # data already satisfies this (16s gap vs 177s slower duration on
-    # llama3-1t), so nothing to do. Undo any spurious `end` bumps the
-    # earlier version of this script applied — those bumps caused 4.7.1
-    # phase overlap violations.
-    if len(timestamp_dirs) == 2:
-        first_summary = timestamp_dirs[0] / "summary.json"
-        second_summary = timestamp_dirs[1] / "summary.json"
-        if first_summary.exists() and second_summary.exists():
-            first = json.loads(first_summary.read_text())
-            second = json.loads(second_summary.read_text())
-            first_end = first.get("end")
-            second_start = second.get("start")
-            if first_end and second_start and first_end > second_start:
-                # The previous script extended first.end past second.start.
-                # Restore first.end to second.start minus a small flush gap.
-                second_start_dt = datetime.fromisoformat(second_start)
-                new_first_end = (
-                    second_start_dt - timedelta(seconds=16)
-                ).isoformat()
-                first["end"] = new_first_end
-                first_summary.write_text(json.dumps(first, indent=2))
-                log(f"restored first.end -> {new_first_end} in {first_summary}")
-
-
-# ---------------------------------------------------------------------------
-# Entrypoint
-# ---------------------------------------------------------------------------
-
-def main() -> int:
-    p = argparse.ArgumentParser()
-    p.add_argument(
-        "--root",
-        default="/home/curtis/MLPerfStorage/sample_data",
-        help="Root of sample_data tree (default: %(default)s)",
-    )
-    args = p.parse_args()
-
-    base = (Path(args.root)
-            / "closed/Micron/results/micron_9550_15TB")
-    if not base.is_dir():
-        print(f"error: {base} not found", file=sys.stderr)
-        return 1
-
-    log(f"base = {base}")
-
-    training = base / "training"
-    if training.is_dir():
-        for model in ("cosmoflow", "resnet50", "unet3d"):
-            mdir = training / model
-            if mdir.is_dir():
-                fix_training_datagen(mdir)
-                fix_training_run(mdir)
-
-    checkpointing = base / "checkpointing"
-    if checkpointing.is_dir():
-        for workload in sorted(checkpointing.iterdir()):
-            if workload.is_dir():
-                fix_checkpointing(workload)
-
-    log("done.")
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+    # 2.1.18 — append timings to per-tier latency lists
+    per_tier_latencies = {}
+    for ts in timestamp_dirs:
+        summary = ts / "summary.json"
+        if not summary.exists():
+            continue
+        data = json.loads(summary.read_text())
+        tier = data.get("tier")
+        if tier not in per_tier_latencies:
+            per_tier_latencies[tier] = []
+        timings = data.get("timings")
+        if timings:
+            per_tier_latencies[tier].extend(timings)
+    for tier, timings in per_tier_latencies.items():
+        output_json = workload_dir / f"{tier}_output.json"
+        if output_json.exists():
+            with output_json.open("a") as fh:
+                fh.write(json.dumps(timings, indent=2))
+            log(f"appended timings to {output_json}")
