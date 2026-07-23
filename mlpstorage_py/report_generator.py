@@ -1536,10 +1536,25 @@ class ReportGenerator:
         at ``submission_checker/checks/vdb_checks.py:462-469``.
 
         Identity columns (D-15): ``vdb_engine`` and ``vdb_index_type``
-        read from ``runs[0].parameters`` (the ``BenchmarkRun`` accessor
-        for CLI/YAML args on disk).
+        read from the ``run`` invocation's ``parameters`` (the
+        ``BenchmarkRun`` accessor for CLI/YAML args on disk), falling
+        back to the other grouped leaves.
+
+        Run-leaf selection: the VDB workload key (D-06) is
+        ``(category, orgname, systemname, engine, index_type)`` — it does
+        NOT include ``command``, so a workload's ``datasize`` /
+        ``datagen`` / ``run`` leaves all group under one key and arrive
+        here as a single ``runs`` list in discovery order. Only the
+        ``run`` leaf carries the native query-phase metrics
+        (``statistics.json`` / ``summary.json``); the datasize/datagen
+        leaves have none. Reading ``runs[0]`` blindly left QPS / latency
+        / recall blank whenever a non-``run`` leaf sorted first, so
+        select the ``run`` invocation for metrics and recall. Fall back
+        to ``runs[0]`` only when no ``run`` leaf is present (e.g. a
+        datasize-only tree) so identity columns still populate.
         """
-        run = runs[0]
+        # Metrics + recall come from the ``run`` leaf (see docstring).
+        run = next((r for r in runs if r.command == 'run'), runs[0])
         summary = self._load_vdb_summary(run)
 
         _VDB_METRIC_FIELDS = (
@@ -1594,13 +1609,24 @@ class ReportGenerator:
         # Identity columns (D-15). Prefer the structured ``parameters`` block
         # (the combined_params fix); fall back to the persisted per-run
         # ``metadata['args']`` snapshot for legacy packages whose parameters
-        # block is empty. Blank only when truly absent from both.
-        out["vdb_num_vectors"] = self._vdb_identity(run, "num_vectors", ("num_vectors",))
-        out["vdb_dimension"] = self._vdb_identity(run, "dimension", ("dimension",))
-        out["vdb_engine"] = self._vdb_identity(run, "engine", ("vdb_engine", "engine"))
-        out["vdb_index_type"] = self._vdb_identity(
-            run, "index_type", ("index_type", "vdb_index")
-        )
+        # block is empty. Resolve across ALL grouped leaves (the ``run`` leaf
+        # first, then the datasize/datagen leaves): an identity arg such as
+        # ``num_vectors`` / ``dimension`` may be recorded only on the
+        # datasize leaf while the query metrics live on the run leaf. Blank
+        # only when truly absent from every leaf.
+        identity_runs = [run] + [r for r in runs if r is not run]
+
+        def _identity(param_key: str, arg_keys: tuple) -> Any:
+            for candidate_run in identity_runs:
+                value = self._vdb_identity(candidate_run, param_key, arg_keys)
+                if value is not None:
+                    return value
+            return None
+
+        out["vdb_num_vectors"] = _identity("num_vectors", ("num_vectors",))
+        out["vdb_dimension"] = _identity("dimension", ("dimension",))
+        out["vdb_engine"] = _identity("engine", ("vdb_engine", "engine"))
+        out["vdb_index_type"] = _identity("index_type", ("index_type", "vdb_index"))
         return out
 
     @staticmethod

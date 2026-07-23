@@ -1159,6 +1159,71 @@ class TestVdbFinalTableColumns:
         assert result["vdb_num_vectors"] == 10
         assert result["vdb_dimension"] == 128
 
+    def test_metrics_read_from_run_leaf_not_first_grouped_leaf(self, tmp_path):
+        """Regression: metrics must come from the ``run`` leaf of the group.
+
+        The VDB workload key (D-06) is
+        ``(category, orgname, systemname, engine, index_type)`` — it does
+        NOT include ``command``, so a workload's ``datasize`` / ``datagen``
+        / ``run`` leaves all group under one key and arrive as a single
+        ``runs`` list (e.g. ``[datasize, datagen, run]``). Only the ``run``
+        leaf carries the native ``statistics.json`` query metrics; the
+        datasize/datagen leaves have none. Reading ``runs[0]`` blindly (the
+        datasize leaf here) left QPS/latency/recall blank even though the
+        real values lived in the ``run`` leaf. ``_aggregate_vdb`` must
+        select the ``run`` invocation.
+        """
+        gen = _make_bare_generator(tmp_path)
+        root = tmp_path / "vector_database" / "milvus" / "DISKANN"
+
+        # datasize + datagen leaves: metadata-shaped BenchmarkRuns whose
+        # result dirs carry NO summary.json / statistics.json.
+        datasize_dir = root / "datasize" / "20260704_090000"
+        datasize_dir.mkdir(parents=True)
+        datagen_dir = root / "datagen" / "20260704_093000"
+        datagen_dir.mkdir(parents=True)
+        params = {"engine": "milvus", "index_type": "DISKANN",
+                  "num_vectors": 1000000, "dimension": 768}
+        datasize_run = _make_run(
+            benchmark_type=BENCHMARK_TYPES.vector_database, model="",
+            result_dir=str(datasize_dir), parameters=params,
+            accelerator=None, command="datasize",
+        )
+        datagen_run = _make_run(
+            benchmark_type=BENCHMARK_TYPES.vector_database, model="",
+            result_dir=str(datagen_dir), parameters=params,
+            accelerator=None, command="datagen",
+        )
+
+        # run leaf: carries the native statistics.json with the real metrics.
+        statistics = {
+            "throughput_qps": 7045.83,
+            "mean_latency_ms": 7.35,
+            "p95_latency_ms": 8.07,
+            "p99_latency_ms": 9.0,
+            "p999_latency_ms": 11.0,
+            "recall": {"mean_recall": 0.4009},
+        }
+        run_dir = _write_vdb_result_dir(
+            root / "run", "20260704_100000", statistics=statistics,
+        )
+        run_run = BenchmarkRun.from_result_dir(str(run_dir))
+
+        # runs[0] is the datasize leaf — the collision the key cannot prevent.
+        result = gen._aggregate_workload_metrics(
+            [datasize_run, datagen_run, run_run], warmup_set=set()
+        )
+
+        assert result["vdb_throughput_qps"] == 7045.83
+        assert result["vdb_mean_latency_ms"] == 7.35
+        assert result["vdb_p95_latency_ms"] == 8.07
+        assert result["vdb_p99_latency_ms"] == 9.0
+        assert result["vdb_p999_latency_ms"] == 11.0
+        assert result["vdb_recall"] == pytest.approx(40.09)
+        # Identity columns still populate (present on the run leaf).
+        assert result["vdb_engine"] == "milvus"
+        assert result["vdb_index_type"] == "DISKANN"
+
 
 class TestBenchmarkRunArgs:
     """``BenchmarkRun.run_args`` surfaces the persisted metadata['args']."""
