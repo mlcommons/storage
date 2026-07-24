@@ -1004,6 +1004,41 @@ class TestCheckpointInterPhaseGapOrigin:
         # 07:18:15 - 07:18:05 = 10 s, from the bookends (not the 071800 summary).
         assert any("10.0s inter-phase gap" in i.message for i in closed)
 
+    def test_gap_over_30s_is_warning_not_invalid(self, mock_logger):
+        """Special-build relaxation: a >30s inter-phase gap must not
+        invalidate the submission — it is reported as a warning-severity
+        CLOSED issue instead of INVALID.
+        """
+        write_run = self._run(
+            mock_logger,
+            num_reads=0, num_writes=10,
+            run_datetime="20260715_071700",
+            end_datetime="20260715_071800",
+            invocation_end_time="2026-07-15T07:18:00",
+        )
+        read_run = self._run(
+            mock_logger,
+            num_reads=10, num_writes=0,
+            run_datetime="20260715_071900",
+            invocation_start_time="2026-07-15T07:19:00",   # 60 s gap
+        )
+
+        checker = CheckpointSubmissionRulesChecker(
+            [write_run, read_run], logger=mock_logger
+        )
+        issues = checker.check_invocation_structure()
+
+        invalid = [i for i in issues if i.validation == PARAM_VALIDATION.INVALID]
+        assert invalid == [], (
+            f"Gap breach must be a warning, not INVALID; got: "
+            f"{[i.message for i in invalid]}"
+        )
+        warnings = [i for i in issues if i.severity == "warning"]
+        assert any(
+            "exceeding" in i.message and "60.0" in i.actual
+            for i in warnings
+        ), f"Expected warning-severity gap issue; got issues={issues!r}"
+
 
 class TestRulesCheckerInitialization:
     """Tests for rules checker initialization order.
