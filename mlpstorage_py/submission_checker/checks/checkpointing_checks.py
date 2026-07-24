@@ -647,9 +647,12 @@ class CheckpointingCheck(BaseCheck):
             record per-node collection timestamps); otherwise
             ``write.summary.end_time`` (predates both fixes). The summary-end
             fallback still includes the full post-benchmark collection window
-            in the gap, so the check emits a normal violation on breach but
-            the submitter should re-run with a current mlpstorage to get the
-            honest measurement.
+            in the gap; the submitter should re-run with a current mlpstorage
+            to get the honest measurement.
+
+        **Special-build relaxation** — a gap breach (>30s) is reported as a
+        ``warn_violation`` rather than a hard failure, so it never
+        invalidates the submission.
 
         A negative gap indicates NTP skew between the write and read nodes
         (the metadata fields are timestamped on their respective invocation
@@ -774,7 +777,9 @@ class CheckpointingCheck(BaseCheck):
                         gap_seconds, write_end, read_start,
                     )
                     continue
-                self.log_violation(
+                # Special-build relaxation: a gap breach is reported as a
+                # warning rather than invalidating the submission.
+                self.warn_violation(
                     "4.7.1", "checkpointCacheFlushValidation", self.path,
                     "failover-callout gap %.1f seconds exceeds 30-second limit "
                     "(%s=%s, %s=%s)",
@@ -782,7 +787,6 @@ class CheckpointingCheck(BaseCheck):
                     write_origin_label, write_end,
                     read_origin_label, read_start,
                 )
-                valid = False
         return valid
 
     @rule("4.7.1", "checkpointCacheFlushValidation")

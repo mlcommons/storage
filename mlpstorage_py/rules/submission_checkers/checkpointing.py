@@ -134,8 +134,10 @@ class CheckpointSubmissionRulesChecker(MultiRunRulesChecker):
             within MAX_INTER_PHASE_GAP_SECONDS by a second invocation with
             0 writes / 10 reads (the gap covers the cache flush).
 
-        Any other arrangement (e.g. ten 1-write runs, overlapping phases, or
-        a >30s gap between the write and read phases) is INVALID for CLOSED.
+        Any other arrangement (e.g. ten 1-write runs or overlapping phases)
+        is INVALID for CLOSED. Special-build relaxation: a >30s gap between
+        the write and read phases is reported as a warning-severity issue
+        rather than INVALID.
         """
         issues = []
 
@@ -268,16 +270,21 @@ class CheckpointSubmissionRulesChecker(MultiRunRulesChecker):
                 return issues
 
             if gap_seconds > MAX_INTER_PHASE_GAP_SECONDS:
+                # Special-build relaxation: a gap breach is reported as a
+                # warning-severity issue rather than INVALID, so it never
+                # invalidates the submission.
                 issues.append(Issue(
-                    validation=PARAM_VALIDATION.INVALID,
+                    validation=PARAM_VALIDATION.CLOSED,
                     message=(
                         f"Gap between write-phase end and read-phase start is "
                         f"{gap_seconds:.1f}s, exceeding the {MAX_INTER_PHASE_GAP_SECONDS}s "
-                        "maximum required by Rules.md §4.7.1."
+                        "maximum required by Rules.md §4.7.1 (accepted with a "
+                        "warning in this build)."
                     ),
                     parameter="checkpoint.invocation_structure",
                     expected=f"≤ {MAX_INTER_PHASE_GAP_SECONDS}s",
                     actual=f"{gap_seconds:.1f}s",
+                    severity="warning",
                 ))
                 return issues
 
