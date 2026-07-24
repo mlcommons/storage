@@ -607,6 +607,9 @@ Required positionals: `<model>` (one of `llama3-8b`, `llama3-70b`, `llama3-405b`
 - **`--checkpoint-folder <path>`, `-cf <path>`**
   Storage location for checkpoint files. Required for `run`.
 
+- **`--hpc`** *(run/configview only)*
+  Declare an HPC shared-parallel-filesystem environment where the §4.7.1 two-invocation failover callout cannot meet the 30-second budget (the write and read phases are separate scheduler jobs whose node sets cannot be guaranteed identical, and per-invocation MPI + DLIO re-init over a multi-TB tree alone exceeds 30s). Relaxes the §4.7.1 30-second gap check and the 1-or-2 invocation-structure check to warnings, and is recorded in `metadata.json` for auditability. Cold reads must still be ensured by the storage layer / benchmark (remote parallel FS, `--o-direct`, or `posix_fadvise(DONTNEED)` on close). See Rules §4.7.1.
+
 - **`--hosts`, `--exec-type`, `--dlio-bin-path`**
   Same semantics as the training options of the same name.
 

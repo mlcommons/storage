@@ -296,11 +296,17 @@ CK_RUN_CLOSED
     --hosts/-s HOST...              (default: 127.0.0.1)
     --num-checkpoints-read/-ncr N   (default: 10; closed allows 10 or 0)
     --num-checkpoints-write/-ncw N  (default: 10; closed allows 10 or 0)
+    --hpc                           (relax §4.7.1 30s gap + invocation
+                                     structure for HPC shared filesystems)
   + MPI_ARGS
   + CORE_STD
   Note: closed runs use 10/10 by default. Use 10/0 then 0/10 in two
         invocations when a cache flush is required between phases
         (see Rules.md §4.7.1 and checkpointing/README.md).
+  Note: --hpc declares an HPC shared-parallel-filesystem environment where
+        the two-invocation failover callout cannot meet the 30s budget; it
+        relaxes the §4.7.1 gap + invocation-structure checks to warnings and
+        is recorded in metadata.json (see Rules.md §4.7.1).
 
   Closed rank constraints by model:
     llama3-1t:   8 or 1024

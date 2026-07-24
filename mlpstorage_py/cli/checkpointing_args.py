@@ -57,13 +57,16 @@ def _add_checkpointing_core_args(parser, command):
         parser: The subcommand parser to add arguments to.
         command: The subcommand name ('datasize', 'run', 'configview').
     """
-    # Set defaults for open-gated attrs so they always exist in the namespace
+    # Set defaults for open-gated attrs so they always exist in the namespace.
+    # hpc defaults False here so vars(args) always carries it (recorded in
+    # metadata.json) even on subcommands that don't expose the flag.
     parser.set_defaults(
         loops=1,
         params='',
         allow_invalid_params=False,
         dlio_bin_path=None,
         checkpoint_folder=None,
+        hpc=False,
     )
 
     add_host_arguments(parser)
@@ -134,6 +137,32 @@ def _add_checkpointing_core_args(parser, command):
                 "Route all checkpoint I/O through s3dlio's O_DIRECT local "
                 "filesystem mode (direct:// URI scheme), bypassing the OS "
                 "page cache.  Requires the 'file' data-access protocol."
+            ),
+        )
+
+    # --hpc: available for run and configview (not datasize).
+    # Declares an HPC shared-parallel-filesystem environment where the §4.7.1
+    # two-invocation failover callout cannot complete within the 30-second
+    # budget (the write and read phases are separate scheduler jobs on nodes
+    # that cannot be guaranteed identical, and per-invocation MPI + DLIO
+    # re-initialization over a multi-TB checkpoint tree alone exceeds 30s).
+    # See mlcommons/storage and Rules.md §4.7.1.
+    if command in ("run", "configview"):
+        parser.add_argument(
+            '--hpc',
+            action='store_true',
+            default=False,
+            dest='hpc',
+            help=(
+                "Declare an HPC shared-parallel-filesystem environment where "
+                "the §4.7.1 same-node, <=30s two-invocation failover-callout "
+                "workflow is infeasible. Relaxes the 30s inter-phase gap and "
+                "invocation-structure enforcement for this run. Recorded in "
+                "metadata.json for auditability; on such systems cold reads "
+                "are ensured by the storage layer / benchmark (e.g. "
+                "posix_fadvise(DONTNEED) on close, O_DIRECT, or a remote "
+                "parallel filesystem) rather than by the callout timing, and "
+                "the submitter remains responsible for cold reads."
             ),
         )
 

@@ -114,7 +114,29 @@ class CheckpointingCheck(BaseCheck):
                 )
                 continue
             yield summary, metadata, timestamp
-    
+
+    def _hpc_exempt(self):
+        """True if any run in this workload declared the §4.7.1 HPC exemption.
+
+        The exemption is opted into at run time with ``mlpstorage ...
+        checkpointing run --hpc``; argparse records it as ``args.hpc`` and
+        ``Benchmark.write_metadata`` serializes ``vars(self.args)`` into each
+        run's ``metadata.json`` (so no extra plumbing is needed to surface it
+        to the validator). It marks an HPC shared-parallel-filesystem
+        environment where the §4.7.1 two-invocation failover-callout workflow
+        cannot complete within the 30-second budget (write and read phases are
+        separate scheduler jobs whose node sets cannot be guaranteed identical,
+        and per-invocation MPI + DLIO re-initialization over a multi-TB
+        checkpoint tree alone exceeds 30s). When set, ``cache_flush_validation``
+        and ``checkpoint_invocation_structure`` relax their enforcement to a
+        warning so the exemption is visible in the report rather than silently
+        skipped. See Rules.md §4.7.1.
+        """
+        for _summary, metadata, _ts in self._iter_valid_files():
+            if (metadata or {}).get("args", {}).get("hpc"):
+                return True
+        return False
+
     @rule("4.3.1", "checkpointDataSizeRatio")
     def checkpoint_data_size_ratio(self):
         """
@@ -658,6 +680,20 @@ class CheckpointingCheck(BaseCheck):
         valid = True
         if self.mode != "checkpointing":
             return valid
+        if self._hpc_exempt():
+            # HPC exemption (--hpc): the 30-second failover-callout budget is
+            # infeasible on an HPC shared parallel filesystem (see _hpc_exempt).
+            # Downgrade to a warning so the exemption is visible in the report
+            # rather than enforced or silently skipped.
+            self.warn_violation(
+                "4.7.1", "checkpointCacheFlushValidation", self.path,
+                "HPC exemption (--hpc) declared: §4.7.1 failover-callout "
+                "30-second gap check skipped. On an HPC shared parallel "
+                "filesystem the two-invocation callout cannot meet the 30s "
+                "budget; cold reads are ensured by the storage layer / "
+                "benchmark and remain the submitter's responsibility.",
+            )
+            return valid
         pairs = _pair_checkpoint_runs(self.submissions_logs)
         if not pairs:
             return valid
@@ -797,6 +833,18 @@ class CheckpointingCheck(BaseCheck):
         """
         valid = True
         if self.mode != "checkpointing":
+            return valid
+
+        if self._hpc_exempt():
+            # HPC exemption (--hpc): the strict 1-or-2 invocation structure is
+            # tied to the same-node, <=30s failover-callout workflow that is
+            # infeasible on an HPC shared parallel filesystem (see _hpc_exempt).
+            # Downgrade to a warning so the exemption is visible in the report.
+            self.warn_violation(
+                "4.7.1", "checkpointCacheFlushValidation", self.path,
+                "HPC exemption (--hpc) declared: §4.7.1 invocation-structure "
+                "enforcement relaxed for this run.",
+            )
             return valid
 
         closed_runs = [
