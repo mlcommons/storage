@@ -493,23 +493,27 @@ class DirectoryCheck(BaseCheck):
             self.log.warning("No checkpointing files found in submission logs")
             return valid
 
-        # Collect (start, end, timestamp_dir) per valid invocation. Prefer the
-        # invocation bookends from metadata.json (storage #714 / #782); fall
-        # back to the DLIO summary fields for pre-bookend results dirs.
+        # Collect (start, end, timestamp_dir, fallback flags) per valid
+        # invocation. Prefer the invocation bookends from metadata.json
+        # (storage #714 / #782); fall back to the DLIO summary fields for
+        # pre-bookend results dirs, remembering per-field which side fell
+        # back — the fallback inflates the measured gap (summary.end
+        # precedes write-side collection; summary.start follows read-side
+        # startup), so a fallback-measured gap is only an upper bound.
         invocations = []
         for checkpoint_dict, metadata, timestamp_dir in self.submissions_logs.checkpoint_files:
             if checkpoint_dict is None:
                 # Missing summary.json — reported under 2.1.22; skip silently.
                 continue
             metadata = metadata or {}
-            start_str = (
-                metadata.get("invocation_start_time")
-                or checkpoint_dict.get("start")
-            )
-            end_str = (
-                metadata.get("invocation_end_time")
-                or checkpoint_dict.get("end")
-            )
+            start_str = metadata.get("invocation_start_time")
+            start_is_fallback = not start_str
+            if start_is_fallback:
+                start_str = checkpoint_dict.get("start")
+            end_str = metadata.get("invocation_end_time")
+            end_is_fallback = not end_str
+            if end_is_fallback:
+                end_str = checkpoint_dict.get("end")
             try:
                 if start_str is None or end_str is None:
                     raise KeyError("start/end")
@@ -523,7 +527,10 @@ class DirectoryCheck(BaseCheck):
                 )
                 valid = False
                 continue
-            invocations.append((start_time, end_time, timestamp_dir))
+            invocations.append(
+                (start_time, end_time, timestamp_dir,
+                 start_is_fallback, end_is_fallback)
+            )
 
         # One invocation (or zero valid ones) — no consecutive pair to check.
         if len(invocations) < 2:
@@ -531,22 +538,38 @@ class DirectoryCheck(BaseCheck):
 
         # Order chronologically by start time, then check end→start gap for
         # each consecutive pair against the slower invocation's duration.
+        #
+        # Worklist A7 (2026-07-24): a gap breach WARNS instead of
+        # invalidating — the third enforcement point of the §4.7.1
+        # relaxation (cache_flush_validation and check_invocation_structure
+        # were downgraded in the same batch). Unparseable timestamps above
+        # remain hard errors.
         invocations.sort(key=lambda x: x[0])
         for first, second in zip(invocations, invocations[1:]):
-            first_start, first_end, _ = first
-            second_start, second_end, _ = second
+            first_start, first_end, _, _, first_end_fb = first
+            second_start, second_end, _, second_start_fb, _ = second
             gap = second_start - first_end
             slower = max(first_end - first_start, second_end - second_start)
             if gap >= slower:
-                self.log_violation(
+                # The gap endpoints are first.end and second.start; the
+                # label applies when either endpoint came from the summary
+                # fallback and therefore inflated the measurement.
+                fallback_note = ""
+                if first_end_fb or second_start_fb:
+                    fallback_note = (
+                        " (measured from DLIO summary start/end because "
+                        "invocation bookends are absent from metadata; "
+                        "startup/collection overhead inflates this number, "
+                        "so treat it as an upper bound on the true gap)"
+                    )
+                self.warn_violation(
                     "2.1.24", "checkpointingTimestampGap", self.checkpointing_path,
                     "Gap between checkpoints is %s, which is >= the slower "
                     "invocation's duration %s. Benchmark activity between "
-                    "checkpoints can't be discarded.",
+                    "checkpoints can't be discarded." + fallback_note,
                     gap,
                     slower,
                 )
-                valid = False
 
         return valid
     
