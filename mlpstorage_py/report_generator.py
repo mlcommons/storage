@@ -1652,9 +1652,22 @@ class ReportGenerator:
         out["vdb_read_bw_gibps"] = (
             read_bps / (1024 ** 3) if isinstance(read_bps, (int, float)) else None
         )
-        out["vdb_num_client_nodes"] = (
-            disk_io.get("host_count") if isinstance(disk_io, dict) else None
-        )
+        host_count = disk_io.get("host_count") if isinstance(disk_io, dict) else None
+        if host_count is None:
+            # R2 fallback: only the new MPI-format native stats carry
+            # disk_io.host_count. Older packages record the client topology
+            # in the persisted CLI args instead; a completed run with no
+            # multi-node evidence is a single client node.
+            args = run.run_args or {}
+            num_client_hosts = args.get("num_client_hosts")
+            hosts = args.get("hosts")
+            if isinstance(num_client_hosts, int) and num_client_hosts > 0:
+                host_count = num_client_hosts
+            elif isinstance(hosts, list) and hosts:
+                host_count = len(hosts)
+            else:
+                host_count = 1
+        out["vdb_num_client_nodes"] = host_count
         # Storage IOPs is not measured (disk_io carries bytes, not op counts) —
         # emit the column present-but-blank so the table has it (submitter or a
         # future instrumentation task fills it).
