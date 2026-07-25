@@ -631,9 +631,14 @@ class ReportGenerator:
 
         # (e) Bottom-up top-level assembly — concatenate every per-model
         # list, sort by the 6-column prefix for deterministic order.
+        # R3: auxiliary-phase rows (datagen/datasize) keep their
+        # Rules-mandated per-phase leaf files from step (c) but stay out
+        # of the org/global rollup tables.
         all_rows: List[dict] = []
         for _folder, rows in sorted(rows_by_model.items()):
-            all_rows.extend(rows)
+            all_rows.extend(
+                r for r in rows if not r.get('auxiliary_command')
+            )
         all_rows.sort(
             key=lambda r: (
                 r.get('category', '') or '',
@@ -757,6 +762,14 @@ class ReportGenerator:
             msg = getattr(issue, 'message', None)
             issue_texts.append(str(msg) if msg is not None else str(issue))
         row['issues'] = '; '.join(issue_texts)
+
+        # R3: auxiliary-phase marker — the issue-#771/#791 6-element keys
+        # (training/checkpointing datagen/datasize). Internal-only:
+        # ``_final_row`` projects it away; rollup assembly skips marked
+        # rows because the fixed schema has no phase column to tell them
+        # apart from broken measurement rows.
+        if len(workload_key) > 5:
+            row['auxiliary_command'] = str(workload_key[5])
 
         return row
 
