@@ -1146,6 +1146,71 @@ class TestVdbFinalTableColumns:
         # The package summary.json must remain byte-identical (no mutation).
         assert (run_dir / "summary.json").read_bytes() == original_summary_bytes
 
+    def test_client_nodes_falls_back_to_num_client_hosts_arg(self, tmp_path):
+        """R2: no ``disk_io.host_count`` → ``args.num_client_hosts``.
+
+        Only the new MPI-format native stats carry ``disk_io.host_count``;
+        older packages (e.g. the single-node v3.0 submitters) have a
+        bytes-only ``disk_io``. The run's persisted CLI args are the next
+        best source.
+        """
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        summary = {
+            "throughput_qps": 1.0,
+            "disk_io": {"total_bytes_read_per_sec": 1024 ** 3},  # no host_count
+        }
+        run_dir = _write_vdb_result_dir(
+            runs_root, "20260704_140000", summary=summary,
+            args={"host": "127.0.0.1", "num_client_hosts": 4},
+        )
+        run = BenchmarkRun.from_result_dir(str(run_dir))
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        assert result["vdb_num_client_nodes"] == 4
+
+    def test_client_nodes_falls_back_to_hosts_list_length(self, tmp_path):
+        """R2: no host_count and no num_client_hosts → ``len(args.hosts)``."""
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        summary = {
+            "throughput_qps": 1.0,
+            "disk_io": {"total_bytes_read_per_sec": 1024 ** 3},
+        }
+        run_dir = _write_vdb_result_dir(
+            runs_root, "20260704_141000", summary=summary,
+            args={"host": "127.0.0.1", "hosts": ["10.0.0.1", "10.0.0.2", "10.0.0.3"]},
+        )
+        run = BenchmarkRun.from_result_dir(str(run_dir))
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        assert result["vdb_num_client_nodes"] == 3
+
+    def test_client_nodes_defaults_to_one_for_single_node_run(self, tmp_path):
+        """R2: a completed run with no multi-node evidence is 1 client node.
+
+        Matches the real single-node v3.0 packages (Suzhou/NewFW/SAMSUNG):
+        ``args.hosts`` is None, ``host`` is 127.0.0.1, and the old-format
+        ``disk_io`` has byte counters but no host_count.
+        """
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        summary = {
+            "throughput_qps": 1.0,
+            "disk_io": {"total_bytes_read_per_sec": 1024 ** 3},
+        }
+        run_dir = _write_vdb_result_dir(
+            runs_root, "20260704_142000", summary=summary,
+            args={"host": "127.0.0.1", "hosts": None},
+        )
+        run = BenchmarkRun.from_result_dir(str(run_dir))
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        assert result["vdb_num_client_nodes"] == 1
+
     def test_identity_columns_fall_back_to_persisted_args(self, tmp_path):
         """Legacy packages have empty parameters; identity comes from metadata['args'].
 
