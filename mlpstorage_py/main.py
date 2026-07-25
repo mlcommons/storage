@@ -314,6 +314,19 @@ def _apply_lay03_orgname_gate(args):
     try:
         args.orgname = resolve_orgname(results_dir_value)
     except ResultsDirNotInitializedError as e:
+        if args.mode == "reports":
+            # Soft-resolve for reports: an assembled multi-submitter
+            # submission tree has no single-org sentinel and must stay
+            # read-only, so `mlpstorage init` is not an option there.
+            # ReportGenerator handles a missing orgname (flat-layout
+            # fallback in discover_scan_roots), so proceed without one.
+            args.orgname = None
+            logger.info(
+                f"results-dir `{results_dir_value}` has no sentinel; "
+                f"reports mode proceeding without an orgname "
+                f"(flat-layout scan)."
+            )
+            return
         raise ConfigurationError(
             f"results-dir `{results_dir_value}` has not been initialized.",
             suggestion=f"Run `mlpstorage init <orgname> {results_dir_value}` first.",

@@ -160,14 +160,16 @@ def test_failure_message_text(tmp_path):
         ("whatif", ["whatif", "training", "unet3d", "datagen", "file",
                     "--data-dir", "/d", "--systemname", "sys-v1",
                     "--num-processes", "1"]),
-        # reports reportgen takes --results-dir + --systemname.
-        ("reports", ["reports", "reportgen", "--systemname", "sys-v1"]),
+        # A9 (validate-cleanup): `reports` no longer hard-fails on a
+        # sentinel-less dir — it soft-resolves to args.orgname=None so
+        # reportgen can run read-only over an assembled multi-submitter
+        # submission tree. Covered by TestReportsModeSoftGate below.
         # Issue #721: history subcommands no longer accept --results-dir on
         # the CLI, so they can't reach the pre-swap LAY-03 gate. The
         # post-swap gate on the historical command's --results-dir is
         # covered by TestHistoryRerunOrgnameGate below.
     ],
-    ids=["closed", "open", "whatif", "reports"],
+    ids=["closed", "open", "whatif"],
 )
 def test_gated_commands_fail_uninitialized(tmp_path, mode, extra_argv):
     """Every mode that takes ``--results-dir`` (per D-12 gated scope) must
