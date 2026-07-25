@@ -308,8 +308,17 @@ class TrainingCheck(BaseCheck):
         If exactly one matches, use it. If multiple datasize phases
         target the same --data-dir, emit ``[3.3.1 DATASIZE-REUSED]``
         — the --data-dir has been reused and we cannot determine
-        authoritatively what it contains. If no match exists, emit
-        ``[3.3.1 DATADIR-MISMATCH]``.
+        authoritatively what it contains.
+
+        Worklist A2 (2026-07-24): ``--data-dir`` is OPTIONAL for
+        ``training datasize`` (a pure calculation), so exact-string
+        matching alone false-positived on most real submissions. When
+        no exact match exists: if every datasize record has
+        ``data_dir=None``, or there is exactly one datasize record
+        overall, match on it anyway — the cardinality comparison is
+        the point of the rule. ``[3.3.1 DATADIR-MISMATCH]`` fires only
+        when ≥2 distinguishable datasize records exist and none match
+        (a genuine ambiguity).
 
         All violations are warnings (``warn_violation``) — mid
         submission-window, do not invalidate work already on disk.
@@ -394,8 +403,11 @@ class TrainingCheck(BaseCheck):
                         "floor not met",
                         ts, run_num_files_train, ds_num_files_train,
                     )
-            elif datasize_files and run_data_dir is not None:
-                # We had datasize records, but none matched this run's --data-dir.
+            elif datasize_by_dir and run_data_dir is not None:
+                # ≥2 distinguishable datasize records and none matched this
+                # run's --data-dir (A2: an empty grouping — all metadata
+                # pruned — is already reported as DATASIZE-MALFORMED, and
+                # the single-record / all-null-dir cases match above).
                 self.warn_violation(
                     "3.3.1", "trainingRunDataMatchesDatasize", self.path,
                     "[3.3.1 DATADIR-MISMATCH] run/%s --data-dir %r has no matching "
@@ -530,14 +542,27 @@ class TrainingCheck(BaseCheck):
           1. Exact ``args.data_dir`` equality between datasize and run.
              If multiple datasize phases target the same --data-dir
              (reuse case), pick the most-recent one before ``run_ts``.
-          2. No match → return ``None`` so the caller emits
-             ``[3.3.1 DATADIR-MISMATCH]``.
+          2. (A2) No exact match, but every datasize record has
+             ``data_dir=None`` → match the null-dir group. ``--data-dir``
+             is optional for datasize, so this is the common real-world
+             shape, not an anomaly.
+          3. (A2) No exact match, but exactly ONE datasize record exists
+             overall → match it regardless of data_dir; the cardinality
+             comparison is the point of the rule.
+          4. Otherwise → return ``None`` so the caller emits
+             ``[3.3.1 DATADIR-MISMATCH]`` (≥2 distinguishable records,
+             genuine ambiguity).
         """
         if run_data_dir is None:
             return None
         records = datasize_by_dir.get(run_data_dir)
         if not records:
-            return None
+            if datasize_by_dir and set(datasize_by_dir.keys()) == {None}:
+                records = datasize_by_dir[None]
+            elif sum(len(v) for v in datasize_by_dir.values()) == 1:
+                records = next(iter(datasize_by_dir.values()))
+            else:
+                return None
         # Pick the latest datasize timestamp that is <= the run timestamp;
         # falls through to the latest overall if none are <= run_ts.
         eligible = [(num, ts) for (num, ts) in records if ts <= run_ts] or records
