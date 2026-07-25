@@ -163,10 +163,12 @@ def test_issue_812_gap_uses_invocation_bookends_not_summary(tmp_path):
 
 def test_issue_812_bookend_gap_still_flags_a_genuine_long_pause(tmp_path):
     """The #813 source-swap must not neuter the check: a genuinely long quiet
-    window measured on the *bookends* must still fail 2.1.24.
+    window measured on the *bookends* must still surface under 2.1.24.
 
-    Here the bookend gap is 5 minutes against 10 s invocations — a real pause
-    that could hide discardable benchmark activity — so the run is invalid.
+    Worklist A7 (Curtis, 2026-07-24): the gap breach is a WARNING, not an
+    error — mirroring the §4.7.1 downgrade in cache_flush_validation /
+    check_invocation_structure. The run stays valid but the 5-minute pause
+    against 10 s invocations must be reported via warn_violation.
     """
     write = (
         {"start": "2025-07-11T19:49:58", "end": "2025-07-11T19:50:12"},
@@ -182,9 +184,90 @@ def test_issue_812_bookend_gap_still_flags_a_genuine_long_pause(tmp_path):
     )
     check = _make_directory_check(tmp_path, [write, read])
     valid = check.checkpointing_timestamp_gap_check()
-    assert valid is False, (
-        "a 5-minute bookend gap against 10 s invocations must still trip 2.1.24"
+    assert valid is True, (
+        "A7: a gap breach warns instead of invalidating — valid must stay True"
     )
+    check.log.error.assert_not_called()
+    assert check.log.warning.call_count == 1, (
+        "the 5-minute bookend gap must still be reported, as a warning"
+    )
+    warned = check.log.warning.call_args[0][0]
+    assert "Gap between checkpoints" in warned
+
+
+# ---------------------------------------------------------------------------
+# Worklist A7 (2026-07-24): 2.1.24 gap breach downgraded to a warning on the
+# integration branch (third enforcement point of the §4.7.1 relaxation), and
+# the message is labeled as an upper bound when the gap was measured from the
+# DLIO summary fallback — the fallback charges read-side startup + write-side
+# cluster collection against the quiet window (this check's own docstring),
+# so the number overstates the true gap on large topologies.
+# ---------------------------------------------------------------------------
+
+
+def test_a7_bookend_measured_breach_is_not_labeled_upper_bound(tmp_path):
+    """A breach measured from real invocation bookends is the true quiet
+    window — no upper-bound caveat belongs in the message."""
+    write = (
+        {"start": "2025-07-11T19:49:58", "end": "2025-07-11T19:50:12"},
+        {"invocation_start_time": "2025-07-11T19:49:50",
+         "invocation_end_time": "2025-07-11T19:50:00"},
+        "20250711_194950",
+    )
+    read = (
+        {"start": "2025-07-11T19:54:58", "end": "2025-07-11T19:55:12"},
+        {"invocation_start_time": "2025-07-11T19:55:00",
+         "invocation_end_time": "2025-07-11T19:55:10"},
+        "20250711_195500",
+    )
+    check = _make_directory_check(tmp_path, [write, read])
+    check.checkpointing_timestamp_gap_check()
+    warned = check.log.warning.call_args[0][0]
+    assert "upper bound" not in warned
+
+
+def test_a7_summary_fallback_breach_is_labeled_upper_bound(tmp_path):
+    """A breach measured via the DLIO summary fallback (metadata carries no
+    invocation bookends — e.g. the submitter pruned metadata.json) must be
+    labeled as an upper bound so reviewers know startup/collection overhead
+    inflates the number (worklist A7 issue (b); the Microsoft AMLFS
+    llama3-405b 128-node case)."""
+    write = (
+        {"start": "2025-07-11T19:49:58", "end": "2025-07-11T19:50:12"},
+        {},
+        "20250711_194950",
+    )
+    read = (
+        {"start": "2025-07-11T19:54:58", "end": "2025-07-11T19:55:12"},
+        {},
+        "20250711_195500",
+    )
+    check = _make_directory_check(tmp_path, [write, read])
+    valid = check.checkpointing_timestamp_gap_check()
+    assert valid is True
+    check.log.error.assert_not_called()
+    assert check.log.warning.call_count == 1
+    warned = check.log.warning.call_args[0][0]
+    assert "upper bound" in warned, (
+        "summary-fallback gap must be labeled an upper bound"
+    )
+
+
+def test_a7_unparseable_timestamps_remain_a_hard_error(tmp_path):
+    """The A7 downgrade covers ONLY the gap breach; garbage timestamp data
+    is still a hard 2.1.24 error (mirrors the #834 scope: missing/
+    unparseable stay errors)."""
+    checkpoint_files = [
+        (
+            {"start": "not-a-timestamp", "end": "2025-07-11T19:54:25"},
+            {},
+            "20250711_195047",
+        ),
+    ]
+    check = _make_directory_check(tmp_path, checkpoint_files)
+    valid = check.checkpointing_timestamp_gap_check()
+    assert valid is False
+    check.log.error.assert_called_once()
 
 
 def test_issue_812_falls_back_to_summary_when_bookends_absent(tmp_path):
