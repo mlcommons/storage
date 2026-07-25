@@ -122,18 +122,19 @@ class BaseCheck(ABC):
         default output. Use ``--debug`` / ``-v`` to surface them again
         when tracing.
 
-        The failure-path "Some X Checks failed for: ..." stays at ERROR
-        because (a) it is a useful transition marker when the user is
-        already scanning failure output and (b) test suites depend on it
-        as a count-of-failures sentinel.
+        The failure-path "Some X failed for: ..." stays at ERROR because
+        it is a useful transition marker when the user is already
+        scanning failure output. (A8: subclass names already end in
+        "checks" — e.g. "directory checks" — so the format no longer
+        appends a literal "Checks" that doubled the word.)
         """
         self.log.debug("Starting %s for: %s", self.name, self.path)
         valid = self.run_checks()
         if valid:
-            self.log.debug("All %s checks passed for: %s", self.name, self.path)
+            self.log.debug("All %s passed for: %s", self.name, self.path)
         else:
             self.log.error(
-                "Some %s Checks failed for: %s",
+                "Some %s failed for: %s",
                 self.name,
                 self.path)
         return valid
