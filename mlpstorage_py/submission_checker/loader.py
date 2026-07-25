@@ -60,23 +60,47 @@ class Loader:
         self.parser_map = PARSER_MAP
         self.config = config
 
-    def load_single_log(self, path, log_type):
+    def load_single_log(self, path, log_type, warn_if_missing=True):
+        """Load one log file, returning its parsed dict or None.
+
+        ``path=None`` means the caller already established (and reported)
+        that no file exists — return None silently (worklist A4: a missing
+        metadata file used to be double-reported by ``find_metadata_path``
+        and then again here).
+
+        ``warn_if_missing=False`` demotes the absence to a debug line for
+        files that are legitimately optional in context (worklist A1:
+        datagen dirs never contain summary.json — DLIO's generate_only
+        path skips ``stats.save_data()``).
+        """
         log = None
+        if path is None:
+            return log
         if os.path.exists(path):
             self.logger.debug("Loading %s log from %s", log_type, path)
             log = self.parser_map.get(log_type, self.parser_map["default"])(path, log_type).get_dict()
-        else:
+        elif warn_if_missing:
             self.logger.warning(
                 "Could not load %s log from %s, path does not exists",
                 log_type,
                 path)
+        else:
+            self.logger.debug(
+                "No %s log at %s (optional for this phase)", log_type, path)
         return log
-    
+
     def find_metadata_path(self, path):
+        """Return the metadata file path in ``path``, or None when absent.
+
+        Warns once (with the directory context) when no metadata file
+        exists; callers hand the None to ``load_single_log``, which stays
+        silent for it (worklist A4 — previously the returned default path
+        triggered a second "Could not load Metadata log" warning).
+        """
         files = [f for f in list_files(path) if "metadata" in f]
         if len(files) == 0:
             self.logger.warning("Could not find metadata file at %s", path)
-            return os.path.join(path, "metadata.json")
+            return None
         elif len(files) > 1:
             self.logger.warning("More than one metadata file found at %s", path)
         return os.path.join(path, files[0])
@@ -150,7 +174,12 @@ class Loader:
                                     summary_path = os.path.join(timestamp_path, "summary.json")
                                     metadata_path = self.find_metadata_path(timestamp_path)
                                     metadata_file = self.load_single_log(metadata_path, "Metadata")
-                                    datagen_file = self.load_single_log(summary_path, "Summary")
+                                    # A1: datagen never has a summary.json
+                                    # (DLIO generate_only) — absence is not
+                                    # noteworthy, presence still loads.
+                                    datagen_file = self.load_single_log(
+                                        summary_path, "Summary",
+                                        warn_if_missing=False)
                                     datagen_files.append((datagen_file, metadata_file, timestamp))
 
                                 # Issue #608: walk datasize/<ts>/ so rule 3.3.1 can cross-check
