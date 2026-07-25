@@ -136,6 +136,26 @@ def test_4_3_1_undersized_checkpoint_emits_warn_prefix_not_error(tmp_path, mock_
     )
 
 
+def test_4_3_1_warns_once_per_workload_not_per_invocation(tmp_path, mock_logger):
+    """Worklist A3 (2026-07-24): the write and read invocations of a paired
+    checkpointing workload carry the same checkpoint_size_GB and host
+    memory, so iterating _iter_valid_files emitted the identical advisory
+    twice per workload (97 baseline lines in ~48 real conditions). The
+    advisory must fire once per distinct (size, memory, hosts) condition."""
+    from mlpstorage_py.tests.conftest import build_submission
+    root = build_submission(tmp_path, chkpt_summary_checkpoint_size_GB=100)
+    check = _run_checkpointing_check(root, mock_logger)
+    check.checkpoint_data_size_ratio()
+    ratio_warnings = [
+        m for m in mock_logger.warnings
+        if m.startswith("[4.3.1 checkpointDataSizeRatio]")
+    ]
+    assert len(ratio_warnings) == 1, (
+        f"expected exactly one 4.3.1 advisory for the identical write+read "
+        f"pair; got {len(ratio_warnings)}: {ratio_warnings}"
+    )
+
+
 # ---------------------------------------------------------------------------
 # 4.3.4 aggregate_accelerator_memory — warnings-only (C2)
 # ---------------------------------------------------------------------------
