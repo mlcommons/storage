@@ -1828,10 +1828,20 @@ class ReportGenerator:
             return {}
         summary_path = os.path.join(run.result_dir, "summary.json")
         if not os.path.isfile(summary_path):
-            self.logger.warning(
-                f"summary.json not found at {summary_path}; "
-                "pass-through columns will be empty."
-            )
+            # datagen/datasize invocations can never have a summary.json
+            # (DLIO doesn't write one for datagen; datasize is a pure
+            # calculation) — absence is only an artifact gap for run phases.
+            if getattr(run, 'command', None) in ('datagen', 'datasize'):
+                self.logger.debug(
+                    f"summary.json not applicable for {run.command} "
+                    f"invocation at {summary_path}; pass-through columns "
+                    "will be empty."
+                )
+            else:
+                self.logger.warning(
+                    f"summary.json not found at {summary_path}; "
+                    "pass-through columns will be empty."
+                )
             return {}
         try:
             with open(summary_path, "r") as f:

@@ -449,7 +449,9 @@ class ResultsDirectoryValidator:
                 continue
 
             if self._is_datetime_dir(datetime_dir.name):
-                self._validate_run_dir(datetime_dir, benchmark_type)
+                self._validate_run_dir(
+                    datetime_dir, benchmark_type, command=command_dir.name
+                )
                 has_valid_runs = True
             else:
                 self.result.warnings.append(
@@ -459,8 +461,15 @@ class ResultsDirectoryValidator:
 
         return has_valid_runs
 
-    def _validate_run_dir(self, run_dir: Path, benchmark_type: str) -> None:
-        """Validate a single run directory."""
+    def _validate_run_dir(
+        self, run_dir: Path, benchmark_type: str, command: str = None
+    ) -> None:
+        """Validate a single run directory.
+
+        ``command`` is the parent command-directory name when the run sits
+        below one (``run``/``datagen``/``datasize``); ``None`` for layouts
+        with no command segment (e.g. checkpointing model dirs).
+        """
         files = list(run_dir.iterdir())
         file_names = [f.name for f in files if f.is_file()]
 
@@ -477,9 +486,12 @@ class ResultsDirectoryValidator:
         else:
             self.result.found_runs += 1
 
-        # Check for summary.json (required for completed DLIO runs)
+        # Check for summary.json (required for completed DLIO runs).
+        # DLIO never writes one for datagen, and datasize is a pure
+        # calculation — only run-phase dirs can be incomplete without it.
         if benchmark_type in ['training', 'checkpointing']:
-            if 'summary.json' not in file_names:
+            if command not in ('datagen', 'datasize') \
+                    and 'summary.json' not in file_names:
                 self.result.warnings.append(
                     f"Missing summary.json in {run_dir} - run may be incomplete"
                 )
