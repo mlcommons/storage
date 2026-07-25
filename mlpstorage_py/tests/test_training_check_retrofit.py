@@ -310,3 +310,87 @@ def test_3_3_7_surfaces_host_consistency_issues(tmp_path, mock_logger):
     assert any("kernel version mismatch" in m for m in warns), (
         f"expected host-consistency-issue warning; got {mock_logger.warnings}"
     )
+
+
+# ---------------------------------------------------------------------------
+# 3.3.3 advisory context — worklist A5 (2026-07-24)
+# ---------------------------------------------------------------------------
+
+
+def _make_training_check_with_runs(tmp_path, mock_logger, run_files):
+    """Build a TrainingCheck over synthetic run tuples (no on-disk tree)."""
+    from mlpstorage_py.submission_checker.loader import (
+        LoaderMetadata, SubmissionLogs,
+    )
+    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
+    logs = SubmissionLogs(
+        run_files=run_files,
+        system_file=None,
+        loader_metadata=LoaderMetadata(
+            division="closed", submitter="Acme", system="sys-v1",
+            mode="training", benchmark="unet3d", folder=str(tmp_path),
+        ),
+    )
+    return TrainingCheck(log=mock_logger, config=config, submissions_logs=logs)
+
+
+def test_3_3_3_advisory_carries_rule_id_and_path_context(tmp_path, mock_logger):
+    """A5: the single-host advisory must be attributable from the line
+    itself — routed through warn_violation with the rule token, the
+    submission path, and the run timestamp. The old bare
+    'Single-host submission has only N accelerators. Consider increasing
+    via --num-accelerators' line carried zero context (24 baseline lines,
+    unattributable)."""
+    run_files = [
+        ({"num_hosts": 1, "num_accelerators": 2}, {}, "20260630_120000"),
+    ]
+    check = _make_training_check_with_runs(tmp_path, mock_logger, run_files)
+    result = check.single_host_simulated_accelerators()
+    assert result is True
+    advisories = [
+        m for m in mock_logger.warnings
+        if m.startswith("[3.3.3 trainingSingleHostSimulatedAccelerators]")
+    ]
+    assert len(advisories) == 1, (
+        f"expected one prefixed 3.3.3 advisory; warnings={mock_logger.warnings}"
+    )
+    assert str(tmp_path) in advisories[0]
+    assert "20260630_120000" in advisories[0]
+    assert not any(
+        m.startswith("Single-host submission") for m in mock_logger.warnings
+    ), "the context-free wording must be gone"
+
+
+def test_3_3_3_advisory_dedupes_identical_condition_across_runs(
+    tmp_path, mock_logger
+):
+    """A5: six runs with the same simulated-accelerator count are ONE
+    advisory condition, not six lines."""
+    run_files = [
+        ({"num_hosts": 1, "num_accelerators": 2}, {}, f"20260630_12000{i}")
+        for i in range(6)
+    ]
+    check = _make_training_check_with_runs(tmp_path, mock_logger, run_files)
+    check.single_host_simulated_accelerators()
+    advisories = [
+        m for m in mock_logger.warnings
+        if m.startswith("[3.3.3 trainingSingleHostSimulatedAccelerators]")
+    ]
+    assert len(advisories) == 1, (
+        f"identical condition must warn once; got {len(advisories)}"
+    )
+
+
+def test_3_3_3_no_advisory_when_multi_host_or_enough_accelerators(
+    tmp_path, mock_logger
+):
+    run_files = [
+        ({"num_hosts": 2, "num_accelerators": 2}, {}, "20260630_120000"),
+        ({"num_hosts": 1, "num_accelerators": 4}, {}, "20260630_120001"),
+    ]
+    check = _make_training_check_with_runs(tmp_path, mock_logger, run_files)
+    check.single_host_simulated_accelerators()
+    assert not any("3.3.3" in m for m in mock_logger.warnings)
+    assert not any(
+        m.startswith("Single-host submission") for m in mock_logger.warnings
+    )
