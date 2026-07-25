@@ -56,6 +56,27 @@ class BaseCheck(ABC):
         prefix = "[%s %s] %s: " % (rule_id, rule_name, path)
         self.log.warning(prefix + msg, *args)
 
+    def info_violation(self, rule_id, rule_name, path, msg, *args):
+        """Info-level counterpart to ``log_violation`` / ``warn_violation``.
+
+        Emits ``[<rule_id> <rule_name>] <path>: <msg>`` through
+        ``self.log.info``. Used for notes that describe validator
+        incompleteness rather than anything about the submission — e.g.
+        the deferred vdb scale/recall/query target tables (worklist A6):
+        those must stay grep-visible per rule ID but should not appear
+        as per-submission WARNINGs in a review report.
+
+        Args:
+            rule_id: Dotted rule ID from Rules.md (e.g. ``"5.1.1"``).
+            rule_name: camelCase rule name from Rules.md
+                (e.g. ``"vdbDatasetScale"``).
+            path: The filesystem path the note applies to.
+            msg: A ``%``-style format string describing the note.
+            *args: Format arguments for ``msg``.
+        """
+        prefix = "[%s %s] %s: " % (rule_id, rule_name, path)
+        self.log.info(prefix + msg, *args)
+
     def run_checks(self):
         """
         Execute all registered checks. Returns True if all checks pass, False otherwise.

@@ -258,8 +258,9 @@ class VdbCheck(BaseCheck):
         if self.mode != "vector_database":
             return valid
 
-        # The defined-scale table is not yet in config.py; surface the gap.
-        self.warn_violation(
+        # The defined-scale table is not yet in config.py; surface the gap
+        # at INFO (A6) — validator incompleteness, not a submission problem.
+        self.info_violation(
             "5.1.1", "vdbDatasetScale", self.path,
             "vdb scale table (num_vectors, dimension) not yet defined in "
             "config.py; per-run scale check deferred",
@@ -484,8 +485,8 @@ class VdbCheck(BaseCheck):
         if self.mode != "vector_database":
             return valid
 
-        # The minimum-recall target table is not yet in config.py.
-        self.warn_violation(
+        # The minimum-recall target table is not yet in config.py (A6: INFO).
+        self.info_violation(
             "5.3.2", "vdbRecallReported", self.path,
             "vdb minimum-recall target table (per scale/metric) not yet "
             "defined in config.py; threshold check deferred — presence "
@@ -574,7 +575,8 @@ class VdbCheck(BaseCheck):
         if self.mode != "vector_database":
             return valid
 
-        self.warn_violation(
+        # A6: deferred-table note at INFO, not WARNING.
+        self.info_violation(
             "5.3.3", "vdbQueryCountMinimum", self.path,
             "vdb minimum-query target table (per scale) not yet defined in "
             "config.py; threshold check deferred — presence check still runs",
