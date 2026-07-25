@@ -897,6 +897,114 @@ class TestCheckpointSubmissionRulesChecker:
         assert checker.check_num_runs() == []
 
 
+class TestCheckpointInterPhaseGapOrigin:
+    """Issue #825: §4.7.1 inter-phase gap origin selection in reportgen.
+
+    The report generator validates through
+    ``CheckpointSubmissionRulesChecker.check_invocation_structure``, which
+    must select the same write-side gap origin as the standalone submission
+    checker (``checkpointing_checks.cache_flush_validation``):
+    ``invocation_end_time`` -> ``final_collection_time`` (post-benchmark
+    node-release proxy) -> summary ``end``. Measuring from the summary end
+    charges write-side post-benchmark cluster collection against the 30 s
+    cache-flush budget and trips a false violation on large topologies.
+    """
+
+    @pytest.fixture
+    def mock_logger(self):
+        return MagicMock()
+
+    def _run(self, mock_logger, *, num_reads, num_writes, run_datetime,
+             end_datetime="", invocation_start_time="",
+             invocation_end_time="", final_collection_time=""):
+        data = BenchmarkRunData(
+            benchmark_type=BENCHMARK_TYPES.checkpointing,
+            model="llama3-8b",
+            command="run",
+            run_datetime=run_datetime,
+            num_processes=8,
+            parameters={
+                "checkpoint": {
+                    "num_checkpoints_read": num_reads,
+                    "num_checkpoints_write": num_writes,
+                }
+            },
+            override_parameters={},
+            end_datetime=end_datetime,
+            invocation_start_time=invocation_start_time,
+            invocation_end_time=invocation_end_time,
+            final_collection_time=final_collection_time,
+        )
+        run = BenchmarkRun.from_data(data, mock_logger)
+        run.category = PARAM_VALIDATION.CLOSED
+        return run
+
+    def test_pre_787_falls_back_to_final_collection_proxy(self, mock_logger):
+        """Pre-#787 dir (no invocation_end_time) uses the node-release proxy.
+
+        The write summary ``end`` is early (before the post-benchmark cluster
+        collection); the latest collection timestamp (node release) is 60 s
+        later. Read phase starts 10 s after node release. Measuring from the
+        summary end yields a 70 s gap (>30 s -> false INVALID); measuring from
+        the final-collection proxy yields the honest 10 s gap -> CLOSED.
+        """
+        write_run = self._run(
+            mock_logger,
+            num_reads=0, num_writes=10,
+            run_datetime="20260715_071700",
+            end_datetime="20260715_071800",           # summary end (timed-section)
+            invocation_end_time="",                    # pre-#787: no bookend
+            final_collection_time="2026-07-15T07:19:00",  # node release (teardown end)
+        )
+        read_run = self._run(
+            mock_logger,
+            num_reads=10, num_writes=0,
+            run_datetime="20260715_071910",            # 10 s after node release
+            invocation_start_time="",                  # pre-#714: no bookend
+        )
+
+        checker = CheckpointSubmissionRulesChecker(
+            [write_run, read_run], logger=mock_logger
+        )
+        issues = checker.check_invocation_structure()
+
+        invalid = [i for i in issues if i.validation == PARAM_VALIDATION.INVALID]
+        assert invalid == [], (
+            "Issue #825 regression: reportgen charged write-side teardown to "
+            f"the gap; got INVALID: {[i.message for i in invalid]}"
+        )
+        closed = [i for i in issues if i.validation == PARAM_VALIDATION.CLOSED]
+        assert any("inter-phase gap" in i.message for i in closed)
+
+    def test_invocation_end_time_bookend_preferred_over_proxy(self, mock_logger):
+        """When present, invocation_end_time wins over the collection proxy."""
+        write_run = self._run(
+            mock_logger,
+            num_reads=0, num_writes=10,
+            run_datetime="20260715_071700",
+            end_datetime="20260715_071800",
+            invocation_end_time="2026-07-15T07:18:05",     # authoritative bookend
+            final_collection_time="2026-07-15T07:19:00",   # ignored when bookend present
+        )
+        read_run = self._run(
+            mock_logger,
+            num_reads=10, num_writes=0,
+            run_datetime="20260715_071815",
+            invocation_start_time="2026-07-15T07:18:15",
+        )
+
+        checker = CheckpointSubmissionRulesChecker(
+            [write_run, read_run], logger=mock_logger
+        )
+        issues = checker.check_invocation_structure()
+
+        invalid = [i for i in issues if i.validation == PARAM_VALIDATION.INVALID]
+        assert invalid == []
+        closed = [i for i in issues if i.validation == PARAM_VALIDATION.CLOSED]
+        # 07:18:15 - 07:18:05 = 10 s, from the bookends (not the 071800 summary).
+        assert any("10.0s inter-phase gap" in i.message for i in closed)
+
+
 class TestRulesCheckerInitialization:
     """Tests for rules checker initialization order.
 
