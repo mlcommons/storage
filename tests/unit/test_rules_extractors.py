@@ -394,9 +394,14 @@ class TestDLIOResultParser:
         # Non-list entries must be filtered so fmean() never sees a scalar.
         assert "train_au_mean_percentage" not in result.metrics
         assert "train_au_meet_expectation" not in result.metrics
-        # Dropped keys are surfaced, not silently discarded.
-        assert mock_logger.warning.called, (
+        # Dropped keys are surfaced, not silently discarded — at debug,
+        # since they are the same structural DLIO scalars on every run
+        # (worklist A13; real fix tracked in #645/#646).
+        assert mock_logger.debug.called, (
             "dropped non-list metric keys must emit a diagnostic"
+        )
+        assert not mock_logger.warning.called, (
+            "A13: the drop diagnostic must not warn per run"
         )
 
 
@@ -719,8 +724,11 @@ class TestResultFilesExtractor:
         result = extractor.extract(str(result_dir), logger=mock_logger)
 
         assert result.metrics is None
-        assert mock_logger.warning.called, (
+        assert mock_logger.debug.called, (
             "collapsing metrics to None must emit a diagnostic, not blank silently"
+        )
+        assert not mock_logger.warning.called, (
+            "A13: the collapse diagnostic must not warn per run"
         )
 
 
