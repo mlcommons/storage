@@ -817,7 +817,10 @@ def _filter_list_metrics(metric_block, logger=None, context: str = ""):
 
     A diagnostic is logged (never silent) both when non-list keys are dropped
     and when the block collapses to nothing, so a blank ``metrics`` column is
-    always traceable to a logged reason rather than disappearing quietly.
+    always traceable with ``--debug`` rather than disappearing quietly. The
+    dropped keys are the same structural DLIO scalars on every run, so the
+    diagnostic stays at debug level; consuming the scalar means is tracked in
+    issues #645/#646.
     """
     if not isinstance(metric_block, dict):
         return None
@@ -826,14 +829,14 @@ def _filter_list_metrics(metric_block, logger=None, context: str = ""):
     dropped = [k for k, v in metric_block.items() if not isinstance(v, list)]
 
     if dropped and logger:
-        logger.warning(
+        logger.debug(
             f"{context}dropped {len(dropped)} non-list metric key(s) not "
             f"usable for aggregation: {sorted(dropped)}"
         )
 
     if not filtered:
         if logger:
-            logger.warning(
+            logger.debug(
                 f"{context}no list-valued metrics remain after filtering; "
                 f"metrics will be blank for this run"
             )
