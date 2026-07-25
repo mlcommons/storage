@@ -628,3 +628,84 @@ class TestMultiOrgRollupPlacement:
             assert {r.get('Organization') for r in rows} == {org}, (
                 f"per-org rollup at {org_json} must contain only {org} rows"
             )
+
+
+class TestRollupExcludesAuxiliaryPhases:
+    """R3: datagen/datasize rows stay OUT of org/global rollup tables.
+
+    The fixed final schema has no phase column, so an auxiliary-phase row
+    (datagen/datasize — the issue-#771/#791 6-element workload keys) is
+    indistinguishable from a broken measurement row in the staff-facing
+    tables: same Organization/Model, every metric cell blank. The rollups
+    (tree root + per-org) must therefore carry only measurement rows.
+    The per-phase LEAF results.{csv,json} (Rules.md 2.1.16/2.1.22
+    mandated) must still be written for every phase directory.
+    """
+
+    def _build_tree_with_datagen(self, tmp_path: pathlib.Path) -> pathlib.Path:
+        fixture_src = _FIXTURES_ROOT / "multi_orgname"
+        dest = tmp_path / "multi_orgname"
+        shutil.copytree(fixture_src, dest)
+        # Clone acme's run invocation into a datagen phase dir: same
+        # metadata shape, command='datagen', no accelerator, and no
+        # summary.json (datagen runs never produce one — A14).
+        run_dir = (
+            dest / "closed" / "acme" / "results" / "system-a"
+            / "training" / "unet3d" / "run" / "20260706_100000"
+        )
+        datagen_dir = (
+            dest / "closed" / "acme" / "results" / "system-a"
+            / "training" / "unet3d" / "datagen" / "20260706_090000"
+        )
+        datagen_dir.mkdir(parents=True)
+        with open(run_dir / "training_unet3d_metadata.json", "r") as fh:
+            metadata = json.load(fh)
+        metadata["command"] = "datagen"
+        metadata["accelerator"] = None
+        metadata["run_datetime"] = "20260706_090000"
+        with open(datagen_dir / "training_unet3d_metadata.json", "w") as fh:
+            json.dump(metadata, fh)
+        return dest
+
+    def test_datagen_row_written_to_leaf_but_not_rollups(self, tmp_path):
+        dest = self._build_tree_with_datagen(tmp_path)
+        args = Namespace(debug=False)
+        gen = ReportGenerator(str(dest), args=args, validate_structure=False)
+        rc = gen.generate_reports()
+        assert rc == 0, f"generate_reports returned non-zero exit code {rc}"
+
+        # Leaf emission preserved: the datagen phase dir gets its own
+        # results.json with the (metric-less) datagen row.
+        leaf_json = (
+            dest / "closed" / "acme" / "results" / "system-a"
+            / "training" / "unet3d" / "datagen" / "results.json"
+        )
+        assert leaf_json.exists(), (
+            f"R3 must not remove the Rules-mandated per-phase leaf rollup "
+            f"at {leaf_json}"
+        )
+        with open(leaf_json, "r") as fh:
+            leaf_rows = json.load(fh)
+        assert len(leaf_rows) == 1, (
+            f"expected the datagen leaf rollup to hold its one row, got "
+            f"{len(leaf_rows)}"
+        )
+
+        # Global rollup (tree root): only the two measurement rows — the
+        # acme datagen row must NOT appear.
+        with open(dest / "results.json", "r") as fh:
+            top_rows = json.load(fh)
+        assert len(top_rows) == 2, (
+            f"R3 violated: global rollup must hold only the 2 measurement "
+            f"rows (acme run + beta_corp run), got {len(top_rows)} rows"
+        )
+
+        # Per-org rollup: acme keeps exactly its one measurement row.
+        with open(
+            dest / "closed" / "acme" / "results" / "results.json", "r"
+        ) as fh:
+            acme_rows = json.load(fh)
+        assert len(acme_rows) == 1, (
+            f"R3 violated: acme per-org rollup must hold only the run row, "
+            f"got {len(acme_rows)} rows"
+        )
