@@ -130,6 +130,11 @@ class CheckpointingCheck(BaseCheck):
         if self.mode != "checkpointing":
             return valid
 
+        # A3: the write and read invocations of a paired workload carry the
+        # same checkpoint_size_GB and host memory, so a per-invocation loop
+        # emitted the identical advisory twice. Deduplicate on the distinct
+        # (size, memory, hosts) conditions before warning.
+        seen_conditions = set()
         for summary, metadata, _ in self._iter_valid_files():
             checkpoint_size_gb = summary.get("metric", {}).get("checkpoint_size_GB", 0)
             # storage#669: use sum(host_memory_GB) / num_hosts rather than
@@ -140,6 +145,11 @@ class CheckpointingCheck(BaseCheck):
 
             if checkpoint_size_gb == 0 or host_memory_gb == 0:
                 continue
+
+            condition = (checkpoint_size_gb, host_memory_gb, num_hosts)
+            if condition in seen_conditions:
+                continue
+            seen_conditions.add(condition)
 
             # Data written per node
             data_per_node = checkpoint_size_gb / num_hosts
