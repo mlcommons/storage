@@ -378,3 +378,46 @@ class TestDiscoverScanRootsMultiOrg:
         roots = discover_scan_roots(str(tmp_path), orgname=None,
                                     systemname=None)
         assert roots == [str(slice_root)]
+
+
+class TestSummaryJsonWarningScope:
+    """Worklist A14 site 1 (2026-07-24): DLIO never writes summary.json for
+    datagen runs, and datasize is a pure calculation — warning that it is
+    "missing" for those phases reported 107 lines of impossible-to-satisfy
+    noise in a full reportgen sweep. The warning stays for run dirs, where
+    an absent summary.json genuinely means an incomplete run."""
+
+    def test_datagen_and_datasize_dirs_do_not_warn_about_summary_json(
+        self, tmp_path
+    ):
+        for command in ("datagen", "datasize"):
+            _write_metadata(
+                tmp_path / "training" / "unet3d" / command / "20250115_143022",
+                benchmark_type="training",
+            )
+
+        result = _validate(tmp_path)
+
+        summary_warnings = [
+            w for w in result.warnings if "summary.json" in w
+        ]
+        assert summary_warnings == [], (
+            "A14: datagen/datasize phases can never have a summary.json; "
+            f"got: {summary_warnings}"
+        )
+
+    def test_run_dir_without_summary_json_still_warns_once(self, tmp_path):
+        _write_metadata(
+            tmp_path / "training" / "unet3d" / "run" / "20250115_143022",
+            benchmark_type="training",
+        )
+
+        result = _validate(tmp_path)
+
+        summary_warnings = [
+            w for w in result.warnings if "summary.json" in w
+        ]
+        assert len(summary_warnings) == 1, (
+            "An absent summary.json in a run dir is a real incomplete-run "
+            f"signal and must keep its warning; got: {summary_warnings}"
+        )

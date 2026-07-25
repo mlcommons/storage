@@ -2351,3 +2351,59 @@ class TestFilterListMetricsLogLevel:
             f"Expected the collapse diagnostic at debug; got: "
             f"{logger.debug.call_args_list}"
         )
+
+
+class TestLoadWorkloadSummaryDatagenScope:
+    """Worklist A14 site 2 (2026-07-24): ``_load_workload_summary`` warned
+    about a missing summary.json for datagen/datasize invocations, which can
+    never have one (DLIO doesn't write it for datagen; datasize is a pure
+    calculation). Those runs reach the helper via the Slice-Training /
+    Slice-Checkpointing scalar reads. The warning stays for run-command
+    invocations, where absence is a real artifact gap."""
+
+    @staticmethod
+    def _fake_run(result_dir, command):
+        run = MagicMock()
+        run.result_dir = str(result_dir)
+        run.command = command
+        return run
+
+    @pytest.mark.parametrize("command", ["datagen", "datasize"])
+    def test_missing_summary_for_datagen_datasize_logs_debug(
+        self, tmp_path, command
+    ):
+        gen = _make_bare_generator(tmp_path)
+        gen.logger = MagicMock()
+        run_dir = tmp_path / "results" / "training" / "unet3d" / command / "x"
+        run_dir.mkdir(parents=True)
+
+        summary = gen._load_workload_summary(self._fake_run(run_dir, command))
+
+        assert summary == {}
+        assert gen.logger.warning.call_count == 0, (
+            f"A14: {command} runs can never have a summary.json; "
+            f"got: {gen.logger.warning.call_args_list}"
+        )
+        debug_text = " ".join(str(c) for c in gen.logger.debug.call_args_list)
+        assert "summary.json" in debug_text, (
+            f"Expected the absence traceable at debug; got: "
+            f"{gen.logger.debug.call_args_list}"
+        )
+
+    def test_missing_summary_for_run_command_still_warns(self, tmp_path):
+        gen = _make_bare_generator(tmp_path)
+        gen.logger = MagicMock()
+        run_dir = tmp_path / "results" / "training" / "unet3d" / "run" / "x"
+        run_dir.mkdir(parents=True)
+
+        summary = gen._load_workload_summary(self._fake_run(run_dir, "run"))
+
+        assert summary == {}
+        warning_text = " ".join(
+            str(c) for c in gen.logger.warning.call_args_list
+        )
+        assert "summary.json" in warning_text, (
+            "A missing summary.json for a run-command invocation is a real "
+            f"artifact gap and must keep its warning; got: "
+            f"{gen.logger.warning.call_args_list}"
+        )
