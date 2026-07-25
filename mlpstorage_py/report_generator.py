@@ -1711,10 +1711,15 @@ class ReportGenerator:
         ``statistics.json``. For those, derive the summary IN MEMORY via
         ``vdb_summary.build_vdb_summary``; NEVER write into the submission
         package (it may be read-only or owned by another submitter).
+
+        An EXISTING summary.json may itself be old-format (query metrics
+        only, no ``disk_io`` — e.g. TTA's v3.0 package) while the native
+        stats alongside it are richer. The native-derived summary is merged
+        UNDERNEATH the loaded one: loaded keys win per-key (``None`` values
+        do not shadow), native fills the gaps.
         """
         summary = self._load_workload_summary(run)
-        if summary:
-            return summary
+        built = None
         if run.result_dir:
             try:
                 from mlpstorage_py.benchmarks.vdb_summary import build_vdb_summary
@@ -1725,13 +1730,19 @@ class ReportGenerator:
                     f"vdb: could not derive summary from native stats at "
                     f"{run.result_dir!r}: {e}"
                 )
-                built = None
-            if built:
-                self.logger.verbose(
-                    f"vdb: derived summary in-memory from native stats at "
-                    f"{run.result_dir!r} (legacy package, no summary.json)."
-                )
-                return built
+        if summary and built:
+            return {
+                **built,
+                **{k: v for k, v in summary.items() if v is not None},
+            }
+        if summary:
+            return summary
+        if built:
+            self.logger.verbose(
+                f"vdb: derived summary in-memory from native stats at "
+                f"{run.result_dir!r} (legacy package, no summary.json)."
+            )
+            return built
         return {}
 
     def _aggregate_kvcache(
