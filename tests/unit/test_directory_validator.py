@@ -306,3 +306,75 @@ class TestDiscoverScanRoots:
         roots = discover_scan_roots(str(tmp_path), orgname="Acme",
                                     systemname="sysA")
         assert roots == [str(tmp_path)]
+
+
+class TestDiscoverScanRootsMultiOrg:
+    """Worklist A10 (2026-07-24): an assembled multi-submitter tree has no
+    single orgname (its root carries no sentinel, so reports mode resolves
+    ``orgname=None`` after the A9 soft-gate). ``discover_scan_roots`` must
+    then enumerate EVERY ``{closed,open}/<org>/results/<system>`` slice
+    that exists on disk instead of returning the raw root — the raw root
+    of such a tree contains division dirs and per-submitter code-pool
+    dirs, no benchmark-type dirs, so structure validation exits 3 on it.
+
+    Flat-layout passthrough is preserved: with ``orgname=None`` and no
+    canonical ``<div>/<org>/results/`` shape on disk, the raw root is
+    still returned unchanged (pinned by
+    ``TestDiscoverScanRoots.test_returns_results_dir_when_orgname_missing``)."""
+
+    def _make_canonical_slice(self, tmp_path: Path, mode: str,
+                              orgname: str, systemname: str) -> Path:
+        slice_root = tmp_path / mode / orgname / "results" / systemname
+        run_dir = slice_root / "training" / "unet3d" / "run" / "20260123_120000"
+        run_dir.mkdir(parents=True, exist_ok=True)
+        (run_dir / "training_unet3d_metadata.json").write_text("{}")
+        (run_dir / "summary.json").write_text("{}")
+        return slice_root
+
+    def test_orgname_none_enumerates_all_org_slices(self, tmp_path):
+        """Multi-org tree, no orgname, no systemname → every org's every
+        system slice, across both divisions. Order is deterministic:
+        division (closed, open), then org sorted, then system sorted."""
+        acme_a = self._make_canonical_slice(tmp_path, "closed", "acme", "sysA")
+        acme_b = self._make_canonical_slice(tmp_path, "closed", "acme", "sysB")
+        zeta = self._make_canonical_slice(tmp_path, "closed", "zeta", "sysZ")
+        open_beta = self._make_canonical_slice(tmp_path, "open", "beta", "sysO")
+        roots = discover_scan_roots(str(tmp_path), orgname=None,
+                                    systemname=None)
+        assert roots == [str(acme_a), str(acme_b), str(zeta), str(open_beta)]
+
+    def test_orgname_none_with_systemname_filters_each_org(self, tmp_path):
+        """--systemname without an orgname narrows every org's slice list
+        to that system only (orgs lacking the system contribute none)."""
+        wanted = self._make_canonical_slice(tmp_path, "closed", "acme", "sysA")
+        self._make_canonical_slice(tmp_path, "closed", "acme", "sysB")
+        self._make_canonical_slice(tmp_path, "closed", "zeta", "sysZ")
+        roots = discover_scan_roots(str(tmp_path), orgname=None,
+                                    systemname="sysA")
+        assert roots == [str(wanted)]
+
+    def test_orgname_none_ignores_non_canonical_root_entries(self, tmp_path):
+        """Per-submitter code-pool dirs and stray files at the tree root
+        must not be treated as scan roots, and the raw root must not
+        appear in the result once canonical slices exist."""
+        slice_root = self._make_canonical_slice(
+            tmp_path, "closed", "acme", "sysA"
+        )
+        pool = tmp_path / "Acme" / "code-4a3ce79d"
+        pool.mkdir(parents=True)
+        (tmp_path / "README.md").write_text("assembled tree")
+        # An org dir without a results/ subdir must not contribute either.
+        (tmp_path / "closed" / "no_results_org").mkdir()
+        roots = discover_scan_roots(str(tmp_path), orgname=None,
+                                    systemname=None)
+        assert roots == [str(slice_root)]
+
+    def test_orgname_none_single_org_tree_returns_its_slices(self, tmp_path):
+        """A sentinel-less single-org canonical tree gets the same slice
+        treatment — structure validation must see benchmark-type dirs."""
+        slice_root = self._make_canonical_slice(
+            tmp_path, "closed", "acme", "sysA"
+        )
+        roots = discover_scan_roots(str(tmp_path), orgname=None,
+                                    systemname=None)
+        assert roots == [str(slice_root)]

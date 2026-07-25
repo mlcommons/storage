@@ -474,6 +474,132 @@ class TestMultiOrgnameCollection:
             f"{beta_rows[0].get('Organization')!r}"
         )
 
+
+# --------------------------------------------------------------------------- #
+# TestMultiOrgRollupPlacement — worklist A10/A11 (Curtis, 2026-07-24)         #
+# --------------------------------------------------------------------------- #
+
+
+class TestMultiOrgRollupPlacement:
+    """A10/A11: multi-org tree → per-org rollups + one global at tree root.
+
+    An assembled multi-submitter tree (no sentinel → orgname=None) must:
+
+    - A10: pass structure validation — scan roots are the per-system
+      slices under every ``<div>/<org>/results/``, never the raw root.
+    - A11 (decision (a), Curtis 2026-07-24): the GLOBAL rollup
+      ``results.{csv,json}`` lands at the TREE ROOT (covering every org),
+      and each org additionally gets its own rollup at
+      ``<div>/<org>/results/`` — the same placement a single-org
+      canonical tree already gets. Pre-fix,
+      ``_resolve_effective_results_dir`` returned from its org loop on
+      the FIRST org found, so the alphabetically-first org's tree
+      received the aggregate for everyone.
+
+    This extends D-08 (one top-level file with mixed rows) rather than
+    contradicting it: the top level of a multi-org tree is the tree
+    root, and the per-org rollup at each org's ``results/`` mirrors the
+    established single-org behavior."""
+
+    def _build_tree(self, tmp_path: pathlib.Path) -> pathlib.Path:
+        fixture_src = _FIXTURES_ROOT / "multi_orgname"
+        assert fixture_src.is_dir(), (
+            f"expected multi_orgname fixture at {fixture_src}"
+        )
+        dest = tmp_path / "multi_orgname"
+        shutil.copytree(fixture_src, dest)
+        return dest
+
+    def _run_reportgen(self, dest: pathlib.Path,
+                       validate_structure: bool = False) -> ReportGenerator:
+        args = Namespace(debug=False)
+        gen = ReportGenerator(
+            str(dest), args=args, validate_structure=validate_structure,
+        )
+        rc = gen.generate_reports()
+        assert rc == 0, f"generate_reports returned non-zero exit code {rc}"
+        return gen
+
+    def test_scan_roots_are_per_system_slices_not_raw_root(self, tmp_path):
+        """A10: orgname=None on a canonical multi-org tree must yield the
+        per-system slices; the raw root (which holds only division dirs)
+        must not be a scan root."""
+        dest = self._build_tree(tmp_path)
+        gen = self._run_reportgen(dest)
+        expected = [
+            str(dest / "closed" / "acme" / "results" / "system-a"),
+            str(dest / "closed" / "beta_corp" / "results" / "system-b"),
+        ]
+        assert gen.scan_roots == expected, (
+            f"A10 violated: expected per-system slices as scan roots, "
+            f"got {gen.scan_roots}"
+        )
+
+    def test_structure_validation_passes_on_multi_org_tree(self, tmp_path):
+        """A10 end-to-end: validate_structure=True must not sys.exit(3) —
+        pre-fix the raw root was validated and had no benchmark-type
+        dirs, killing the run before any report was generated."""
+        dest = self._build_tree(tmp_path)
+        gen = self._run_reportgen(dest, validate_structure=True)
+        assert gen.workload_results, (
+            "expected workloads to accumulate after structure validation"
+        )
+
+    def test_global_rollup_lands_at_tree_root_with_all_orgs(self, tmp_path):
+        """A11 decision (a): the global results.{csv,json} covers every
+        org and sits at the tree root — NOT inside the first org's
+        results/ folder."""
+        dest = self._build_tree(tmp_path)
+        gen = self._run_reportgen(dest)
+        assert gen.global_summary_dir == str(dest), (
+            f"A11 violated: global rollup dir should be the tree root "
+            f"{dest}, got {gen.global_summary_dir}"
+        )
+        top_json = dest / "results.json"
+        assert top_json.exists(), (
+            f"expected global results.json at tree root {top_json}"
+        )
+        with open(top_json, "r") as fh:
+            rows = json.load(fh)
+        orgs = {r.get('Organization') for r in rows}
+        assert orgs == {'acme', 'beta_corp'}, (
+            f"global rollup must contain rows from every org, got {orgs}"
+        )
+        # The first org's results/ must NOT receive the global rollup.
+        first_org_rollup = (
+            dest / "closed" / "acme" / "results" / "results.json"
+        )
+        if first_org_rollup.exists():
+            with open(first_org_rollup, "r") as fh:
+                acme_rollup_rows = json.load(fh)
+            acme_orgs = {r.get('Organization') for r in acme_rollup_rows}
+            assert acme_orgs <= {'acme'}, (
+                f"acme's per-org rollup leaked other orgs' rows: {acme_orgs}"
+            )
+
+    def test_per_org_rollups_written_into_each_orgs_results_dir(
+        self, tmp_path
+    ):
+        """A11 decision (a): each org gets its own rollup at
+        <div>/<org>/results/, containing only that org's rows."""
+        dest = self._build_tree(tmp_path)
+        self._run_reportgen(dest)
+        for org in ("acme", "beta_corp"):
+            org_json = dest / "closed" / org / "results" / "results.json"
+            org_csv = dest / "closed" / org / "results" / "results.csv"
+            assert org_json.exists(), (
+                f"A11 violated: expected per-org rollup at {org_json}"
+            )
+            assert org_csv.exists(), (
+                f"A11 violated: expected per-org rollup at {org_csv}"
+            )
+            with open(org_json, "r") as fh:
+                rows = json.load(fh)
+            assert rows, f"per-org rollup at {org_json} is empty"
+            assert {r.get('Organization') for r in rows} == {org}, (
+                f"per-org rollup at {org_json} must contain only {org} rows"
+            )
+
         # D-08 core assertion: the top-level file exists and its rows
         # come from the SAME single results.json file — no per-orgname
         # sub-file was synthesized between the top level and the
