@@ -338,9 +338,15 @@ class TestTrainingRunRulesChecker:
     def test_check_num_files_train_skips_when_system_info_missing(self, mock_logger):
         """Issue #503 bug 1: when the run was loaded from on-disk metadata
         without cluster_information (system_info is None), check_num_files_train
-        must skip the check (return None) and log a warning rather than crash
-        with AttributeError. Before the fix, the AttributeError was caught by
-        the verifier's per-check wrapper and the entire run was marked INVALID."""
+        must skip the check (return None) rather than crash with
+        AttributeError. Before the fix, the AttributeError was caught by
+        the verifier's per-check wrapper and the entire run was marked INVALID.
+
+        Worklist A12 (2026-07-24): this condition ONLY occurs for runs loaded
+        from on-disk metadata (live runs always carry args or cluster info),
+        so surfacing it per run at WARNING was pure reports-mode noise —
+        520 lines in the first full reportgen run. The skip is surfaced at
+        DEBUG instead."""
         data = BenchmarkRunData(
             benchmark_type=BENCHMARK_TYPES.training,
             model="unet3d",
@@ -360,10 +366,15 @@ class TestTrainingRunRulesChecker:
         issue = checker.check_num_files_train()
 
         assert issue is None, "Check must skip cleanly, not return an Issue"
-        # Confirm we surfaced the skip to the user via the logger
+        # A12: the skip is traceable at DEBUG, but must NOT be a per-run
+        # WARNING (it describes tool limitations, not the submission).
+        debugs = [c for c in mock_logger.method_calls if c[0] == 'debug']
+        assert any('check_num_files_train' in str(c) for c in debugs), (
+            f"Expected a debug line naming check_num_files_train; got: {debugs}"
+        )
         warnings = [c for c in mock_logger.method_calls if c[0] == 'warning']
-        assert any('check_num_files_train' in str(c) for c in warnings), (
-            f"Expected a warning naming check_num_files_train; got: {warnings}"
+        assert not any('check_num_files_train' in str(c) for c in warnings), (
+            f"A12: the skip must not warn per run; got: {warnings}"
         )
 
     def test_check_allowed_params_closed_param(self, mock_logger):
