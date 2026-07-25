@@ -1104,6 +1104,48 @@ class TestVdbFinalTableColumns:
             "reportgen must derive summary in-memory, never write into the package"
         )
 
+    def test_existing_summary_lacking_disk_io_merges_native_stats(self, tmp_path):
+        """An old-format summary.json must not shadow richer native stats (R1).
+
+        TTA's v3.0 package carries a run-root summary.json from an older
+        producer (query metrics only, no ``disk_io``) alongside native
+        statistics that DO have ``disk_io`` (host_count + byte counters).
+        ``_load_vdb_summary`` must merge the native-derived summary
+        underneath the loaded one — loaded keys win, native fills the
+        gaps — instead of returning the shadowing summary as-is.
+        """
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        summary = {  # old-format: no disk_io block
+            "throughput_qps": 555.0,
+            "p99_latency_ms": 4.2,
+            "recall": 0.91,
+        }
+        statistics = {
+            "throughput_qps": 111.0,  # conflict: the loaded summary must win
+            "disk_io": {
+                "total_bytes_read_per_sec": 3 * 1024 ** 3,
+                "host_count": 4,
+            },
+        }
+        run_dir = _write_vdb_result_dir(
+            runs_root, "20260704_136000", summary=summary, statistics=statistics
+        )
+        run = BenchmarkRun.from_result_dir(str(run_dir))
+        original_summary_bytes = (run_dir / "summary.json").read_bytes()
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        # Gap-filled from native stats:
+        assert result["vdb_read_bw_gibps"] == pytest.approx(3.0)
+        assert result["vdb_num_client_nodes"] == 4
+        # Loaded summary wins on conflicting keys:
+        assert result["vdb_throughput_qps"] == 555.0
+        assert result["vdb_p99_latency_ms"] == 4.2
+        assert result["vdb_recall"] == pytest.approx(91.0)
+        # The package summary.json must remain byte-identical (no mutation).
+        assert (run_dir / "summary.json").read_bytes() == original_summary_bytes
+
     def test_identity_columns_fall_back_to_persisted_args(self, tmp_path):
         """Legacy packages have empty parameters; identity comes from metadata['args'].
 
