@@ -143,9 +143,11 @@ class TrainingRunRulesChecker(RunRulesChecker):
             # so the 5×memory rule cannot be evaluated. Skip the check rather
             # than crashing the entire verification (which previously marked
             # every run INVALID via an AttributeError caught by the verifier
-            # framework). (#503)
+            # framework). (#503) This condition only occurs for loaded-from-disk
+            # runs, so it describes a tool limitation, not the submission —
+            # surface at debug, not per-run WARNING.
             if "cluster_information" in str(e):
-                self.logger.warning(
+                self.logger.debug(
                     f"Skipping check_num_files_train: {e}. "
                     f"The check requires live cluster info; this run was "
                     f"loaded from on-disk metadata that does not preserve it."
