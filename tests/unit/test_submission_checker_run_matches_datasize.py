@@ -305,7 +305,13 @@ class TestWarningCases:
         )
 
     def test_datadir_mismatch_between_datasize_and_run_warns(self, tmp_path, caplog):
-        """datasize and run target different --data-dir → DATADIR-MISMATCH."""
+        """≥2 distinguishable datasize records, none matching the run's
+        --data-dir → DATADIR-MISMATCH.
+
+        (Worklist A2 narrowed the mismatch: a SINGLE datasize record now
+        matches any run — cardinality comparison is the point of the rule
+        — so this scenario needs two distinct datasize dirs to be a
+        genuine ambiguity worth warning about.)"""
         result, records = _materialize_scenario(
             tmp_path, caplog,
             datasize_num_files=84_375,
@@ -314,6 +320,9 @@ class TestWarningCases:
             data_dir_datasize="/data/old",
             data_dir_datagen="/data/old",
             data_dir_run="/data/new",
+            datasize_extras=[
+                {"num_files_train": 84_375, "data_dir": "/data/other"},
+            ],
         )
         assert result is True
         assert _has_token(records, "[3.3.1 DATADIR-MISMATCH]")
@@ -391,6 +400,78 @@ class TestWarningCases:
         )
         assert result is True
         assert _has_token(records, "[3.3.1 EVAL-FIELD-MISSING]")
+
+
+class TestDatadirMismatchFalsePositives:
+    """Worklist A2 (2026-07-24): DATADIR-MISMATCH false-positive fixes.
+
+    --data-dir is OPTIONAL for `training datasize` (a pure calculation),
+    so most real submissions record ``args.data_dir: null`` there — and
+    exact-string matching then guaranteed a mismatch warning for every
+    run (6 per workload; 160 baseline lines, mostly false). The mismatch
+    is only meaningful when there are ≥2 distinguishable datasize
+    records and none match the run.
+    """
+
+    def test_a2_null_datadir_datasize_matches_any_run(self, tmp_path, caplog):
+        """All datasize records with data_dir=None must still match runs —
+        proven by the UNDERRUN check firing through the matched record."""
+        result, records = _materialize_scenario(
+            tmp_path, caplog,
+            datasize_num_files=84_375,
+            datagen_num_files=84_375,
+            run_num_files=10_000,
+            data_dir_datasize=None,
+            data_dir_datagen="/data/unet3d",
+            data_dir_run="/data/unet3d",
+        )
+        assert result is True
+        assert not _has_token(records, "[3.3.1 DATADIR-MISMATCH]"), (
+            f"null-data-dir datasize must not mismatch (A2); got: "
+            f"{[r.getMessage() for r in records]}"
+        )
+        assert _has_token(records, "[3.3.1 DATASIZE-UNDERRUN]"), (
+            "the null-dir datasize record must actually be matched and "
+            "cross-checked (run 10k < datasize 84,375)"
+        )
+
+    def test_a2_single_datasize_record_matches_despite_different_dir(
+        self, tmp_path, caplog
+    ):
+        """Exactly one datasize record → match it regardless of data_dir;
+        the cardinality comparison is the point of the rule."""
+        result, records = _materialize_scenario(
+            tmp_path, caplog,
+            datasize_num_files=84_375,
+            datagen_num_files=84_375,
+            run_num_files=10_000,
+            data_dir_datasize="/data/old",
+            data_dir_datagen="/data/new",
+            data_dir_run="/data/new",
+        )
+        assert result is True
+        assert not _has_token(records, "[3.3.1 DATADIR-MISMATCH]")
+        assert _has_token(records, "[3.3.1 DATASIZE-UNDERRUN]")
+
+    def test_a2_pruned_datasize_metadata_no_mismatch(self, tmp_path, caplog):
+        """Datasize metadata pruned by the submitter → the record drops out
+        of grouping; MALFORMED reports it, MISMATCH must not pile on."""
+        workload_dir = _build_training_tree(
+            tmp_path,
+            datasize_num_files=84_375,
+            datagen_num_files=84_375,
+            run_num_files=84_375,
+        )
+        for meta in (workload_dir / "datasize").rglob("*metadata.json"):
+            meta.unlink()
+        root = _scaffold_division_root(tmp_path, workload_dir)
+        result, records = _run_rule(root, caplog)
+        assert result is True
+        assert _has_token(records, "[3.3.1 DATASIZE-MALFORMED]")
+        assert not _has_token(records, "[3.3.1 DATADIR-MISMATCH]"), (
+            "pruned datasize metadata is already reported as MALFORMED; "
+            "a per-run MISMATCH on top is noise (A2)"
+        )
 
 
 class TestDatasizeMalformedCases:
