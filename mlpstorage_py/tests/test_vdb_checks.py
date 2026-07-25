@@ -216,6 +216,12 @@ def _warnings(mock_logger, rule_id: str, rule_name: str):
     return [m for m in mock_logger.warnings if prefix in m]
 
 
+def _infos(mock_logger, rule_id: str, rule_name: str):
+    """Return mock_logger.infos entries tagged with the given rule prefix."""
+    prefix = "[%s %s]" % (rule_id, rule_name)
+    return [m for m in mock_logger.infos if prefix in m]
+
+
 # ===========================================================================
 # Mode-guard sweep — proves all 17 rules no-op on non-vdb submissions
 # ===========================================================================
@@ -280,9 +286,13 @@ class Test_5_1_1_VdbDatasetScale:
             run_files=run_files,
         )
         assert check.vdb_dataset_scale() is True
-        # The deferred-data warning is expected.
-        assert _warnings(mock_logger, "5.1.1", "vdbDatasetScale"), (
-            "expected deferred scale-table warn"
+        # A6 (2026-07-24): the deferred-table note reports validator
+        # incompleteness, not a submission problem — INFO, not WARNING.
+        assert _infos(mock_logger, "5.1.1", "vdbDatasetScale"), (
+            "expected deferred scale-table note at INFO"
+        )
+        assert _warnings(mock_logger, "5.1.1", "vdbDatasetScale") == [], (
+            "deferred-table note must not be a per-submission WARNING (A6)"
         )
         assert _violations(mock_logger, "5.1.1", "vdbDatasetScale") == []
 
@@ -466,9 +476,10 @@ class Test_5_3_2_VdbRecallReported:
             leaf, "closed", mock_logger, run_files=run_files,
         )
         assert check.vdb_recall_reported() is True
-        assert _warnings(mock_logger, "5.3.2", "vdbRecallReported"), (
-            "expected deferred recall-table warn"
+        assert _infos(mock_logger, "5.3.2", "vdbRecallReported"), (
+            "expected deferred recall-table note at INFO (A6)"
         )
+        assert _warnings(mock_logger, "5.3.2", "vdbRecallReported") == []
         assert _violations(mock_logger, "5.3.2", "vdbRecallReported") == []
 
     def test_missing_recall_without_fallback_logs_violation(self, tmp_path, mock_logger):
@@ -656,9 +667,10 @@ class Test_5_3_3_VdbQueryCountMinimum:
             leaf, "closed", mock_logger, run_files=run_files,
         )
         assert check.vdb_query_count_minimum() is True
-        assert _warnings(mock_logger, "5.3.3", "vdbQueryCountMinimum"), (
-            "expected deferred query-table warn"
+        assert _infos(mock_logger, "5.3.3", "vdbQueryCountMinimum"), (
+            "expected deferred query-table note at INFO (A6)"
         )
+        assert _warnings(mock_logger, "5.3.3", "vdbQueryCountMinimum") == []
         assert _violations(mock_logger, "5.3.3", "vdbQueryCountMinimum") == []
 
     def test_missing_qps_and_query_count_logs_violation(self, tmp_path, mock_logger):
