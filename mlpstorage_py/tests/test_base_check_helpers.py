@@ -186,3 +186,27 @@ class TestRunChecksUnchanged:
         c.init_checks()
         result = c.run_checks()
         assert result is False
+
+
+class TestAggregateFailureLineWording:
+    """Worklist A8 (2026-07-24): the aggregate failure line doubled the word
+    'checks' — subclass names already end in 'checks' ('directory checks',
+    'submission structure checks'), and the format string appended a
+    literal 'Checks', producing 'Some directory checks Checks failed for'
+    (107 baseline lines)."""
+
+    def test_failure_line_has_no_doubled_checks_word(self, mock_log):
+        class FailingCheck(BaseCheck):
+            def init_checks(self):
+                self.checks = [lambda: False]
+
+        c = FailingCheck(log=mock_log, path="/p")
+        c.name = "directory checks"
+        c.init_checks()
+        c()
+        aggregate = [
+            m for m in mock_log.formatted_errors() if "failed for" in m
+        ]
+        assert aggregate == ["Some directory checks failed for: /p"], (
+            f"doubled-word aggregate line (A8); got {aggregate}"
+        )
