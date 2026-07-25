@@ -608,12 +608,19 @@ class TrainingCheck(BaseCheck):
         (Rules.md 3.3.3)
 
         Per the binding table in Plan 03-02 `<interfaces>`: this rule is advisory,
-        not a violation. The existing ``self.log.warning`` call is preserved; only
-        the ``@rule`` decorator is added so ``discover_rules`` reports 3.3.3 covered.
+        not a violation.
+
+        Worklist A5 (2026-07-24): the advisory routes through
+        ``warn_violation`` so the line carries the rule token, the
+        submission path, and the run timestamp (the old bare
+        ``self.log.warning`` was unattributable in a whole-tree report),
+        and identical conditions across a workload's runs are warned
+        once, not per run.
         """
         valid = True
         if self.mode != "training":
             return valid
+        seen_counts = set()
         for summary, metadata, ts in self.submissions_logs.run_files:
             if summary is None:
                 self.log.debug(
@@ -625,9 +632,15 @@ class TrainingCheck(BaseCheck):
             num_accelerators = summary.get("num_accelerators", 1)
 
             if num_hosts == 1 and num_accelerators < 4:
-                self.log.warning(
-                    "Single-host submission has only %d accelerators. Consider increasing via --num-accelerators",
-                    num_accelerators
+                if num_accelerators in seen_counts:
+                    continue
+                seen_counts.add(num_accelerators)
+                self.warn_violation(
+                    "3.3.3", "trainingSingleHostSimulatedAccelerators", self.path,
+                    "run/%s: single-host run simulates only %d "
+                    "accelerator(s); a representative submission is "
+                    "expected to simulate at least 4 (--num-accelerators)",
+                    ts, num_accelerators,
                 )
 
         return valid
