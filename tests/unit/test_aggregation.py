@@ -2288,3 +2288,66 @@ class TestNumpyPandasScipyForbidden:
             "STACK.md A-01 anchor line 'from statistics import fmean' "
             "missing from report_generator.py."
         )
+
+
+class TestFilterListMetricsLogLevel:
+    """Worklist A13 (2026-07-24): ``_filter_list_metrics`` diagnostics belong
+    at debug, not WARNING.
+
+    The dropped keys are the same structural DLIO scalars
+    (``train_au_mean_percentage``, ``save_checkpoint_*``, ...) on every run,
+    so per-run WARNINGs added 582 lines of noise to a full reportgen sweep
+    (462 "dropped N non-list metric key(s)" + 120 "no list-valued metrics
+    remain"). The real fix — consuming the scalar means — is tracked in
+    issues #645/#646 pending the WG's Rules.md §4.7 clarification; until
+    then the diagnostics stay traceable with --debug.
+    """
+
+    def test_mixed_block_drops_scalars_at_debug_not_warning(self):
+        from mlpstorage_py.rules.models import _filter_list_metrics
+
+        logger = MagicMock()
+        block = {
+            "train_throughput_samples_per_second": [1.0, 2.0],
+            "train_au_percentage": [90.0, 91.0],
+            "train_au_mean_percentage": 90.5,
+            "train_au_meet_expectation": "success",
+        }
+
+        filtered = _filter_list_metrics(block, logger=logger)
+
+        assert filtered == {
+            "train_throughput_samples_per_second": [1.0, 2.0],
+            "train_au_percentage": [90.0, 91.0],
+        }
+        assert logger.warning.call_count == 0, (
+            f"A13: dropping structural DLIO scalars must not warn per run; "
+            f"got: {logger.warning.call_args_list}"
+        )
+        debug_text = " ".join(str(c) for c in logger.debug.call_args_list)
+        assert "dropped" in debug_text, (
+            f"Expected the drop diagnostic at debug; got: "
+            f"{logger.debug.call_args_list}"
+        )
+
+    def test_all_scalar_block_returns_none_at_debug_not_warning(self):
+        from mlpstorage_py.rules.models import _filter_list_metrics
+
+        logger = MagicMock()
+        block = {
+            "save_checkpoint_duration_mean_seconds": 1.5,
+            "save_checkpoint_throughput_mean_GB_per_second": 12.0,
+        }
+
+        filtered = _filter_list_metrics(block, logger=logger)
+
+        assert filtered is None
+        assert logger.warning.call_count == 0, (
+            f"A13: all-scalar collapse must not warn per run; "
+            f"got: {logger.warning.call_args_list}"
+        )
+        debug_text = " ".join(str(c) for c in logger.debug.call_args_list)
+        assert "no list-valued metrics" in debug_text, (
+            f"Expected the collapse diagnostic at debug; got: "
+            f"{logger.debug.call_args_list}"
+        )
