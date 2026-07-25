@@ -1681,10 +1681,16 @@ class ReportGenerator:
             else:
                 host_count = 1
         out["vdb_num_client_nodes"] = host_count
-        # Storage IOPs is not measured (disk_io carries bytes, not op counts) —
-        # emit the column present-but-blank so the table has it (submitter or a
-        # future instrumentation task fills it).
-        out["vdb_storage_iops"] = None
+        # R4: Storage IOPs = read + write IOPS when the package measured
+        # them. ENHANCED-mode vdbbench emits ``disk_io.read_iops`` /
+        # ``write_iops`` (enhanced_bench.py); SIMPLE-mode packages carry
+        # byte counters only, so the column stays blank for them.
+        read_iops = disk_io.get("read_iops") if isinstance(disk_io, dict) else None
+        write_iops = disk_io.get("write_iops") if isinstance(disk_io, dict) else None
+        iops_parts = [
+            v for v in (read_iops, write_iops) if isinstance(v, (int, float))
+        ]
+        out["vdb_storage_iops"] = sum(iops_parts) if iops_parts else None
 
         # Identity columns (D-15). Prefer the structured ``parameters`` block
         # (the combined_params fix); fall back to the persisted per-run
