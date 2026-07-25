@@ -431,6 +431,86 @@ def test_benchmark_init_raises_when_orgname_missing():
 
 
 # ---------------------------------------------------------------------------- #
+# A9 (validate-cleanup worklist) — `reports` mode soft-resolves the sentinel   #
+# ---------------------------------------------------------------------------- #
+#
+# An assembled multi-submitter submission tree (e.g. submissions_storage_v3.0)
+# has no single-org sentinel — `mlpstorage init <org>` is semantically wrong
+# there and the tree must stay read-only. reportgen already handles a missing
+# orgname (discover_scan_roots falls back to walking the whole tree), so the
+# LAY-03 gate must soft-resolve for `reports`: use the sentinel when present,
+# proceed with args.orgname=None when absent. Benchmark modes keep hard-fail.
+
+
+class TestReportsModeSoftGate:
+    """`reports` mode: sentinel optional; benchmark modes unchanged."""
+
+    def test_reports_mode_proceeds_without_sentinel(self, tmp_path):
+        """reportgen against an uninitialised dir must NOT raise E101; it
+        reaches ReportGenerator with args.orgname None."""
+        pytest.importorskip("mlpstorage_py.report_generator")
+        from mlpstorage_py import main as main_mod
+        from mlpstorage_py.config import EXIT_CODE
+
+        uninit = tmp_path / "subs"
+        uninit.mkdir()
+
+        argv = ["mlpstorage", "reports", "reportgen",
+                "--results-dir", str(uninit)]
+
+        with patch("mlpstorage_py.report_generator.ReportGenerator") as mock_rg, \
+             patch("sys.argv", argv):
+            mock_rg.return_value.generate_reports.return_value = EXIT_CODE.SUCCESS
+            rc = main_mod._main_impl()
+
+        assert rc == EXIT_CODE.SUCCESS
+        mock_rg.assert_called_once()
+        args_passed = mock_rg.call_args[0][1]
+        assert getattr(args_passed, "orgname", "MISSING") is None, (
+            "Expected args.orgname=None on the sentinel-less reports path; "
+            f"got {getattr(args_passed, 'orgname', 'MISSING')!r}"
+        )
+
+    def test_reports_mode_still_resolves_sentinel_when_present(self, tmp_path):
+        """Initialized dir: reports mode keeps canonical-slice behavior —
+        args.orgname comes from the sentinel exactly as before."""
+        pytest.importorskip("mlpstorage_py.report_generator")
+        from mlpstorage_py import main as main_mod
+        from mlpstorage_py.config import EXIT_CODE
+
+        init_dir = _init_results_dir(tmp_path, orgname="Acme")
+
+        argv = ["mlpstorage", "reports", "reportgen",
+                "--results-dir", init_dir]
+
+        with patch("mlpstorage_py.report_generator.ReportGenerator") as mock_rg, \
+             patch("sys.argv", argv):
+            mock_rg.return_value.generate_reports.return_value = EXIT_CODE.SUCCESS
+            rc = main_mod._main_impl()
+
+        assert rc == EXIT_CODE.SUCCESS
+        args_passed = mock_rg.call_args[0][1]
+        assert getattr(args_passed, "orgname", None) == "Acme"
+
+    def test_benchmark_modes_still_hard_fail_without_sentinel(self, tmp_path):
+        """The soft path is reports-only: a benchmark mode against the same
+        uninitialised dir still raises the locked LAY-03 error."""
+        from mlpstorage_py import main as main_mod
+        from mlpstorage_py.errors import ConfigurationError
+
+        uninit = tmp_path / "subs"
+        uninit.mkdir()
+
+        with patch.object(main_mod, "update_args"), \
+             patch.object(main_mod, "run_benchmark"), \
+             patch("sys.argv", _datagen_argv(str(uninit))):
+            with pytest.raises(ConfigurationError) as excinfo:
+                main_mod._main_impl()
+
+        assert "has not been initialized" in str(excinfo.value)
+
+
+# ---------------------------------------------------------------------------- #
 # WR-06 — defense-in-depth orgname re-validation at the gate                   #
 # ---------------------------------------------------------------------------- #
 
