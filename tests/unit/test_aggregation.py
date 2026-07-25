@@ -1146,6 +1146,47 @@ class TestVdbFinalTableColumns:
         # The package summary.json must remain byte-identical (no mutation).
         assert (run_dir / "summary.json").read_bytes() == original_summary_bytes
 
+    def test_storage_iops_from_enhanced_disk_io(self, tmp_path):
+        """R4: Storage IOPs = read_iops + write_iops from disk_io.
+
+        ENHANCED-mode vdbbench emits per-run ``disk_io.read_iops`` /
+        ``write_iops`` (enhanced_bench.py); SIMPLE-mode packages carry
+        byte counters only and the column stays blank (pinned by
+        ``test_read_bw_and_client_nodes_from_disk_io``).
+        """
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        summary = {
+            "throughput_qps": 1.0,
+            "disk_io": {
+                "total_bytes_read_per_sec": 1024 ** 3,
+                "host_count": 2,
+                "read_iops": 1200.5,
+                "write_iops": 30.2,
+            },
+        }
+        run_dir = _write_vdb_result_dir(runs_root, "20260704_143000", summary=summary)
+        run = BenchmarkRun.from_result_dir(str(run_dir))
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        assert result["vdb_storage_iops"] == pytest.approx(1230.7)
+
+    def test_storage_iops_read_only_when_write_absent(self, tmp_path):
+        """R4: a lone read_iops still populates the column."""
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        summary = {
+            "throughput_qps": 1.0,
+            "disk_io": {"read_iops": 900.0},
+        }
+        run_dir = _write_vdb_result_dir(runs_root, "20260704_144000", summary=summary)
+        run = BenchmarkRun.from_result_dir(str(run_dir))
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        assert result["vdb_storage_iops"] == pytest.approx(900.0)
+
     def test_client_nodes_falls_back_to_num_client_hosts_arg(self, tmp_path):
         """R2: no ``disk_io.host_count`` → ``args.num_client_hosts``.
 
