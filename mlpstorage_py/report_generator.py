@@ -279,6 +279,13 @@ class ReportGenerator:
             apply_logging_options(self.logger, args)
 
         self.results_dir = results_dir
+        # Per-org rollup targets for a multi-org tree (worklist A11
+        # decision (a)): populated by _resolve_effective_results_dir when
+        # the canonical probe finds >= 2 distinct orgs. Keyed by
+        # (division, orgname) -> "<root>/<division>/<orgname>/results"
+        # so generate_reports can drop each org's own results.{csv,json}
+        # next to its per-system subdirectories.
+        self._per_org_rollup_dirs: Dict[tuple, str] = {}
         # Detect the canonical mlpstorage submission tree (sentinel-bearing root
         # with <division>/<orgname>/results/<system>/<benchmark-type>/...) and
         # resolve --results-dir down to the per-system subtree that contains
@@ -383,10 +390,15 @@ class ReportGenerator:
         expected = ResultsDirectoryValidator.EXPECTED_BENCHMARK_TYPES
         if any((root / b).is_dir() for b in expected):
             return results_dir
-        # Canonical tree probe.
+        # Canonical tree probe. Collect EVERY (division, org) match first
+        # — returning on the first org found is the worklist A11 bug: on
+        # an assembled multi-submitter tree the alphabetically-first
+        # org's results/ received the global rollup for everyone.
         systemname = None
         if self.args is not None:
             systemname = getattr(self.args, 'systemname', None)
+        # (division, org_dir, rebind_target) per canonical match.
+        matches: List[tuple] = []
         for division in ('closed', 'open'):
             division_dir = root / division
             if not division_dir.is_dir():
@@ -398,25 +410,51 @@ class ReportGenerator:
                 if systemname:
                     system_dir = results_root / systemname
                     if system_dir.is_dir():
-                        self.logger.info(
-                            "Detected canonical submission tree; scoping to "
-                            "%s/results/%s for --systemname=%s",
-                            org_dir, systemname, systemname,
-                        )
-                        return str(system_dir)
+                        matches.append((division, org_dir, system_dir))
                 else:
-                    # No --systemname: rebind to the org's results/ folder
-                    # itself. The global summary lands here (see
-                    # _global_summary_dir_for), and discover_scan_roots
-                    # walks each system slice under it.
-                    self.logger.info(
-                        "Detected canonical submission tree without "
-                        "--systemname; aggregating across every system "
-                        "under %s",
-                        results_root,
-                    )
-                    return str(results_root)
-        return results_dir
+                    matches.append((division, org_dir, results_root))
+        if not matches:
+            return results_dir
+
+        distinct_orgs = {org_dir.name for _div, org_dir, _t in matches}
+        if len(distinct_orgs) > 1:
+            # Multi-org tree (A11 decision (a), 2026-07-24): keep the
+            # tree root as the effective results dir so the GLOBAL
+            # rollup lands there (covering every org), and register each
+            # org's results/ folder for its own per-org rollup.
+            self._per_org_rollup_dirs = {
+                (division, org_dir.name): str(org_dir / 'results')
+                for division, org_dir, _target in matches
+            }
+            self.logger.info(
+                "Detected multi-org submission tree (%d orgs) under %s; "
+                "global rollup lands at the tree root, per-org rollups "
+                "in each <division>/<org>/results/",
+                len(distinct_orgs), root,
+            )
+            return results_dir
+
+        # Single org — preserve the established single-submitter
+        # behavior: rebind to the first matching slice.
+        division, org_dir, target = matches[0]
+        if systemname:
+            self.logger.info(
+                "Detected canonical submission tree; scoping to "
+                "%s/results/%s for --systemname=%s",
+                org_dir, systemname, systemname,
+            )
+        else:
+            # No --systemname: rebind to the org's results/ folder
+            # itself. The global summary lands here (see
+            # _global_summary_dir_for), and discover_scan_roots
+            # walks each system slice under it.
+            self.logger.info(
+                "Detected canonical submission tree without "
+                "--systemname; aggregating across every system "
+                "under %s",
+                target,
+            )
+        return str(target)
 
     def _global_summary_dir_for(self, effective_results_dir: str) -> str:
         """Return the directory where the GLOBAL rollup should be written.
@@ -614,6 +652,22 @@ class ReportGenerator:
         # top-level file becomes a header-only CSV / `[]` JSON.
         self.write_json_file(all_rows, target_dir=self.global_summary_dir)
         self.write_csv_file(all_rows, target_dir=self.global_summary_dir)
+
+        # (g) Multi-org tree only (worklist A11 decision (a)): each org
+        # additionally gets its own rollup at <division>/<org>/results/,
+        # holding only that org's rows — the same placement a single-org
+        # canonical tree gets for its global. `_per_org_rollup_dirs` is
+        # empty outside multi-org mode, so this is a no-op elsewhere.
+        for (division, org), target_dir in sorted(
+            self._per_org_rollup_dirs.items()
+        ):
+            org_rows = [
+                r for r in all_rows
+                if (r.get('category', '') or '').lower() == division
+                and r.get('orgname', '') == org
+            ]
+            self.write_json_file(org_rows, target_dir=target_dir)
+            self.write_csv_file(org_rows, target_dir=target_dir)
 
         return EXIT_CODE.SUCCESS
 

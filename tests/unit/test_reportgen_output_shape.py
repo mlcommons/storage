@@ -474,6 +474,35 @@ class TestMultiOrgnameCollection:
             f"{beta_rows[0].get('Organization')!r}"
         )
 
+        # D-08 core assertion: the top-level file exists and its rows
+        # come from the SAME single results.json file — no per-orgname
+        # sub-file was synthesized between the top level and the
+        # per-model level. (Worklist A11 moved the top level of a
+        # multi-org tree to the tree root, collecting EVERY org's rows;
+        # the per-org rollup at each <div>/<org>/results/ is pinned by
+        # TestMultiOrgRollupPlacement, not here.)
+        top_level_json = pathlib.Path(gen.global_summary_dir) / "results.json"
+        assert top_level_json.exists(), (
+            f"expected top-level results.json at {top_level_json}"
+        )
+        with open(top_level_json, "r") as fh:
+            top_rows = json.load(fh)
+
+        # The fixed-schema 'Organization' column is the emitted successor
+        # to the machine-key 'orgname' — it distinguishes cross-org rows.
+        top_orgnames = {r.get('Organization') for r in top_rows}
+        assert top_orgnames, (
+            f"top-level results.json is empty; expected at least one org's rows"
+        )
+        assert '' not in top_orgnames, (
+            f"D-08 violated: top-level rows include empty Organization. "
+            f"Organizations seen: {top_orgnames}"
+        )
+        assert top_orgnames.issubset({'acme', 'beta_corp'}), (
+            f"D-08 violated: top-level rows include unexpected Organizations "
+            f"{top_orgnames - {'acme', 'beta_corp'}}"
+        )
+
 
 # --------------------------------------------------------------------------- #
 # TestMultiOrgRollupPlacement — worklist A10/A11 (Curtis, 2026-07-24)         #
@@ -599,44 +628,3 @@ class TestMultiOrgRollupPlacement:
             assert {r.get('Organization') for r in rows} == {org}, (
                 f"per-org rollup at {org_json} must contain only {org} rows"
             )
-
-        # D-08 core assertion: the top-level file exists and its rows
-        # come from the SAME single results.json file — no per-orgname
-        # sub-file was synthesized between the top level and the
-        # per-model level. Count top-level results.json files under
-        # dest (should be exactly one at global_summary_dir; the
-        # per-model rollups DO NOT COUNT as they live at model dirs,
-        # not at any intermediate orgname level).
-        top_level_json = pathlib.Path(gen.global_summary_dir) / "results.json"
-        assert top_level_json.exists(), (
-            f"expected top-level results.json at {top_level_json}"
-        )
-        with open(top_level_json, "r") as fh:
-            top_rows = json.load(fh)
-
-        # The top-level file, when reportgen is invoked at the
-        # dest (multi_orgname root, no --systemname), aggregates ONE
-        # org's tree at a time (the resolver picks the first
-        # sorted). The D-08 invariant is that if BOTH orgs are under
-        # the same `<results-dir>` at the level ReportGenerator
-        # actually scans, they collapse into ONE top-level file.
-        # The multi_orgname fixture's directory shape puts each org
-        # under its own `results/` sub-tree, so we assert instead
-        # that the top_rows carry orgname distinguishers (either
-        # acme OR beta_corp — never blank/other). This still catches
-        # any regression that would COLLAPSE cross-org rows or drop
-        # the orgname column.
-        # The fixed-schema 'Organization' column is the emitted successor
-        # to the machine-key 'orgname' — it distinguishes cross-org rows.
-        top_orgnames = {r.get('Organization') for r in top_rows}
-        assert top_orgnames, (
-            f"top-level results.json is empty; expected at least one org's rows"
-        )
-        assert '' not in top_orgnames, (
-            f"D-08 violated: top-level rows include empty Organization. "
-            f"Organizations seen: {top_orgnames}"
-        )
-        assert top_orgnames.issubset({'acme', 'beta_corp'}), (
-            f"D-08 violated: top-level rows include unexpected Organizations "
-            f"{top_orgnames - {'acme', 'beta_corp'}}"
-        )

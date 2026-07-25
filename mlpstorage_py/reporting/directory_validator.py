@@ -47,9 +47,17 @@ def discover_scan_roots(
     flat results root — which it structurally is (its children are
     ``<benchmark>/<model>/<command>/<datetime>/``).
 
-    Otherwise (orgname missing, or no matching canonical slice found on
-    disk) the function returns ``[results_dir]`` so flat-layout callers
-    continue to work unchanged.
+    When ``orgname`` is *not* supplied (worklist A10 — an assembled
+    multi-submitter tree has no sentinel, so reports mode resolves
+    ``orgname=None``), the canonical shape is probed for EVERY org:
+    scan roots become each ``<div>/<org>/results/<system>`` slice found
+    across both divisions (filtered to ``systemname`` when given). The
+    raw root of such a tree holds only division dirs and per-submitter
+    code-pool dirs — no benchmark-type dirs — so returning it would fail
+    structure validation outright.
+
+    Otherwise (no canonical slice found on disk) the function returns
+    ``[results_dir]`` so flat-layout callers continue to work unchanged.
 
     Args:
         results_dir: Top-level path (a sentinel-bearing submission root in
@@ -70,6 +78,34 @@ def discover_scan_roots(
     """
     root = Path(results_dir)
     if not orgname:
+        multi_org_roots: List[str] = []
+        for mode in _CANONICAL_MODES:
+            mode_dir = root / mode
+            if not mode_dir.is_dir():
+                continue
+            for org_dir in sorted(
+                p for p in mode_dir.iterdir() if p.is_dir()
+            ):
+                results_parent = org_dir / "results"
+                if not results_parent.is_dir():
+                    continue
+                if systemname:
+                    candidate = results_parent / systemname
+                    if candidate.is_dir():
+                        multi_org_roots.append(str(candidate))
+                else:
+                    multi_org_roots.extend(
+                        str(p) for p in sorted(results_parent.iterdir())
+                        if p.is_dir()
+                    )
+        if multi_org_roots:
+            if logger:
+                logger.debug(
+                    "discover_scan_roots: orgname=None, canonical "
+                    f"multi-org tree under {root} — "
+                    f"{len(multi_org_roots)} system slice(s) discovered"
+                )
+            return multi_org_roots
         return [str(root)]
 
     canonical_roots: List[str] = []
