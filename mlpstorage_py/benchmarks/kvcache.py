@@ -814,16 +814,19 @@ class KVCacheBenchmark(Benchmark):
 
         Sums read/write bandwidth and token throughput across all rank files.
         Takes the mean of read/write bandwidth and token throughput across
-        the trials. Takes max storage_io_latency_ms.p95 across all ranks and
-        trials. Takes the max Records missing files without crashing and
-        sets partial_failure. When storage_entries == 0, logs that the
-        working set was served from the CPU tier.
+        the trials. Takes max storage_io_latency_ms.p95 (per-request
+        cumulative storage I/O time) and max cache_stats.storage_read_p95_ms
+        (per-IO read latency, R5) across all ranks and trials. Records
+        missing files without crashing and sets partial_failure. When
+        storage_entries == 0, logs that the working set was served from
+        the CPU tier.
         """
         all_read_bw = []
         all_write_bw = []
         all_avg_throughput = []
         all_storage_throughput = []
         all_p95_latency = []
+        all_read_p95 = []
         missing_files = []
         cpu_tier_flags = []
         for trial_dir in trial_dirs:
@@ -832,6 +835,7 @@ class KVCacheBenchmark(Benchmark):
             trial_avg_throughput = []
             trial_storage_throughput = []
             trial_p95_latency = []
+            trial_read_p95 = []
             for rank_idx in range(expected_rank_count):
                 rank_dir = Path(trial_dir) / f"rank_{rank_idx}"
                 result_file = next(rank_dir.glob('kvcache_results_*.json'), None)
@@ -855,6 +859,13 @@ class KVCacheBenchmark(Benchmark):
                     trial_avg_throughput.append(summary.get('avg_throughput_tokens_per_sec', 0.0))
                     trial_storage_throughput.append(summary.get('storage_throughput_tokens_per_sec', 0.0))
                     trial_p95_latency.append(summary.get('storage_io_latency_ms', {}).get('p95', 0.0))
+                    # Per-IO storage read latency percentile (R5). The
+                    # benchmark only writes this key when the rank did at
+                    # least one storage read, so absence means "no storage
+                    # reads on this rank" — skip, don't coerce to 0.0.
+                    rank_read_p95 = cache_stats.get('storage_read_p95_ms')
+                    if rank_read_p95 is not None:
+                        trial_read_p95.append(rank_read_p95)
                 except Exception as e:
                     self.logger.warning(f"Failed to parse {result_file}: {e}")
                     missing_files.append(str(result_file))
@@ -871,6 +882,10 @@ class KVCacheBenchmark(Benchmark):
                 all_avg_throughput.append(sum(trial_avg_throughput))
                 all_storage_throughput.append(sum(trial_storage_throughput))
                 all_p95_latency.append(max(trial_p95_latency))
+            # Guarded separately: a trial can parse fine yet have no rank
+            # that performed a storage read (fully CPU/GPU-tier-served).
+            if trial_read_p95:
+                all_read_p95.append(max(trial_read_p95))
         if missing_files:
             hosts = getattr(self.args, 'hosts', None) or []
             multi_host = any(not _is_localhost(h.split(':')[0]) for h in hosts)
@@ -894,6 +909,11 @@ class KVCacheBenchmark(Benchmark):
             'aggregated_avg_throughput_tokens_per_sec': fmean(all_avg_throughput) if all_avg_throughput else None,
             'aggregated_storage_throughput_tokens_per_sec': fmean(all_storage_throughput) if all_storage_throughput else None,
             'aggregated_p95_latency_ms': max(all_p95_latency) if all_p95_latency else None,
+            # Per-IO storage read p95 (R5) — the value the report's
+            # "P95 Read Latency (ms)" column surfaces. Distinct from
+            # aggregated_p95_latency_ms, which is per-request cumulative
+            # storage I/O time (reads + writes).
+            'aggregated_storage_read_p95_ms': max(all_read_p95) if all_read_p95 else None,
             'rank_count': expected_rank_count,
             'trial_count': len(trial_dirs),
             'partial_failure': len(missing_files) > 0,

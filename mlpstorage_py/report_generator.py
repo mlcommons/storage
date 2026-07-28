@@ -9,6 +9,7 @@ from __future__ import annotations
 from typing import Union, Literal
 
 import csv
+import glob
 import json
 import os.path
 import pprint
@@ -188,7 +189,11 @@ _KVCACHE_GROUP_METRICS = [
     ("Throughput (tok/s)", "aggregated_avg_throughput_tokens_per_sec"),
     ("Read B/W (GiB/s)", "aggregated_read_bandwidth_gbps"),
     ("Write B/W (GiB/s)", "aggregated_write_bandwidth_gbps"),
-    ("P95 Read Latency (ms)", "aggregated_p95_latency_ms"),
+    # R5: per-IO read latency percentile. NOT aggregated_p95_latency_ms —
+    # that source field is the P95 of per-request cumulative storage I/O
+    # time (all batched decode reads + miss writes summed per request),
+    # which inflated this column ~10-500x for every Storage Only run.
+    ("P95 Read Latency (ms)", "aggregated_storage_read_p95_ms"),
 ]
 
 # Which workload block a row fills, keyed by the internal benchmark_type
@@ -1809,6 +1814,13 @@ class ReportGenerator:
             the resulting output columns look like
             ``kvcache_option_<opt>_aggregated_read_bandwidth_gbps`` —
             preserving the grep-chain from source to output (D-17).
+          - R5 backfill: options whose summary.json predates
+            ``aggregated_storage_read_p95_ms`` get that one field
+            recomputed from the per-rank result files (see
+            ``_backfill_kvcache_read_p95``) so existing submissions
+            gain the corrected "P95 Read Latency (ms)" source without
+            a rerun. This is a documented exception to the D-22
+            pass-through boundary.
         """
         run = runs[0]
         summary = self._load_workload_summary(run)
@@ -1853,7 +1865,63 @@ class ReportGenerator:
                     # verbatim to preserve the grep-chain from source
                     # summary.json field to output column name.
                     out[f"kvcache_option_{option_name}_{metric_name}"] = value
+                # R5 backfill — the one deliberate exception to the D-22
+                # "no math in reportgen" boundary. summary.json files
+                # written before R5 lack ``aggregated_storage_read_p95_ms``
+                # (the per-IO read latency the "P95 Read Latency (ms)"
+                # column surfaces), but the per-rank result files they
+                # were aggregated from are part of every submission, so
+                # the field is recomputed here rather than asking
+                # submitters to rerun. Same convention as the run-time
+                # aggregation: max across ranks and trials. A present
+                # summary field — even an honest ``None`` from a run
+                # with zero storage reads — wins over recomputation.
+                if "aggregated_storage_read_p95_ms" not in option_dict:
+                    backfilled = self._backfill_kvcache_read_p95(run, option_name)
+                    if backfilled is not None:
+                        out[
+                            f"kvcache_option_{option_name}_aggregated_storage_read_p95_ms"
+                        ] = backfilled
         return out
+
+    def _backfill_kvcache_read_p95(
+        self, run: BenchmarkRun, option_name: str,
+    ) -> Optional[float]:
+        """Recompute per-IO storage read p95 from per-rank result files.
+
+        Mirrors the run-time aggregation in
+        ``benchmarks/kvcache.py._aggregate_option_results`` (R5): max of
+        ``summary.cache_stats.storage_read_p95_ms`` across every rank
+        file of every trial for the option. Ranks that never performed a
+        storage read do not carry the key and are skipped — a run where
+        no rank did storage reads returns ``None`` (blank column), never
+        a fabricated ``0.0``.
+        """
+        if not run.result_dir:
+            return None
+        pattern = os.path.join(
+            run.result_dir, f"option_{option_name}",
+            "trial_*", "rank_*", "kvcache_results_*.json",
+        )
+        values = []
+        for rank_file in glob.glob(pattern):
+            try:
+                with open(rank_file, "r") as f:
+                    data = json.load(f)
+            except (OSError, ValueError) as e:
+                self.logger.warning(
+                    f"kvcache R5 backfill: rank file {rank_file} could "
+                    f"not be read: {e}; skipping."
+                )
+                continue
+            value = (
+                data.get("summary", {})
+                .get("cache_stats", {})
+                .get("storage_read_p95_ms")
+            )
+            if isinstance(value, (int, float)):
+                values.append(value)
+        return max(values) if values else None
 
     def _load_workload_summary(self, run: BenchmarkRun) -> Dict[str, Any]:
         """
