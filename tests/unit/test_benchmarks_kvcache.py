@@ -466,16 +466,27 @@ class TestAggregateOptionResults:
     """Tests for KVCacheBenchmark._aggregate_option_results."""
 
     def _make_rank_file(self, rank_dir, bw, p95, storage_entries=100,
-                        write_bw=0.0, avg_throughput=0.0, storage_throughput=0.0):
-        """Write a synthetic rank output JSON file."""
+                        write_bw=0.0, avg_throughput=0.0, storage_throughput=0.0,
+                        read_p95=None):
+        """Write a synthetic rank output JSON file.
+
+        ``read_p95`` plants ``cache_stats.storage_read_p95_ms`` — the
+        per-IO storage read latency percentile. The real benchmark only
+        emits that key when the rank performed at least one storage read
+        (cache.py gates on a non-empty latency list), so ``None`` omits
+        it to model a CPU/GPU-tier-only rank.
+        """
         rank_dir.mkdir(parents=True, exist_ok=True)
+        cache_stats = {
+            'tier_storage_read_bandwidth_gbps': bw,
+            'tier_storage_write_bandwidth_gbps': write_bw,
+            'storage_entries': storage_entries,
+        }
+        if read_p95 is not None:
+            cache_stats['storage_read_p95_ms'] = read_p95
         data = {
             'summary': {
-                'cache_stats': {
-                    'tier_storage_read_bandwidth_gbps': bw,
-                    'tier_storage_write_bandwidth_gbps': write_bw,
-                    'storage_entries': storage_entries,
-                },
+                'cache_stats': cache_stats,
                 'storage_io_latency_ms': {'p95': p95},
                 'avg_throughput_tokens_per_sec': avg_throughput,
                 'storage_throughput_tokens_per_sec': storage_throughput,
@@ -504,6 +515,46 @@ class TestAggregateOptionResults:
         result = bm._aggregate_option_results(1, [str(trial_dir)], expected_rank_count=2)
 
         assert result['aggregated_p95_latency_ms'] == pytest.approx(15.0)
+
+    def test_takes_max_storage_read_p95_across_ranks(self, tmp_path):
+        """R5: aggregated_storage_read_p95_ms == max per-IO read p95 across ranks.
+
+        ``summary.storage_io_latency_ms.p95`` is the P95 of *per-request
+        cumulative* storage I/O time (reads + writes summed over every
+        batched decode read in a request) — not a read latency. The
+        per-IO read percentile the report's "P95 Read Latency (ms)"
+        column promises lives in ``cache_stats.storage_read_p95_ms``.
+        """
+        bm = _make_run_benchmark(tmp_path)
+        trial_dir = tmp_path / 'trial_0'
+        self._make_rank_file(trial_dir / 'rank_0', bw=1.5, p95=10.0, read_p95=100.0)
+        self._make_rank_file(trial_dir / 'rank_1', bw=2.5, p95=15.0, read_p95=250.0)
+
+        result = bm._aggregate_option_results(1, [str(trial_dir)], expected_rank_count=2)
+
+        assert result['aggregated_storage_read_p95_ms'] == pytest.approx(250.0)
+
+    def test_storage_read_p95_skips_ranks_without_key(self, tmp_path):
+        """R5: a rank that never touched storage (no ``storage_read_p95_ms``
+        key) is skipped, not counted as 0.0."""
+        bm = _make_run_benchmark(tmp_path)
+        trial_dir = tmp_path / 'trial_0'
+        self._make_rank_file(trial_dir / 'rank_0', bw=0.0, p95=0.0, storage_entries=0)
+        self._make_rank_file(trial_dir / 'rank_1', bw=2.5, p95=15.0, read_p95=42.0)
+
+        result = bm._aggregate_option_results(1, [str(trial_dir)], expected_rank_count=2)
+
+        assert result['aggregated_storage_read_p95_ms'] == pytest.approx(42.0)
+
+    def test_storage_read_p95_none_when_absent_everywhere(self, tmp_path):
+        """R5: no rank carries the per-IO key -> None (blank), never 0.0."""
+        bm = _make_run_benchmark(tmp_path)
+        trial_dir = tmp_path / 'trial_0'
+        self._make_rank_file(trial_dir / 'rank_0', bw=0.0, p95=0.0, storage_entries=0)
+
+        result = bm._aggregate_option_results(1, [str(trial_dir)], expected_rank_count=1)
+
+        assert result['aggregated_storage_read_p95_ms'] is None
 
     def test_no_partial_failure_when_all_files_present(self, tmp_path):
         """partial_failure is False when all rank files exist."""
@@ -579,7 +630,7 @@ class TestAggregateOptionResults:
             'option',
             'aggregated_read_bandwidth_gbps', 'aggregated_write_bandwidth_gbps',
             'aggregated_avg_throughput_tokens_per_sec', 'aggregated_storage_throughput_tokens_per_sec',
-            'aggregated_p95_latency_ms',
+            'aggregated_p95_latency_ms', 'aggregated_storage_read_p95_ms',
             'rank_count', 'trial_count', 'partial_failure', 'missing_files', 'cpu_tier_ranks',
         }
         assert required_keys.issubset(set(result.keys()))

@@ -1484,6 +1484,86 @@ class TestKvCachePassThrough:
             summary["options"]["profile_b"]["aggregated_read_bandwidth_gbps"]
         )
 
+    @staticmethod
+    def _plant_rank_file(run_dir: pathlib.Path, option: str, trial: str,
+                         rank: str, read_p95=None) -> None:
+        """Plant a per-rank kvcache result JSON under the run dir.
+
+        Layout mirrors the real benchmark:
+        ``<run_dir>/option_<opt>/trial_<t>/rank_<r>/kvcache_results_*.json``.
+        ``read_p95=None`` omits ``cache_stats.storage_read_p95_ms`` —
+        matching a rank that never performed a storage read.
+        """
+        rank_dir = run_dir / f"option_{option}" / f"trial_{trial}" / f"rank_{rank}"
+        rank_dir.mkdir(parents=True, exist_ok=True)
+        cache_stats = {}
+        if read_p95 is not None:
+            cache_stats["storage_read_p95_ms"] = read_p95
+        (rank_dir / "kvcache_results_20260704_140000.json").write_text(
+            json.dumps({"summary": {"cache_stats": cache_stats}})
+        )
+
+    def test_kvcache_read_p95_backfilled_from_rank_files(self, tmp_path):
+        """R5 backfill: summary.json predates ``aggregated_storage_read_p95_ms``
+        (every existing submission), so reportgen recomputes it from the
+        per-rank ``cache_stats.storage_read_p95_ms`` values — max across
+        ranks and trials, matching the run-time aggregation convention.
+        This is the explicit D-22 exception that lets already-submitted
+        results get the corrected column without a rerun.
+        """
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        runs_root.mkdir()
+        run = _kvcache_run(runs_root, "20260704_140000")
+        run_dir = runs_root / "20260704_140000"
+        self._plant_rank_file(run_dir, "profile_a", "1", "0", read_p95=120.5)
+        self._plant_rank_file(run_dir, "profile_a", "2", "0", read_p95=310.25)
+        self._plant_rank_file(run_dir, "profile_b", "1", "0", read_p95=55.0)
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        assert result["kvcache_option_profile_a_aggregated_storage_read_p95_ms"] == (
+            pytest.approx(310.25)
+        )
+        assert result["kvcache_option_profile_b_aggregated_storage_read_p95_ms"] == (
+            pytest.approx(55.0)
+        )
+
+    def test_kvcache_read_p95_summary_field_wins_over_backfill(self, tmp_path):
+        """R5: when summary.json already carries the field (post-fix runs),
+        it passes through verbatim — no recompute from rank files."""
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        runs_root.mkdir()
+        run = _kvcache_run(runs_root, "20260704_140000")
+        run_dir = runs_root / "20260704_140000"
+        # Rank file disagrees with summary.json — summary must win.
+        self._plant_rank_file(run_dir, "profile_a", "1", "0", read_p95=999.0)
+        summary_path = run_dir / "summary.json"
+        summary = json.loads(summary_path.read_text())
+        summary["options"]["profile_a"]["aggregated_storage_read_p95_ms"] = 77.7
+        summary_path.write_text(json.dumps(summary))
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        assert result["kvcache_option_profile_a_aggregated_storage_read_p95_ms"] == 77.7
+
+    def test_kvcache_read_p95_absent_when_unrecoverable(self, tmp_path):
+        """R5: no summary field and no rank files with the per-IO key ->
+        the column stays absent/None (blank), never a fabricated 0.0."""
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        runs_root.mkdir()
+        run = _kvcache_run(runs_root, "20260704_140000")
+        run_dir = runs_root / "20260704_140000"
+        # Rank file exists but its rank never did a storage read.
+        self._plant_rank_file(run_dir, "profile_a", "1", "0", read_p95=None)
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        col = "kvcache_option_profile_a_aggregated_storage_read_p95_ms"
+        assert result.get(col) is None
+
     def test_kvcache_zero_value_passthrough_verbatim(self, tmp_path):
         """D-22 boundary: source ``0.0`` sentinel flows through as ``0.0``, not ``None``.
 

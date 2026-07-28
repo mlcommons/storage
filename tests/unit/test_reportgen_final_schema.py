@@ -196,14 +196,17 @@ def _internal_rows() -> List[Dict[str, Any]]:
         "kvcache_option_1_aggregated_read_bandwidth_gbps": 11.1,
         "kvcache_option_1_aggregated_write_bandwidth_gbps": 1.11,
         "kvcache_option_1_aggregated_p95_latency_ms": 0.11,
+        "kvcache_option_1_aggregated_storage_read_p95_ms": 45.6,
         "kvcache_option_2_aggregated_avg_throughput_tokens_per_sec": 222.0,
         "kvcache_option_2_aggregated_read_bandwidth_gbps": 22.2,
         "kvcache_option_2_aggregated_write_bandwidth_gbps": 2.22,
         "kvcache_option_2_aggregated_p95_latency_ms": 0.22,
+        "kvcache_option_2_aggregated_storage_read_p95_ms": 7.8,
         "kvcache_option_3_aggregated_avg_throughput_tokens_per_sec": 333.0,
         "kvcache_option_3_aggregated_read_bandwidth_gbps": 33.3,
         "kvcache_option_3_aggregated_write_bandwidth_gbps": 3.33,
         "kvcache_option_3_aggregated_p95_latency_ms": 0.33,
+        "kvcache_option_3_aggregated_storage_read_p95_ms": 91.2,
         "issues": "",
     }
     return [training, checkpointing, vdb, kvcache]
@@ -322,4 +325,11 @@ class TestValueProjection:
         assert row["KVCache llama3.1-8b Storage Only - Read B/W (GiB/s)"] == 11.1
         assert row["KVCache llama3.1-8b Storage + Mem - Throughput (tok/s)"] == 222.0
         assert row["KVCache llama3.1-70b Storage Only - Throughput (tok/s)"] == 333.0
-        assert row["KVCache llama3.1-70b Storage Only - P95 Read Latency (ms)"] == 0.33
+        # R5: the P95 Read Latency column sources the per-IO read
+        # percentile (aggregated_storage_read_p95_ms), NOT the
+        # per-request cumulative storage-I/O total that
+        # aggregated_p95_latency_ms actually measures. Both keys are
+        # planted with different values to pin the precedence.
+        assert row["KVCache llama3.1-8b Storage Only - P95 Read Latency (ms)"] == 45.6
+        assert row["KVCache llama3.1-8b Storage + Mem - P95 Read Latency (ms)"] == 7.8
+        assert row["KVCache llama3.1-70b Storage Only - P95 Read Latency (ms)"] == 91.2
