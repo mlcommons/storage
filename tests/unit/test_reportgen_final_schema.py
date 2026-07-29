@@ -129,8 +129,8 @@ def _internal_rows() -> List[Dict[str, Any]]:
         "sut_rus": 14,
         "sut_integrated_client_storage": "",
         "sut_usable_capacity_tib": "",
-        "sut_code": Hyperlink("code", "closed/acme/code-abc12345/"),
-        "sut_logs": Hyperlink("logs", "closed/acme/code-abc12345/"),
+        "sut_code": Hyperlink("code", "acme/code-abc12345/"),
+        "sut_logs": Hyperlink("logs", "acme/code-abc12345/"),
     }
     common = {
         "category": "closed",
@@ -289,7 +289,7 @@ class TestValueProjection:
         assert row["Training - Read B/W (GiB/s)"] == 12.5
         # Code/Logs live in the workload block, populated for this row.
         assert row["Training - Code"] == {
-            "text": "code", "href": "closed/acme/code-abc12345/"}
+            "text": "code", "href": "acme/code-abc12345/"}
         # Other workloads' blocks are blank for a training row.
         assert row["Checkpointing - Write B/W (GiB/s)"] == ""
         assert row["VDB - Vector Count"] == ""

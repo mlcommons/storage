@@ -141,6 +141,22 @@ def _inject_code_pointer(root: pathlib.Path) -> None:
     (leaf / ".mlps-code-image").write_text(f"md5-tree-v2:{_CODE_HASH}\n")
 
 
+def _inject_pool_image(root: pathlib.Path) -> pathlib.Path:
+    """Materialize the pool image where code_image.py actually puts it.
+
+    ``code_image.py`` builds the pool under ``org_root = results_dir /
+    orgname`` and documents that location as deliberately mode-agnostic
+    (D-64) — i.e. ``<repo-root>/<org>/code-<hash8>/``, with **no**
+    ``closed/`` or ``open/`` component. See _capture_new_pool_image.
+    """
+    pool = root / "acme" / _CODE_DIR
+    pool.mkdir(parents=True, exist_ok=True)
+    (pool / ".code-hash.json").write_text(
+        json.dumps({"hash": _CODE_HASH, "algorithm": "md5-tree-v2"})
+    )
+    return pool
+
+
 class TestSutCodeLogsLinks:
     """Task F-b: Code/Logs anchors resolved from the run's .mlps-code-image."""
 
@@ -152,7 +168,7 @@ class TestSutCodeLogsLinks:
         _run_reportgen(root)
         rows = json.loads((_acme_per_model_dir(root) / "results.json").read_text())
         row = rows[0]
-        expected_href = f"closed/acme/{_CODE_DIR}/"
+        expected_href = f"acme/{_CODE_DIR}/"
         assert row["Training - Code"] == {"text": "code", "href": expected_href}
         # Logs is a placeholder pointing at the same code-image dir for now.
         assert row["Training - Logs"] == {"text": "logs", "href": expected_href}
@@ -163,9 +179,49 @@ class TestSutCodeLogsLinks:
         _run_reportgen(root)
         with open(_acme_per_model_dir(root) / "results.csv", newline="") as fh:
             row = next(csv.DictReader(fh))
-        href = f"closed/acme/{_CODE_DIR}/"
+        href = f"acme/{_CODE_DIR}/"
         assert row["Training - Code"] == f'<a href="{href}">code</a>'
         assert row["Training - Logs"] == f'<a href="{href}">logs</a>'
+
+    def test_code_href_has_no_division_prefix(self, tmp_path):
+        """The href must not carry a ``closed/``/``open/`` component.
+
+        Regression guard for the tree-wide dangling-link bug: every Code and
+        Logs anchor in the published v3.0 tables pointed at
+        ``closed/<org>/code-<hash>/``, but pool images live at
+        ``<org>/code-<hash>/``, so all 356 of them 404'd.
+        """
+        root = _prepare_tree(tmp_path)
+        _inject_code_pointer(root)
+        _run_reportgen(root)
+        rows = json.loads((_acme_per_model_dir(root) / "results.json").read_text())
+        href = rows[0]["Training - Code"]["href"]
+        assert not href.startswith("closed/"), (
+            f"href must not be division-prefixed, got {href!r}"
+        )
+        assert not href.startswith("open/")
+        assert href == f"acme/{_CODE_DIR}/"
+
+    def test_code_href_resolves_to_the_pool_image_on_disk(self, tmp_path):
+        """The emitted href, read relative to the repo root, must exist.
+
+        This is the assertion that actually catches a dangling link; the
+        string comparisons above would keep passing if both the generator
+        and the expectation drifted together.
+        """
+        root = _prepare_tree(tmp_path)
+        _inject_code_pointer(root)
+        pool = _inject_pool_image(root)
+        _run_reportgen(root)
+        rows = json.loads((_acme_per_model_dir(root) / "results.json").read_text())
+        for col in ("Training - Code", "Training - Logs"):
+            href = rows[0][col]["href"]
+            target = (root / href).resolve()
+            assert target.is_dir(), (
+                f"{col} href {href!r} does not resolve to a directory under "
+                f"the repo root (expected {pool})"
+            )
+            assert target == pool.resolve()
 
     def test_missing_pointer_leaves_code_logs_blank(self, tmp_path):
         # No pointer injected → graceful blank, no crash.
