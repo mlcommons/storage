@@ -1789,6 +1789,45 @@ class TestKvCacheIntegrityWarnings:
         assert "20260723_191548" in text
         assert any(i.severity == "warning" for i in result.issues)
 
+    def test_datasize_leaf_is_not_a_selection_candidate(self, tmp_path):
+        """A ``datasize`` sibling must not win selection or count as dropped.
+
+        The kv_cache grouping key has no ``command`` component (D-05), so
+        a ``datasize`` leaf shares the group with the ``run`` it sized.
+        It writes no ``summary.json``, so selecting it blanks all twelve
+        KVCache metrics — which is what an earlier draft of this fix did
+        to rows v3.0-0019 / 0021 / 0023 / 0142 before the expectation
+        diff caught it. It is also not a dropped measurement.
+        """
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        runs_root.mkdir()
+        datasize = _make_run(
+            benchmark_type=BENCHMARK_TYPES.kv_cache,
+            model="llama3-8b",
+            result_dir=str(runs_root / "20260716_165852"),
+            metrics={},
+            parameters={"performance_profile": "balanced"},
+            accelerator=None,
+            run_datetime="20260716_165852",
+            command="datasize",
+        )
+        (runs_root / "20260716_165852").mkdir()
+        # The run leaf is LATER than the datasize leaf — earliest-wins
+        # would pick the wrong one without the command filter.
+        run = _kvcache_run_at(runs_root, "20260716_165917", "20260716_165917")
+
+        metrics = gen._aggregate_workload_metrics([datasize, run], warmup_set=set())
+        assert metrics["kvcache_aggregated_read_bandwidth_gbps"] is not None, (
+            "the datasize leaf won selection and blanked the row's metrics"
+        )
+
+        _run_process_workload_groups(gen, [datasize, run])
+        result = list(gen.workload_results.values())[0]
+        assert not [m for m in _issue_messages(result) if "runs in this" in m], (
+            "a datasize sibling was reported as a dropped measurement"
+        )
+
     def test_clean_single_run_gets_no_integrity_warning(self, tmp_path):
         """Negative control — the ordinary case stays quiet."""
         gen = _make_bare_generator(tmp_path)

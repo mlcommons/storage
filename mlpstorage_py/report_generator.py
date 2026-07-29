@@ -52,6 +52,24 @@ _INVALID_MSG_EMPTY_METRIC = (
     "metric {key} is empty in invocation {basename}; cannot aggregate"
 )
 
+# Issue #836 kv_cache integrity warnings. Warnings, not INVALID gates — both
+# conditions describe a row that is misleading rather than one that violates a
+# Rules.md invariant, and the kv_cache branch has no rules-strict gates by
+# design (the D-22 pass-through boundary). They ride on ``Result.issues`` so
+# they reach the published ``issues`` column; a log line alone is not something
+# a reviewer of a 179-row table can be expected to catch.
+_WARN_MSG_KVCACHE_COLLAPSED_GROUP = (
+    "[WARN] kv_cache row built from 1 of {n} runs in this workload group: "
+    "published {published}; dropped {dropped}. The dropped runs' metrics "
+    "appear in no published table."
+)
+_WARN_MSG_KVCACHE_PARTIAL_FAILURE = (
+    "[WARN] kv_cache run {run} recorded partial_failure in summary.json: "
+    "{missing} missing per-rank result file(s), {failed} mpirun trial(s) with "
+    "non-zero exit. Published metrics are aggregated over the surviving "
+    "ranks only."
+)
+
 
 class Hyperlink:
     """A results-table cell that is a (visible-text, href) pair.
@@ -1922,6 +1940,156 @@ class ReportGenerator:
             return built
         return {}
 
+    @staticmethod
+    def _kvcache_run_label(run: BenchmarkRun) -> str:
+        """Identify a kv_cache run the way it appears on disk (#836).
+
+        Canonically the leaf directory IS the timestamp, so the label is
+        just that. When a submission renames the leaf — ANL's
+        ``1nodex8ppn`` — the name a reviewer sees in the tree and the
+        ``run_datetime`` that identifies the run are different strings,
+        and a warning that names only one of them is hard to act on.
+        """
+        basename = os.path.basename(run.result_dir or "")
+        run_datetime = str(run.run_datetime or "")
+        if basename and run_datetime and basename != run_datetime:
+            return f"{basename} ({run_datetime})"
+        return basename or run_datetime or "(unknown)"
+
+    @staticmethod
+    def _kvcache_measured_runs(runs: List[BenchmarkRun]) -> List[BenchmarkRun]:
+        """The invocations in a kv_cache group that carry measurements (#836).
+
+        The kv_cache grouping key is ``(category, orgname, systemname,
+        model, performance_profile)`` — no ``command`` component (D-05) —
+        so a ``datasize`` leaf lands in the same group as the ``run`` it
+        sized. ``datasize`` is a pure calculation and writes no
+        ``summary.json``, so treating it as a candidate would blank every
+        metric on the row; five submissions in the v3.0 tree package one
+        alongside their run. It is also not a "dropped measurement" for
+        warning purposes.
+
+        Falls back to the full list when nothing is a ``run`` — better a
+        metric-less row than an IndexError on an unforeseen layout.
+        """
+        measured = [r for r in runs if getattr(r, 'command', None) == 'run']
+        return measured or list(runs)
+
+    @classmethod
+    def _select_kvcache_run(cls, runs: List[BenchmarkRun]) -> BenchmarkRun:
+        """Pick the one run whose metrics a kv_cache row publishes (#836).
+
+        A kv_cache group is meant to hold one measured invocation, so
+        this is normally that run by another name. When it holds more —
+        see ``_kvcache_collapsed_group_issue`` — the previous ``runs[0]``
+        made the published values a function of filesystem-discovery
+        order, which is genuinely arbitrary: of the three v3.0 groups
+        with two real runs, discovery published the earlier run for two
+        of them and the later run for the third. Earliest
+        ``run_datetime`` wins instead — no better claim than latest, but
+        it is a rule rather than an accident, and it matches the
+        positional convention Rules.md §2.1.17 already uses for training.
+        """
+        return min(
+            cls._kvcache_measured_runs(runs),
+            key=lambda r: (
+                str(r.run_datetime or ""),
+                os.path.basename(r.result_dir or ""),
+                os.path.abspath(r.result_dir or ""),
+            ),
+        )
+
+    def _kvcache_integrity_issues(self, runs: List[BenchmarkRun]) -> List[Issue]:
+        """Warnings for kv_cache rows that would otherwise look clean (#836).
+
+        Returns issues for the two silent paths, in the order a reviewer
+        would want to read them: first that the row represents a subset
+        of what was measured, then that the run behind it lost data.
+        """
+        if not runs:
+            return []
+        issues: List[Issue] = []
+        published = self._select_kvcache_run(runs)
+
+        collapsed = self._kvcache_collapsed_group_issue(runs, published)
+        if collapsed is not None:
+            issues.append(collapsed)
+
+        partial = self._kvcache_partial_failure_issue(published)
+        if partial is not None:
+            issues.append(partial)
+
+        return issues
+
+    def _kvcache_collapsed_group_issue(
+        self, runs: List[BenchmarkRun], published: BenchmarkRun,
+    ) -> Optional[Issue]:
+        """Warn when N kv_cache runs reduce to one published row (#836).
+
+        The grouping key is ``(category, orgname, systemname, model,
+        performance_profile)`` and ``systemname`` is path-derived, so two
+        runs collide only when a submission puts them under one system
+        directory. That is not a layout the tool produces: in the v3.0
+        tree the single instance came from three system directories
+        (``crux-eagle``, ``crux-eagle-n8``, ``crux-eagle-n64`` per each
+        run's own ``metadata.result_dir``) merged into one at packaging
+        time. Whatever the cause, one row cannot honestly represent N
+        measured configurations, so say which one it is.
+        """
+        # Strictly the ``run`` invocations — no fallback to the full list.
+        # ``_kvcache_measured_runs`` falls back so selection always yields
+        # something, but a group holding only ``datasize`` invocations has
+        # dropped no measurement and must stay quiet (ANL polaris-nvme
+        # packages two of them).
+        measured = [r for r in runs if getattr(r, 'command', None) == 'run']
+        if len(measured) < 2 or published not in measured:
+            return None
+        dropped = [r for r in measured if r is not published]
+        message = _WARN_MSG_KVCACHE_COLLAPSED_GROUP.format(
+            n=len(measured),
+            published=self._kvcache_run_label(published),
+            dropped=", ".join(
+                self._kvcache_run_label(r) for r in sorted(
+                    dropped, key=lambda r: str(r.run_datetime or "")
+                )
+            ),
+        )
+        self.logger.warning(message)
+        return Issue(PARAM_VALIDATION.CLOSED, message, severity="warning")
+
+    def _kvcache_partial_failure_issue(
+        self, run: BenchmarkRun,
+    ) -> Optional[Issue]:
+        """Warn when the published run recorded a partial failure (#836).
+
+        ``kvcache._write_run_summary`` sets ``partial_failure`` when any
+        option lost per-rank result files, and records every mpirun trial
+        that exited non-zero under ``trial_failures``. Nothing read either
+        field, so a run that kept 3 % of its ranks published a row shaped
+        exactly like a clean one — its metrics are an ``fmean`` over
+        whatever survived.
+        """
+        summary = self._load_workload_summary(run)
+        if not summary.get("partial_failure"):
+            return None
+        options = summary.get("options") or {}
+        missing = sum(
+            len(opt.get("missing_files") or [])
+            for opt in options.values()
+            if isinstance(opt, dict)
+        )
+        failed_trials = sum(
+            len(failures or [])
+            for failures in (summary.get("trial_failures") or {}).values()
+        )
+        message = _WARN_MSG_KVCACHE_PARTIAL_FAILURE.format(
+            run=self._kvcache_run_label(run),
+            missing=missing,
+            failed=failed_trials,
+        )
+        self.logger.warning(message)
+        return Issue(PARAM_VALIDATION.CLOSED, message, severity="warning")
+
     def _aggregate_kvcache(
         self,
         runs: List[BenchmarkRun],
@@ -1962,7 +2130,11 @@ class ReportGenerator:
             a rerun. This is a documented exception to the D-22
             pass-through boundary.
         """
-        run = runs[0]
+        # A kv_cache group holds one invocation by design; when it holds
+        # more, the pick must not depend on discovery order (#836). The
+        # accompanying warning is raised in ``_kvcache_integrity_issues``
+        # so it lands on the row rather than only in the log.
+        run = self._select_kvcache_run(runs)
         summary = self._load_workload_summary(run)
 
         out: Dict[str, Any] = {}
@@ -2419,6 +2591,21 @@ class ReportGenerator:
                                     severity="warning",
                                 )
                             )
+
+                # ----------------------------------------------------------
+                # kv_cache integrity warnings (#836): a row built from a
+                # subset of the group's runs, or from a run that recorded
+                # a partial failure. Warnings only — they annotate the
+                # published row rather than voiding it, leaving the
+                # question of whether the underlying submission is legal
+                # where it belongs (the WG, per open question 3). Whatif
+                # skips them on the D-29 precedent.
+                # ----------------------------------------------------------
+                if (
+                    category_str != 'whatif'
+                    and runs[0].benchmark_type == BENCHMARK_TYPES.kv_cache
+                ):
+                    issues.extend(self._kvcache_integrity_issues(runs))
 
                 # ----------------------------------------------------------
                 # Aggregation dispatch — inner try/except for
