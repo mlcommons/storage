@@ -865,6 +865,14 @@ class ReportGenerator:
         canonical code_image helpers (D-61 pointer parse, D-62 pool-dir
         name). Returns ``None`` when the pointer is absent or unreadable —
         the caller then leaves Code/Logs blank.
+
+        The URL is ``<org>/code-<hash8>/`` with **no** division component.
+        Pool images live at ``org_root = results_dir / orgname``, which
+        code_image._capture_new_pool_image documents as mode-agnostic by
+        design (D-64): one pool per organization, shared across the CLOSED
+        and OPEN divisions. ``category`` is accepted for signature
+        stability but is deliberately not part of the path — prefixing it
+        is what made all 356 links in the v3.0 tree dangle.
         """
         result_dir = getattr(first_run, 'result_dir', None)
         if not result_dir:
@@ -880,7 +888,7 @@ class ReportGenerator:
                 "reportgen: no/invalid code-image pointer at %s: %s; "
                 "Code/Logs will be blank.", result_dir, e)
             return None
-        return f"{category}/{orgname}/{_pool_dir_name(full_hash)}/"
+        return f"{orgname}/{_pool_dir_name(full_hash)}/"
 
     def _read_system_description(self, first_run: Any, systemname: str):
         """Locate + parse ``systems/<systemname>.yaml`` for a workload.
