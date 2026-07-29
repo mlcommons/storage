@@ -1619,6 +1619,193 @@ class TestKvCachePassThrough:
 
 
 # --------------------------------------------------------------------------- #
+# TestKvCacheIntegrityWarnings — issue #836                                   #
+# --------------------------------------------------------------------------- #
+
+
+def _kvcache_run_at(
+    dest_root: pathlib.Path,
+    dirname: str,
+    ts: str,
+    **summary_overrides: Any,
+) -> BenchmarkRun:
+    """Plant the kvcache fixture at an arbitrary leaf name, patching summary.json.
+
+    ``_kvcache_run`` names the leaf after the timestamp, which is the
+    canonical ``<model>/run/<ts>/`` shape. Issue #836's tree does not:
+    ANL packaged three runs as ``1nodex8ppn`` / ``8nodex8ppn`` /
+    ``64nodex8ppn`` under one model dir, so leaf name and ``run_datetime``
+    diverge. This helper decouples the two and lets a test write
+    ``partial_failure`` / ``trial_failures`` into the copied summary.
+    """
+    src_dir = _FIXTURES_ROOT / "kvcache" / "llama3-8b" / "run" / "20260704_140000"
+    dest_dir = dest_root / dirname
+    if not dest_dir.exists():
+        shutil.copytree(src_dir, dest_dir)
+    summary_path = dest_dir / "summary.json"
+    summary = _load_summary(summary_path)
+    summary["run_datetime"] = ts
+    summary.update(summary_overrides)
+    with open(summary_path, "w") as f:
+        json.dump(summary, f)
+    return _make_run(
+        benchmark_type=BENCHMARK_TYPES.kv_cache,
+        model="llama3-8b",
+        result_dir=str(dest_dir),
+        metrics={},
+        parameters={"performance_profile": "balanced"},
+        accelerator=None,
+        run_datetime=ts,
+    )
+
+
+def _issue_messages(result) -> List[str]:
+    """Return the ``Result``'s issue messages as plain strings."""
+    return [i.message for i in (result.issues or [])]
+
+
+class TestKvCacheIntegrityWarnings:
+    """kv_cache rows must not hide a collapsed group or a failed run (#836).
+
+    Two silent paths, both found in ``closed/ANL/results/crux-eagle``:
+
+    1. Three runs shared one workload grouping key
+       ``(category, org, system, model, performance_profile)`` because the
+       submitter flattened three system directories into one. Only
+       ``runs[0]`` — filesystem-discovery order, not a rule — reached the
+       published row; the other two appeared in no table, and the only
+       diagnostic was ``No valid run directories found`` against the
+       workload directory, which names neither the row that was produced
+       nor the runs that were dropped.
+
+    2. ``partial_failure`` / ``trial_failures`` are written into
+       ``summary.json`` by ``kvcache._write_run_summary`` and read by
+       nothing. Two of ANL's three runs lost 70 % and 97 % of their
+       per-rank result files with every mpirun trial exiting non-zero,
+       and ``open/farmgpu/.../llama3.1-70b-instruct`` publishes a row
+       today that is missing 45 rank files. Such a row is
+       indistinguishable from a clean one.
+
+    Both surface as warning ``Issue`` objects on the workload ``Result``
+    so they reach the published ``issues`` column, not just a log line
+    among 183 others.
+    """
+
+    def test_collapsed_group_annotates_the_published_row(self, tmp_path):
+        """A row built from 1 of N runs says so, and names what was dropped."""
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        runs_root.mkdir()
+        runs = [
+            _kvcache_run_at(runs_root, "1nodex8ppn", "20260723_062638"),
+            _kvcache_run_at(runs_root, "8nodex8ppn", "20260723_191548"),
+            _kvcache_run_at(runs_root, "64nodex8ppn", "20260724_051511"),
+        ]
+
+        _run_process_workload_groups(gen, runs)
+
+        assert len(gen.workload_results) == 1, (
+            "the three runs must land in ONE group — that collapse is the "
+            "condition under test, not something the test should dodge"
+        )
+        result = list(gen.workload_results.values())[0]
+        messages = _issue_messages(result)
+        collapsed = [m for m in messages if "1 of 3 runs" in m]
+        assert collapsed, (
+            f"no collapsed-group warning on the row; issues were {messages}"
+        )
+        text = collapsed[0]
+        # The published run is named...
+        assert "1nodex8ppn (20260723_062638)" in text
+        # ...and so is every run whose metrics went nowhere.
+        assert "8nodex8ppn (20260723_191548)" in text
+        assert "64nodex8ppn (20260724_051511)" in text
+        assert any(i.severity == "warning" for i in result.issues)
+
+    def test_collapsed_group_selection_is_deterministic(self, tmp_path):
+        """Earliest ``run_datetime`` wins regardless of discovery order.
+
+        ``runs[0]`` made the published values a function of filesystem
+        iteration order. Feeding the same three runs in reverse must
+        produce the same row.
+        """
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        runs_root.mkdir()
+        # Distinct host_counts make the pick observable — with the fixture's
+        # identical values any run would satisfy the assertion below.
+        runs = [
+            _kvcache_run_at(runs_root, "64nodex8ppn", "20260724_051511", host_count=64),
+            _kvcache_run_at(runs_root, "8nodex8ppn", "20260723_191548", host_count=8),
+            _kvcache_run_at(runs_root, "1nodex8ppn", "20260723_062638", host_count=1),
+        ]
+
+        # Reverse-order input still publishes the earliest run.
+        metrics = gen._aggregate_workload_metrics(runs, warmup_set=set())
+        assert metrics["kvcache_num_client_nodes"] == 1
+
+        _run_process_workload_groups(gen, runs)
+        result = list(gen.workload_results.values())[0]
+        collapsed = [m for m in _issue_messages(result) if "1 of 3 runs" in m]
+        assert collapsed and "published 1nodex8ppn (20260723_062638)" in collapsed[0]
+
+    def test_partial_failure_surfaces_on_the_row(self, tmp_path):
+        """A run that lost rank files says so, with the counts."""
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        runs_root.mkdir()
+        run = _kvcache_run_at(
+            runs_root,
+            "20260723_191548",
+            "20260723_191548",
+            partial_failure=True,
+            trial_failures={
+                "1": [{"trial": 0, "exit_code": 1, "stderr_log": "a.log"}],
+                "2": [{"trial": 0, "exit_code": 1, "stderr_log": "b.log"}],
+            },
+        )
+        # Missing per-rank files live per-option, as kvcache writes them.
+        summary_path = runs_root / "20260723_191548" / "summary.json"
+        summary = _load_summary(summary_path)
+        summary["options"]["profile_a"]["missing_files"] = ["r1.json", "r2.json"]
+        summary["options"]["profile_a"]["partial_failure"] = True
+        summary["options"]["profile_b"]["missing_files"] = ["r3.json"]
+        summary["options"]["profile_b"]["partial_failure"] = True
+        with open(summary_path, "w") as f:
+            json.dump(summary, f)
+
+        _run_process_workload_groups(gen, [run])
+
+        result = list(gen.workload_results.values())[0]
+        messages = _issue_messages(result)
+        flagged = [m for m in messages if "partial_failure" in m]
+        assert flagged, (
+            f"a run missing rank files published a clean-looking row; "
+            f"issues were {messages}"
+        )
+        text = flagged[0]
+        assert "3 missing" in text, f"missing-file count absent from {text!r}"
+        assert "2 mpirun trial" in text, f"failed-trial count absent from {text!r}"
+        assert "20260723_191548" in text
+        assert any(i.severity == "warning" for i in result.issues)
+
+    def test_clean_single_run_gets_no_integrity_warning(self, tmp_path):
+        """Negative control — the ordinary case stays quiet."""
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        runs_root.mkdir()
+        run = _kvcache_run_at(runs_root, "20260704_140000", "20260704_140000")
+
+        _run_process_workload_groups(gen, [run])
+
+        result = list(gen.workload_results.values())[0]
+        messages = _issue_messages(result)
+        assert not [m for m in messages if "partial_failure" in m or "runs in" in m], (
+            f"clean run acquired a spurious integrity warning: {messages}"
+        )
+
+
+# --------------------------------------------------------------------------- #
 # TestInvalidRulesStrict — D-23 / D-24 / D-26 / D-27 / D-29                   #
 # --------------------------------------------------------------------------- #
 
