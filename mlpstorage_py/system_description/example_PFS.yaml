@@ -13,6 +13,9 @@ system_under_test:
             simultaneous_write: true
             simultaneous_read: true
             remap_time_in_seconds: 0
+        usable_capacity_tib: 8192
+        availability: available
+        int_client_store_tib: 16
     deployment: "onprem"
     product_nodes:
         - friendly_description: Metadata Processing

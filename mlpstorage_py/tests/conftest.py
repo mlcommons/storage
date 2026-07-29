@@ -172,6 +172,9 @@ def _build_system_yaml(
     benchmark_api: str = "file",
     remap_time_seconds: int | None = None,
     simultaneous_flags: dict | None = None,
+    usable_capacity_tib: int = 100,
+    availability: str = "available",
+    int_client_store_tib: int | None = None,
 ) -> dict:
     """Build a schema-valid system YAML dict for the given submission_name.
 
@@ -185,6 +188,10 @@ def _build_system_yaml(
     - ``remap_time_seconds``: sets ``capabilities.remap_time_in_seconds``.
     - ``simultaneous_flags``: dict of capability field overrides
       (simultaneous_write, simultaneous_read, multi_host).
+
+    Solution-level results-table fields: ``usable_capacity_tib`` and
+    ``availability`` are required by the schema and always emitted;
+    ``int_client_store_tib`` is optional and omitted unless passed.
 
     Bug fix (Phase 2 Plan 02-02): the original dict used ``power_capacity_watts``
     (not a valid ``PowerSupply`` field) and omitted the required ``inlet_voltage``
@@ -219,6 +226,12 @@ def _build_system_yaml(
                     "client_installation": "in_box",
                 },
                 "capabilities": caps,
+                "usable_capacity_tib": usable_capacity_tib,
+                "availability": availability,
+                # Optional (required=False) — omitted unless a test wants the
+                # Integrated Client Storage (TiB) cell populated.
+                **({"int_client_store_tib": int_client_store_tib}
+                   if int_client_store_tib is not None else {}),
             },
             "deployment": "cloud",
             "clients": [
@@ -399,6 +412,13 @@ def build_submission(tmp_path, **overrides) -> Path:
     * ``chkpt_simultaneous_flags`` (dict | None) — CHKPT-05: overrides any of
       ``simultaneous_write``, ``simultaneous_read``, ``multi_host`` in system YAML
       capabilities block.
+    * ``sys_usable_capacity_tib`` (int) — ``solution.usable_capacity_tib``,
+      source of the results table's Usable Capacity (TiB) cell.
+    * ``sys_availability`` (str) — ``solution.availability``; one of
+      ``available`` / ``preview`` / ``RDI``.
+    * ``sys_int_client_store_tib`` (int | None) — optional
+      ``solution.int_client_store_tib``; omitted from the YAML entirely when
+      None, which is the expected v3.0 case.
     * ``chkpt_checkpoint_folder`` (str | None) — CHKPT-06: sets
       ``args.checkpoint_folder`` in each checkpoint metadata.json.
     * ``chkpt_results_dir`` (str | None) — CHKPT-06: sets ``args.results_dir``
@@ -478,6 +498,13 @@ def build_submission(tmp_path, **overrides) -> Path:
     chkpt_summary_num_accelerators = overrides.pop("chkpt_summary_num_accelerators", None)
     run_data_dir = overrides.pop("run_data_dir", None)
     run_results_dir = overrides.pop("run_results_dir", None)
+
+    # Solution-level results-table fields. The two required ones carry
+    # schema-valid defaults; int_client_store_tib is optional and stays
+    # absent unless a test asks for it.
+    sys_usable_capacity_tib = overrides.pop("sys_usable_capacity_tib", 100)
+    sys_availability = overrides.pop("sys_availability", "available")
+    sys_int_client_store_tib = overrides.pop("sys_int_client_store_tib", None)
 
     # storage#655: DoD fixture-coverage kwargs for vector_database + kv_cache.
     # * include_vdb (bool)                       — adds vector_database/milvus/DISKANN/…
@@ -570,6 +597,9 @@ def build_submission(tmp_path, **overrides) -> Path:
                 benchmark_api=benchmark_api,
                 remap_time_seconds=effective_remap_time,
                 simultaneous_flags=chkpt_simultaneous_flags,
+                usable_capacity_tib=sys_usable_capacity_tib,
+                availability=sys_availability,
+                int_client_store_tib=sys_int_client_store_tib,
             )
 
             # Phase 2 Plan 02-02: apply system_yaml_* mutation kwargs.

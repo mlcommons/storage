@@ -67,6 +67,16 @@ class SystemYamlSchemaCheck(BaseCheck):
         # showed Pydantic v2 propagates the container path, not an empty tuple.
         "system_under_test -> solution -> capabilities":
             ("4.7.3", "checkpointRemappingTimeReporting"),
+
+        # Solution-level fields backing the results-table SUT block. Mapped
+        # explicitly so a missing/ill-typed value reads as a system-description
+        # problem rather than falling through to the 2.1.7 unmapped default.
+        "system_under_test -> solution -> usable_capacity_tib":
+            ("2.1.7", "systemsDirectoryFiles"),
+        "system_under_test -> solution -> availability":
+            ("2.1.7", "systemsDirectoryFiles"),
+        "system_under_test -> solution -> int_client_store_tib":
+            ("2.1.7", "systemsDirectoryFiles"),
     }
 
     def __init__(self, log, config: Config, root_path: str):

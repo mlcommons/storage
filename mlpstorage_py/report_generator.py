@@ -101,6 +101,11 @@ class Hyperlink:
 # reference names (# Client Nodes, Code, Read B/W, …) are workload-qualified.  #
 # --------------------------------------------------------------------------- #
 
+# Public ID prefix. Hardcoded rather than derived from the package version:
+# the published ID must not change if the package version rolls forward
+# mid-submission-cycle.
+_PUBLIC_ID_PREFIX = "v3.0"
+
 # Model column display labels (reference table titles). Blank for the
 # single-table workloads (kvcache, vdb) — the Benchmark Type column
 # identifies those.
@@ -115,22 +120,25 @@ _MODEL_DISPLAY_LABELS = {
 
 # Left edge + shared System-Under-Test block. Each entry is
 # (final_column_name, internal_row_key_or_None). ``None`` => manual /
-# present-but-blank placeholder (Public ID + the 5 submitter-filled cells).
-# Division / Benchmark Type / Model are computed in ``_final_row``.
+# present-but-blank placeholder; no cell in this block is manual any more.
+# Division / Benchmark Type / Model are computed in ``_final_row``. Public ID
+# is generated in ``_assign_public_ids``; Type / Access Protocol /
+# Availability / Integrated Client Storage / Usable Capacity are derived from
+# the system-description YAML in ``_sut_columns``.
 _SUT_FINAL_COLUMNS = [
-    ("Public ID", None),
+    ("Public ID", "sut_public_id"),
     ("Organization", "orgname"),
     ("Division", "__division__"),
     ("Benchmark Type", "__benchmark_type__"),
     ("Model", "__model__"),
     ("Name", "sut_name"),
     ("Description", "sut_description"),
-    ("Type", None),
-    ("Access Protocol", None),
-    ("Availability", None),
+    ("Type", "sut_type"),
+    ("Access Protocol", "sut_access_protocol"),
+    ("Availability", "sut_availability"),
     ("RU's", "sut_rus"),
-    ("Integrated Client Storage", None),
-    ("Usable Capacity (TiB)", None),
+    ("Integrated Client Storage (TiB)", "sut_integrated_client_storage"),
+    ("Usable Capacity (TiB)", "sut_usable_capacity_tib"),
 ]
 
 # Per-workload metric/param blocks. ``__code__`` / ``__logs__`` are the
@@ -573,15 +581,18 @@ class ReportGenerator:
         #   (b) Group the row dicts per-model via
         #       `_model_group_folder_for_workload` (workload-aware
         #       wrapper around the existing `_model_group_folder`).
-        #   (c) Emit per-model `results.{csv,json}` FIRST — the source
-        #       of truth for each model.
-        #   (d) Emit empty per-model `results.{csv,json}` (header-only
-        #       CSV, `[]` JSON) for any on-disk `<...>/<model>/`
-        #       directory that produced zero workload rows. Closes the
-        #       D-03 empty-model-dir corner in Phase 6 itself.
-        #   (e) Assemble the top-level file BOTTOM-UP by concatenating
+        #   (c) Assemble the top-level row list BOTTOM-UP by concatenating
         #       every per-model row list into `all_rows`, sorted by the
         #       6-column prefix for deterministic order across runs.
+        #   (d) Assign Public IDs over the sorted `all_rows`. Row dicts are
+        #       shared by reference with `rows_by_model` and the per-org
+        #       slices, so this one pass gives a row the same ID in every
+        #       table it appears in. It runs BEFORE any file is written.
+        #   (e) Emit per-model `results.{csv,json}` — the source of truth
+        #       for each model — then empty per-model `results.{csv,json}`
+        #       (header-only CSV, `[]` JSON) for any on-disk
+        #       `<...>/<model>/` directory that produced zero workload
+        #       rows. Closes the D-03 empty-model-dir corner in Phase 6.
         #   (f) Emit top-level `results.{csv,json}` at
         #       `self.global_summary_dir`.
         #
@@ -623,22 +634,15 @@ class ReportGenerator:
             self._emit_empty_model_dirs(rows_by_model)
             return EXIT_CODE.SUCCESS
 
-        # (c) Per-model file emission — the D-02 "per-model file IS the
-        # source" step. Sorted for deterministic order.
-        for model_folder, rows in sorted(rows_by_model.items()):
-            self.write_json_file(rows, target_dir=model_folder)
-            self.write_csv_file(rows, target_dir=model_folder)
-
-        # (d) Empty-model-dir emission (D-03 corner) — MUST run BEFORE
-        # top-level assembly so it does not contribute rows to
-        # `all_rows`. Implemented in Task 4 as an explicit walker.
-        self._emit_empty_model_dirs(rows_by_model)
-
-        # (e) Bottom-up top-level assembly — concatenate every per-model
+        # (c) Bottom-up top-level assembly — concatenate every per-model
         # list, sort by the 6-column prefix for deterministic order.
         # R3: auxiliary-phase rows (datagen/datasize) keep their
-        # Rules-mandated per-phase leaf files from step (c) but stay out
+        # Rules-mandated per-phase leaf files from step (e) but stay out
         # of the org/global rollup tables.
+        #
+        # Assembly happens BEFORE any file is written so Public IDs can be
+        # assigned first (step (d)) — the per-model tables must show the
+        # same ID the rollups do.
         all_rows: List[dict] = []
         for _folder, rows in sorted(rows_by_model.items()):
             all_rows.extend(
@@ -654,6 +658,20 @@ class ReportGenerator:
                 r.get('accelerator', '') or '',
             )
         )
+
+        # (d) Public ID assignment over the sorted publishable rows.
+        self._assign_public_ids(all_rows)
+
+        # (e) Per-model file emission — the D-02 "per-model file IS the
+        # source" step. Sorted for deterministic order.
+        for model_folder, rows in sorted(rows_by_model.items()):
+            self.write_json_file(rows, target_dir=model_folder)
+            self.write_csv_file(rows, target_dir=model_folder)
+
+        # Empty-model-dir emission (D-03 corner). `_emit_empty_model_dirs`
+        # only reads `rows_by_model` for membership, so running it after
+        # assembly still contributes zero rows to `all_rows`.
+        self._emit_empty_model_dirs(rows_by_model)
 
         # (f) Top-level file emission — the D-02 "collection, not
         # aggregation" step. Also emitted when `rows_by_model` was
@@ -804,19 +822,22 @@ class ReportGenerator:
     ) -> Dict[str, Any]:
         """Build the shared SUT block for a workload row (Task F).
 
-        AUTO-filled: ``sut_organization`` (path), ``sut_name`` /
-        ``sut_description`` (Hyperlinks to the system-description
-        ``.yaml`` / ``.pdf``), ``sut_rus`` (``total_rack_units``). The
-        remaining six cells are present-but-blank placeholders the
-        submitter fills manually. Hrefs are repo-root-relative (Option A).
+        AUTO-filled from the path: ``sut_organization``, ``sut_name`` /
+        ``sut_description`` (Hyperlinks to the system-description ``.yaml``
+        / ``.pdf``). AUTO-filled from the system-description YAML:
+        ``sut_rus`` (``total_rack_units``) plus the five cells derived in
+        ``_derive_sut_cells``. ``sut_public_id`` is filled later, once the
+        publishable rows have been sorted (see ``_assign_public_ids``).
+        Hrefs are repo-root-relative (Option A).
         """
         cols: Dict[str, Any] = {key: "" for key in self._SUT_COLUMNS}
         cols['sut_organization'] = orgname or ""
 
         if category and orgname and systemname:
             base = f"{category}/{orgname}/systems/{systemname}"
-            _submission_name, rack_units = self._read_system_description(
-                first_run, systemname)
+            _submission_name, rack_units, solution = (
+                self._read_system_description(first_run, systemname))
+            cols.update(self._derive_sut_cells(solution, systemname))
             # Visible text (user-confirmed 2026-07-21): Name shows the
             # system name and links to the system-description.yaml;
             # Description shows literal "PDF" and links to the .pdf.
@@ -866,13 +887,15 @@ class ReportGenerator:
 
         Walks up from the run's ``result_dir`` to the first ancestor that
         contains ``systems/<systemname>.yaml`` (the ``<org>`` level of the
-        submission tree). Returns ``(submission_name, total_rack_units)``,
-        each ``None`` when the file is absent/unreadable — the caller then
-        falls back to the systemname text and a blank RU cell.
+        submission tree). Returns
+        ``(submission_name, total_rack_units, solution_dict)``. The first
+        two are ``None`` and the third an empty dict when the file is
+        absent/unreadable — the caller then falls back to the systemname
+        text, a blank RU cell and blank derived cells.
         """
         result_dir = getattr(first_run, 'result_dir', None)
         if not result_dir:
-            return None, None
+            return None, None, {}
         import yaml  # local import: pyyaml is a runtime dep, keep top clean
         from pathlib import Path
         start = Path(result_dir)
@@ -885,16 +908,106 @@ class ReportGenerator:
                     sut = data.get('system_under_test') or {}
                     solution = sut.get('solution') or {}
                     return (solution.get('submission_name'),
-                            sut.get('total_rack_units'))
+                            sut.get('total_rack_units'),
+                            solution)
                 except (OSError, yaml.YAMLError) as e:
                     self.logger.warning(
                         "reportgen: could not read system description %s: %s",
                         candidate, e)
-                    return None, None
+                    return None, None, {}
         self.logger.warning(
             "reportgen: no systems/%s.yaml found above %s; SUT block will "
             "fall back to systemname + blank RUs.", systemname, result_dir)
-        return None, None
+        return None, None, {}
+
+    def _derive_sut_cells(
+        self, solution: Dict[str, Any], systemname: str,
+    ) -> Dict[str, Any]:
+        """Derive the five YAML-sourced SUT cells from ``solution``.
+
+        ``Type`` is assembled from the solution's capabilities and
+        architecture::
+
+            if (simultaneous_write && simultaneous_read) Type = 'Shared'
+            else                                         Type = 'Failover'
+            if (storage_location == 'remote_and_local')  Type += ' remote and local'
+            else                                         Type += ' ' + storage_location
+            Type += ' ' + product_API
+
+        ``Access Protocol`` is POSIX for a ``file`` benchmark_API and S3 for
+        an ``object`` one. ``Availability`` is title-cased for display (the
+        schema enum is lowercase, except ``RDI``). The two capacities pass
+        straight through; ``int_client_store_tib`` is optional and expected
+        to be absent for every v3.0 submitter — the column exists for v2.0
+        parity.
+
+        Every cell degrades to ``""`` independently when its inputs are
+        missing, so a tree whose YAMLs have not been backfilled with the new
+        required fields still produces tables. ``Type`` in particular blanks
+        when ANY of its four inputs is absent rather than emitting a
+        half-built string like ``Shared remote None`` (user-confirmed).
+        """
+        cells: Dict[str, Any] = {
+            'sut_type': "",
+            'sut_access_protocol': "",
+            'sut_availability': "",
+            'sut_usable_capacity_tib': "",
+            'sut_integrated_client_storage': "",
+        }
+        if not solution:
+            return cells
+
+        architecture = solution.get('architecture') or {}
+        capabilities = solution.get('capabilities') or {}
+
+        storage_location = architecture.get('storage_location')
+        product_api = architecture.get('product_API')
+        simultaneous_write = capabilities.get('simultaneous_write')
+        simultaneous_read = capabilities.get('simultaneous_read')
+
+        if None not in (storage_location, product_api,
+                        simultaneous_write, simultaneous_read):
+            sut_type = (
+                'Shared' if (simultaneous_write and simultaneous_read)
+                else 'Failover'
+            )
+            if storage_location == 'remote_and_local':
+                sut_type += ' remote and local'
+            else:
+                sut_type += f" {storage_location}"
+            cells['sut_type'] = f"{sut_type} {product_api}"
+        else:
+            self.logger.warning(
+                "reportgen: %s is missing architecture/capabilities fields "
+                "needed for the Type cell; leaving it blank.", systemname)
+
+        benchmark_api = architecture.get('benchmark_API')
+        if benchmark_api is not None:
+            cells['sut_access_protocol'] = (
+                'POSIX' if benchmark_api == 'file' else 'S3'
+            )
+
+        availability = solution.get('availability')
+        if availability is not None:
+            # Display casing only — 'available'/'preview' title-case, 'RDI'
+            # is already an acronym and must survive untouched. Coerced to
+            # str first: this YAML has not been schema-validated by the time
+            # reportgen reads it, so the value may be any scalar.
+            availability = str(availability)
+            cells['sut_availability'] = (
+                availability if availability.isupper()
+                else availability.capitalize()
+            )
+
+        usable_capacity = solution.get('usable_capacity_tib')
+        if usable_capacity is not None:
+            cells['sut_usable_capacity_tib'] = usable_capacity
+
+        int_client_store = solution.get('int_client_store_tib')
+        if int_client_store is not None:
+            cells['sut_integrated_client_storage'] = int_client_store
+
+        return cells
 
     def _model_group_folder_for_workload(
         self, workload_result: 'Result'
@@ -924,6 +1037,25 @@ class ReportGenerator:
             metrics={},
         )
         return self._model_group_folder(proxy)
+
+    def _assign_public_ids(self, all_rows: List[dict]) -> None:
+        """Number the publishable rows ``v3.0-0001``, ``v3.0-0002``, ...
+
+        Mutates *all_rows* in place. ``all_rows`` is already sorted by the
+        rollup key, and holds only measurement (``run``) rows — auxiliary
+        datagen/datasize rows were filtered out by the R3 rule upstream and
+        keep the blank ``sut_public_id`` seeded by ``_sut_columns``.
+
+        IDs are positional and fully regenerated on every run: nothing is
+        persisted between runs, and inserting a row that sorts earlier
+        renumbers everything after it. Because these row dicts are the same
+        objects held in ``rows_by_model`` and sliced into the per-org
+        rollups, this single pass propagates to every table a row appears
+        in — numbering each output file separately would instead make every
+        single-row per-model table ``v3.0-0001``.
+        """
+        for index, row in enumerate(all_rows, start=1):
+            row['sut_public_id'] = f"{_PUBLIC_ID_PREFIX}-{index:04d}"
 
     def _emit_empty_model_dirs(
         self, rows_by_model: Dict[str, List[dict]]

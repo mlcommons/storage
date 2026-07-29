@@ -13,6 +13,9 @@ system_under_test:
             simultaneous_write: false
             simultaneous_read: false
             remap_time_in_seconds: 30
+        usable_capacity_tib: 8
+        availability: preview
+        int_client_store_tib: 8
     deployment: "onprem"
     clients:
         - friendly_description: Data

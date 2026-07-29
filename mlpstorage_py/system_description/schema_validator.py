@@ -60,6 +60,12 @@ class ClientInstallation(str, Enum):
     na          = 'n/a'
 
 
+class Availability(str, Enum):
+    available = 'available'
+    preview   = 'preview'
+    RDI       = 'RDI'
+
+
 class DeploymentMode(str, Enum):
     onprem = 'onprem'
     cloud  = 'cloud'
@@ -301,6 +307,13 @@ class Solution(StrictModel):
     friendly_description: str          = Field(min_length=1)
     architecture:         Architecture
     capabilities:         Capabilities
+    # Source cells for the v3.0 results table's Usable Capacity (TiB),
+    # Availability and Integrated Client Storage (TiB) columns. The first two
+    # are required; int_client_store_tib is optional — no v3.0 submitter is
+    # expected to use it, the column survives for v2.0 parity.
+    usable_capacity_tib:  int          = Field(ge=1)
+    availability:         Availability
+    int_client_store_tib: Optional[int] = Field(default=None, ge=1)
 
 
 class SystemUnderTest(StrictModel):

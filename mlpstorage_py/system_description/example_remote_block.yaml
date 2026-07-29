@@ -13,6 +13,8 @@ system_under_test:
             simultaneous_write: false
             simultaneous_read: true
             remap_time_in_seconds: 15
+        usable_capacity_tib: 2048
+        availability: RDI
     deployment: "onprem"
     product_nodes:
         - friendly_description: Block Server

@@ -13,6 +13,8 @@ system_under_test:
             simultaneous_write: true
             simultaneous_read: true
             remap_time_in_seconds: 0
+        usable_capacity_tib: 512
+        availability: available
     deployment: "onprem"
     product_nodes:
         - friendly_description: NFS Server

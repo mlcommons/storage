@@ -33,6 +33,25 @@ system_under_test:
             simultaneous_write:     bool( )         # Are simultaneous writes by multiple hosts supported?
             simultaneous_read:      bool( )         # Are simultaneous reads by multiple hosts supported?
             remap_time_in_seconds:  int( min=0 )    # Time required to go from writing to reading
+        usable_capacity_tib:        int( min=1 )
+        availability:               enum( 'available', 'preview', 'RDI' )
+        int_client_store_tib:       int( min=1, required=False )
+
+#if (simultaneous_write && simultaneous_read)
+#    type = 'Shared'
+#else
+#    type = 'Failover'
+#if (storage_location == 'remote_and_local')
+#    type += ' remote and local'
+#else
+#    type += ' ' + storage_location
+#type += ' ' + product_API
+#if (benchmark_API == 'file')
+#    accprot = 'POSIX'
+#else
+#    accprot = 'S3'
+#intclntstor = '';
+
     deployment:                     enum( 'onprem', 'cloud' )
     product_nodes:                  list( include( 'node_description' ), required=False )
     product_switches:               list( include( 'switch_description' ), required=False )
@@ -158,4 +177,10 @@ power_supply:
     inlet_voltage:              int( min=1 )        # AC input voltage the PSU is wired for (e.g. 120, 208, 240)
     nameplate_power_watts:      int( min=1 )        # The nameplate (regulatory rated) input power of the power supply
     efficiency:                 enum( 'Standard', 'Bronze', 'Silver', 'Gold', 'Platinum', 'Titanium', 'Ruby', 'Unrated' )
+
+
+
+
+
+
 
