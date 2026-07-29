@@ -171,13 +171,21 @@ def _architecture(storage_location="remote", footprint="open_source", installati
 
 
 def _solution(storage_location="remote", sw=True, sr=True, remap=0,
-              footprint="open_source", installation="in_box") -> dict:
-    return {
+              footprint="open_source", installation="in_box",
+              usable_capacity_tib=100, availability="available",
+              int_client_store_tib=None) -> dict:
+    solution = {
         "submission_name": "test",
         "friendly_description": "Test submission",
         "architecture": _architecture(storage_location, footprint, installation),
         "capabilities": _capabilities(sw, sr, remap),
+        "usable_capacity_tib": usable_capacity_tib,
+        "availability": availability,
     }
+    # Optional field (required=False) — omitted unless a test asks for it.
+    if int_client_store_tib is not None:
+        solution["int_client_store_tib"] = int_client_store_tib
+    return solution
 
 
 def _onprem_doc(storage_location="remote") -> dict:
@@ -1088,3 +1096,85 @@ class TestNetworkPortState:
                 traffic=["data"],
             )
         assert "speed" in str(exc_info.value)
+
+
+# ---------------------------------------------------------------------------
+# solution.usable_capacity_tib / availability / int_client_store_tib
+#
+# Three fields added at the `solution` level (parallel to architecture and
+# capabilities) so the v3.0 results table can generate its Usable Capacity,
+# Availability and Integrated Client Storage cells instead of having them
+# hand-filled. The first two are required; int_client_store_tib is optional
+# (nobody is expected to use it in v3.0 — the column survives for v2.0
+# parity).
+# ---------------------------------------------------------------------------
+
+class TestUsableCapacity:
+    def test_present_and_positive_passes(self):
+        ok(_onprem_doc())
+
+    def test_missing_rejected(self):
+        doc = _onprem_doc()
+        del doc["system_under_test"]["solution"]["usable_capacity_tib"]
+        fail(doc, "usable_capacity_tib")
+
+    def test_zero_rejected(self):
+        doc = _onprem_doc()
+        doc["system_under_test"]["solution"]["usable_capacity_tib"] = 0
+        fail(doc, "usable_capacity_tib")
+
+    def test_negative_rejected(self):
+        doc = _onprem_doc()
+        doc["system_under_test"]["solution"]["usable_capacity_tib"] = -5
+        fail(doc, "usable_capacity_tib")
+
+    def test_non_integer_rejected(self):
+        doc = _onprem_doc()
+        doc["system_under_test"]["solution"]["usable_capacity_tib"] = "lots"
+        fail(doc, "usable_capacity_tib")
+
+
+class TestAvailability:
+    @pytest.mark.parametrize("value", ["available", "preview", "RDI"])
+    def test_each_enum_value_passes(self, value):
+        doc = _onprem_doc()
+        doc["system_under_test"]["solution"]["availability"] = value
+        ok(doc)
+
+    def test_missing_rejected(self):
+        doc = _onprem_doc()
+        del doc["system_under_test"]["solution"]["availability"]
+        fail(doc, "availability")
+
+    def test_unknown_value_rejected(self):
+        doc = _onprem_doc()
+        doc["system_under_test"]["solution"]["availability"] = "shipping"
+        fail(doc, "availability")
+
+    def test_enum_is_case_sensitive(self):
+        """Values are lowercase in the schema; title-casing is a display-time
+        concern in reportgen, not an accepted input spelling."""
+        doc = _onprem_doc()
+        doc["system_under_test"]["solution"]["availability"] = "Available"
+        fail(doc, "availability")
+
+
+class TestIntegratedClientStorage:
+    def test_absent_passes(self):
+        """Optional (required=False) — the expected v3.0 case."""
+        ok(_onprem_doc())
+
+    def test_present_and_positive_passes(self):
+        doc = _onprem_doc()
+        doc["system_under_test"]["solution"]["int_client_store_tib"] = 8
+        ok(doc)
+
+    def test_zero_rejected(self):
+        doc = _onprem_doc()
+        doc["system_under_test"]["solution"]["int_client_store_tib"] = 0
+        fail(doc, "int_client_store_tib")
+
+    def test_non_integer_rejected(self):
+        doc = _onprem_doc()
+        doc["system_under_test"]["solution"]["int_client_store_tib"] = "some"
+        fail(doc, "int_client_store_tib")

@@ -55,7 +55,7 @@ FINAL_SCHEMA: List[str] = [
     "Access Protocol",
     "Availability",
     "RU's",
-    "Integrated Client Storage",
+    "Integrated Client Storage (TiB)",
     "Usable Capacity (TiB)",
     # Training block (6)
     "Training - Accelerator Type",
