@@ -800,3 +800,159 @@ class TestModelFolderClamping:
         leaf = str(tmp_path / "results" / "llama3-8b" / "run" / "20260704_140000")
         expected = str(tmp_path / "results" / "llama3-8b")
         assert gen._model_group_folder(self._result_for(leaf)) == expected
+
+
+# --------------------------------------------------------------------------- #
+# TestZombieRowsWithheld — issue #836, WRT-4                                  #
+# --------------------------------------------------------------------------- #
+
+
+def _plant_kvcache_leaf(
+    system_dir: pathlib.Path,
+    command: str,
+    run_datetime: str,
+    with_summary: bool = True,
+) -> pathlib.Path:
+    """Plant one canonical kv_cache invocation under a system directory.
+
+    ``with_summary=False`` reproduces ZettaLane's
+    ``kv_cache/llama3.1-8b/run/20260627_194318``: option dirs, trial logs
+    and metadata are all present, but the run's summary sits under the
+    older ``kvcache_run_summary_*.json`` name, so ``summary.json`` is
+    absent and every pass-through metric reads blank.
+    """
+    src = _FIXTURES_ROOT / "kvcache" / "llama3-8b" / "run" / "20260704_140000"
+    leaf = system_dir / "kv_cache" / "llama3-8b" / command / run_datetime
+    leaf.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copytree(src, leaf)
+    metadata_path = leaf / "kvcache_llama3-8b_metadata.json"
+    with open(metadata_path) as fh:
+        metadata = json.load(fh)
+    metadata["command"] = command
+    metadata["run_datetime"] = run_datetime
+    with open(metadata_path, "w") as fh:
+        json.dump(metadata, fh)
+    if not with_summary:
+        (leaf / "summary.json").rename(
+            leaf / f"kvcache_run_summary_{run_datetime}.json"
+        )
+    return leaf
+
+
+def _plant_kvcache_system(tmp_path: pathlib.Path, system: str) -> pathlib.Path:
+    """A canonical closed/<org>/results/<system>/ directory."""
+    system_dir = (
+        tmp_path / "tree" / "closed" / "TestOrg" / "results" / system
+    )
+    system_dir.mkdir(parents=True)
+    return system_dir
+
+
+class TestZombieRowsWithheld:
+    """A row with no measurements must not be published (#836, WRT-4).
+
+    The fixed final schema has no phase column and no issues column, so a
+    row whose every metric cell is blank is indistinguishable from a real
+    result that happens to read zero. Two such rows publish in the v3.0
+    tree today:
+
+    - ``v3.0-0006`` ANL polaris-nvme, whose kv_cache group holds only two
+      ``datasize`` invocations. R3 already keeps training/checkpointing
+      auxiliary phases out of the rollups via the issue-#771/#791
+      6-element workload keys, but kv_cache and vector_database keys are
+      always 5-tuples, so their auxiliary groups were never marked.
+    - ``v3.0-0138`` ZettaLane mayascale, a ``run`` group whose
+      ``summary.json`` does not exist under that name — every pass-through
+      column is blank.
+
+    Where the data is missing the row is withheld from every table and the
+    reason goes to the log, which is where submitters read problems (and
+    what ApparentProblems.md is written from) — not into the results
+    table.
+    """
+
+    def test_kvcache_datasize_only_group_stays_out_of_rollups(self, tmp_path):
+        """ANL polaris-nvme's shape: auxiliary phases only, no measurement."""
+        system_dir = _plant_kvcache_system(tmp_path, "polaris-nvme")
+        _plant_kvcache_leaf(system_dir, "datasize", "20260721_203747")
+        _plant_kvcache_leaf(system_dir, "datasize", "20260721_215716")
+
+        gen = ReportGenerator(
+            str(tmp_path / "tree"), args=Namespace(debug=False),
+            validate_structure=False,
+        )
+        assert gen.generate_reports() == 0
+
+        top_rows = json.loads(
+            (pathlib.Path(gen.global_summary_dir) / "results.json").read_text()
+        )
+        assert top_rows == [], (
+            f"a kv_cache group holding only datasize invocations published a "
+            f"metric-less row: {top_rows}"
+        )
+
+        # R3 parity with training: the per-phase leaf file is still written.
+        leaf_json = system_dir / "kv_cache" / "llama3-8b" / "results.json"
+        assert leaf_json.exists(), (
+            f"the Rules-mandated per-phase leaf rollup at {leaf_json} was "
+            f"removed along with the rollup row"
+        )
+
+    def test_run_without_a_readable_summary_is_withheld_and_logged(
+        self, tmp_path
+    ):
+        """ZettaLane's shape: a run invocation that yields no measurements."""
+        system_dir = _plant_kvcache_system(tmp_path, "mayascale")
+        leaf = _plant_kvcache_leaf(
+            system_dir, "run", "20260627_194318", with_summary=False,
+        )
+
+        gen = ReportGenerator(
+            str(tmp_path / "tree"), args=Namespace(debug=False),
+            validate_structure=False,
+        )
+        gen.logger.warning = MagicMock(wraps=gen.logger.warning)
+        assert gen.generate_reports() == 0
+
+        top_rows = json.loads(
+            (pathlib.Path(gen.global_summary_dir) / "results.json").read_text()
+        )
+        assert top_rows == [], (
+            f"a run with no readable summary published a blank row: {top_rows}"
+        )
+        model_rows = json.loads(
+            (system_dir / "kv_cache" / "llama3-8b" / "results.json").read_text()
+        )
+        assert model_rows == [], (
+            f"the model-level table published the blank row the rollups "
+            f"withheld — the two tables disagree: {model_rows}"
+        )
+
+        rendered = " ".join(
+            (call.args[0] % call.args[1:]) if len(call.args) > 1
+            else str(call.args[0] if call.args else call)
+            for call in gen.logger.warning.call_args_list
+        )
+        assert str(leaf) in rendered, (
+            "the withheld row's run directory was never named in the log"
+        )
+        assert "no measurements" in rendered, (
+            f"the log does not say why the row was withheld: {rendered[:600]}"
+        )
+
+    def test_healthy_run_still_publishes(self, tmp_path):
+        """Negative control — a run with a summary is unaffected."""
+        system_dir = _plant_kvcache_system(tmp_path, "healthy")
+        _plant_kvcache_leaf(system_dir, "run", "20260704_140000")
+
+        gen = ReportGenerator(
+            str(tmp_path / "tree"), args=Namespace(debug=False),
+            validate_structure=False,
+        )
+        assert gen.generate_reports() == 0
+
+        top_rows = json.loads(
+            (pathlib.Path(gen.global_summary_dir) / "results.json").read_text()
+        )
+        assert len(top_rows) == 1, f"the healthy row was withheld: {top_rows}"
+        assert top_rows[0]["Public ID"] == "v3.0-0001"
