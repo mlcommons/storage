@@ -1128,7 +1128,30 @@ class TestUsableCapacity:
         doc["system_under_test"]["solution"]["usable_capacity_tib"] = -5
         fail(doc, "usable_capacity_tib")
 
-    def test_non_integer_rejected(self):
+    def test_fractional_value_passes(self):
+        """Capacity is a float, not an int. A submitter's usable capacity is
+        rarely a whole number of TiB — XSKY's AIMesh reports 111.78 — and
+        rounding the figure to satisfy the schema is not ours to do."""
+        doc = _onprem_doc()
+        doc["system_under_test"]["solution"]["usable_capacity_tib"] = 111.78
+        ok(doc)
+
+    def test_whole_number_still_passes(self):
+        """Widening int -> float must not break the submitters who do report
+        a whole number of TiB; every example_*.yaml template uses one."""
+        doc = _onprem_doc()
+        doc["system_under_test"]["solution"]["usable_capacity_tib"] = 8192
+        ok(doc)
+
+    def test_fractional_below_minimum_rejected(self):
+        """The ge=1 bound survives the widening — a fractional value under
+        1 TiB is still out of range, it is not merely int-ness that blocked
+        it before."""
+        doc = _onprem_doc()
+        doc["system_under_test"]["solution"]["usable_capacity_tib"] = 0.5
+        fail(doc, "usable_capacity_tib")
+
+    def test_non_numeric_rejected(self):
         doc = _onprem_doc()
         doc["system_under_test"]["solution"]["usable_capacity_tib"] = "lots"
         fail(doc, "usable_capacity_tib")
@@ -1174,7 +1197,19 @@ class TestIntegratedClientStorage:
         doc["system_under_test"]["solution"]["int_client_store_tib"] = 0
         fail(doc, "int_client_store_tib")
 
-    def test_non_integer_rejected(self):
+    def test_fractional_value_passes(self):
+        """Same widening as usable_capacity_tib — both are TiB capacities
+        feeding adjacent results-table columns, so they take the same type."""
+        doc = _onprem_doc()
+        doc["system_under_test"]["solution"]["int_client_store_tib"] = 111.78
+        ok(doc)
+
+    def test_fractional_below_minimum_rejected(self):
+        doc = _onprem_doc()
+        doc["system_under_test"]["solution"]["int_client_store_tib"] = 0.5
+        fail(doc, "int_client_store_tib")
+
+    def test_non_numeric_rejected(self):
         doc = _onprem_doc()
         doc["system_under_test"]["solution"]["int_client_store_tib"] = "some"
         fail(doc, "int_client_store_tib")
