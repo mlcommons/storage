@@ -95,6 +95,49 @@ class TestIssuesListVisibility:
         assert "metric x is empty" in rendered
         assert "All runs satisfy" not in rendered
 
+    def test_warning_is_badged_as_a_warning(self, formatter):
+        """A warning must not render under a green ``[CLOSED]`` badge.
+
+        The badge is the first thing read. ``[CLOSED]`` on "row built
+        from 1 of 3 runs" reads as approval of the row, which is the
+        opposite of the message.
+        """
+        issues = [
+            Issue(
+                PARAM_VALIDATION.CLOSED,
+                "[WARN] kv_cache row built from 1 of 3 runs",
+                severity="warning",
+            ),
+        ]
+
+        rendered = formatter.format_issues_list(issues, show_all=False)
+
+        assert "[WARN]" in rendered
+        assert "[CLOSED]" not in rendered, (
+            f"warning rendered under a CLOSED badge: {rendered!r}"
+        )
+
+    def test_issue_without_parameter_omits_the_none_placeholder(self, formatter):
+        """``parameter`` is optional; absent should not print as ``None:``."""
+        issues = [
+            Issue(PARAM_VALIDATION.INVALID, "metric x is empty in invocation y"),
+        ]
+
+        rendered = formatter.format_issues_list(issues, show_all=False)
+
+        assert "None" not in rendered, f"stray None placeholder in {rendered!r}"
+        assert "metric x is empty in invocation y" in rendered
+
+    def test_issue_with_parameter_still_names_it(self, formatter):
+        """Negative control — a real ``parameter`` is still rendered."""
+        issues = [
+            Issue(PARAM_VALIDATION.INVALID, "bad value", parameter="num_processes"),
+        ]
+
+        rendered = formatter.format_issues_list(issues, show_all=False)
+
+        assert "num_processes: bad value" in rendered
+
     def test_show_all_is_unchanged(self, formatter):
         """``show_all=True`` still renders everything, warnings included."""
         issues = [
