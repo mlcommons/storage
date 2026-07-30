@@ -1997,29 +1997,82 @@ class ReportGenerator:
         measured = [r for r in runs if getattr(r, 'command', None) == 'run']
         return measured or list(runs)
 
-    @classmethod
-    def _select_kvcache_run(cls, runs: List[BenchmarkRun]) -> BenchmarkRun:
+    @staticmethod
+    def _kvcache_run_order_key(run: BenchmarkRun) -> tuple:
+        """Total order on kv_cache runs, newest last (#836).
+
+        ``run_datetime`` decides it; leaf name and absolute path break
+        ties so that two runs sharing a timestamp still order the same
+        way on every filesystem.
+        """
+        return (
+            str(run.run_datetime or ""),
+            os.path.basename(run.result_dir or ""),
+            os.path.abspath(run.result_dir or ""),
+        )
+
+    def _kvcache_run_defect(self, run: BenchmarkRun) -> Optional[str]:
+        """Why a kv_cache run is unfit to publish, or ``None`` if it is fit (#836).
+
+        Two disqualifiers, returned as the short marker a warning shows:
+
+        ``partial_failure`` — ``kvcache._write_run_summary`` recorded that
+        an option lost per-rank result files, or that an mpirun trial
+        exited non-zero (``trial_failures``). The run's headline figures
+        are an ``fmean`` over whatever survived.
+
+        ``no summary.json`` — nothing to publish from, so every
+        pass-through metric would read blank. ZettaLane's
+        ``kv_cache/llama3.1-8b/run/20260627_194318`` is such a leaf: it
+        has option dirs, trial logs and metadata, but writes its summary
+        under the older ``kvcache_run_summary_*.json`` name. Preferring a
+        leaf like that on recency alone would blank a row that has real
+        measurements in it.
+
+        Read quietly: selection consults every candidate, and
+        ``_load_workload_summary``'s missing-file warning belongs to the
+        run that actually gets published, not to each one considered.
+        """
+        summary = self._load_workload_summary(run, quiet=True)
+        if not summary:
+            return "no summary.json"
+        if summary.get("partial_failure"):
+            return "partial_failure"
+        if any(
+            failures for failures in (summary.get("trial_failures") or {}).values()
+        ):
+            return "partial_failure"
+        return None
+
+    def _kvcache_run_is_error_free(self, run: BenchmarkRun) -> bool:
+        """Whether a kv_cache run recorded a clean execution (#836)."""
+        return self._kvcache_run_defect(run) is None
+
+    def _select_kvcache_run(self, runs: List[BenchmarkRun]) -> BenchmarkRun:
         """Pick the one run whose metrics a kv_cache row publishes (#836).
 
         A kv_cache group is meant to hold one measured invocation, so
         this is normally that run by another name. When it holds more —
         see ``_kvcache_collapsed_group_issue`` — the previous ``runs[0]``
         made the published values a function of filesystem-discovery
-        order, which is genuinely arbitrary: of the three v3.0 groups
-        with two real runs, discovery published the earlier run for two
-        of them and the later run for the third. Earliest
-        ``run_datetime`` wins instead — no better claim than latest, but
-        it is a rule rather than an accident, and it matches the
-        positional convention Rules.md §2.1.17 already uses for training.
+        order. The rule instead:
+
+        1. the LATEST error-free run, because a submitter iterates (run,
+           change something, run again) and the last run is the one they
+           mean to publish. Everpure's 51hosts_20 and 51hosts_30 each
+           package exactly that pair.
+        2. failing that, the latest run of any kind — a group of nothing
+           but failed runs still publishes deterministically, and
+           ``_kvcache_partial_failure_issue`` then flags the row.
+
+        Latest alone would not do: ANL crux-eagle's two later runs lost
+        70 % and 97 % of their per-rank result files with every mpirun
+        trial exiting non-zero, so recency there points at 0.0 tok/s and
+        a 281-second P95 rather than at the submitter's best work.
         """
-        return min(
-            cls._kvcache_measured_runs(runs),
-            key=lambda r: (
-                str(r.run_datetime or ""),
-                os.path.basename(r.result_dir or ""),
-                os.path.abspath(r.result_dir or ""),
-            ),
-        )
+        candidates = self._kvcache_measured_runs(runs)
+        error_free = [r for r in candidates if self._kvcache_run_is_error_free(r)]
+        return max(error_free or candidates, key=self._kvcache_run_order_key)
 
     def _kvcache_integrity_issues(self, runs: List[BenchmarkRun]) -> List[Issue]:
         """Warnings for kv_cache rows that would otherwise look clean (#836).
@@ -2067,12 +2120,26 @@ class ReportGenerator:
         if len(measured) < 2 or published not in measured:
             return None
         dropped = [r for r in measured if r is not published]
+
+        def _dropped_label(run: BenchmarkRun) -> str:
+            """Name a dropped run, marking the ones that did not run clean.
+
+            Selection prefers the latest ERROR-FREE run, so a later run
+            appearing in the dropped list is not a positional accident —
+            it lost data. Saying so is the difference between a reviewer
+            reading the warning as a bug and reading it as the rule
+            working.
+            """
+            label = self._kvcache_run_label(run)
+            defect = self._kvcache_run_defect(run)
+            return f"{label} [{defect}]" if defect else label
+
         message = _WARN_MSG_KVCACHE_COLLAPSED_GROUP.format(
             n=len(measured),
             published=self._kvcache_run_label(published),
             dropped=", ".join(
-                self._kvcache_run_label(r) for r in sorted(
-                    dropped, key=lambda r: str(r.run_datetime or "")
+                _dropped_label(r) for r in sorted(
+                    dropped, key=self._kvcache_run_order_key
                 )
             ),
         )
@@ -2257,7 +2324,9 @@ class ReportGenerator:
                 values.append(value)
         return max(values) if values else None
 
-    def _load_workload_summary(self, run: BenchmarkRun) -> Dict[str, Any]:
+    def _load_workload_summary(
+        self, run: BenchmarkRun, quiet: bool = False,
+    ) -> Dict[str, Any]:
         """
         Load the workload's ``summary.json`` for vdb / kvcache pass-through
         branches.
@@ -2268,11 +2337,19 @@ class ReportGenerator:
         malformed JSON logs a warning and returns ``{}`` — the caller
         emits empty pass-through columns rather than aborting the whole
         reportgen pass (threat T-06-06 mitigation).
+
+        ``quiet`` suppresses those diagnostics for callers that read a
+        summary to make a decision rather than to publish from it —
+        ``_kvcache_run_is_error_free`` consults every candidate in a
+        group (#836), and the absence of a summary is the published
+        run's problem to report, not each considered run's.
         """
         if not run.result_dir:
             return {}
         summary_path = os.path.join(run.result_dir, "summary.json")
         if not os.path.isfile(summary_path):
+            if quiet:
+                return {}
             # datagen/datasize invocations can never have a summary.json
             # (DLIO doesn't write one for datagen; datasize is a pure
             # calculation) — absence is only an artifact gap for run phases.
@@ -2292,10 +2369,11 @@ class ReportGenerator:
             with open(summary_path, "r") as f:
                 return json.load(f)
         except (OSError, ValueError) as e:
-            self.logger.warning(
-                f"summary.json at {summary_path} could not be read: {e}; "
-                "pass-through columns will be empty."
-            )
+            if not quiet:
+                self.logger.warning(
+                    f"summary.json at {summary_path} could not be read: {e}; "
+                    "pass-through columns will be empty."
+                )
             return {}
 
     # ------------------------------------------------------------------
