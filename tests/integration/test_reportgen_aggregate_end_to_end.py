@@ -401,3 +401,120 @@ class TestPreservesUnrelatedFiles:
         assert deep_unrelated.read_text() == (
             "Unrelated per-model notes — must survive."
         )
+
+
+# --------------------------------------------------------------------------- #
+# TestLeafAndRollupAgree — issue #836 suggestion 3                            #
+# --------------------------------------------------------------------------- #
+
+
+def _plant_flattened_kvcache(results_root: pathlib.Path) -> pathlib.Path:
+    """Plant a kv_cache run whose leaf is NOT named after its timestamp.
+
+    Reproduces ``closed/ANL/results/crux-eagle`` from #836: three runs
+    written canonically as ``<system>/kv_cache/llama3.1-8b/run/<ts>/`` on
+    three different machines, then merged into one system directory at
+    packaging time with each ``run/<ts>/`` pair collapsed into a single
+    directory renamed after its topology.
+
+    Returns the model directory that owns the planted runs.
+    """
+    src = _FIXTURES_ROOT / "kvcache" / "llama3-8b" / "run" / "20260704_140000"
+    model_dir = (
+        results_root / "closed" / "ANL" / "results" / "crux-eagle"
+        / "kv_cache" / "llama3-8b-10u"
+    )
+    model_dir.mkdir(parents=True)
+    for leaf_name, run_datetime in (
+        ("1nodex8ppn", "20260723_062638"),
+        ("8nodex8ppn", "20260723_191548"),
+    ):
+        leaf = model_dir / leaf_name
+        shutil.copytree(src, leaf)
+        # Each leaf carries its own run_datetime, as the real tree does —
+        # the directory name no longer encodes it.
+        for name in ("summary.json", "kvcache_llama3-8b_metadata.json"):
+            path = leaf / name
+            blob = _load_json(path)
+            blob["run_datetime"] = run_datetime
+            with open(path, "w") as fh:
+                json.dump(blob, fh)
+    return model_dir
+
+
+class TestLeafAndRollupAgree:
+    """A workload's own table must hold the row its rollups publish (#836).
+
+    Two paths disagreed about what constitutes a run. Extraction works
+    off each leaf's self-describing ``*_metadata.json``, so a
+    non-canonically-named leaf yields a ``BenchmarkRun`` and reaches the
+    rollups. Row PLACEMENT went through ``_model_group_folder``, which
+    hops a fixed two levels up from the leaf on the assumption that it
+    sits at ``<model>/<command>/<ts>/``. When the leaf sits one level
+    shallower, those two hops land ON the ``kv_cache`` benchmark-type
+    directory instead of the model directory — so the row was written to
+    ``<system>/kv_cache/results.csv``, a path the canonical layout has no
+    table at, while the real model directory got a header-only file from
+    the D-03 empty-model-dir pass.
+
+    Observed in the v3.0 tree as an empty
+    ``crux-eagle/kv_cache/llama3-8b-10u/results.csv`` beside a populated
+    ``crux-eagle/kv_cache/results.csv`` and a populated top-level row.
+    ``crux-eagle/kv_cache/results.csv`` is the only such file in the
+    tree — every other system's kv_cache table lives one level deeper,
+    inside its model directory.
+    """
+
+    def test_noncanonical_leaf_row_lands_in_the_model_dir(self, tmp_path):
+        results_root = tmp_path / "results_root"
+        results_root.mkdir()
+        model_dir = _plant_flattened_kvcache(results_root)
+
+        args = Namespace(debug=False)
+        gen = ReportGenerator(
+            str(results_root), args=args, validate_structure=False,
+        )
+        assert gen.generate_reports() == 0
+
+        # The runs were extracted and aggregated — that is the premise,
+        # not the thing under test.
+        top_rows = _load_json(pathlib.Path(gen.global_summary_dir) / "results.json")
+        kv_rows = [r for r in top_rows if r.get("Benchmark Type") == "kv_cache"]
+        assert len(kv_rows) == 1, (
+            f"expected the group to publish one row upstream; got {kv_rows}"
+        )
+
+        # ...so the model directory's own table must hold it.
+        leaf_rows = _load_json(model_dir / "results.json")
+        assert len(leaf_rows) == 1, (
+            f"{model_dir.name}/results.json is empty while the top-level "
+            f"table publishes {len(kv_rows)} kv_cache row(s) — the two "
+            f"tables disagree about whether this workload exists"
+        )
+        assert leaf_rows[0]["Public ID"] == kv_rows[0]["Public ID"]
+
+    def test_no_table_is_written_at_the_benchmark_type_dir(self, tmp_path):
+        """No ``<system>/kv_cache/results.csv`` — that path owns no table.
+
+        The canonical model-level rollup lives at
+        ``<system>/kv_cache/<model>/``. A table one level above it is not
+        a second opinion, it is a phantom: nothing reads it, and it
+        contradicts the model directory beside it.
+        """
+        results_root = tmp_path / "results_root"
+        results_root.mkdir()
+        model_dir = _plant_flattened_kvcache(results_root)
+        benchmark_type_dir = model_dir.parent
+
+        args = Namespace(debug=False)
+        gen = ReportGenerator(
+            str(results_root), args=args, validate_structure=False,
+        )
+        assert gen.generate_reports() == 0
+
+        for name in ("results.csv", "results.json"):
+            stray = benchmark_type_dir / name
+            assert not stray.exists(), (
+                f"reportgen wrote {stray}, one level above the model "
+                f"directory that owns the workload's table"
+            )
