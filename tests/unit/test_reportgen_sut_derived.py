@@ -59,9 +59,9 @@ def _system_yaml(
     product_API: str = "file",
     simultaneous_write: bool = True,
     simultaneous_read: bool = True,
-    usable_capacity_tib: int = 512,
+    usable_capacity_tib: float = 512,
     availability: str = "available",
-    int_client_store_tib: int | None = None,
+    int_client_store_tib: float | None = None,
 ) -> dict:
     """A system-description dict carrying every field the SUT block reads."""
     solution = {

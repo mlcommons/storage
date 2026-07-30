@@ -311,9 +311,16 @@ class Solution(StrictModel):
     # Availability and Integrated Client Storage (TiB) columns. The first two
     # are required; int_client_store_tib is optional — no v3.0 submitter is
     # expected to use it, the column survives for v2.0 parity.
-    usable_capacity_tib:  int          = Field(ge=1)
+    #
+    # Both capacities are float, not int: a usable capacity is rarely a whole
+    # number of TiB once RAID/EC overhead is taken out (XSKY's AIMesh reports
+    # 111.78), and rounding a submitter's stated figure to satisfy the schema
+    # is not ours to do. ge=1 is unchanged by the widening — sub-1-TiB is
+    # still out of range. Whole numbers keep validating: the model is lax
+    # (extra="forbid" only, not strict=True), so an int coerces to float.
+    usable_capacity_tib:  float          = Field(ge=1)
     availability:         Availability
-    int_client_store_tib: Optional[int] = Field(default=None, ge=1)
+    int_client_store_tib: Optional[float] = Field(default=None, ge=1)
 
 
 class SystemUnderTest(StrictModel):

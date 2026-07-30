@@ -172,9 +172,9 @@ def _build_system_yaml(
     benchmark_api: str = "file",
     remap_time_seconds: int | None = None,
     simultaneous_flags: dict | None = None,
-    usable_capacity_tib: int = 100,
+    usable_capacity_tib: float = 100,
     availability: str = "available",
-    int_client_store_tib: int | None = None,
+    int_client_store_tib: float | None = None,
 ) -> dict:
     """Build a schema-valid system YAML dict for the given submission_name.
 
@@ -412,11 +412,11 @@ def build_submission(tmp_path, **overrides) -> Path:
     * ``chkpt_simultaneous_flags`` (dict | None) — CHKPT-05: overrides any of
       ``simultaneous_write``, ``simultaneous_read``, ``multi_host`` in system YAML
       capabilities block.
-    * ``sys_usable_capacity_tib`` (int) — ``solution.usable_capacity_tib``,
+    * ``sys_usable_capacity_tib`` (float) — ``solution.usable_capacity_tib``,
       source of the results table's Usable Capacity (TiB) cell.
     * ``sys_availability`` (str) — ``solution.availability``; one of
       ``available`` / ``preview`` / ``RDI``.
-    * ``sys_int_client_store_tib`` (int | None) — optional
+    * ``sys_int_client_store_tib`` (float | None) — optional
       ``solution.int_client_store_tib``; omitted from the YAML entirely when
       None, which is the expected v3.0 case.
     * ``chkpt_checkpoint_folder`` (str | None) — CHKPT-06: sets

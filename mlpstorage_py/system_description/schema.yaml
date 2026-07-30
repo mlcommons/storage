@@ -33,9 +33,12 @@ system_under_test:
             simultaneous_write:     bool( )         # Are simultaneous writes by multiple hosts supported?
             simultaneous_read:      bool( )         # Are simultaneous reads by multiple hosts supported?
             remap_time_in_seconds:  int( min=0 )    # Time required to go from writing to reading
-        usable_capacity_tib:        int( min=1 )
+        # Fractional capacities are accepted — usable capacity is rarely a
+        # whole number of TiB once RAID/EC overhead is taken out. Report the
+        # figure as measured rather than rounding it to an integer.
+        usable_capacity_tib:        num( min=1 )
         availability:               enum( 'available', 'preview', 'RDI' )
-        int_client_store_tib:       int( min=1, required=False )
+        int_client_store_tib:       num( min=1, required=False )
 
 #if (simultaneous_write && simultaneous_read)
 #    type = 'Shared'
