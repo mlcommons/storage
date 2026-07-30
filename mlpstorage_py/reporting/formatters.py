@@ -211,8 +211,17 @@ Fix these issues and re-run the benchmark.
         if not issues:
             return "    No issues found"
 
+        # ``validation`` is the submission category; ``severity`` is whether a
+        # human needs to look. Filtering on validation alone hid every
+        # CLOSED + warning issue — the datagen leaf-presence warnings and the
+        # #836 kv_cache collapsed-group / partial_failure warnings, all of
+        # which describe a published row that is misleading rather than a
+        # submission that is disqualified. Ordinary CLOSED chatter (the
+        # per-workload "all runs satisfy the CLOSED category" line) still goes.
         filtered_issues = issues if show_all else [
-            i for i in issues if i.validation != PARAM_VALIDATION.CLOSED
+            i for i in issues
+            if i.validation != PARAM_VALIDATION.CLOSED
+            or getattr(i, 'severity', None) == 'warning'
         ]
 
         if not filtered_issues:
@@ -221,11 +230,26 @@ Fix these issues and re-run the benchmark.
         lines = ["    Issues:"]
         for issue in filtered_issues:
             validation = issue.validation.value.upper()
-            color = 'green' if validation == 'CLOSED' else (
-                'yellow' if validation == 'OPEN' else 'red'
-            )
-            badge = self._color(f"[{validation}]", color)
-            lines.append(f"      {badge} {issue.parameter}: {issue.message}")
+            if getattr(issue, 'severity', None) == 'warning':
+                # Badge the severity, not the category: a green [CLOSED]
+                # on "row built from 1 of 3 runs" reads as approval.
+                label, color = 'WARN', 'yellow'
+            else:
+                label = validation
+                color = 'green' if validation == 'CLOSED' else (
+                    'yellow' if validation == 'OPEN' else 'red'
+                )
+            badge = self._color(f"[{label}]", color)
+            # ``parameter`` is optional — the rules-strict INVALID messages
+            # and the #836 warnings carry none, and "None: " is noise.
+            prefix = f"{issue.parameter}: " if issue.parameter else ""
+            # Warning messages carry their own "[WARN] " lead-in, which the
+            # datagen leaf-presence tests pin. Absorb it rather than render
+            # "[WARN] [WARN] ..." or break that contract.
+            message = issue.message
+            if label == 'WARN' and message.startswith('[WARN] '):
+                message = message[len('[WARN] '):]
+            lines.append(f"      {badge} {prefix}{message}")
 
         return "\n".join(lines)
 

@@ -117,6 +117,27 @@ class TestIssuesListVisibility:
             f"warning rendered under a CLOSED badge: {rendered!r}"
         )
 
+    def test_warn_badge_absorbs_the_messages_own_prefix(self, formatter):
+        """No ``[WARN] [WARN]``.
+
+        Warning messages carry their own ``[WARN] `` lead-in — pinned for
+        the datagen leaf-presence family by
+        ``test_aggregation.py::TestDatagenReportgenValidation`` — so the
+        badge must absorb it rather than stack on it.
+        """
+        issues = [
+            Issue(
+                PARAM_VALIDATION.CLOSED,
+                "[WARN] datagen leaf incomplete (20260101_000000): summary.json",
+                severity="warning",
+            ),
+        ]
+
+        rendered = formatter.format_issues_list(issues, show_all=False)
+
+        assert rendered.count("[WARN]") == 1, f"stacked badges in {rendered!r}"
+        assert "datagen leaf incomplete" in rendered
+
     def test_issue_without_parameter_omits_the_none_placeholder(self, formatter):
         """``parameter`` is optional; absent should not print as ``None:``."""
         issues = [
