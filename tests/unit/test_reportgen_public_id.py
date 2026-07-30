@@ -8,8 +8,12 @@ the published rows itself:
 - The counter starts at 1 **after** the rows have been sorted, so IDs follow
   the established rollup sort key (category, orgname, systemname,
   benchmark_type, model, accelerator).
-- IDs are **fully regenerated** on every run. Nothing is persisted between
-  runs; inserting a row that sorts earlier renumbers everything after it.
+- The FIRST run of a tree numbers positionally, and records that numbering in
+  a ``public_ids.json`` registry it creates. From then on IDs are pinned, not
+  positional: a row keeps its number and a new row mints above the highest
+  issued. See ``test_reportgen_public_id_registry.py`` — everything below
+  describes a tree's first pass, which is what fixes the format and the
+  starting order.
 - Only ``run`` rows are numbered. Auxiliary-phase rows (datagen/datasize —
   the R3 / issue-#771/#791 6-element workload keys) are excluded from the
   rollups and carry a blank Public ID in their per-phase leaf files.
@@ -129,9 +133,13 @@ class TestFullRegeneration:
         second = {r["Organization"]: r["Public ID"] for r in _global_rows(root)}
         assert first == second
 
-    def test_inserting_an_earlier_org_renumbers(self, tmp_path):
-        """IDs are positional, not sticky: a new org sorting before acme
-        pushes acme from 0001 to 0002."""
+    def test_inserting_an_earlier_org_does_not_renumber(self, tmp_path):
+        """IDs are sticky once the first run has recorded them: a new org
+        sorting before acme takes the next free number instead of displacing
+        it. Numbering therefore drifts out of sort order as organizations
+        arrive — deliberately, since displacing a published ID is worse. The
+        release-time renumber (delete the registry, regenerate) restores sort
+        order and closes gaps for publication."""
         root = _prepare_tree(tmp_path)
         _run(root)
         assert _per_model_rows(root, "acme", "system-a")[0]["Public ID"] == (
@@ -140,12 +148,10 @@ class TestFullRegeneration:
         # Clone acme's whole org tree under a name that sorts first.
         shutil.copytree(root / "closed" / "acme", root / "closed" / "aaa_corp")
         _run(root)
-        ids = [r["Public ID"] for r in _global_rows(root)]
-        assert ids == [f"v3.0-{i:04d}" for i in range(1, len(ids) + 1)]
         by_org = {r["Organization"]: r["Public ID"] for r in _global_rows(root)}
-        assert by_org["aaa_corp"] == "v3.0-0001"
-        assert by_org["acme"] == "v3.0-0002"
-        assert by_org["beta_corp"] == "v3.0-0003"
+        assert by_org["acme"] == "v3.0-0001"
+        assert by_org["beta_corp"] == "v3.0-0002"
+        assert by_org["aaa_corp"] == "v3.0-0003"
 
 
 class TestOnlyRunRowsAreNumbered:
