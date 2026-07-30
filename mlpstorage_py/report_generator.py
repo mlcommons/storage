@@ -233,6 +233,17 @@ _WORKLOAD_BLOCK_BY_TYPE = {
     "kv_cache": ("KVCache", _KVCACHE_SHARED_BLOCK),  # + groups, see _final_row
 }
 
+# Phases that measure nothing: a calculation (datasize) or a data write
+# (datagen). Rules.md mandates their per-phase leaf results files, but they
+# carry no result and must not reach the rollup tables (R3, #836 WRT-4).
+_AUXILIARY_COMMANDS = ("datagen", "datasize")
+
+# Columns that are present on any row the tool can place at all — a code
+# image is captured before the benchmark runs, so Code/Logs populate even
+# for a run that produced nothing. They cannot count as evidence that a row
+# has measurements in it (#836 WRT-4).
+_NON_MEASUREMENT_BLOCK_COLUMNS = ("Code", "Logs")
+
 
 def _build_final_schema():
     """Assemble the ordered fixed column list from the block definitions.
@@ -644,6 +655,11 @@ class ReportGenerator:
             if model_folder is None:
                 skipped_no_model_folder += 1
                 continue
+            # A measurement row with nothing measured in it is not a
+            # result (#836 WRT-4). Withhold it from every table and put
+            # the reason in the log, where submitters read problems.
+            if self._withhold_metricless_row(row, workload_result):
+                continue
             rows_by_model.setdefault(model_folder, []).append(row)
 
         # D-08 "no runs" preservation — early-return SUCCESS when there
@@ -725,6 +741,128 @@ class ReportGenerator:
             self.write_csv_file(org_rows, target_dir=target_dir)
 
         return EXIT_CODE.SUCCESS
+
+    @staticmethod
+    def _is_auxiliary_only_group(workload_result: 'Result') -> bool:
+        """Whether a workload group holds no measurement invocation (#836 WRT-4).
+
+        Judged on the group's CONTENTS, not on
+        ``Result.benchmark_command``: the kv_cache and vector_database keys
+        have no ``command`` component, so ``datagen``, ``datasize`` and
+        ``run`` invocations share one group and the label is only the first
+        run's command. Every vector_database group in the v3.0 tree is
+        labelled ``datagen`` for that reason while holding five real
+        ``run`` invocations — marking by the label withheld all five vdb
+        rows.
+        """
+        runs = workload_result.benchmark_run
+        runs = runs if isinstance(runs, list) else [runs]
+        commands = [
+            getattr(r, 'command', None) for r in runs if r is not None
+        ]
+        if not commands:
+            return False
+        return all(c in _AUXILIARY_COMMANDS for c in commands)
+
+    def _log_auxiliary_only_withholding(
+        self, row: Dict[str, Any], workload_result: 'Result',
+    ) -> None:
+        """Say that a workload publishes no row, and what it held (#836 WRT-4).
+
+        Marking an auxiliary-only kv_cache / vector_database group keeps a
+        metric-less row out of the rollups, but silently: the system loses
+        a workload with nothing to act on. For ANL polaris-nvme this
+        warning is the only signal there is — its ``run`` leaf
+        (``kv_cache/llama3.1-8b/run/20260721_203800``) holds trial logs and
+        option directories but no ``*_metadata.json``, and a leaf with no
+        metadata is never enumerated as a run directory, so the #835
+        skipped-run reporting does not name it either.
+
+        Training and checkpointing keep their existing silence: their
+        auxiliary phases get their own 6-element key and sit alongside the
+        ``run`` group that does publish, so nothing goes missing.
+        """
+        runs = workload_result.benchmark_run
+        runs = runs if isinstance(runs, list) else [runs]
+        commands = sorted({
+            str(getattr(r, 'command', '') or '?') for r in runs if r is not None
+        })
+        leaves = [
+            str(getattr(r, 'result_dir', '') or '')
+            for r in runs if r is not None
+        ]
+        self.logger.warning(
+            "reportgen: %s %s workload for %s publishes no row — the group "
+            "holds no measurement invocation, only %s. Present: %s. A "
+            "`run` invocation whose *_metadata.json is missing is not "
+            "loadable and leaves its phase directories behind like this.",
+            row.get("category", "") or "?",
+            row.get("benchmark_type", "") or "?",
+            row.get("systemname", "") or "?",
+            ", ".join(commands),
+            "; ".join(p for p in leaves if p) or "(unknown)",
+        )
+
+    def _withhold_metricless_row(
+        self, row: Dict[str, Any], workload_result: 'Result',
+    ) -> bool:
+        """Whether to keep a measurement row out of every table (#836 WRT-4).
+
+        A row whose workload block is entirely blank says nothing except
+        that a directory existed. The fixed schema has no issues column to
+        qualify it with, so published it reads as a system that measured
+        zero — ZettaLane's mayascale kv_cache row (v3.0-0138) is one, its
+        run's summary being under the older
+        ``kvcache_run_summary_<ts>.json`` name. Withhold it from the leaf
+        table and the rollups alike (leaving them consistent, per
+        suggestion 3) and log the run directory with the reason, which is
+        where a submitter reads problems.
+
+        Deliberately conservative: only a wholly blank block qualifies.
+        Configuration cells such as ``# Client Nodes`` count as content,
+        so a partially-populated row still publishes and is described by
+        the #835 / #836 warnings instead. Withholding a real submission's
+        row would be far worse than publishing a thin one.
+
+        Auxiliary phases are not this: they measure nothing by definition,
+        R3 owns them, and they keep their Rules-mandated per-phase leaf
+        file.
+        """
+        if row.get('auxiliary_command'):
+            return False
+        block = _WORKLOAD_BLOCK_BY_TYPE.get(row.get("benchmark_type") or "")
+        if block is None:
+            return False
+        prefix = block[0] + " - "
+        projected = self._final_row(row)
+        for column, value in projected.items():
+            if not column.startswith(block[0]):
+                continue
+            if column.startswith(prefix) and column[len(prefix):] in (
+                _NON_MEASUREMENT_BLOCK_COLUMNS
+            ):
+                continue
+            if value not in ("", None):
+                return False
+
+        leaf = ""
+        runs = workload_result.benchmark_run
+        first_run = runs[0] if isinstance(runs, list) and runs else runs
+        if first_run is not None:
+            leaf = str(getattr(first_run, 'result_dir', '') or "")
+        self.logger.warning(
+            "reportgen: withholding %s %s row for %s from results.csv — the "
+            "run produced no measurements (every %s column is blank). Run "
+            "directory: %s. Fix the run's data or remove the directory; a "
+            "blank row is indistinguishable from a system that measured "
+            "zero.",
+            row.get("category", "") or "?",
+            row.get("benchmark_type", "") or "?",
+            row.get("systemname", "") or "?",
+            block[0],
+            leaf or "(unknown)",
+        )
+        return True
 
     def _workload_result_to_row(
         self,
@@ -820,6 +958,20 @@ class ReportGenerator:
         # apart from broken measurement rows.
         if len(workload_key) > 5:
             row['auxiliary_command'] = str(workload_key[5])
+        elif self._is_auxiliary_only_group(workload_result):
+            self._log_auxiliary_only_withholding(row, workload_result)
+            # kv_cache and vector_database keys are always 5-tuples — they
+            # have no ``command`` component to lengthen — so their
+            # auxiliary phases reached the rollups unmarked. ANL
+            # polaris-nvme's kv_cache group holds two ``datasize``
+            # invocations and nothing else (its only ``run`` leaf lost its
+            # metadata, #835), and published v3.0-0006 with every metric
+            # blank. R3's reasoning does not depend on how the key was
+            # built, so mark by the group's contents instead (#836 WRT-4).
+            row['auxiliary_command'] = str(
+                workload_result.benchmark_command
+                or _AUXILIARY_COMMANDS[0]
+            )
 
         return row
 
