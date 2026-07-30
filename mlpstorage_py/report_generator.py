@@ -15,6 +15,7 @@ import os.path
 import pprint
 import statistics
 import sys
+import textwrap
 
 from dataclasses import dataclass
 from statistics import fmean, StatisticsError
@@ -386,6 +387,11 @@ class ReportGenerator:
         # basename cannot cross-mark each other's real runs as warmups.
         self.warmup_result_dirs: set = set()
         self.processing_errors: List[str] = []
+        # Run directories found on disk but not loadable into a run.
+        # These contribute nothing to results.{csv,json}, so they are
+        # reported at the end of the pass rather than left as one
+        # WARNING line among thousands (#835).
+        self.skipped_run_dirs: List = []
 
         self.accumulate_results()
         self.print_results()
@@ -1263,7 +1269,11 @@ class ReportGenerator:
         for scan_root in self.scan_roots:
             try:
                 benchmark_runs.extend(
-                    get_runs_files(scan_root, logger=self.logger)
+                    get_runs_files(
+                        scan_root,
+                        logger=self.logger,
+                        skipped=self.skipped_run_dirs,
+                    )
                 )
             except Exception as e:
                 self.logger.error(
@@ -1272,6 +1282,15 @@ class ReportGenerator:
                 self.processing_errors.append(
                     f"Directory scan failed for {scan_root}: {e}"
                 )
+
+        if self.skipped_run_dirs:
+            self.logger.warning(
+                f"{len(self.skipped_run_dirs)} run director"
+                f"{'y was' if len(self.skipped_run_dirs) == 1 else 'ies were'} "
+                "skipped and contribute nothing to results.csv / results.json. "
+                "See the SKIPPED RUN DIRECTORIES section at the end of this "
+                "report."
+            )
 
         if not benchmark_runs:
             scan_paths = ', '.join(self.scan_roots)
@@ -2694,6 +2713,9 @@ class ReportGenerator:
                 print("\nProcessing errors occurred:")
                 for error in self.processing_errors:
                     print(f"  - {error}")
+            # Every leaf may have been dropped — the case where the
+            # skip list is the only explanation for an empty report.
+            self._print_skipped_run_dirs()
             return
 
         # Calculate summary counts
@@ -2746,6 +2768,39 @@ class ReportGenerator:
             print("-" * 70)
             for error in self.processing_errors:
                 print(f"  - {error}")
+
+        self._print_skipped_run_dirs()
+
+    def _print_skipped_run_dirs(self) -> None:
+        """Report every run directory the walk found but could not load.
+
+        These publish nothing: their metrics are absent from
+        results.{csv,json}, and where a datagen/datasize sibling leaf
+        still loads, the workload keeps a row with blank metric columns.
+        Printed as its own section so the count is visible without
+        grepping a pass that can run to thousands of lines (#835).
+        """
+        if not self.skipped_run_dirs:
+            return
+
+        count = len(self.skipped_run_dirs)
+        print("\n" + "-" * 70)
+        print(f"SKIPPED RUN DIRECTORIES ({count})")
+        print("-" * 70)
+        print(
+            "These directories were found on disk but could not be loaded. "
+            "They contribute\nNO metrics to results.csv / results.json."
+        )
+        for skipped in self.skipped_run_dirs:
+            print(f"\n  {skipped.path}")
+            # break_on_hyphens/break_long_words off so filenames and
+            # placeholders like <benchmark-type>_<run-datetime>_metadata.json
+            # stay copy-pasteable instead of splitting at a hyphen.
+            print(textwrap.fill(
+                skipped.detail, width=70,
+                initial_indent="    ", subsequent_indent="    ",
+                break_on_hyphens=False, break_long_words=False,
+            ))
 
     def _print_run_details(self, result: Result) -> None:
         """

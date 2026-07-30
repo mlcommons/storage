@@ -205,7 +205,12 @@ class TestSkippedRunsAreRecorded:
 
         get_runs_files(str(results_dir), logger=mock_logger, skipped=[])
 
-        warnings = " ".join(mock_logger.get_messages('warning'))
+        # ``mock_logger`` is a MagicMock (tests/conftest.py) — read the
+        # recorded call args, not MockLogger's get_messages(), which a
+        # MagicMock answers with an empty iterator.
+        warnings = " ".join(
+            str(call) for call in mock_logger.warning.call_args_list
+        )
         assert "BLANK" in warnings.upper(), (
             f"warning never names the consequence: {warnings!r}"
         )

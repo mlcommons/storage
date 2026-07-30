@@ -845,6 +845,21 @@ def _filter_list_metrics(metric_block, logger=None, context: str = ""):
     return filtered
 
 
+class BenchmarkTypeUndetermined(ValueError):
+    """A run leaf could not be identified as any benchmark type.
+
+    Raised when a directory holds a ``summary.json`` but carries no
+    usable ``*_metadata.json`` and no DLIO Hydra workflow signal.
+
+    This is the load failure with a specific, cheap remedy — restore the
+    run's metadata file — as opposed to a malformed or truncated
+    package. ``get_runs_files`` distinguishes the two so it can tell the
+    submitter which one they are looking at (#835). Subclasses
+    ``ValueError`` so existing ``except ValueError`` callers are
+    unaffected.
+    """
+
+
 class DLIOResultParser:
     """Parses DLIO benchmark result files into BenchmarkRunData."""
 
@@ -887,7 +902,7 @@ class DLIOResultParser:
             command = "run"
 
         if benchmark_type is None:
-            raise ValueError(
+            raise BenchmarkTypeUndetermined(
                 f"Could not determine benchmark type for {result_dir}: "
                 "summary.json lacks workflow signal and no Hydra configs found"
             )

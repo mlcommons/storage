@@ -724,7 +724,7 @@ class TestIssue599CanonicalTreeAccepted:
         # canonical slice path (NOT the bare tmp_path) — that's the key
         # post-fix contract.
         seen_scan_roots = []
-        def fake_get_runs(path, logger=None):
+        def fake_get_runs(path, logger=None, **kwargs):
             seen_scan_roots.append(path)
             return []
 
@@ -756,7 +756,7 @@ class TestIssue599CanonicalTreeAccepted:
             orgname="Acme", systemname="sysA",
         )
         seen_scan_roots = []
-        def fake_get_runs(path, logger=None):
+        def fake_get_runs(path, logger=None, **kwargs):
             seen_scan_roots.append(path)
             return []
 
@@ -786,7 +786,7 @@ class TestIssue599CanonicalTreeAccepted:
             orgname="Acme", systemname="sysA",
         )
         seen_scan_roots = []
-        def fake_get_runs(path, logger=None):
+        def fake_get_runs(path, logger=None, **kwargs):
             seen_scan_roots.append(path)
             return []
 
@@ -812,7 +812,7 @@ class TestIssue599CanonicalTreeAccepted:
         (run_dir / "summary.json").write_text("{}")
 
         seen_scan_roots = []
-        def fake_get_runs(path, logger=None):
+        def fake_get_runs(path, logger=None, **kwargs):
             seen_scan_roots.append(path)
             return []
 
@@ -900,7 +900,7 @@ class TestOptionalSystemnameForReportgen:
         )
 
         seen_scan_roots = []
-        def fake_get_runs(path, logger=None):
+        def fake_get_runs(path, logger=None, **kwargs):
             seen_scan_roots.append(path)
             return []
 
@@ -960,7 +960,7 @@ class TestOptionalSystemnameForReportgen:
 
         seen = []
         with patch('mlpstorage_py.report_generator.get_runs_files',
-                   side_effect=lambda p, logger=None: seen.append(p) or []), \
+                   side_effect=lambda p, logger=None, **kw: seen.append(p) or []), \
              patch.object(ReportGenerator, 'print_results'):
             ReportGenerator(str(tmp_path), args=args,
                             validate_structure=True)
@@ -983,7 +983,7 @@ class TestOptionalSystemnameForReportgen:
 
         seen = []
         with patch('mlpstorage_py.report_generator.get_runs_files',
-                   side_effect=lambda p, logger=None: seen.append(p) or []), \
+                   side_effect=lambda p, logger=None, **kw: seen.append(p) or []), \
              patch.object(ReportGenerator, 'print_results'):
             gen = ReportGenerator(str(tmp_path), args=args,
                                   validate_structure=True)

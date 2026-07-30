@@ -9,6 +9,7 @@ import math
 import os
 import re
 import sys
+from dataclasses import dataclass
 from typing import Tuple, List, Optional
 
 from mlpstorage_py.config import BENCHMARK_TYPES, DATETIME_STR
@@ -435,20 +436,64 @@ def generate_output_location(
     )
 
 
-def get_runs_files(results_dir: str, logger=None) -> List:
+@dataclass
+class SkippedRunDir:
+    """One run directory the walk found but could not turn into a run.
+
+    Recorded so the caller can report at the end of the pass what is
+    missing from the report, rather than leaving the only trace as a
+    WARNING line among thousands (#835).
+
+    Attributes:
+        path: Absolute path of the skipped directory.
+        reason: One of the machine-readable constants below.
+        detail: Human-readable diagnosis naming the consequence and,
+            where one exists, the remedy. Does not repeat ``path`` — the
+            log line and the end-of-pass section each supply it once.
+    """
+
+    #: No metadata file and no DLIO workflow signal — the kv_cache /
+    #: vector_database case, recoverable by restoring one small file.
+    UNDETERMINED_TYPE = 'undetermined_type'
+    #: More than one ``*_metadata.json`` in a single leaf; ambiguous.
+    MULTIPLE_METADATA = 'multiple_metadata'
+    #: Any other failure building the run (malformed or truncated files).
+    LOAD_ERROR = 'load_error'
+
+    path: str
+    reason: str
+    detail: str
+
+
+def get_runs_files(
+    results_dir: str, logger=None, skipped: Optional[List] = None
+) -> List:
     """
     Find all benchmark run directories in a results directory.
 
     Args:
         results_dir: Path to the results directory.
         logger: Optional logger instance.
+        skipped: Optional list; each directory found but not loaded is
+            appended as a :class:`SkippedRunDir`. Callers use it to
+            report dropped runs at the end of the pass. Omitting it
+            preserves the historical signature.
 
     Returns:
         List of BenchmarkRun instances.
     """
-    from mlpstorage_py.rules.models import BenchmarkRun
+    from mlpstorage_py.rules.models import BenchmarkRun, BenchmarkTypeUndetermined
 
     runs = []
+
+    def record(path: str, reason: str, detail: str) -> None:
+        """Log the drop and, if the caller asked, record it for the summary."""
+        if logger:
+            logger.warning(f"Dropping {path} from the report: {detail}")
+        if skipped is not None:
+            skipped.append(
+                SkippedRunDir(path=os.path.abspath(path), reason=reason, detail=detail)
+            )
 
     if not os.path.exists(results_dir):
         if logger:
@@ -466,8 +511,14 @@ def get_runs_files(results_dir: str, logger=None) -> List:
         has_metadata = len(metadata_files) == 1
 
         if len(metadata_files) > 1:
-            if logger:
-                logger.warning(f"Skipping {root}: multiple metadata files found ({len(metadata_files)})")
+            record(
+                root,
+                SkippedRunDir.MULTIPLE_METADATA,
+                f"{len(metadata_files)} *_metadata.json files found "
+                f"({', '.join(sorted(metadata_files))}) and only one may "
+                "identify a run. This run's metrics will be BLANK in "
+                "results.csv. Remove the files that do not belong to this run.",
+            )
             continue
 
         if has_summary or has_metadata:
@@ -476,8 +527,31 @@ def get_runs_files(results_dir: str, logger=None) -> List:
                 runs.append(run)
                 if logger:
                     logger.debug(f"Found run: {run.run_id}")
+            except BenchmarkTypeUndetermined:
+                # The recoverable case, and the only one where the
+                # metadata file is load-bearing: DLIO training and
+                # checkpointing runs identify themselves through their
+                # Hydra configs, so the file is effectively optional for
+                # them. kv_cache and vector_database have no other
+                # signal — without it the run is dropped and its whole
+                # workload publishes with empty metric columns, which
+                # reads as a submitter with no results rather than as a
+                # tooling failure (#835).
+                record(
+                    root,
+                    SkippedRunDir.UNDETERMINED_TYPE,
+                    "no usable *_metadata.json and no DLIO workflow signal. "
+                    "This workload's metrics will be BLANK in results.csv. If "
+                    "this is a kv_cache or vector_database run, restore its "
+                    "<benchmark-type>_<run-datetime>_metadata.json file — the "
+                    "measured data does not need to be regenerated.",
+                )
             except Exception as e:
-                if logger:
-                    logger.warning(f"Failed to load run from {root}: {e}")
+                record(
+                    root,
+                    SkippedRunDir.LOAD_ERROR,
+                    f"failed to load run ({e}). This run's metrics will be "
+                    "BLANK in results.csv.",
+                )
 
     return runs
