@@ -1715,15 +1715,17 @@ class TestKvCacheIntegrityWarnings:
             f"no collapsed-group warning on the row; issues were {messages}"
         )
         text = collapsed[0]
-        # The published run is named...
-        assert "1nodex8ppn (20260723_062638)" in text
+        # The published run is named — all three are error-free here, so the
+        # latest wins...
+        assert "published 64nodex8ppn (20260724_051511)" in text
         # ...and so is every run whose metrics went nowhere.
-        assert "8nodex8ppn (20260723_191548)" in text
-        assert "64nodex8ppn (20260724_051511)" in text
+        dropped = text.split("dropped", 1)[1]
+        assert "1nodex8ppn (20260723_062638)" in dropped
+        assert "8nodex8ppn (20260723_191548)" in dropped
         assert any(i.severity == "warning" for i in result.issues)
 
     def test_collapsed_group_selection_is_deterministic(self, tmp_path):
-        """Earliest ``run_datetime`` wins regardless of discovery order.
+        """Latest ``run_datetime`` wins regardless of discovery order.
 
         ``runs[0]`` made the published values a function of filesystem
         iteration order. Feeding the same three runs in reverse must
@@ -1740,14 +1742,143 @@ class TestKvCacheIntegrityWarnings:
             _kvcache_run_at(runs_root, "1nodex8ppn", "20260723_062638", host_count=1),
         ]
 
-        # Reverse-order input still publishes the earliest run.
+        # Input order does not decide the row; the latest run does.
         metrics = gen._aggregate_workload_metrics(runs, warmup_set=set())
-        assert metrics["kvcache_num_client_nodes"] == 1
+        assert metrics["kvcache_num_client_nodes"] == 64
 
         _run_process_workload_groups(gen, runs)
         result = list(gen.workload_results.values())[0]
         collapsed = [m for m in _issue_messages(result) if "1 of 3 runs" in m]
-        assert collapsed and "published 1nodex8ppn (20260723_062638)" in collapsed[0]
+        assert collapsed and "published 64nodex8ppn (20260724_051511)" in collapsed[0]
+
+    def test_selection_prefers_latest_error_free_run(self, tmp_path):
+        """The latest run that did NOT fail wins, not simply the latest.
+
+        A benchmark submitter iterates: run, change something, run again,
+        keep going. The last run is therefore the one they intend to
+        publish — but only if it succeeded. ANL's crux-eagle is the
+        counter-case: its two later runs lost 70 % and 97 % of their
+        per-rank result files with every mpirun trial exiting non-zero,
+        and their headline figures are an ``fmean`` over the 3–30 % of
+        ranks that survived. Publishing 0.0 tok/s and a 281-second P95
+        because that run happens to be last is worse than publishing
+        nothing.
+        """
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        runs_root.mkdir()
+        runs = [
+            _kvcache_run_at(
+                runs_root, "1nodex8ppn", "20260723_062638", host_count=1,
+            ),
+            # The latest error-free run — what must be published.
+            _kvcache_run_at(
+                runs_root, "8nodex8ppn", "20260723_191548", host_count=8,
+            ),
+            # Later, but lost 97 % of its ranks: ineligible.
+            _kvcache_run_at(
+                runs_root, "64nodex8ppn", "20260724_051511", host_count=64,
+                partial_failure=True,
+                trial_failures={
+                    str(i): [{"trial": 0, "exit_code": 1}] for i in range(1, 4)
+                },
+            ),
+        ]
+
+        metrics = gen._aggregate_workload_metrics(runs, warmup_set=set())
+        assert metrics["kvcache_num_client_nodes"] == 8, (
+            "a run that recorded partial_failure won selection over an "
+            "error-free sibling"
+        )
+
+        _run_process_workload_groups(gen, runs)
+        result = list(gen.workload_results.values())[0]
+        messages = _issue_messages(result)
+        collapsed = [m for m in messages if "1 of 3 runs" in m]
+        assert collapsed, f"no collapsed-group warning; issues were {messages}"
+        text = collapsed[0]
+        assert "published 8nodex8ppn (20260723_191548)" in text
+        # A reviewer reading the warning must be able to see the choice was
+        # principled rather than positional — the dropped run that failed is
+        # marked as such.
+        assert "64nodex8ppn (20260724_051511) [partial_failure]" in text
+        # The published run is clean, so no partial-failure warning rides
+        # along on the row.
+        assert not [m for m in messages if "recorded partial_failure" in m], (
+            f"clean published run acquired a partial-failure warning: {messages}"
+        )
+
+    def test_selection_falls_back_to_latest_when_every_run_failed(self, tmp_path):
+        """With no error-free run in the group, the latest wins — and says so.
+
+        The fallback keeps the rule total: a group of nothing but failed
+        runs still publishes deterministically rather than by discovery
+        order, and the partial-failure warning then names the published
+        run so the row is not mistaken for a clean one.
+        """
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        runs_root.mkdir()
+        runs = [
+            _kvcache_run_at(
+                runs_root, "8nodex8ppn", "20260723_191548", host_count=8,
+                partial_failure=True,
+            ),
+            _kvcache_run_at(
+                runs_root, "64nodex8ppn", "20260724_051511", host_count=64,
+                partial_failure=True,
+            ),
+        ]
+
+        metrics = gen._aggregate_workload_metrics(runs, warmup_set=set())
+        assert metrics["kvcache_num_client_nodes"] == 64
+
+        _run_process_workload_groups(gen, runs)
+        result = list(gen.workload_results.values())[0]
+        messages = _issue_messages(result)
+        assert [m for m in messages if "published 64nodex8ppn" in m], (
+            f"fallback did not publish the latest run; issues were {messages}"
+        )
+        assert [
+            m for m in messages
+            if "recorded partial_failure" in m
+            and "64nodex8ppn (20260724_051511)" in m
+        ], f"the published failed run was not flagged; issues were {messages}"
+
+    def test_summaryless_run_loses_to_a_run_that_has_one(self, tmp_path):
+        """A leaf with no ``summary.json`` must not win on recency alone.
+
+        ``closed/ZettaLane/.../kv_cache/llama3.1-8b/run/20260627_194318``
+        is such a leaf — it holds option dirs, trial logs and metadata but
+        writes its summary under the older ``kvcache_run_summary_*.json``
+        name, so every pass-through metric reads blank. Latest-wins would
+        let a leaf like that blank a row that has real measurements in it,
+        which is the failure mode the ``datasize`` filter already guards
+        against by another route.
+        """
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "workload"
+        runs_root.mkdir()
+        good = _kvcache_run_at(runs_root, "20260627_194318", "20260627_194318")
+        # Later, extractable, but no summary.json to publish from.
+        bare = runs_root / "20260628_101500"
+        bare.mkdir()
+        summaryless = _make_run(
+            benchmark_type=BENCHMARK_TYPES.kv_cache,
+            model="llama3-8b",
+            result_dir=str(bare),
+            metrics={},
+            parameters={"performance_profile": "balanced"},
+            accelerator=None,
+            run_datetime="20260628_101500",
+        )
+
+        metrics = gen._aggregate_workload_metrics(
+            [good, summaryless], warmup_set=set()
+        )
+        assert metrics["kvcache_aggregated_read_bandwidth_gbps"] is not None, (
+            "a summary-less leaf won selection and blanked the row's metrics"
+        )
 
     def test_partial_failure_surfaces_on_the_row(self, tmp_path):
         """A run that lost rank files says so, with the counts."""
@@ -1805,16 +1936,17 @@ class TestKvCacheIntegrityWarnings:
         datasize = _make_run(
             benchmark_type=BENCHMARK_TYPES.kv_cache,
             model="llama3-8b",
-            result_dir=str(runs_root / "20260716_165852"),
+            result_dir=str(runs_root / "20260721_223339"),
             metrics={},
             parameters={"performance_profile": "balanced"},
             accelerator=None,
-            run_datetime="20260716_165852",
+            run_datetime="20260721_223339",
             command="datasize",
         )
-        (runs_root / "20260716_165852").mkdir()
-        # The run leaf is LATER than the datasize leaf — earliest-wins
-        # would pick the wrong one without the command filter.
+        (runs_root / "20260721_223339").mkdir()
+        # The datasize leaf is LATER than the run leaf — both timestamps are
+        # Everpure 51hosts_20's own — so latest-wins would pick the wrong one
+        # without the command filter.
         run = _kvcache_run_at(runs_root, "20260716_165917", "20260716_165917")
 
         metrics = gen._aggregate_workload_metrics([datasize, run], warmup_set=set())
