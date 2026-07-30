@@ -126,6 +126,16 @@ class Hyperlink:
 # mid-submission-cycle.
 _PUBLIC_ID_PREFIX = "v3.0"
 
+# A tree opts into PINNED Public IDs by carrying this file beside its global
+# results.csv. Present -> a row keeps its id however the table re-sorts around
+# it, and ids are never reused. Absent -> positional numbering as before, and
+# the file is never created. See `_assign_public_ids` / `_pin_public_ids`.
+#
+# This is the one file reportgen writes under <results-dir> that is not a
+# `results.{csv,json}` (a deliberate, narrow exception to D-04), and only for
+# a tree that already has it.
+_PUBLIC_ID_REGISTRY_FILENAME = "public_ids.json"
+
 # Model column display labels (reference table titles). Blank for the
 # single-table workloads (kvcache, vdb) — the Benchmark Type column
 # identifies those.
@@ -932,6 +942,16 @@ class ReportGenerator:
             'benchmark_type': bt_val,
             'model': model_val,
             'accelerator': accelerator_val,
+            # Row identity for the pinned Public ID registry. The workload
+            # key IS the generator's notion of "which row is this"
+            # (D-05/D-06), so carry it rather than reconstructing identity
+            # from the display columns later: the CSV ``Model`` cell is
+            # blank for kv_cache and vector_database, while id1/id2 hold
+            # model + performance profile / engine + index type. Two
+            # kv_cache profiles for one system are two distinct rows that a
+            # display-column key would collapse into one.
+            # Internal-only — ``_final_row`` projects it away.
+            '__workload_key__': tuple(str(part) for part in workload_key),
         }
         # Task F: shared System-Under-Test block (from system-description.yaml),
         # inserted after the D-10 prefix and before metric groups so the
@@ -1233,16 +1253,234 @@ class ReportGenerator:
         datagen/datasize rows were filtered out by the R3 rule upstream and
         keep the blank ``sut_public_id`` seeded by ``_sut_columns``.
 
-        IDs are positional and fully regenerated on every run: nothing is
-        persisted between runs, and inserting a row that sorts earlier
-        renumbers everything after it. Because these row dicts are the same
-        objects held in ``rows_by_model`` and sliced into the per-org
-        rollups, this single pass propagates to every table a row appears
-        in — numbering each output file separately would instead make every
-        single-row per-model table ``v3.0-0001``.
+        Two modes, selected by whether the tree carries a
+        ``public_ids.json`` registry beside its global ``results.csv``:
+
+        **Positional (no registry — the default).** IDs are fully
+        regenerated on every run: nothing is persisted, and inserting a row
+        that sorts earlier renumbers everything after it.
+
+        **Pinned (registry present).** Each row keeps the ID the registry
+        records for its identity, however the table re-sorts around it; a
+        row the registry has never seen mints ``next_index``. See
+        ``_pin_public_ids``.
+
+        Either way, because these row dicts are the same objects held in
+        ``rows_by_model`` and sliced into the per-org rollups, this single
+        pass propagates to every table a row appears in — numbering each
+        output file separately would instead make every single-row
+        per-model table ``v3.0-0001``.
         """
-        for index, row in enumerate(all_rows, start=1):
-            row['sut_public_id'] = f"{_PUBLIC_ID_PREFIX}-{index:04d}"
+        registry = self._load_public_id_registry()
+        if registry is None:
+            for index, row in enumerate(all_rows, start=1):
+                row['sut_public_id'] = f"{_PUBLIC_ID_PREFIX}-{index:04d}"
+            return
+        self._pin_public_ids(all_rows, registry)
+
+    def _public_id_registry_path(self) -> str:
+        """Where a tree declares that its Public IDs are pinned.
+
+        Beside the global ``results.csv`` normally. The results-dir root is
+        also honored, because ``global_summary_dir`` MOVES with the shape of
+        the tree — a multi-org tree rolls up at the root, a single-org tree
+        inside that org — and a registry that stopped being found would
+        silently renumber the very tree that asked for stability. An
+        existing file wins wherever it is; a new one is written beside the
+        global rollup.
+        """
+        candidates = [
+            os.path.join(self.global_summary_dir, _PUBLIC_ID_REGISTRY_FILENAME),
+            os.path.join(self.results_dir, _PUBLIC_ID_REGISTRY_FILENAME),
+        ]
+        for path in candidates:
+            if os.path.exists(path):
+                return path
+        return candidates[0]
+
+    def _load_public_id_registry(self) -> Optional[dict]:
+        """Return the pinned-ID registry, or ``None`` when the tree has none.
+
+        Presence of the file is the opt-in: a tree that does not carry one
+        keeps positional numbering and never has one written for it. An
+        unreadable or malformed registry is NOT silently treated as absent —
+        that would renumber a tree whose whole point is that its IDs hold
+        still — so it is reported and treated as empty, which pins nothing
+        and mints everything from scratch.
+        """
+        path = self._public_id_registry_path()
+        if not os.path.exists(path):
+            return None
+        try:
+            with open(path) as handle:
+                registry = json.load(handle)
+        except (OSError, ValueError) as exc:
+            self.logger.error(
+                "reportgen: Public ID registry at %s could not be read (%s). "
+                "Treating it as empty: every row will be issued a NEW id, so "
+                "any existing citation of a v3.0-NNNN id will be wrong. Fix "
+                "or restore the file before publishing this run's tables.",
+                path, exc,
+            )
+            return {"assignments": []}
+        if not isinstance(registry, dict):
+            self.logger.error(
+                "reportgen: Public ID registry at %s is a %s, expected an "
+                "object with an \"assignments\" list. Treating it as empty.",
+                path, type(registry).__name__,
+            )
+            return {"assignments": []}
+        return registry
+
+    @staticmethod
+    def _row_identity(row: dict) -> tuple:
+        """The registry's key for a row: benchmark type + workload key.
+
+        Falls back to the display-ish prefix fields for a row assembled
+        without a workload key (only synthetic rows in practice). The
+        benchmark type is part of the key because id1/id2 mean different
+        things per type — an engine name and a model name could otherwise
+        collide.
+        """
+        key = row.get('__workload_key__') or (
+            str(row.get('category', '') or ''),
+            str(row.get('orgname', '') or ''),
+            str(row.get('systemname', '') or ''),
+            str(row.get('model', '') or ''),
+            str(row.get('accelerator', '') or ''),
+        )
+        return (str(row.get('benchmark_type', '') or ''), tuple(key))
+
+    @staticmethod
+    def _public_id_index(public_id: str) -> int:
+        """The numeric part of ``v3.0-0042``, or 0 if it does not parse."""
+        try:
+            return int(str(public_id).rsplit('-', 1)[1])
+        except (IndexError, ValueError):
+            return 0
+
+    def _pin_public_ids(self, all_rows: List[dict], registry: dict) -> None:
+        """Assign each row the ID its identity already owns (#836 follow-up).
+
+        The invariant that matters is that **an ID is never reused**. A row
+        that stops publishing keeps its entry in the registry and leaves a
+        gap in the table; new rows mint above the highest ID ever issued,
+        never into the gap. Reusing a retired number would leave every
+        earlier citation of it pointing at a different, valid submission —
+        the failure mode that is invisible on inspection.
+
+        ``next_index`` is repaired from the assignments rather than trusted,
+        so a hand-edited registry cannot mint a duplicate.
+        """
+        assignments = registry.get('assignments')
+        if not isinstance(assignments, list):
+            assignments = []
+        by_identity: Dict[tuple, dict] = {}
+        for entry in assignments:
+            if not isinstance(entry, dict):
+                continue
+            key = entry.get('key')
+            if not isinstance(key, (list, tuple)):
+                continue
+            identity = (
+                str(entry.get('benchmark_type', '') or ''),
+                tuple(str(part) for part in key),
+            )
+            by_identity.setdefault(identity, entry)
+
+        highest = max(
+            (self._public_id_index(e.get('public_id', ''))
+             for e in assignments if isinstance(e, dict)),
+            default=0,
+        )
+        next_index = max(
+            int(registry.get('next_index') or 0), highest + 1, 1
+        )
+
+        minted = 0
+        issued: Dict[str, int] = {}
+        for row in all_rows:
+            identity = self._row_identity(row)
+            entry = by_identity.get(identity)
+            if entry is not None and issued.get(
+                str(entry.get('public_id', ''))
+            ):
+                # Same identity twice in one table. No registry can tell
+                # them apart; issuing one ID twice would be worse than
+                # minting, so mint and say what happened.
+                self.logger.warning(
+                    "reportgen: ambiguous identity %s appears on more than "
+                    "one published row — the Public ID registry cannot tell "
+                    "them apart. Minting a fresh id for the duplicate so ids "
+                    "stay unique; expect it to move if the rows are "
+                    "disambiguated. Give each run its own system directory.",
+                    list(identity[1]),
+                )
+                entry = None
+            if entry is None:
+                public_id = f"{_PUBLIC_ID_PREFIX}-{next_index:04d}"
+                next_index += 1
+                minted += 1
+                entry = {
+                    'public_id': public_id,
+                    'category': str(row.get('category', '') or ''),
+                    'organization': str(row.get('orgname', '') or ''),
+                    'system': str(row.get('systemname', '') or ''),
+                    'benchmark_type': identity[0],
+                    'key': list(identity[1]),
+                }
+                assignments.append(entry)
+                by_identity.setdefault(identity, entry)
+            public_id = str(entry.get('public_id', ''))
+            row['sut_public_id'] = public_id
+            issued[public_id] = issued.get(public_id, 0) + 1
+
+        retired = len(by_identity) - (len(all_rows) - minted)
+        self.logger.info(
+            "reportgen: Public IDs are pinned by %s — %d row(s) kept their "
+            "id, %d minted, %d id(s) reserved for rows that are not "
+            "publishing.",
+            self._public_id_registry_path(),
+            len(all_rows) - minted, minted, max(retired, 0),
+        )
+        if minted:
+            self.logger.warning(
+                "reportgen: minted %d NEW Public ID(s) for row(s) the "
+                "registry had not seen before. Commit the updated %s so the "
+                "next run issues the same ids.",
+                minted, _PUBLIC_ID_REGISTRY_FILENAME,
+            )
+
+        registry['assignments'] = sorted(
+            assignments,
+            key=lambda e: self._public_id_index(
+                e.get('public_id', '') if isinstance(e, dict) else ''
+            ),
+        )
+        registry['next_index'] = next_index
+        registry.setdefault('public_id_prefix', _PUBLIC_ID_PREFIX)
+        self._save_public_id_registry(registry)
+
+    def _save_public_id_registry(self, registry: dict) -> None:
+        """Persist the registry, sorted, so its diffs stay readable.
+
+        Written every pinned run, not only when something was minted: the
+        file is the record of which ids exist, and a run that mints nothing
+        still confirms it.
+        """
+        path = self._public_id_registry_path()
+        try:
+            with open(path, 'w') as handle:
+                json.dump(registry, handle, indent=2)
+                handle.write('\n')
+        except OSError as exc:
+            self.logger.error(
+                "reportgen: could not write the Public ID registry at %s "
+                "(%s). This run's tables are numbered correctly, but any id "
+                "minted in it is NOT recorded and the next run will issue a "
+                "different one.",
+                path, exc,
+            )
 
     def _emit_empty_model_dirs(
         self, rows_by_model: Dict[str, List[dict]]

@@ -81,6 +81,31 @@ def _clone_org_as(root: pathlib.Path, src: str, dest: str) -> None:
     shutil.copytree(root / "closed" / src, root / "closed" / dest)
 
 
+_BETA_RUN_LEAF = pathlib.PurePath(
+    "closed/beta_corp/results/system-b/training/unet3d/run/20260706_101500"
+)
+
+
+def _withhold_beta_row(root: pathlib.Path) -> pathlib.Path:
+    """Make beta_corp stop publishing, without removing the organization.
+
+    Deleting the whole org directory would drop the tree from two orgs to
+    one, and a single-org tree puts its global rollup (and therefore the
+    registry) somewhere else entirely — the row would vanish for a reason
+    that has nothing to do with pinning. Removing just the run leaf leaves
+    the org in place and the layout unchanged.
+    """
+    leaf = root / _BETA_RUN_LEAF
+    stash = root.parent / "beta_run_leaf_stash"
+    shutil.copytree(leaf, stash)
+    shutil.rmtree(leaf)
+    return stash
+
+
+def _restore_beta_row(root: pathlib.Path, stash: pathlib.Path) -> None:
+    shutil.copytree(stash, root / _BETA_RUN_LEAF)
+
+
 class TestOptInByPresence:
     def test_no_registry_keeps_positional_renumbering(self, tmp_path):
         """Without the file, behavior is unchanged: inserting an
@@ -183,7 +208,7 @@ class TestIdsAreNeverReused:
         _run(root)
         assert _ids_by_org(root)["beta_corp"] == "v3.0-0002"
 
-        shutil.rmtree(root / "closed" / "beta_corp")
+        _withhold_beta_row(root)
         _run(root)
         assert _ids_by_org(root) == {"acme": "v3.0-0001"}, (
             "beta_corp's row is gone; acme must keep 0001"
@@ -197,7 +222,7 @@ class TestIdsAreNeverReused:
         root = _prepare_tree(tmp_path)
         _seed_empty_registry(root)
         _run(root)
-        shutil.rmtree(root / "closed" / "beta_corp")
+        _withhold_beta_row(root)
         _run(root)
         _clone_org_as(root, "acme", "aaa_corp")
         _run(root)
@@ -211,11 +236,10 @@ class TestIdsAreNeverReused:
         root = _prepare_tree(tmp_path)
         _seed_empty_registry(root)
         _run(root)
-        saved = tmp_path / "beta_corp_backup"
-        shutil.copytree(root / "closed" / "beta_corp", saved)
-        shutil.rmtree(root / "closed" / "beta_corp")
+        stash = _withhold_beta_row(root)
         _run(root)
-        shutil.copytree(saved, root / "closed" / "beta_corp")
+        assert "beta_corp" not in _ids_by_org(root)
+        _restore_beta_row(root, stash)
         _run(root)
         assert _ids_by_org(root)["beta_corp"] == "v3.0-0002"
 
