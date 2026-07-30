@@ -881,6 +881,7 @@ class TestZombieRowsWithheld:
             str(tmp_path / "tree"), args=Namespace(debug=False),
             validate_structure=False,
         )
+        gen.logger.warning = MagicMock(wraps=gen.logger.warning)
         assert gen.generate_reports() == 0
 
         top_rows = json.loads(
@@ -896,6 +897,25 @@ class TestZombieRowsWithheld:
         assert leaf_json.exists(), (
             f"the Rules-mandated per-phase leaf rollup at {leaf_json} was "
             f"removed along with the rollup row"
+        )
+
+        # A system that loses a workload must be told why. For polaris-nvme
+        # this is the ONLY signal available: its `run` leaf holds trial logs
+        # and option dirs but no *_metadata.json, and the #835 skipped-run
+        # reporting never sees it — the walk does not treat a leaf with no
+        # metadata as a run directory at all, so it is named nowhere in a
+        # full-tree pass.
+        rendered = " ".join(
+            (call.args[0] % call.args[1:]) if len(call.args) > 1
+            else str(call.args[0] if call.args else call)
+            for call in gen.logger.warning.call_args_list
+        )
+        assert "polaris-nvme" in rendered, (
+            f"the withheld workload's system was never named: {rendered[:600]}"
+        )
+        assert "no measurement" in rendered, (
+            f"the log does not say the group holds no measurement "
+            f"invocation: {rendered[:600]}"
         )
 
     def test_run_without_a_readable_summary_is_withheld_and_logged(
