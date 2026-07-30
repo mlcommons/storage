@@ -139,11 +139,12 @@ class TestVectorDBDirectoryLayouts:
 
         assert result.found_runs == 0
         assert any(
-            "VectorDB index directory" in warning and "is empty" in warning
+            "VectorDB index directory" in warning.message
+            and "contains no command directories" in warning.message
             for warning in result.warnings
         )
         assert any(
-            "No valid VectorDB run directories" in warning
+            "No valid VectorDB run directories" in warning.message
             for warning in result.warnings
         )
 
@@ -161,8 +162,8 @@ class TestVectorDBDirectoryLayouts:
 
         assert result.found_runs == 0
         assert any(
-            "Unexpected directory in VectorDB index directory" in warning
-            and "not-a-command" in warning
+            "Unexpected directory in VectorDB index directory" in warning.message
+            and "not-a-command" in warning.message
             for warning in result.warnings
         )
 
@@ -399,7 +400,7 @@ class TestSummaryJsonWarningScope:
         result = _validate(tmp_path)
 
         summary_warnings = [
-            w for w in result.warnings if "summary.json" in w
+            w for w in result.warnings if "summary.json" in w.message
         ]
         assert summary_warnings == [], (
             "A14: datagen/datasize phases can never have a summary.json; "
@@ -415,7 +416,7 @@ class TestSummaryJsonWarningScope:
         result = _validate(tmp_path)
 
         summary_warnings = [
-            w for w in result.warnings if "summary.json" in w
+            w for w in result.warnings if "summary.json" in w.message
         ]
         assert len(summary_warnings) == 1, (
             "An absent summary.json in a run dir is a real incomplete-run "

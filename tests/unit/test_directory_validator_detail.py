@@ -176,8 +176,13 @@ class TestUnreachableSubtreeIsNamed:
             if w.warning_type == DirectoryValidationWarning.UNREACHABLE
         ][0]
 
-        assert "not examined" in warning.message.lower(), (
-            f"consequence not stated: {warning.message!r}"
+        message = warning.message.lower()
+        assert "examined" in message, (
+            f"never says the subtree went unexamined: {warning.message!r}"
+        )
+        assert "invisible" in message, (
+            f"never says the runs inside cannot reach the report: "
+            f"{warning.message!r}"
         )
 
     def test_remedy_names_the_expected_layout(self, tmp_path):

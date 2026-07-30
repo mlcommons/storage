@@ -24,6 +24,7 @@ from mlpstorage_py.reporting.directory_validator import (
     ResultsDirectoryValidator,
     DirectoryValidationError,
     DirectoryValidationResult,
+    DirectoryValidationWarning,
     discover_scan_roots,
 )
 
@@ -38,6 +39,7 @@ __all__ = [
     'ResultsDirectoryValidator',
     'DirectoryValidationError',
     'DirectoryValidationResult',
+    'DirectoryValidationWarning',
     'discover_scan_roots',
     # Formatters
     'ValidationMessageFormatter',

@@ -32,6 +32,7 @@ from mlpstorage_py.errors import ConfigurationError
 from mlpstorage_py.utils import MLPSJsonEncoder
 from mlpstorage_py.reporting import (
     ResultsDirectoryValidator,
+    DirectoryValidationWarning,
     ValidationMessageFormatter,
     ClosedRequirementsFormatter,
     ReportSummaryFormatter,
@@ -548,7 +549,7 @@ class ReportGenerator:
         """
         total_runs = 0
         total_benchmark_types: set = set()
-        all_warnings: List[str] = []
+        all_warnings: List[DirectoryValidationWarning] = []
         any_failed = False
         last_validator: Optional[ResultsDirectoryValidator] = None
 
@@ -578,7 +579,9 @@ class ReportGenerator:
             return False
 
         for warning in all_warnings:
-            self.logger.warning(warning)
+            self.logger.warning(warning.message)
+            if warning.suggestion:
+                self.logger.warning(f"    Fix: {warning.suggestion}")
 
         self.logger.info(
             f"Directory validation passed: found {total_runs} runs "

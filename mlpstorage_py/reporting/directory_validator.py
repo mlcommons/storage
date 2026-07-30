@@ -158,11 +158,44 @@ class DirectoryValidationError:
 
 
 @dataclass
+class DirectoryValidationWarning:
+    """A non-fatal finding about the results-directory structure.
+
+    Carries the same four fields as :class:`DirectoryValidationError`.
+    A warning that names neither where it happened nor what to do about
+    it costs the reader a code read, and at submission scale it is one
+    line among thousands.
+
+    ``__str__`` returns the bare message so call sites that log or
+    format a warning directly keep reading as prose instead of printing
+    a dataclass repr.
+    """
+
+    #: A directory exists that the walker does not recognize.
+    UNEXPECTED = 'unexpected'
+    #: A directory that should hold something holds nothing.
+    EMPTY = 'empty'
+    #: A run directory is missing a file that marks it complete.
+    INCOMPLETE = 'incomplete'
+    #: A subtree could not be descended — anything inside it is
+    #: invisible to both validation and the generated report.
+    UNREACHABLE = 'unreachable'
+
+    path: str
+    warning_type: str
+    message: str
+    suggestion: str
+
+    def __str__(self) -> str:
+        return self.message
+
+
+@dataclass
 class DirectoryValidationResult:
     """Result of directory validation."""
     is_valid: bool
     errors: List[DirectoryValidationError] = field(default_factory=list)
-    warnings: List[str] = field(default_factory=list)
+    warnings: List[DirectoryValidationWarning] = field(default_factory=list)
     found_benchmark_types: Set[str] = field(default_factory=set)
     found_runs: int = 0
 
@@ -269,10 +302,22 @@ class ResultsDirectoryValidator:
                     self._validate_benchmark_type_dir(entry)
                 elif not entry.name.startswith('.'):
                     # Ignore hidden directories but warn about unexpected ones
-                    self.result.warnings.append(
-                        f"Unexpected directory '{entry.name}' in results root. "
-                        f"Expected benchmark types: {self.EXPECTED_BENCHMARK_TYPES}"
-                    )
+                    self.result.warnings.append(DirectoryValidationWarning(
+                        path=str(entry),
+                        warning_type=DirectoryValidationWarning.UNEXPECTED,
+                        message=(
+                            f"Unexpected directory '{entry.name}' in results "
+                            f"root {self.results_dir}. Expected benchmark "
+                            f"types: {self.EXPECTED_BENCHMARK_TYPES}. It was "
+                            "not examined, and nothing inside it can reach "
+                            "the report."
+                        ),
+                        suggestion=(
+                            "Move any runs it holds under the matching "
+                            "benchmark-type directory, or remove it if it is "
+                            "not part of the submission."
+                        ),
+                    ))
 
         if not found_benchmark_dirs:
             self.result.errors.append(DirectoryValidationError(
@@ -303,9 +348,19 @@ class ResultsDirectoryValidator:
                 self._validate_model_dir(model_dir, benchmark_type)
 
         if not has_valid_content:
-            self.result.warnings.append(
-                f"Benchmark type directory '{benchmark_type}/' is empty"
-            )
+            self.result.warnings.append(DirectoryValidationWarning(
+                path=str(benchmark_dir),
+                warning_type=DirectoryValidationWarning.EMPTY,
+                message=(
+                    f"Benchmark type directory '{benchmark_type}/' contains "
+                    "no model directories, so it contributes no rows to the "
+                    "report."
+                ),
+                suggestion=(
+                    f"Populate it with <model>/<command>/<YYYYMMDD_HHMMSS>/ "
+                    "run directories, or remove the empty directory."
+                ),
+            ))
 
     def _validate_vectordb_dir(self, benchmark_dir: Path) -> None:
         """Validate supported VectorDB results-directory layouts.
@@ -326,9 +381,20 @@ class ResultsDirectoryValidator:
         ]
 
         if not visible_dirs:
-            self.result.warnings.append(
-                f"Benchmark type directory '{benchmark_type}/' is empty"
-            )
+            self.result.warnings.append(DirectoryValidationWarning(
+                path=str(benchmark_dir),
+                warning_type=DirectoryValidationWarning.EMPTY,
+                message=(
+                    f"Benchmark type directory '{benchmark_type}/' contains "
+                    "no engine or command directories, so it contributes no "
+                    "rows to the report."
+                ),
+                suggestion=(
+                    "Populate it with <engine>/<index>/<command>/"
+                    "<YYYYMMDD_HHMMSS>/ run directories, or remove the empty "
+                    "directory."
+                ),
+            ))
             return
 
         has_valid_runs = False
@@ -352,9 +418,20 @@ class ResultsDirectoryValidator:
             ]
 
             if not engine_children:
-                self.result.warnings.append(
-                    f"VectorDB engine directory '{engine_dir}' is empty"
-                )
+                self.result.warnings.append(DirectoryValidationWarning(
+                    path=str(engine_dir),
+                    warning_type=DirectoryValidationWarning.EMPTY,
+                    message=(
+                        f"VectorDB engine directory '{engine_dir}' contains "
+                        "no index or command directories, so this engine "
+                        "contributes no rows to the report."
+                    ),
+                    suggestion=(
+                        "Populate it with <index>/<command>/"
+                        "<YYYYMMDD_HHMMSS>/ run directories, or remove the "
+                        "empty directory."
+                    ),
+                ))
                 continue
 
             for second_level in engine_children:
@@ -375,9 +452,20 @@ class ResultsDirectoryValidator:
                 ]
 
                 if not index_children:
-                    self.result.warnings.append(
-                        f"VectorDB index directory '{index_dir}' is empty"
-                    )
+                    self.result.warnings.append(DirectoryValidationWarning(
+                        path=str(index_dir),
+                        warning_type=DirectoryValidationWarning.EMPTY,
+                        message=(
+                            f"VectorDB index directory '{index_dir}' contains "
+                            "no command directories, so this index "
+                            "contributes no rows to the report."
+                        ),
+                        suggestion=(
+                            f"Populate it with one of {self.EXPECTED_COMMANDS}"
+                            "/<YYYYMMDD_HHMMSS>/ run directories, or remove "
+                            "the empty directory."
+                        ),
+                    ))
                     continue
 
                 for command_dir in index_children:
@@ -387,33 +475,86 @@ class ResultsDirectoryValidator:
                             engine_has_valid_runs = True
                             has_valid_runs = True
                     else:
-                        self.result.warnings.append(
-                            "Unexpected directory in VectorDB index directory "
-                            f"'{index_dir}': {command_dir.name}. Expected a "
-                            f"command directory: {self.EXPECTED_COMMANDS}"
-                        )
+                        self.result.warnings.append(DirectoryValidationWarning(
+                            path=str(command_dir),
+                            warning_type=DirectoryValidationWarning.UNEXPECTED,
+                            message=(
+                                "Unexpected directory in VectorDB index "
+                                f"directory '{index_dir}': {command_dir.name}. "
+                                "Expected a command directory: "
+                                f"{self.EXPECTED_COMMANDS}. It was not "
+                                "examined, and nothing inside it can reach "
+                                "the report."
+                            ),
+                            suggestion=(
+                                "Move any runs it holds under "
+                                f"{index_dir}/<command>/<YYYYMMDD_HHMMSS>/, "
+                                "or remove it if it is not part of the "
+                                "submission."
+                            ),
+                        ))
 
                 if not index_has_valid_runs:
-                    self.result.warnings.append(
-                        f"No valid run directories found in {index_dir}"
-                    )
+                    self.result.warnings.append(DirectoryValidationWarning(
+                        path=str(index_dir),
+                        warning_type=DirectoryValidationWarning.UNREACHABLE,
+                        message=(
+                            f"No run directories found in {index_dir}: none "
+                            "of its children is a command directory "
+                            f"({self.EXPECTED_COMMANDS}) holding a "
+                            "YYYYMMDD_HHMMSS run directory. This index "
+                            "contributes no rows to the report."
+                        ),
+                        suggestion=(
+                            "Place each run at <index>/<command>/"
+                            "<YYYYMMDD_HHMMSS>/."
+                        ),
+                    ))
 
             if not engine_has_valid_runs:
-                self.result.warnings.append(
-                    f"No valid run directories found in {engine_dir}"
-                )
+                self.result.warnings.append(DirectoryValidationWarning(
+                    path=str(engine_dir),
+                    warning_type=DirectoryValidationWarning.UNREACHABLE,
+                    message=(
+                        f"No run directories found under engine {engine_dir}. "
+                        "This engine contributes no rows to the report."
+                    ),
+                    suggestion=(
+                        "Place each run at <engine>/<index>/<command>/"
+                        "<YYYYMMDD_HHMMSS>/."
+                    ),
+                ))
 
         if not has_valid_runs:
-            self.result.warnings.append(
-                f"No valid VectorDB run directories found in {benchmark_dir}"
-            )
+            self.result.warnings.append(DirectoryValidationWarning(
+                path=str(benchmark_dir),
+                warning_type=DirectoryValidationWarning.UNREACHABLE,
+                message=(
+                    f"No valid VectorDB run directories found in "
+                    f"{benchmark_dir}. No vector_database rows will appear in "
+                    "the report."
+                ),
+                suggestion=(
+                    "Place each run at <engine>/<index>/<command>/"
+                    "<YYYYMMDD_HHMMSS>/."
+                ),
+            ))
 
     def _validate_model_dir(self, model_dir: Path, benchmark_type: str) -> None:
-        """Validate a model directory."""
+        """Validate a model directory.
+
+        Children that are neither a ``YYYYMMDD_HHMMSS`` run directory nor
+        a known command directory are dead ends: the walk cannot descend
+        them, so any runs they hold reach neither this validation nor the
+        report. They are named either individually (when real runs sit
+        beside them) or in the aggregate warning (when nothing here is
+        valid) — never both, so one directory is reported once.
+        """
         has_valid_runs = False
+        unrecognized: List[str] = []
 
         for entry in model_dir.iterdir():
-            if entry.is_dir():
+            if entry.is_dir() and not entry.name.startswith('.'):
                 # Check if this is a datetime directory (direct runs)
                 if self._is_datetime_dir(entry.name):
                     self._validate_run_dir(entry, benchmark_type)
@@ -422,11 +563,58 @@ class ResultsDirectoryValidator:
                 elif entry.name in self.EXPECTED_COMMANDS:
                     if self._validate_command_dir(entry, benchmark_type):
                         has_valid_runs = True
+                else:
+                    unrecognized.append(entry.name)
 
         if not has_valid_runs:
-            self.result.warnings.append(
-                f"No valid run directories found in {model_dir}"
+            found = (
+                f" Found instead: {', '.join(sorted(unrecognized))}."
+                if unrecognized else ""
             )
+            unexamined = (
+                " Nothing below them was examined — any runs they contain "
+                "are invisible to both this validation and the report."
+                if unrecognized else ""
+            )
+            self.result.warnings.append(DirectoryValidationWarning(
+                path=str(model_dir),
+                warning_type=DirectoryValidationWarning.UNREACHABLE,
+                message=(
+                    f"No run directories found in {model_dir}: none of its "
+                    f"{len(unrecognized)} subdirector"
+                    f"{'y' if len(unrecognized) == 1 else 'ies'} is a "
+                    "YYYYMMDD_HHMMSS run directory or a known command "
+                    f"directory ({self.EXPECTED_COMMANDS})."
+                    f"{found}{unexamined}"
+                ),
+                suggestion=(
+                    "Place each run at <model>/<command>/<YYYYMMDD_HHMMSS>/ "
+                    f"where <command> is one of {self.EXPECTED_COMMANDS}. A "
+                    "system that ran several configurations needs one system "
+                    "directory per configuration, not one model directory "
+                    "holding several."
+                ),
+            ))
+        elif unrecognized:
+            self.result.warnings.append(DirectoryValidationWarning(
+                path=str(model_dir),
+                warning_type=DirectoryValidationWarning.UNEXPECTED,
+                message=(
+                    f"{len(unrecognized)} unrecognized subdirector"
+                    f"{'y' if len(unrecognized) == 1 else 'ies'} in "
+                    f"{model_dir}: {', '.join(sorted(unrecognized))}. "
+                    "Expected a YYYYMMDD_HHMMSS run directory or a command "
+                    f"directory ({self.EXPECTED_COMMANDS}). "
+                    f"{'It was' if len(unrecognized) == 1 else 'They were'} "
+                    "not examined, so any runs inside cannot reach the "
+                    "report."
+                ),
+                suggestion=(
+                    "Move any runs they hold under "
+                    "<model>/<command>/<YYYYMMDD_HHMMSS>/, or remove them if "
+                    "they are not part of the submission."
+                ),
+            ))
 
     def _validate_command_dir(
         self, command_dir: Path, benchmark_type: str
@@ -454,10 +642,20 @@ class ResultsDirectoryValidator:
                 )
                 has_valid_runs = True
             else:
-                self.result.warnings.append(
-                    f"Unexpected directory format in {command_dir}: "
-                    f"{datetime_dir.name}"
-                )
+                self.result.warnings.append(DirectoryValidationWarning(
+                    path=str(datetime_dir),
+                    warning_type=DirectoryValidationWarning.UNEXPECTED,
+                    message=(
+                        f"Unexpected directory format in {command_dir}: "
+                        f"{datetime_dir.name} is not a YYYYMMDD_HHMMSS run "
+                        "directory. It was not examined, so any run inside "
+                        "cannot reach the report."
+                    ),
+                    suggestion=(
+                        "Rename it to the run's YYYYMMDD_HHMMSS timestamp, or "
+                        "remove it if it is not part of the submission."
+                    ),
+                ))
 
         return has_valid_runs
 
@@ -492,9 +690,20 @@ class ResultsDirectoryValidator:
         if benchmark_type in ['training', 'checkpointing']:
             if command not in ('datagen', 'datasize') \
                     and 'summary.json' not in file_names:
-                self.result.warnings.append(
-                    f"Missing summary.json in {run_dir} - run may be incomplete"
-                )
+                self.result.warnings.append(DirectoryValidationWarning(
+                    path=str(run_dir),
+                    warning_type=DirectoryValidationWarning.INCOMPLETE,
+                    message=(
+                        f"Missing summary.json in {run_dir} — the run may not "
+                        "have completed. Its metrics will be absent or "
+                        "partial in the report."
+                    ),
+                    suggestion=(
+                        "Confirm the run finished; if it did, restore its "
+                        "summary.json. If it did not, rerun it — a partial "
+                        "run cannot be scored."
+                    ),
+                ))
 
     def _is_datetime_dir(self, name: str) -> bool:
         """Check if directory name matches expected datetime format."""
@@ -516,8 +725,13 @@ class ResultsDirectoryValidator:
         if self.result.warnings:
             lines.append("=== Warnings ===\n")
             for warning in self.result.warnings:
-                lines.append(f"WARNING: {warning}")
-            lines.append("")
+                lines.append(
+                    f"WARNING [{warning.warning_type.upper()}]: "
+                    f"{warning.message}"
+                )
+                lines.append(f"  Path: {warning.path}")
+                lines.append(f"  Fix: {warning.suggestion}")
+                lines.append("")
 
         if not lines:
             lines.append("Directory structure validation passed.")
