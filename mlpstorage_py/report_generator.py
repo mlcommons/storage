@@ -19,7 +19,7 @@ import textwrap
 
 from dataclasses import dataclass
 from statistics import fmean, StatisticsError
-from typing import List, Dict, Any, Optional, Set
+from typing import List, Dict, Any, Optional, Set, Tuple
 
 from mlpstorage_py.mlps_logging import setup_logging, apply_logging_options
 from mlpstorage_py.config import MLPS_DEBUG, BENCHMARK_TYPES, EXIT_CODE, PARAM_VALIDATION, LLM_MODELS, LLM_ALLOWED_VALUES, MODELS, ACCELERATORS
@@ -1253,30 +1253,29 @@ class ReportGenerator:
         datagen/datasize rows were filtered out by the R3 rule upstream and
         keep the blank ``sut_public_id`` seeded by ``_sut_columns``.
 
-        Two modes, selected by whether the tree carries a
-        ``public_ids.json`` registry beside its global ``results.csv``:
+        IDs are **pinned**, via a ``public_ids.json`` registry beside the
+        global ``results.csv``. A tree without one gets one, filled from
+        that run's positional assignment; from then on each row keeps the
+        ID the registry records for its identity however the table re-sorts
+        around it, and a row the registry has never seen mints
+        ``next_index``. See ``_pin_public_ids``.
 
-        **Positional (no registry — the default).** IDs are fully
-        regenerated on every run: nothing is persisted, and inserting a row
-        that sorts earlier renumbers everything after it.
+        The registry is created rather than opted into because a file
+        somebody has to remember to make is a file that will not exist when
+        it matters. Deleting it is how a tree is renumbered — once, before
+        publication, to close gaps and restore sort order.
 
-        **Pinned (registry present).** Each row keeps the ID the registry
-        records for its identity, however the table re-sorts around it; a
-        row the registry has never seen mints ``next_index``. See
-        ``_pin_public_ids``.
-
-        Either way, because these row dicts are the same objects held in
+        Because these row dicts are the same objects held in
         ``rows_by_model`` and sliced into the per-org rollups, this single
         pass propagates to every table a row appears in — numbering each
         output file separately would instead make every single-row
         per-model table ``v3.0-0001``.
         """
+        published, ambiguous = self._published_public_ids()
+        existed = os.path.exists(self._public_id_registry_path())
         registry = self._load_public_id_registry()
-        if registry is None:
-            for index, row in enumerate(all_rows, start=1):
-                row['sut_public_id'] = f"{_PUBLIC_ID_PREFIX}-{index:04d}"
-            return
-        self._pin_public_ids(all_rows, registry)
+        self._pin_public_ids(all_rows, registry, created=not existed)
+        self._warn_on_changed_public_ids(all_rows, published, ambiguous)
 
     def _public_id_registry_path(self) -> str:
         """Where a tree declares that its Public IDs are pinned.
@@ -1298,19 +1297,24 @@ class ReportGenerator:
                 return path
         return candidates[0]
 
-    def _load_public_id_registry(self) -> Optional[dict]:
-        """Return the pinned-ID registry, or ``None`` when the tree has none.
+    def _load_public_id_registry(self) -> dict:
+        """Return the pinned-ID registry, empty when the tree has none yet.
 
-        Presence of the file is the opt-in: a tree that does not carry one
-        keeps positional numbering and never has one written for it. An
-        unreadable or malformed registry is NOT silently treated as absent —
-        that would renumber a tree whose whole point is that its IDs hold
-        still — so it is reported and treated as empty, which pins nothing
-        and mints everything from scratch.
+        An absent registry is normal — it means this tree has not been
+        numbered before, or staff removed the file to renumber for
+        publication. Either way the run mints a fresh contiguous numbering
+        and writes the registry, and
+        ``_warn_on_changed_public_ids`` reports any id that moved.
+
+        An unreadable or malformed registry is NOT silently treated as
+        absent — that would quietly renumber a tree whose whole point is
+        that its ids hold still — so it is reported as an error and treated
+        as empty, which mints everything from scratch and trips the same
+        guard.
         """
         path = self._public_id_registry_path()
         if not os.path.exists(path):
-            return None
+            return {"assignments": []}
         try:
             with open(path) as handle:
                 registry = json.load(handle)
@@ -1331,6 +1335,121 @@ class ReportGenerator:
             )
             return {"assignments": []}
         return registry
+
+    # Columns that identify a row in an ALREADY-WRITTEN results.csv. The
+    # published table carries display cells, not the internal workload key,
+    # so the guard has to match on these — and they are not guaranteed
+    # unique (two kv_cache performance profiles for one system share all
+    # five). Duplicates are excluded from the comparison rather than
+    # matched arbitrarily; see `_published_public_ids`.
+    _PUBLISHED_MATCH_COLUMNS = (
+        "Division", "Organization", "Name", "Benchmark Type", "Model",
+    )
+
+    def _published_public_ids(
+        self, path: Optional[str] = None,
+    ) -> Tuple[Dict[tuple, str], int]:
+        """Read the ids the tree's existing global results.csv already shows.
+
+        Returns ``(by_display_key, ambiguous_count)``. Missing or unreadable
+        table -> ``({}, 0)``: a tree with nothing published yet cannot have
+        changed anything, which is what keeps a submitter's first run quiet.
+        """
+        if path is None:
+            path = os.path.join(self.global_summary_dir, 'results.csv')
+        if not os.path.exists(path):
+            return {}, 0
+        seen: Dict[tuple, str] = {}
+        duplicated: set = set()
+        try:
+            with open(path, newline='') as handle:
+                for row in csv.DictReader(handle):
+                    public_id = (row.get("Public ID") or "").strip()
+                    if not public_id:
+                        continue  # auxiliary leaf rows are never numbered
+                    key = tuple(
+                        (row.get(c) or "") for c in self._PUBLISHED_MATCH_COLUMNS
+                    )
+                    if key in seen:
+                        duplicated.add(key)
+                        continue
+                    seen[key] = public_id
+        except (OSError, ValueError) as exc:
+            self.logger.debug(
+                "reportgen: could not read %s to compare Public IDs (%s); "
+                "skipping the changed-id check.", path, exc,
+            )
+            return {}, 0
+        for key in duplicated:
+            seen.pop(key, None)
+        return seen, len(duplicated)
+
+    def _warn_on_changed_public_ids(
+        self,
+        all_rows: List[dict],
+        published: Dict[tuple, str],
+        ambiguous: int,
+    ) -> None:
+        """Report every id this run moved off an already-published row.
+
+        Deleting ``public_ids.json`` is how a tree is renumbered for
+        publication — so the tool cannot distinguish that from a registry
+        that was LOST (a stale clone, a file never checked out, a
+        ``git clean``). Both mint a plausible, wrong numbering and record it
+        as authoritative, and only one of them is intended.
+
+        So this does not gate on intent, which it has no way to know. It
+        reports the consequence and names the recovery, wording that has to
+        read correctly for the staffer who removed the file deliberately and
+        for the one who did not. It accuses nobody and blocks nothing.
+
+        Silent in normal pinned operation: a matched row's id never changes,
+        a minted row appears in no earlier table, and a withheld row simply
+        stops appearing.
+        """
+        if not published:
+            return
+        changed = []
+        for row in all_rows:
+            # Project through _final_row so the key is built from the same
+            # cells the file holds. Coerce to str: Name/Description are
+            # `Hyperlink` objects until they are written, and `str()` is
+            # exactly the anchor the CSV carries.
+            projected = self._final_row(row)
+            key = tuple(
+                str(projected.get(c) or "")
+                for c in self._PUBLISHED_MATCH_COLUMNS
+            )
+            was = published.get(key)
+            now = row.get('sut_public_id', '')
+            if was and now and was != now:
+                changed.append((was, now, key))
+        if not changed:
+            return
+
+        examples = "; ".join(
+            f"{was} -> {now} ({key[1]}, {key[3]})"
+            for was, now, key in changed[:3]
+        )
+        self.logger.warning(
+            "reportgen: this run CHANGED the Public ID on %d row(s) that the "
+            "existing results.csv already published — e.g. %s%s. Citations of "
+            "those ids now point at different, valid rows. If you removed %s "
+            "deliberately to renumber for publication, this is expected: "
+            "refresh the ids cited in ApparentProblems.md and "
+            "AssignedReviewers.md in the same change. If the registry was "
+            "lost rather than removed, restore it (git restore %s) and re-run "
+            "before publishing these tables.",
+            len(changed), examples,
+            ", …" if len(changed) > 3 else "",
+            _PUBLIC_ID_REGISTRY_FILENAME, _PUBLIC_ID_REGISTRY_FILENAME,
+        )
+        if ambiguous:
+            self.logger.warning(
+                "reportgen: %d row group(s) in the existing results.csv share "
+                "their display columns and were excluded from that "
+                "comparison, so the count above may understate it.", ambiguous,
+            )
 
     @staticmethod
     def _row_identity(row: dict) -> tuple:
@@ -1359,7 +1478,9 @@ class ReportGenerator:
         except (IndexError, ValueError):
             return 0
 
-    def _pin_public_ids(self, all_rows: List[dict], registry: dict) -> None:
+    def _pin_public_ids(
+        self, all_rows: List[dict], registry: dict, created: bool = False,
+    ) -> None:
         """Assign each row the ID its identity already owns (#836 follow-up).
 
         The invariant that matters is that **an ID is never reused**. A row
@@ -1436,20 +1557,32 @@ class ReportGenerator:
             issued[public_id] = issued.get(public_id, 0) + 1
 
         retired = len(by_identity) - (len(all_rows) - minted)
-        self.logger.info(
-            "reportgen: Public IDs are pinned by %s — %d row(s) kept their "
-            "id, %d minted, %d id(s) reserved for rows that are not "
-            "publishing.",
-            self._public_id_registry_path(),
-            len(all_rows) - minted, minted, max(retired, 0),
-        )
-        if minted:
-            self.logger.warning(
-                "reportgen: minted %d NEW Public ID(s) for row(s) the "
-                "registry had not seen before. Commit the updated %s so the "
-                "next run issues the same ids.",
-                minted, _PUBLIC_ID_REGISTRY_FILENAME,
+        if created:
+            # Nothing was "renumbered" here — the tree had no registry, so
+            # every row is minted by definition. Saying so at WARNING would
+            # make a submitter's very first run look like a problem.
+            self.logger.info(
+                "reportgen: created %s and recorded %d Public ID "
+                "assignment(s). Ids are pinned from now on: a row keeps its "
+                "number as the table re-sorts. Commit the file alongside the "
+                "results tables.",
+                self._public_id_registry_path(), len(all_rows),
             )
+        else:
+            self.logger.info(
+                "reportgen: Public IDs are pinned by %s — %d row(s) kept "
+                "their id, %d minted, %d id(s) reserved for rows that are "
+                "not publishing.",
+                self._public_id_registry_path(),
+                len(all_rows) - minted, minted, max(retired, 0),
+            )
+            if minted:
+                self.logger.warning(
+                    "reportgen: minted %d NEW Public ID(s) for row(s) the "
+                    "registry had not seen before. Commit the updated %s so "
+                    "the next run issues the same ids.",
+                    minted, _PUBLIC_ID_REGISTRY_FILENAME,
+                )
 
         registry['assignments'] = sorted(
             assignments,
