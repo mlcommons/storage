@@ -53,6 +53,7 @@ import os
 import pathlib
 import shutil
 from argparse import Namespace
+from types import SimpleNamespace
 from typing import Any, Dict, List
 from unittest.mock import MagicMock, patch
 
@@ -709,3 +710,93 @@ class TestRollupExcludesAuxiliaryPhases:
             f"R3 violated: acme per-org rollup must hold only the run row, "
             f"got {len(acme_rows)} rows"
         )
+
+
+# --------------------------------------------------------------------------- #
+# TestModelFolderClamping — issue #836 suggestion 3                           #
+# --------------------------------------------------------------------------- #
+
+
+class TestModelFolderClamping:
+    """A model-level table never lands on or above `<benchmark-type>/` (#836).
+
+    ``_model_group_folder`` hops a fixed number of levels up from the run
+    leaf, which is right at canonical depth and overshoots when a
+    submission collapses ``<model>/<command>/<ts>/`` into one directory.
+    The overshoot wrote crux-eagle's row to
+    ``<system>/kv_cache/results.csv`` while its model directory got a
+    header-only file — two tables disagreeing about one workload.
+
+    The end-to-end behaviour is pinned in
+    tests/integration/test_reportgen_aggregate_end_to_end.py; these cover
+    the resolver's own edges, including the layout so flat there is no
+    model level to place a table in.
+    """
+
+    @staticmethod
+    def _result_for(leaf: str, bt=BENCHMARK_TYPES.kv_cache):
+        """A minimal Result stand-in — the resolver reads two attributes."""
+        run = SimpleNamespace(result_dir=leaf, run_id="run-under-test")
+        return SimpleNamespace(benchmark_run=run, benchmark_type=bt)
+
+    def test_canonical_leaf_resolves_to_the_model_dir(self, tmp_path):
+        gen = _bare_generator(tmp_path)
+        leaf = "/subs/closed/ANL/results/sys-a/kv_cache/llama3.1-8b/run/20260723_062638"
+        assert gen._model_group_folder(self._result_for(leaf)) == (
+            "/subs/closed/ANL/results/sys-a/kv_cache/llama3.1-8b"
+        )
+
+    def test_shallow_leaf_clamps_to_the_model_dir(self, tmp_path):
+        """The crux-eagle shape: `<model>/<topology>/`, no `<command>/<ts>/`."""
+        gen = _bare_generator(tmp_path)
+        leaf = "/subs/closed/ANL/results/crux-eagle/kv_cache/llama3-8b-10u/1nodex8ppn"
+        assert gen._model_group_folder(self._result_for(leaf)) == (
+            "/subs/closed/ANL/results/crux-eagle/kv_cache/llama3-8b-10u"
+        )
+
+    def test_leaf_directly_under_benchmark_type_has_no_model_level(self, tmp_path):
+        """No model directory means no model-level table — and say so.
+
+        Returning the benchmark-type directory would write a phantom
+        table; returning the leaf would write ``results.csv`` inside a run
+        directory. Neither is a table, so the row stays in the rollups
+        only and the warning names the expected layout.
+        """
+        gen = _bare_generator(tmp_path)
+        gen.logger = MagicMock()
+        leaf = "/subs/closed/ANL/results/crux-eagle/kv_cache/20260723_062638"
+
+        assert gen._model_group_folder(self._result_for(leaf)) is None
+
+        assert gen.logger.warning.called, "the skipped placement was silent"
+        # Render lazy-% calls the way the logger would, so the assertions
+        # read what a submitter actually sees.
+        text = " ".join(
+            (call.args[0] % call.args[1:]) if len(call.args) > 1 else str(call.args)
+            for call in gen.logger.warning.call_args_list
+        )
+        assert "no model-level results.csv" in text
+        assert "<system>/kv_cache/<model>/<command>/<timestamp>/" in text
+        assert leaf in text
+
+    def test_vdb_shallow_leaf_clamps_below_vector_database(self, tmp_path):
+        """The same overshoot exists for vdb, whose canonical depth is deeper."""
+        gen = _bare_generator(tmp_path)
+        leaf = (
+            "/subs/closed/TTA/results/sys-b/vector_database/milvus/hnsw-flat"
+        )
+        assert gen._model_group_folder(
+            self._result_for(leaf, BENCHMARK_TYPES.vector_database)
+        ) == "/subs/closed/TTA/results/sys-b/vector_database/milvus"
+
+    def test_tree_without_a_benchmark_type_dir_keeps_the_hop_result(self, tmp_path):
+        """Flat fixture trees have no `<benchmark-type>/` ancestor to anchor on.
+
+        Several fixtures plant ``<model>/run/<ts>/`` straight under the
+        results root. With no anchor the hop result stands, unchanged —
+        the clamp must not start returning None for those.
+        """
+        gen = _bare_generator(tmp_path)
+        leaf = str(tmp_path / "results" / "llama3-8b" / "run" / "20260704_140000")
+        expected = str(tmp_path / "results" / "llama3-8b")
+        assert gen._model_group_folder(self._result_for(leaf)) == expected

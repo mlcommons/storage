@@ -1191,7 +1191,18 @@ class ReportGenerator:
                           → walk up two levels to land at `<engine>/<index>/`
                              (the "model-like" grouping key for vdb).
 
-        Returns None (and logs a warning) if the run has no result_dir.
+        The hop count assumes canonical depth. When a leaf sits shallower
+        than its layout expects, the hops overshoot and land ON (or above)
+        the `<benchmark-type>/` directory — a path that owns no table. The
+        result was two tables disagreeing: `<system>/kv_cache/results.csv`
+        holding crux-eagle's row while the model directory beside it got a
+        header-only file from the D-03 empty-model-dir pass (#836
+        suggestion 3). `_clamp_to_benchmark_type_subtree` catches the
+        overshoot and places the row in the model directory instead, so a
+        workload that reaches the rollups also appears in its own table.
+
+        Returns None (and logs a warning) if the run has no result_dir, or
+        if the layout has no model directory at all to hold a table.
         """
         leaf = getattr(result.benchmark_run, 'result_dir', None)
         if not leaf:
@@ -1207,9 +1218,89 @@ class ReportGenerator:
             # checkpointing: <ts>/ → <model>/
             # training:      <ts>/ → run/   (Rules.md 2.1.16 — results.json
             #                                lives inside the run/ phase dir)
-            return os.path.dirname(leaf_abs)
-        # kv_cache, vector_database: <ts>/ → <command>/ → group folder
-        return os.path.dirname(os.path.dirname(leaf_abs))
+            hopped = os.path.dirname(leaf_abs)
+        else:
+            # kv_cache, vector_database: <ts>/ → <command>/ → group folder
+            hopped = os.path.dirname(os.path.dirname(leaf_abs))
+        return self._clamp_to_benchmark_type_subtree(hopped, leaf_abs, bt)
+
+    @staticmethod
+    def _benchmark_type_dir(leaf_abs: str, bt) -> Optional[str]:
+        """The `<system>/<benchmark-type>/` ancestor of a run leaf (#836).
+
+        Matches the nearest ancestor whose name is the benchmark type's
+        own path token — the segment ``generate_output_location`` puts
+        between ``<system>/`` and the model. Returns None when no ancestor
+        matches, which is the case for the flat fixture trees that plant a
+        model directory straight under the results root.
+        """
+        token = str(getattr(bt, 'value', bt) or "")
+        if not token:
+            return None
+        parts = leaf_abs.split(os.sep)
+        for i in range(len(parts) - 1, -1, -1):
+            if parts[i] == token:
+                return os.sep.join(parts[:i + 1])
+        return None
+
+    def _clamp_to_benchmark_type_subtree(
+        self, hopped: str, leaf_abs: str, bt,
+    ) -> Optional[str]:
+        """Keep a model-level table strictly inside `<benchmark-type>/` (#836).
+
+        ``hopped`` is the canonical-depth guess. It is correct whenever it
+        lands below the benchmark-type directory — every canonical tree,
+        and shallow layouts that still leave a model directory above the
+        leaf. It is wrong when it lands on the benchmark-type directory
+        itself or above it, which happens when a submission collapses a
+        ``<model>/<command>/<ts>/`` pair into a single directory:
+        ``dirname(dirname())`` then walks straight past the model.
+
+        In that case the model directory is the ancestor that is a direct
+        child of the benchmark-type directory. If that child IS the leaf,
+        the layout has no model level to write a table into; return None
+        and say so rather than writing ``results.csv`` inside a run
+        directory.
+        """
+        anchor = self._benchmark_type_dir(leaf_abs, bt)
+        if anchor is None:
+            return hopped
+        anchor_prefix = anchor + os.sep
+        if hopped.startswith(anchor_prefix):
+            return hopped
+
+        relative = leaf_abs[len(anchor_prefix):] if leaf_abs.startswith(
+            anchor_prefix
+        ) else ""
+        first_segment = relative.split(os.sep)[0] if relative else ""
+        if not first_segment:
+            self.logger.warning(
+                "reportgen: run leaf %s sits directly in %s with no model "
+                "directory above it; its row appears in the rollup tables "
+                "but has no model-level results.csv of its own. Expected "
+                "layout: <system>/%s/<model>/<command>/<timestamp>/.",
+                leaf_abs, anchor, str(getattr(bt, 'value', bt) or ""),
+            )
+            return None
+        model_dir = anchor_prefix + first_segment
+        if model_dir == leaf_abs:
+            self.logger.warning(
+                "reportgen: run leaf %s is itself the only level below %s; "
+                "its row appears in the rollup tables but has no "
+                "model-level results.csv of its own. Expected layout: "
+                "<system>/%s/<model>/<command>/<timestamp>/.",
+                leaf_abs, anchor, str(getattr(bt, 'value', bt) or ""),
+            )
+            return None
+        self.logger.warning(
+            "reportgen: run leaf %s is one level shallower than the "
+            "canonical <model>/<command>/<timestamp>/ layout; placing its "
+            "model-level results.csv at %s rather than %s, which owns no "
+            "table. Restore the <command>/<timestamp>/ levels to silence "
+            "this.",
+            leaf_abs, model_dir, hopped,
+        )
+        return model_dir
 
     # Canonical result-tree depths: number of parent hops from the run's
     # <ts>/ leaf up to the <system>/ folder. Derived from
