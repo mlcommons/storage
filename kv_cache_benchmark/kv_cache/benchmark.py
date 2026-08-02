@@ -184,6 +184,7 @@ class IntegratedBenchmark:
         }
         self.results_lock = threading.Lock()
         self.stop_event: Optional[threading.Event] = None
+        self.producer_done = threading.Event()
         self.rag_ingest_done = threading.Event() if self.enable_rag else None
 
     def _ingest_rag_documents(self, num_docs: int, stop_event: Optional[threading.Event] = None):
@@ -258,6 +259,15 @@ class IntegratedBenchmark:
                 logger.error(f"Error reading trace file {filepath}: {e}")
                 sys.exit(1)
 
+    def _mark_producer_done(self, stop_event: threading.Event):
+        """Mark finite input complete and stop once every request has finished."""
+        if stop_event.is_set():
+            return
+        self.producer_done.set()
+        with self.results_lock:
+            if self.results['requests_completed'] >= self.request_counter:
+                stop_event.set()
+
     def _generate_requests_from_trace(self, stop_event: threading.Event):
         """Generates InferenceRequest objects from the streaming trace iterator."""
         speedup = self.trace_speedup
@@ -324,6 +334,7 @@ class IntegratedBenchmark:
 
             if rows_in_cycle == 0:
                 logger.warning("BurstGPT trace yielded 0 rows.")
+                self._mark_producer_done(stop_event)
                 break
 
             if cycles_remaining > 0:
@@ -331,8 +342,7 @@ class IntegratedBenchmark:
                 if cycles_remaining == 0:
                     logger.info(f"Completed {self.replay_cycles} replay cycle(s). "
                                 f"Trace total_tokens sum: {trace_total_tokens_sum:,}")
-                    if self.stop_event:
-                        self.stop_event.set()
+                    self._mark_producer_done(stop_event)
                     break
 
             prev_timestamp = None
@@ -360,8 +370,7 @@ class IntegratedBenchmark:
                         cycles_remaining -= 1
                         if cycles_remaining == 0:
                             logger.info(f"Completed {self.replay_cycles} ShareGPT replay cycle(s).")
-                            if self.stop_event:
-                                self.stop_event.set()
+                            self._mark_producer_done(stop_event)
                             return
                     conversation_iterator = iter(self.sharegpt_loader.iterate_conversations(shuffle=True))
                     continue
@@ -633,8 +642,12 @@ class IntegratedBenchmark:
                 self.results['generation_latencies'].append(generation_latency)
 
                 if self.max_requests > 0 and self.results['requests_completed'] >= self.max_requests:
-                    if self.stop_event:
-                        self.stop_event.set()
+                    stop_event.set()
+                elif (
+                    self.producer_done.is_set()
+                    and self.results['requests_completed'] >= self.request_counter
+                ):
+                    stop_event.set()
 
             self.qos_monitor.record_request(request)
 
@@ -1216,6 +1229,7 @@ class IntegratedBenchmark:
 
         stop_event = threading.Event()
         self.stop_event = stop_event
+        self.producer_done.clear()
 
         threads = []
         if self.use_dataset:
