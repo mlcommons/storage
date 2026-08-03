@@ -81,6 +81,9 @@ get_qos_profiles = kv_cache.get_qos_profiles
 QoSSLA = kv_cache.QoSSLA
 YAML_AVAILABLE = kv_cache.YAML_AVAILABLE
 IntegratedBenchmark = kv_cache.IntegratedBenchmark
+PrefixCacheEntry = kv_cache.PrefixCacheEntry
+PrefixType = kv_cache.PrefixType
+RAGDocumentManager = kv_cache.RAGDocumentManager
 
 # Input validation imports
 validate_args = kv_cache.validate_args
@@ -2164,6 +2167,19 @@ class TestTraceReplay:
         )
         return bench
 
+    @staticmethod
+    def _sharegpt_benchmark(dataset_path, duration_seconds=5):
+        return IntegratedBenchmark(
+            model_config=MODEL_CONFIGS['tiny-1b'],
+            num_users=2,
+            gpu_memory_gb=0,
+            cpu_memory_gb=0.01,
+            duration_seconds=duration_seconds,
+            dataset_path=str(dataset_path),
+            generation_mode=GenerationMode.NONE,
+            replay_cycles=1,
+        )
+
     def test_resolve_trace_files_from_directory(self, trace_dir):
         """Passing a directory should resolve all CSVs sorted by name."""
         model_config = MODEL_CONFIGS['tiny-1b']
@@ -2236,7 +2252,6 @@ class TestTraceReplay:
         monkeypatch.setattr(bench.cache, 'allocate_cache', lambda *args, **kwargs: (True, 'cpu', 0.0))
 
         stop_event = threading.Event()
-        bench.stop_event = stop_event
         producer = threading.Thread(
             target=bench._generate_requests_from_trace,
             args=(stop_event,),
@@ -2259,13 +2274,19 @@ class TestTraceReplay:
         assert bench.results['requests_completed'] == expected_requests
         assert bench.request_queue.empty()
 
-    def test_hard_stop_does_not_drain_queue(self, benchmark_with_trace):
+    def test_hard_stop_does_not_drain_queue(self, benchmark_with_trace, monkeypatch):
         """An explicit hard stop should leave queued requests unprocessed."""
         stop_event = threading.Event()
         benchmark_with_trace._generate_requests_from_trace(stop_event)
         queued_requests = benchmark_with_trace.request_queue.qsize()
+        queue_get = benchmark_with_trace.request_queue.get
 
-        stop_event.set()
+        def get_then_stop(*args, **kwargs):
+            item = queue_get(*args, **kwargs)
+            stop_event.set()
+            return item
+
+        monkeypatch.setattr(benchmark_with_trace.request_queue, 'get', get_then_stop)
         worker = threading.Thread(
             target=benchmark_with_trace.process_requests,
             args=(stop_event,),
@@ -2299,6 +2320,162 @@ class TestTraceReplay:
         assert benchmark_with_trace.producer_done.is_set()
         assert stop_event.is_set()
 
+    def test_worker_failure_hard_stops_finite_replay(
+        self, benchmark_with_trace, monkeypatch
+    ):
+        """A failed request must not leave a finite replay waiting for its duration."""
+        bench = benchmark_with_trace
+        bench.prefix_cache_manager = None
+        bench.prefill_only = True
+
+        def fail_allocation(*args, **kwargs):
+            raise RuntimeError("allocation failed")
+
+        monkeypatch.setattr(bench.cache, 'allocate_cache', fail_allocation)
+        started = time.perf_counter()
+        with pytest.raises(RuntimeError, match="Benchmark thread failed") as error:
+            bench.run()
+
+        assert time.perf_counter() - started < 5
+        assert isinstance(error.value.__cause__, RuntimeError)
+        assert bench.results['requests_completed'] == 0
+
+    def test_producer_failure_hard_stops_finite_replay(self, benchmark_with_trace):
+        """A failed producer must not leave the benchmark waiting for its duration."""
+        bench = benchmark_with_trace
+        Path(bench.burst_trace_files[0]).unlink()
+        started = time.perf_counter()
+        with pytest.raises(RuntimeError, match="Benchmark thread failed") as error:
+            bench.run()
+
+        assert time.perf_counter() - started < 5
+        assert isinstance(error.value.__cause__, SystemExit)
+        assert not bench.producer_done.is_set()
+
+    def test_in_flight_request_is_cancelled_after_hard_stop(
+        self, benchmark_with_trace, monkeypatch
+    ):
+        """Hard cutoffs discard an admitted request after its blocking I/O returns."""
+        bench = benchmark_with_trace
+        stop_event = threading.Event()
+        started = threading.Event()
+        release = threading.Event()
+        cache_reads = []
+        bench._generate_requests_from_trace(stop_event)
+        prefix_entry = PrefixCacheEntry(
+            prefix_key='system_test',
+            prefix_type=PrefixType.SYSTEM_PROMPT,
+            text_hash='test',
+            token_count=5,
+            kv_cache_key='kv_system_test'
+        )
+
+        def blocking_allocation(*args, **kwargs):
+            started.set()
+            release.wait(timeout=5)
+            return True, 'cpu', 0.0
+
+        def track_cache_read(*args, **kwargs):
+            cache_reads.append(args)
+            return 'cpu', 0.0
+
+        monkeypatch.setattr(
+            bench.prefix_cache_manager.prefix_matcher,
+            'detect_system_prompt',
+            lambda context_tokens: prefix_entry
+        )
+        monkeypatch.setattr(bench.cache, 'allocate_cache', blocking_allocation)
+        monkeypatch.setattr(bench.cache, 'access_cache', track_cache_read)
+        worker = threading.Thread(target=bench.process_requests, args=(stop_event,), daemon=True)
+        worker.start()
+
+        assert started.wait(timeout=2)
+        with bench.results_lock:
+            stop_event.set()
+        release.set()
+        worker.join(timeout=2)
+
+        assert not worker.is_alive()
+        assert bench.results['requests_completed'] == 0
+        assert not bench.results['prefill_latencies']
+        assert bench.request_queue.qsize() == 7
+        assert len(cache_reads) == 1
+        assert not any(bench.prefix_cache_manager.stats.values())
+
+    def test_hard_stop_interrupts_simulated_generation(
+        self, benchmark_with_trace, monkeypatch
+    ):
+        """A duration-style stop should not wait out a long token-generation sleep."""
+        class TrackingEvent(threading.Event):
+            def __init__(self):
+                super().__init__()
+                self.generation_started = threading.Event()
+
+            def wait(self, timeout=None):
+                if timeout and timeout > 10:
+                    self.generation_started.set()
+                return super().wait(timeout)
+
+        bench = benchmark_with_trace
+        bench.generation_mode = GenerationMode.REALISTIC
+        bench.prefix_cache_manager = None
+        bench.prefill_only = True
+        stop_event = TrackingEvent()
+        bench._generate_requests_from_trace(stop_event)
+        monkeypatch.setattr(bench.cache, 'allocate_cache', lambda *args: (True, 'cpu', 0.0))
+        monkeypatch.setitem(GENERATION_TIMING, GenerationMode.REALISTIC, 60.0)
+        worker = threading.Thread(target=bench.process_requests, args=(stop_event,), daemon=True)
+        worker.start()
+
+        assert stop_event.generation_started.wait(timeout=2)
+        stop_event.set()
+        worker.join(timeout=2)
+
+        assert not worker.is_alive()
+        assert bench.results['requests_completed'] == 0
+        assert bench.request_queue.qsize() == 7
+
+    def test_max_requests_caps_trace_production(self, benchmark_with_trace):
+        """A small completion limit must not allow an entire trace to queue first."""
+        bench = benchmark_with_trace
+        bench.max_requests = 1
+        stop_event = threading.Event()
+
+        bench._generate_requests_from_trace(stop_event)
+
+        assert bench.request_counter == 1
+        assert bench.request_queue.qsize() == 1
+        assert not bench.producer_done.is_set()
+        assert not stop_event.is_set()
+
+    def test_hard_stop_interrupts_rag_ingestion(self):
+        """RAG ingestion should stop after the allocation active at cancellation."""
+        stop_event = threading.Event()
+
+        class StoppingCache:
+            def __init__(self):
+                self.allocations = 0
+
+            def allocate_cache(self, **kwargs):
+                self.allocations += 1
+                stop_event.set()
+                return True, 'cpu', 0.0
+
+        cache = StoppingCache()
+        manager = RAGDocumentManager(cache, chunk_size=1)
+
+        manager.ingest_document(
+            'doc',
+            total_tokens=3,
+            model_config=MODEL_CONFIGS['tiny-1b'],
+            stop_event=stop_event
+        )
+
+        assert cache.allocations == 1
+        assert not manager.documents
+        assert not manager.chunk_index
+        assert not any(manager.stats.values())
+
     def test_sharegpt_finite_replay_marks_producer_done(self, tmp_path):
         """ShareGPT finite replay should use graceful completion too."""
         dataset = tmp_path / 'sharegpt.json'
@@ -2307,17 +2484,7 @@ class TestTraceReplay:
             '{"from":"human","value":"first"},{"from":"gpt","value":"reply"},'
             '{"from":"human","value":"second"},{"from":"gpt","value":"reply"}]}]'
         )
-        bench = IntegratedBenchmark(
-            model_config=MODEL_CONFIGS['tiny-1b'],
-            num_users=2,
-            gpu_memory_gb=0,
-            cpu_memory_gb=0.01,
-            duration_seconds=5,
-            dataset_path=str(dataset),
-            max_conversations=1,
-            generation_mode=GenerationMode.NONE,
-            replay_cycles=1,
-        )
+        bench = self._sharegpt_benchmark(dataset)
         stop_event = threading.Event()
 
         bench._generate_requests_from_dataset(stop_event)
@@ -2326,6 +2493,31 @@ class TestTraceReplay:
         assert bench.request_queue.qsize() == 2
         assert bench.producer_done.is_set()
         assert not stop_event.is_set()
+
+    def test_empty_sharegpt_finite_replay_completes(self, tmp_path):
+        """An empty finite dataset should finish instead of starting synthetic traffic."""
+        dataset = tmp_path / 'empty-sharegpt.json'
+        dataset.write_text('[]')
+        bench = self._sharegpt_benchmark(dataset)
+        results = bench.run()
+
+        assert bench.request_counter == 0
+        assert bench.request_queue.empty()
+        assert bench.producer_done.is_set()
+        assert results['requests_completed'] == 0
+
+    def test_missing_sharegpt_finite_replay_fails(self, tmp_path):
+        """A missing finite dataset must not look like a successful empty replay."""
+        bench = self._sharegpt_benchmark(
+            tmp_path / 'missing-sharegpt.json', duration_seconds=30
+        )
+
+        started = time.perf_counter()
+        with pytest.raises(RuntimeError, match="Benchmark thread failed"):
+            bench.run()
+
+        assert time.perf_counter() - started < 5
+        assert isinstance(bench.sharegpt_loader.load_error, FileNotFoundError)
 
     def test_total_tokens_tracked(self, benchmark_with_trace):
         """Total tokens from trace should be summed correctly."""
@@ -2352,7 +2544,6 @@ class TestTraceReplay:
         )
 
         stop_event = threading.Event()
-        bench.stop_event = stop_event
 
         start = time.time()
         gen_thread = threading.Thread(

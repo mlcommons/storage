@@ -183,8 +183,8 @@ class IntegratedBenchmark:
             'seed': self.seed,
         }
         self.results_lock = threading.Lock()
-        self.stop_event: Optional[threading.Event] = None
         self.producer_done = threading.Event()
+        self._thread_error: Optional[BaseException] = None
         self.rag_ingest_done = threading.Event() if self.enable_rag else None
 
     def _ingest_rag_documents(self, num_docs: int, stop_event: Optional[threading.Event] = None):
@@ -208,7 +208,12 @@ class IntegratedBenchmark:
             if stop_event and stop_event.is_set():
                 break
             doc_tokens = random.randint(token_min, token_max)
-            self.rag_manager.ingest_document(f"doc_{i:04d}", doc_tokens, self.model_config)
+            self.rag_manager.ingest_document(
+                f"doc_{i:04d}",
+                doc_tokens,
+                self.model_config,
+                stop_event=stop_event
+            )
 
         if self.rag_ingest_done:
             self.rag_ingest_done.set()
@@ -268,6 +273,15 @@ class IntegratedBenchmark:
             if self.results['requests_completed'] >= self.request_counter:
                 stop_event.set()
 
+    def _next_request_id(self) -> Optional[int]:
+        """Reserve the next request ID without producing beyond max_requests."""
+        with self.counter_lock:
+            if self.max_requests > 0 and self.request_counter >= self.max_requests:
+                return None
+            request_id = self.request_counter
+            self.request_counter += 1
+            return request_id
+
     def _generate_requests_from_trace(self, stop_event: threading.Event):
         """Generates InferenceRequest objects from the streaming trace iterator."""
         speedup = self.trace_speedup
@@ -287,22 +301,15 @@ class IntegratedBenchmark:
 
                 if prev_timestamp is not None and speedup > 0:
                     delta = timestamp - prev_timestamp
-                    if delta > 0:
-                        sleep_time = delta / speedup
-                        remaining = sleep_time
-                        while remaining > 0 and not stop_event.is_set():
-                            chunk = min(remaining, 5.0)
-                            time.sleep(chunk)
-                            remaining -= chunk
-                        if stop_event.is_set():
-                            break
+                    if delta > 0 and stop_event.wait(delta / speedup):
+                        break
                 prev_timestamp = timestamp
 
                 trace_total_tokens_sum += total_tokens
 
-                with self.counter_lock:
-                    req_id = self.request_counter
-                    self.request_counter += 1
+                req_id = self._next_request_id()
+                if req_id is None:
+                    return
 
                 rand = random.random()
                 if rand < interactive_prob:
@@ -349,7 +356,17 @@ class IntegratedBenchmark:
 
     def _generate_requests_from_dataset(self, stop_event: threading.Event):
         """Generates InferenceRequest objects from the loaded ShareGPT dataset."""
+        if (
+            self.replay_cycles > 0
+            and self.sharegpt_loader
+            and self.sharegpt_loader.load_error
+        ):
+            raise RuntimeError("Failed to load ShareGPT dataset") from self.sharegpt_loader.load_error
         if not self.sharegpt_loader or not self.sharegpt_loader.conversations:
+            if self.replay_cycles > 0:
+                logger.warning("ShareGPT dataset is empty or not loaded.")
+                self._mark_producer_done(stop_event)
+                return
             logger.warning("ShareGPT dataset is empty or not loaded. Falling back to synthetic workload.")
             users = UserSimulator.generate_mixed_users(self.num_users)
             self.generate_requests(users, stop_event)
@@ -379,9 +396,9 @@ class IntegratedBenchmark:
             context_tokens = turn['context_tokens']
             generate_tokens = turn['generation_tokens']
 
-            with self.counter_lock:
-                req_id = self.request_counter
-                self.request_counter += 1
+            req_id = self._next_request_id()
+            if req_id is None:
+                return
 
             interactive_prob = cfg('qos_distribution', 'interactive_probability', default=0.15)
             responsive_threshold = cfg('qos_distribution', 'responsive_threshold', default=0.50)
@@ -419,17 +436,36 @@ class IntegratedBenchmark:
             turn_index += 1
 
             if self.request_rate > 0:
-                time.sleep(1.0 / self.request_rate)
+                stop_event.wait(1.0 / self.request_rate)
+
+    def _run_thread(self, role, target, stop_event: threading.Event, args=()):
+        """Run a background target and hard-stop the benchmark if it fails."""
+        try:
+            target(*args)
+        except (Exception, SystemExit) as error:
+            logger.exception("%s failed", role)
+            with self.results_lock:
+                if self._thread_error is None:
+                    self._thread_error = error
+                stop_event.set()
 
     def generate_requests(self, users: List[UserProfile], stop_event: threading.Event):
         """Generate requests concurrently for each simulated user."""
 
+        producer_threads = []
         if self.enable_rag and self.rag_manager and self.rag_ingest_done:
-            threading.Thread(
-                target=self._ingest_rag_documents,
-                args=(self.rag_num_docs, stop_event),
+            rag_thread = threading.Thread(
+                target=self._run_thread,
+                args=(
+                    "Request producer",
+                    self._ingest_rag_documents,
+                    stop_event,
+                    (self.rag_num_docs, stop_event)
+                ),
                 daemon=True
-            ).start()
+            )
+            rag_thread.start()
+            producer_threads.append(rag_thread)
 
         def enqueue_request(request: InferenceRequest):
             priority_tuple = (-QOS_PROFILES[request.qos_level].priority, time.time())
@@ -439,10 +475,7 @@ class IntegratedBenchmark:
             """Simulates an individual user generating traffic."""
             local_conv_id = None
 
-            while not stop_event.is_set():
-                time.sleep(user.think_time * random.uniform(0.8, 1.2))
-                if stop_event.is_set():
-                    break
+            while not stop_event.wait(user.think_time * random.uniform(0.8, 1.2)):
 
                 if self.enable_multi_turn and self.conversation_manager:
                     if local_conv_id and random.random() >= 0.8:
@@ -469,9 +502,9 @@ class IntegratedBenchmark:
                 new_context = random.randint(max(1, user.context_length // 4), user.context_length)
                 new_gen = random.randint(max(1, user.generation_length // 4), user.generation_length)
 
-                with self.counter_lock:
-                    req_id = self.request_counter
-                    self.request_counter += 1
+                req_id = self._next_request_id()
+                if req_id is None:
+                    return
 
                 if self.enable_multi_turn and self.conversation_manager and local_conv_id:
                     turn_number, cache_key = self.conversation_manager.add_turn(local_conv_id, new_context, new_gen)
@@ -505,9 +538,9 @@ class IntegratedBenchmark:
                     retrieved_chunks = self.rag_manager.retrieve_chunks(doc_id)
                     rag_context_tokens = sum(chunk.token_count for chunk in retrieved_chunks)
 
-                    with self.counter_lock:
-                        rag_req_id = self.request_counter
-                        self.request_counter += 1
+                    rag_req_id = self._next_request_id()
+                    if rag_req_id is None:
+                        return
 
                     rag_request = InferenceRequest(
                         user_id=user.user_id,
@@ -522,12 +555,23 @@ class IntegratedBenchmark:
                     )
                     enqueue_request(rag_request)
 
-        for user in users:
-            threading.Thread(target=user_worker, args=(user,), daemon=True).start()
+        try:
+            for user in users:
+                user_thread = threading.Thread(
+                    target=self._run_thread,
+                    args=("Request producer", user_worker, stop_event, (user,)),
+                    daemon=True
+                )
+                user_thread.start()
+                producer_threads.append(user_thread)
 
-        self.active_users = users
-
-        stop_event.wait()
+            self.active_users = users
+            stop_event.wait()
+        finally:
+            with self.results_lock:
+                stop_event.set()
+            for thread in producer_threads:
+                thread.join()
 
     def process_requests(self, stop_event: threading.Event):
         """The main worker loop that processes requests from the queue."""
@@ -539,18 +583,31 @@ class IntegratedBenchmark:
 
             # Check again after dequeue — don't start expensive I/O after stop
             if stop_event.is_set():
+                self.request_queue.put((priority_tuple, request))
                 break
 
             request.start_time = time.perf_counter()
             storage_latency = 0.0
             cache_type = 'user'
+            multi_turn_hits = 0
+            multi_turn_misses = 0
+            prefill_latency = None
+            decode_latency = None
 
             # 1. Check for a prefix cache hit.
             if self.prefix_cache_manager:
-                prefix_entry, remaining_tokens = self.prefix_cache_manager.check_prefix_cache(request, self.model_config)
+                prefix_entry, remaining_tokens = self.prefix_cache_manager.check_prefix_cache(
+                    request,
+                    self.model_config,
+                    record_stats=False
+                )
+                if stop_event.is_set():
+                    return
                 if prefix_entry:
                     cache_type = 'system' if prefix_entry.prefix_type == PrefixType.SYSTEM_PROMPT else 'common'
                     _, read_lat = self.cache.access_cache(prefix_entry.kv_cache_key, request.phase, cache_type)
+                    if stop_event.is_set():
+                        return
                     storage_latency += read_lat
                     request.context_tokens = remaining_tokens
 
@@ -567,19 +624,23 @@ class IntegratedBenchmark:
                     )
                     for prev_turn_key in prev_keys:
                         location, read_latency = self.cache.access_cache(prev_turn_key, InferencePhase.DECODE, 'multi_turn')
+                        if stop_event.is_set():
+                            return
                         if location is not None:
                             storage_latency += read_latency
-                            with self.results_lock: self.results['multi_turn_cache_hits'] += 1
+                            multi_turn_hits += 1
                         else:
-                            with self.results_lock: self.results['multi_turn_cache_misses'] += 1
+                            multi_turn_misses += 1
 
                 # 3. Perform the main PREFILL operation (a cache WRITE).
                 if request.phase == InferencePhase.PREFILL or request.phase == InferencePhase.PREFILL_DECODE:
                     success, location, write_latency = self.cache.allocate_cache(
                         request.cache_key, request.context_tokens, InferencePhase.PREFILL
                     )
+                    if stop_event.is_set():
+                        return
                     storage_latency += write_latency
-                    with self.results_lock: self.results['prefill_latencies'].append(write_latency)
+                    prefill_latency = write_latency
 
             # 4. Simulate a RAG operation.
             if self.rag_manager and random.random() < cfg('rag', 'request_probability', default=0.1):
@@ -587,8 +648,12 @@ class IntegratedBenchmark:
                 if doc_keys:
                     doc_id = random.choice(doc_keys)
                     chunks = self.rag_manager.retrieve_chunks(doc_id)
+                    if stop_event.is_set():
+                        return
                     for chunk in chunks:
                         _, read_lat = self.cache.access_cache(chunk.kv_cache_key, InferencePhase.DECODE)
+                        if stop_event.is_set():
+                            return
                         storage_latency += read_lat
 
             # 5. Perform the DECODE operation (a cache READ).
@@ -603,6 +668,8 @@ class IntegratedBenchmark:
                         decode_key = request.cache_key
                     
                     location, read_latency = self.cache.access_cache(decode_key, InferencePhase.DECODE, cache_type)
+                    if stop_event.is_set():
+                        return
                     storage_latency += read_latency
                     decode_total_latency = read_latency
 
@@ -614,25 +681,34 @@ class IntegratedBenchmark:
                                 request.context_tokens,
                                 InferencePhase.PREFILL
                             )
+                            if stop_event.is_set():
+                                return
                             storage_latency += write_latency
                     else:
                         decode_batch_size = cfg('decode', 'batch_size', default=32)
                         num_batched_reads = max(1, (request.generate_tokens + decode_batch_size - 1) // decode_batch_size)
                         for _ in range(num_batched_reads):
                             _, batch_read_latency = self.cache.access_cache(decode_key, InferencePhase.DECODE, cache_type)
+                            if stop_event.is_set():
+                                return
                             storage_latency += batch_read_latency
                             decode_total_latency += batch_read_latency
 
-                    with self.results_lock: self.results['decode_latencies'].append(decode_total_latency)
+                    decode_latency = decode_total_latency
 
             # 6. Simulate token generation time.
             generation_latency = request.generate_tokens * GENERATION_TIMING[self.generation_mode]
-            if generation_latency > 0: time.sleep(generation_latency)
+            if generation_latency > 0 and stop_event.wait(generation_latency):
+                return
 
             request.complete_time = time.perf_counter()
 
             # 7. Record all results.
             with self.results_lock:
+                if stop_event.is_set():
+                    return
+                if self.prefix_cache_manager:
+                    self.prefix_cache_manager.record_prefix_result(prefix_entry, self.model_config)
                 self.results['requests_completed'] += 1
                 self.results['total_tokens_generated'] += request.generate_tokens
                 self.results['total_storage_io_latency'] += storage_latency
@@ -640,6 +716,12 @@ class IntegratedBenchmark:
                 self.results['end_to_end_latencies'].append(request.total_latency_ms / 1000)
                 self.results['storage_latencies'].append(storage_latency)
                 self.results['generation_latencies'].append(generation_latency)
+                self.results['multi_turn_cache_hits'] += multi_turn_hits
+                self.results['multi_turn_cache_misses'] += multi_turn_misses
+                if prefill_latency is not None:
+                    self.results['prefill_latencies'].append(prefill_latency)
+                if decode_latency is not None:
+                    self.results['decode_latencies'].append(decode_latency)
 
                 if self.max_requests > 0 and self.results['requests_completed'] >= self.max_requests:
                     stop_event.set()
@@ -656,8 +738,7 @@ class IntegratedBenchmark:
         start_time = time.time()
         last_log_time = start_time
 
-        while not stop_event.is_set():
-            time.sleep(self.scale_interval)
+        while not stop_event.wait(self.scale_interval):
             now = time.time()
 
             elapsed = now - start_time
@@ -702,7 +783,8 @@ class IntegratedBenchmark:
                     logger.info(f"Autoscaler {action} -> {self.num_users} users (saturation: {saturation_level:.2f})")
                 elif action == 'stop':
                     logger.info("Autoscaler requested stop after reaching capacity peak.")
-                    stop_event.set()
+                    with self.results_lock:
+                        stop_event.set()
                     log_entry = {
                         'timestamp': datetime.now().isoformat(),
                         'mode': self.autoscaler.mode,
@@ -1228,43 +1310,81 @@ class IntegratedBenchmark:
         print("-" * 80)
 
         stop_event = threading.Event()
-        self.stop_event = stop_event
-        self.producer_done.clear()
 
         threads = []
         if self.use_dataset:
-            gen_thread = threading.Thread(target=self._generate_requests_from_dataset, args=(stop_event,), daemon=True)
+            producer = self._generate_requests_from_dataset
+            producer_args = (stop_event,)
         elif self.use_burst_trace:
-            gen_thread = threading.Thread(target=self._generate_requests_from_trace, args=(stop_event,), daemon=True)
+            producer = self._generate_requests_from_trace
+            producer_args = (stop_event,)
         else:
-            gen_thread = threading.Thread(target=self.generate_requests, args=(users, stop_event), daemon=True)
-
-        threads.append(gen_thread)
-        gen_thread.start()
-
-        num_workers = min(self.num_users, 500)
-        for _ in range(num_workers):
-            proc_thread = threading.Thread(target=self.process_requests, args=(stop_event,), daemon=True)
-            threads.append(proc_thread)
-            proc_thread.start()
-
-        if self.enable_autoscaling:
-            mon_thread = threading.Thread(target=self.monitor_stats, args=(stop_event,), daemon=True)
-            threads.append(mon_thread)
-            mon_thread.start()
+            producer = self.generate_requests
+            producer_args = (users, stop_event)
+        gen_thread = threading.Thread(
+            target=self._run_thread,
+            args=("Request producer", producer, stop_event, producer_args),
+            daemon=True
+        )
 
         benchmark_start = time.time()
-        stop_event.wait(timeout=self.duration)
-        actual_duration = time.time() - benchmark_start
+        benchmark_deadline = benchmark_start + self.duration
+        try:
+            gen_thread.start()
+            threads.append(gen_thread)
 
-        stop_event.set()
+            num_workers = min(self.num_users, 500)
+            for _ in range(num_workers):
+                if stop_event.is_set():
+                    break
+                if time.time() >= benchmark_deadline:
+                    with self.results_lock:
+                        stop_event.set()
+                    break
+                proc_thread = threading.Thread(
+                    target=self._run_thread,
+                    args=("Request worker", self.process_requests, stop_event, (stop_event,)),
+                    daemon=True
+                )
+                proc_thread.start()
+                threads.append(proc_thread)
+
+            if self.enable_autoscaling and not stop_event.is_set():
+                mon_thread = threading.Thread(
+                    target=self._run_thread,
+                    args=("Autoscaler monitor", self.monitor_stats, stop_event, (stop_event,)),
+                    daemon=True
+                )
+                mon_thread.start()
+                threads.append(mon_thread)
+        except Exception:
+            with self.results_lock:
+                stop_event.set()
+            for thread in threads:
+                thread.join()
+            if self.enable_latency_tracing:
+                self._stop_latency_tracing()
+            if self.io_tracer is not None:
+                self.io_tracer.close()
+            raise
+
+        remaining_duration = max(0.0, benchmark_deadline - time.time())
+        stop_event.wait(timeout=remaining_duration)
+        with self.results_lock:
+            stop_event.set()
+            actual_duration = time.time() - benchmark_start
         for thread in threads:
-            thread.join(timeout=2.0)
+            thread.join()
 
         # Stop tracing and collect results before stats calculation
         trace_data = None
         if self.enable_latency_tracing:
             trace_data = self._stop_latency_tracing()
+
+        if self._thread_error is not None:
+            if self.io_tracer is not None:
+                self.io_tracer.close()
+            raise RuntimeError("Benchmark thread failed") from self._thread_error
 
         self._calculate_stats(actual_duration)
 
