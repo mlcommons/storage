@@ -1361,7 +1361,7 @@ class IntegratedBenchmark:
             with self.results_lock:
                 stop_event.set()
             for thread in threads:
-                thread.join()
+                thread.join(timeout=2.0)
             if self.enable_latency_tracing:
                 self._stop_latency_tracing()
             if self.io_tracer is not None:
@@ -1374,7 +1374,7 @@ class IntegratedBenchmark:
             stop_event.set()
             actual_duration = time.time() - benchmark_start
         for thread in threads:
-            thread.join()
+            thread.join(timeout=2.0)
 
         # Stop tracing and collect results before stats calculation
         trace_data = None

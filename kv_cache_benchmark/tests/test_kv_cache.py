@@ -2402,6 +2402,34 @@ class TestTraceReplay:
         assert len(cache_reads) == 1
         assert not any(bench.prefix_cache_manager.stats.values())
 
+    def test_duration_hard_stop_does_not_wait_for_blocked_io(
+        self, benchmark_with_trace, monkeypatch
+    ):
+        """A duration cutoff must return while an in-flight storage call is blocked."""
+        bench = benchmark_with_trace
+        bench.duration = 1
+        bench.num_users = 1
+        bench.prefix_cache_manager = None
+        bench.prefill_only = True
+        started = threading.Event()
+        release = threading.Event()
+
+        def blocking_allocation(*args, **kwargs):
+            started.set()
+            release.wait(timeout=10)
+            return True, 'cpu', 0.0
+
+        monkeypatch.setattr(bench.cache, 'allocate_cache', blocking_allocation)
+        run_started = time.perf_counter()
+        try:
+            bench.run()
+        finally:
+            release.set()
+
+        assert started.is_set()
+        assert time.perf_counter() - run_started < 5
+        assert bench.results['requests_completed'] == 0
+
     def test_hard_stop_interrupts_simulated_generation(
         self, benchmark_with_trace, monkeypatch
     ):
