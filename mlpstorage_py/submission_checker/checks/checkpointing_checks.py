@@ -237,7 +237,13 @@ class CheckpointingCheck(BaseCheck):
             return valid
 
         for summary, metadata, _ in self._iter_valid_files():
-            verification = metadata.get("verification", "closed")
+            # mlpstorage writes verification as "CLOSED"/"OPEN" (uppercase) —
+            # the pre-#841 lowercase-only comparison meant this check never
+            # fired on a real tree. Sibling checks (4.6.2 at :289, 4.6.3 at
+            # :451, 4.6.4 at :618) still carry the lowercase-only pattern;
+            # enabling them changes real-tree behavior beyond #841's scope,
+            # so they are left for their own gated fix.
+            verification = metadata.get("verification", "closed").lower()
 
             if verification == "closed":
                 checkpoint_mode = metadata.get("override_parameters", {}).get("checkpoint.mode", "").lower()
@@ -551,7 +557,9 @@ class CheckpointingCheck(BaseCheck):
             return valid
 
         for summary, metadata, _ in self._iter_valid_files():
-            if metadata.get("verification", "closed") != "closed":
+            # mlpstorage writes verification as "CLOSED"/"OPEN" (uppercase);
+            # test fixtures historically use lowercase — compare folded.
+            if metadata.get("verification", "closed").lower() != "closed":
                 continue
 
             params_dict = metadata.get("override_parameters", {})
