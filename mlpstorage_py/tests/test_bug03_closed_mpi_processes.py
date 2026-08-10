@@ -123,23 +123,39 @@ class TestBug03SubsetBranch:
             "Expected a [4.6.1 checkpointClosedMpiProcesses] violation. "
             f"Got errors: {mock_log.errors}"
         )
-        # Message should mention "subset mode requires 8 processes" and the actual count
-        assert any("subset" in e and "7" in e for e in mock_log.errors), (
-            f"Violation message should mention 'subset' and '7'. Got: {mock_log.errors}"
+        # Message names the respective required count and the actual count.
+        # (Post-#841 the subset carve-out is gone — 8b's respective count is
+        # 8, so the same violation fires through the unified branch.)
+        assert any("8" in e and "7" in e for e in mock_log.errors), (
+            f"Violation message should mention '8' and '7'. Got: {mock_log.errors}"
         )
 
-    def test_bug03_subset_branch_passes_for_correct_processes(self):
-        """num_processes == 8 in subset mode must return True with no violations."""
+    def test_bug03_subset_label_no_longer_excuses_the_count(self):
+        """Superseded by mlcommons/storage#841: this test originally pinned
+        the subset carve-out ("8 processes for any model"). Post-#841 the
+        respective count applies regardless of the label — 70B at 8
+        processes fails 4.6.1 — while the legitimate 8B subset run passes
+        because its respective count IS 8."""
         mock_log = MockLogger()
         check = _make_check(
             checkpoint_mode="subset",
-            model="llama3-70b",  # any model
+            model="llama3-70b",
             num_processes=8,
             mock_logger=mock_log,
         )
         result = check.closed_mpi_processes()
-        assert result is True, "subset mode with correct 8 processes should pass"
-        assert mock_log.errors == [], f"Expected no errors, got: {mock_log.errors}"
+        assert result is False, "70B labeled subset at 8 processes must fail 4.6.1"
+        assert any("64" in e for e in mock_log.errors), mock_log.errors
+
+        mock_log = MockLogger()
+        check = _make_check(
+            checkpoint_mode="subset",
+            model="llama3-8b",
+            num_processes=8,
+            mock_logger=mock_log,
+        )
+        assert check.closed_mpi_processes() is True
+        assert mock_log.errors == []
 
 
 class TestBug03NonSubsetBranch:

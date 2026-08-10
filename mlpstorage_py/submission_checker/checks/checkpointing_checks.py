@@ -248,24 +248,30 @@ class CheckpointingCheck(BaseCheck):
                 model_size = re.search(r"(8b|70b|405b|1t)", model_name)
                 model_key = model_size.group(1) if model_size else None
 
-                if checkpoint_mode == "subset":
-                    if num_processes != 8:
+                # No subset carve-out (mlcommons/storage#841): Rules.md 4.6.1
+                # requires the respective count — 8/64/512/1024 — for every
+                # CLOSED run. The pre-#841 branch here accepted 8 processes
+                # for any model whenever the auto-set subset label was
+                # present, which the missing "not" in 4.3.5 appeared to
+                # endorse. The one legitimate subset form (8B, per 4.3.5) has
+                # a respective count of 8, so it needs no exception. The
+                # ``checkpoint_mode`` variable stays for the message so a
+                # mislabeled run still reads coherently.
+                if model_key:
+                    required = self.config.get_closed_mpi_processes(model_key)
+                    if num_processes != required:
                         self.log_violation(
                             "4.6.1", "checkpointClosedMpiProcesses", self.path,
-                            "CLOSED subset mode requires 8 processes, got %d (model: %s)",
-                            num_processes, model_key or model_name,
+                            "CLOSED submission model %s requires %d processes, "
+                            "got %d%s",
+                            model_key, required, num_processes,
+                            " (run is labeled subset; no subset form exists "
+                            "for this model — Rules.md 4.3.5, "
+                            "mlcommons/storage#841)"
+                            if checkpoint_mode == "subset" and model_key != "8b"
+                            else "",
                         )
                         valid = False
-                else:
-                    if model_key:
-                        required = self.config.get_closed_mpi_processes(model_key)
-                        if num_processes != required:
-                            self.log_violation(
-                                "4.6.1", "checkpointClosedMpiProcesses", self.path,
-                                "CLOSED submission model %s requires %d processes, got %d",
-                                model_key, required, num_processes,
-                            )
-                            valid = False
 
         return valid
     
@@ -519,67 +525,75 @@ class CheckpointingCheck(BaseCheck):
     @rule("4.3.5", "checkpointSubsetRunValidation")
     def subset_run_validation(self):
         """
-        For subset runs, verify exactly 8 accelerators and not 8B model.
-        (Rules.md 4.3.5)
+        For CLOSED subset runs, verify exactly 8 accelerators and the 8B model.
+        (Rules.md 4.3.5, corrected per mlcommons/storage#841)
 
-        Note (mlcommons/storage#792): ``checkpoint.mode == "subset"`` in
-        ``override_parameters`` is auto-set by
-        ``mlpstorage_py.benchmarks.dlio.CheckpointingBenchmark.add_checkpoint_params``
-        for *any* run where ``num_processes < ClosedGPUs`` — not just genuine
-        8-accelerator subset runs. So this branch also fires for CLOSED
-        misconfigurations that landed between subset (8) and full
-        (ClosedGPUs) — e.g. 51 hosts × 8 ranks = 408 processes for 405b. The
-        error message calls out both valid submission forms so the user isn't
-        misled into thinking they explicitly opted into subset mode.
+        The published 4.3.5 text was missing the word "not" ("…or the model
+        is [not] '8B'"), and the original version of this check implemented
+        the typo faithfully — erroring on the 8B subset run (the only
+        legitimate form: one 8-GPU node, marking a local-NVMe architecture's
+        linear-scale-out claim) while passing 8-accelerator subset runs of
+        the large models, which have no subset form at all.
+
+        A run counts as subset on either signal: the auto-set
+        ``checkpoint.mode == "subset"`` override (``benchmarks/dlio.py``
+        labels any ``num_processes < ClosedGPUs`` run, mlcommons/storage#792)
+        or the explicit ``--checkpoint-subset`` arg recorded in metadata —
+        the 8B claim run is execution-identical to a full run, so the args
+        snapshot is its only signal.
+
+        Scope: CLOSED only. An OPEN run below the full count engages the same
+        partial-checkpoint mechanics but is governed by 4.6.4's TP*PP-multiple
+        rule, not 4.3.5.
         """
         valid = True
         if self.mode != "checkpointing":
             return valid
 
         for summary, metadata, _ in self._iter_valid_files():
+            if metadata.get("verification", "closed") != "closed":
+                continue
+
             params_dict = metadata.get("override_parameters", {})
-            checkpoint_mode = params_dict.get("checkpoint.mode", "")
+            args_dict = metadata.get("args", {})
+            is_subset = (
+                params_dict.get("checkpoint.mode", "") == "subset"
+                or bool(args_dict.get("checkpoint_subset"))
+            )
+            if not is_subset:
+                continue
 
-            if checkpoint_mode == "subset":
-                num_accelerators = summary.get("num_accelerators", 0)
-                model_name = metadata.get("args", {}).get("model", "").lower()
+            num_accelerators = summary.get("num_accelerators", 0)
+            model_name = args_dict.get("model", "").lower()
 
-                if num_accelerators != 8:
-                    model_size = re.search(r"(8b|70b|405b|1t)", model_name)
-                    if model_size:
-                        model_key = model_size.group(1)
-                        try:
-                            required_closed = self.config.get_closed_mpi_processes(model_key)
-                        except (KeyError, AttributeError):
-                            required_closed = None
-                    else:
-                        required_closed = None
+            # 405b/1t contain no "8b" substring; match the size token exactly.
+            model_size = re.search(r"(?<![0-9])(8b|70b|405b|1t)", model_name)
+            model_key = model_size.group(1) if model_size else None
 
-                    if required_closed is not None:
-                        self.log_violation(
-                            "4.3.5", "checkpointSubsetRunValidation", self.path,
-                            "num_accelerators=%d does not match any valid CLOSED "
-                            "submission form for %s: Rules.md 4.6.1 requires "
-                            "exactly 8 (subset run per 4.3.5) or %d (full run). "
-                            "The 'subset' label was auto-set by mlpstorage for "
-                            "this downscaled run — see mlcommons/storage#792.",
-                            num_accelerators, model_name, required_closed,
-                        )
-                    else:
-                        self.log_violation(
-                            "4.3.5", "checkpointSubsetRunValidation", self.path,
-                            "subset run requires exactly 8 accelerators, got %d",
-                            num_accelerators,
-                        )
-                    valid = False
+            if model_key != "8b":
+                try:
+                    required_closed = self.config.get_closed_mpi_processes(model_key)
+                except (KeyError, AttributeError):
+                    required_closed = None
+                self.log_violation(
+                    "4.3.5", "checkpointSubsetRunValidation", self.path,
+                    "subset run is not defined for model %s: Rules.md 4.3.5 "
+                    "defines subset mode only for the 8B model (one 8-GPU "
+                    "node claiming linear scale-out). A CLOSED %s submission "
+                    "must be a full run%s. See mlcommons/storage#841.",
+                    model_name, model_name,
+                    f" of {required_closed} processes" if required_closed else "",
+                )
+                valid = False
 
-                if "8b" in model_name:
-                    self.log_violation(
-                        "4.3.5", "checkpointSubsetRunValidation", self.path,
-                        "subset run cannot use 8B model: %s",
-                        model_name,
-                    )
-                    valid = False
+            if num_accelerators != 8:
+                self.log_violation(
+                    "4.3.5", "checkpointSubsetRunValidation", self.path,
+                    "subset run requires exactly 8 accelerators (one 8-GPU "
+                    "node), got %d",
+                    num_accelerators,
+                )
+                valid = False
 
         return valid
 

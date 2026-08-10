@@ -227,7 +227,7 @@ class TestSubsetRunValidationClarifiedMessage:
         user can see which knob to turn.
     """
 
-    def test_405b_408_accelerators_message_lists_both_valid_forms(
+    def test_405b_408_accelerators_message_names_the_remedy(
         self, tmp_path, mock_logger
     ):
         # Build a submission with llama3-405b and inject the exact failure state.
@@ -249,18 +249,18 @@ class TestSubsetRunValidationClarifiedMessage:
         errors = [c for c in mock_logger.method_calls if c[0] == "error"]
         assert errors, f"expected an error to be logged; got {mock_logger.method_calls}"
         joined = " ".join(str(c) for c in errors)
-        # Message names the CLOSED subset form (8) …
-        assert "8" in joined, joined
-        # … the full CLOSED form for the specific model (512 for 405b) …
+        # Post-#841 the message names the actual remedy: no subset form for
+        # 405b — a CLOSED submission must be the full 512-process run …
         assert "512" in joined, joined
-        # … and points the reader at the underlying auto-labeling behavior.
-        assert "auto-set" in joined or "storage#792" in joined, joined
+        # … and points at the corrected rule reading.
+        assert "storage#841" in joined or "8B" in joined, joined
 
-    def test_genuine_subset_run_still_passes(self, tmp_path, mock_logger):
-        """Regression guard: a real 8-accelerator subset run (for 405b) does
-        NOT get flagged. This locks the message change to the misconfig path
-        and not the happy path.
-        """
+    def test_405b_subset_run_now_fails(self, tmp_path, mock_logger):
+        """Superseded by mlcommons/storage#841: this test originally pinned an
+        8-accelerator 405b subset run as the happy path. The published 4.3.5
+        text was missing the word "not" — subset mode is defined only for the
+        8B model, so this exact shape (ten of which published in v3.0) must
+        now flag."""
         root = build_submission(
             tmp_path,
             chkpt_model="llama3-405b",
@@ -274,9 +274,10 @@ class TestSubsetRunValidationClarifiedMessage:
         check = _run_checkpointing_check(root, mock_logger)
         ok = check.subset_run_validation()
 
-        assert ok is True
+        assert ok is False, "405b subset run must fail 4.3.5 post-#841"
         errors = [c for c in mock_logger.method_calls if c[0] == "error"]
-        assert not errors, f"unexpected errors on happy-path subset run: {errors}"
+        joined = " ".join(str(c) for c in errors)
+        assert "not defined" in joined or "only for the 8B" in joined, joined
 
 
 # Fixture at module scope so the class methods can share it.

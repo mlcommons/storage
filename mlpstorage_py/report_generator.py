@@ -2287,10 +2287,13 @@ class ReportGenerator:
         out["checkpoint_num_client_nodes"] = _first_present("num_hosts")
 
         # Checkpoint Mode (Full / Subset). The benchmark writes
-        # ``checkpoint.mode = "subset"`` only for subset runs
+        # ``checkpoint.mode = "subset"`` only for downscaled runs
         # (benchmarks/dlio.py:add_checkpoint_params); a "default" / absent
         # mode is a full-model run. Handle both the nested params dict and
-        # a flattened ``checkpoint.mode`` key defensively.
+        # a flattened ``checkpoint.mode`` key defensively. An 8B run declared
+        # subset via the explicit --checkpoint-subset arg is
+        # execution-identical to a full run — no DLIO override is written —
+        # so the args snapshot is its only signal (mlcommons/storage#841).
         params = runs[0].parameters or {}
         mode_raw = None
         ckpt_params = params.get("checkpoint")
@@ -2298,7 +2301,11 @@ class ReportGenerator:
             mode_raw = ckpt_params.get("mode")
         if mode_raw is None:
             mode_raw = params.get("checkpoint.mode")
-        out["checkpoint_mode"] = "Subset" if mode_raw == "subset" else "Full"
+        is_subset = (
+            mode_raw == "subset"
+            or bool((runs[0].run_args or {}).get("checkpoint_subset"))
+        )
+        out["checkpoint_mode"] = "Subset" if is_subset else "Full"
 
         # DP Instances — configured data parallelism int(ClosedGPUs /
         # GPUpDP) from LLM_ALLOWED_VALUES (the same value
