@@ -149,6 +149,19 @@ class TestSubsetRunValidationInversionFixed:
         assert ok is False, "explicit subset declaration on 70B must fail 4.3.5"
         assert _errors_4_3_5(log)
 
+    def test_verification_case_matches_real_metadata(self):
+        """mlpstorage writes ``verification: "CLOSED"`` (uppercase) to real
+        metadata — the v3.0 tree's ten subset rows all carry it. A
+        lowercase-only comparison silently skips every real run; this is
+        exactly the miss the clone-gate caught."""
+        check, log = _make_check(
+            verification="CLOSED",
+            model="llama3-70b",
+            override_parameters={"checkpoint.mode": "subset"},
+        )
+        assert check.subset_run_validation() is False
+        assert _errors_4_3_5(log)
+
     def test_non_subset_closed_run_untouched(self):
         check, log = _make_check(
             model="llama3-70b",
@@ -164,7 +177,10 @@ class TestClosedMpiProcessesNoSubsetCarveOut:
     """§4.6.1: CLOSED counts are strict-respective; no subset escape hatch."""
 
     def test_closed_subset_70b_8_procs_is_flagged(self):
+        # Uppercase verification, as mlpstorage actually writes it — the
+        # lowercase-only comparison left 4.6.1 dead on every real tree.
         check, log = _make_check(
+            verification="CLOSED",
             model="llama3-70b",
             num_processes=8,
             override_parameters={"checkpoint.mode": "subset"},
