@@ -1243,6 +1243,20 @@ class CheckpointingBenchmark(DLIOBenchmark):
         if self.args.num_processes < ClosedGPUs:
             self.params_dict['checkpoint.mode'] = "subset"
             self.params_dict['model.parallelism.data'] = configured_data_parallelism
+            # A downscaled run engages DLIO's partial-checkpoint mechanics
+            # (checkpoint.mode="subset"). That is legal for OPEN at TP*PP
+            # multiples (Rules.md 4.6.4) but is NOT a CLOSED submission form,
+            # and it is not the 4.3.5 subset claim either — that is 8B-only
+            # via --checkpoint-subset (mlcommons/storage#841). Say so here,
+            # where the classification happens, so the label never again
+            # reads as an opt-in the user made.
+            self.logger.warning(
+                f'num_processes={self.args.num_processes} is below the full '
+                f'{self.args.model} count ({ClosedGPUs}); DLIO will write a '
+                f'partial ("subset") checkpoint. This is not a valid CLOSED '
+                f'submission (Rules.md 4.6.1), and subset submissions are '
+                f'defined only for the 8B model (Rules.md 4.3.5).'
+            )
 
         self.params_dict['checkpoint.num_checkpoints_read'] = self.args.num_checkpoints_read
         self.params_dict['checkpoint.num_checkpoints_write'] = self.args.num_checkpoints_write

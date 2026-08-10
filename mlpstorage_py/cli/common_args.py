@@ -157,10 +157,10 @@ HELP_MESSAGES = {
         "of the required memory."
     ),
     'checkpoint_subset': (
-        "Run the checkpoint in 'Subset' mode. This mode only runs on a subset of hosts. eg, for large "
-        "models that required hundreds of processes to do an entire checkpoint, subset mode enables "
-        "using fewer processes and only doing part of the checkpoint. This is used in the Submissions to "
-        "represent a single 8-GPU node writing to local storage."
+        "Declare this run a 'Subset' run (Rules.md 4.3.5). Subset mode is defined only for the 8B model "
+        "at 8 processes: one industry-standard 8-GPU node checkpointing to storage the solution manages "
+        "on that node, claiming linear scale-out of the measured bandwidth. The larger models (70B, "
+        "405B, 1T) have no subset form — they must run at their full process counts."
     ),
 
     # VectorDB help messages

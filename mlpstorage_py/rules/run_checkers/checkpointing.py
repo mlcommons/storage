@@ -8,6 +8,7 @@ from typing import Optional
 
 from mlpstorage_py.config import (
     BENCHMARK_TYPES,
+    LLAMA3_8B,
     LLM_ALLOWED_VALUES,
     LLM_MODELS,
     LLM_SUBSET_PROCS,
@@ -52,25 +53,28 @@ class CheckpointingRunRulesChecker(RunRulesChecker):
     def check_num_processes(self) -> Optional[Issue]:
         """Fail-fast gate on --num-processes against Rules.md 4.6.1 / 4.6.4.
 
-        Per Rules.md §4.6.1 (Table 2), a CLOSED checkpointing submission for a
-        given LLM model must use *exactly* one of two process counts:
-          * ``LLM_SUBSET_PROCS`` (8) — the subset-run form (§4.3.5); or
-          * ``ClosedGPUs`` — the full-run form (8 / 64 / 512 / 1024 for
-            llama3-8b / -70b / -405b / -1t).
+        Per Rules.md §4.6.1 (Table 2), a CLOSED checkpointing submission must
+        use *exactly* ``ClosedGPUs`` processes for its model — 8 / 64 / 512 /
+        1024 for llama3-8b / -70b / -405b / -1t, respectively.
 
         OPEN submissions (§4.6.4) may use any positive multiple of
         ``GPUpDP`` (TP*PP).
 
+        History: the original #792 version of this gate also accepted
+        ``LLM_SUBSET_PROCS`` (8) as a CLOSED form for *every* model, reading
+        §4.3.5 as defining an 8-process "subset run" of the large models.
+        That reading traces to a missing "not" in the published §4.3.5 text
+        (mlcommons/storage#841): subset mode is defined *only* for the 8B
+        model — one 8-GPU node, marking a local-NVMe linear-scale-out claim —
+        and the large models have no subset form at all. For llama3-8b the
+        full count is 8, so nothing changes there; a large-model run at 8
+        processes is now OPEN-eligible when 8 is a TP*PP multiple (70b) and
+        INVALID otherwise (405b, 1t).
+
         Any other value — e.g. the ``51 hosts × 8 ranks = 408`` configuration
-        that surfaced in mlcommons/storage#792 — is neither a subset run nor
-        a full CLOSED run, and (for 405b) is not a multiple of TP*PP either,
-        so it cannot qualify for OPEN. Prior to this check the misconfiguration
-        was silently accepted at run time and only surfaced at
-        ``mlpstorage validate`` as the misleading "subset run requires exactly
-        8 accelerators, got 408" (auto-labeled by ``add_checkpoint_params`` in
-        benchmarks/dlio.py setting ``checkpoint.mode="subset"`` for any
-        downscaled run). Failing fast here saves the hours of wasted DLIO run
-        time between the misconfigured launch and the eventual validate call.
+        that surfaced in mlcommons/storage#792 — fails fast here, saving the
+        hours of wasted DLIO run time between a misconfigured launch and the
+        eventual validate call.
 
         Silent-passes when model is not one of the four recognized LLMs;
         ``check_model`` above owns that surface.
@@ -82,7 +86,7 @@ class CheckpointingRunRulesChecker(RunRulesChecker):
         num_processes = self.benchmark_run.num_processes
         _min_procs, _zero_level, gpu_per_dp, closed_gpus = LLM_ALLOWED_VALUES[model]
 
-        if num_processes == closed_gpus or num_processes == LLM_SUBSET_PROCS:
+        if num_processes == closed_gpus:
             return None
 
         if num_processes > 0 and num_processes % gpu_per_dp == 0:
@@ -91,13 +95,14 @@ class CheckpointingRunRulesChecker(RunRulesChecker):
                 message=(
                     f"num_processes={num_processes} is not a valid CLOSED "
                     f"configuration for {model}: Rules.md 4.6.1 requires "
-                    f"exactly {LLM_SUBSET_PROCS} (subset run) or "
-                    f"{closed_gpus} (full run). This value is a multiple of "
-                    f"TP*PP ({gpu_per_dp}), so it qualifies for OPEN only — "
-                    f"re-run with the 'open' positional argument."
+                    f"exactly {closed_gpus} processes (no subset form exists "
+                    f"for this model — Rules.md 4.3.5, mlcommons/storage#841). "
+                    f"This value is a multiple of TP*PP ({gpu_per_dp}), so it "
+                    f"qualifies for OPEN only — re-run with the 'open' "
+                    f"positional argument."
                 ),
                 parameter="num_processes",
-                expected=f"{LLM_SUBSET_PROCS} or {closed_gpus}",
+                expected=closed_gpus,
                 actual=num_processes,
             )
 
@@ -105,16 +110,67 @@ class CheckpointingRunRulesChecker(RunRulesChecker):
             validation=PARAM_VALIDATION.INVALID,
             message=(
                 f"num_processes={num_processes} is not a valid checkpointing "
-                f"configuration for {model}. Rules.md 4.6.1 requires "
-                f"exactly {LLM_SUBSET_PROCS} (subset run per §4.3.5) or "
-                f"{closed_gpus} (full CLOSED run) processes; §4.6.4 allows "
-                f"any positive multiple of TP*PP ({gpu_per_dp}) for OPEN. "
-                f"For a {model} run distributed across N hosts, choose an "
-                f"hosts × ranks-per-host product that lands on one of these "
-                f"values."
+                f"configuration for {model}. Rules.md 4.6.1 requires exactly "
+                f"{closed_gpus} processes for a CLOSED run, and no subset "
+                f"form exists for this model (Rules.md 4.3.5, "
+                f"mlcommons/storage#841); §4.6.4 allows any positive multiple "
+                f"of TP*PP ({gpu_per_dp}) for OPEN. For a {model} run "
+                f"distributed across N hosts, choose an hosts × "
+                f"ranks-per-host product that lands on one of these values."
             ),
             parameter="num_processes",
-            expected=f"{LLM_SUBSET_PROCS} or {closed_gpus} (CLOSED); "
+            expected=f"{closed_gpus} (CLOSED); "
                      f"positive multiple of {gpu_per_dp} (OPEN)",
             actual=num_processes,
         )
+
+    def check_subset_mode(self) -> Optional[Issue]:
+        """Gate the explicit ``--checkpoint-subset`` declaration (Rules.md 4.3.5).
+
+        Subset mode is the 8B single-node claim: a storage solution that
+        centrally manages node-local NVMe checkpoints one 8-GPU node and
+        claims linear scale-out of the measured bandwidth. It is defined for
+        no other model — the larger workloads exist to measure architectures
+        where checkpoint data must reach shared central storage (see
+        mlcommons/storage#841 for the missing "not" that read as permitting
+        large-model subset runs).
+
+        The flag with any model but llama3-8b, or with a process count other
+        than ``LLM_SUBSET_PROCS`` (8), is an illegal combination and aborts
+        before DLIO launches. Absent the flag this check has no surface:
+        downscaled-run classification belongs to ``check_num_processes``.
+        """
+        if not self.benchmark_run.run_args.get('checkpoint_subset'):
+            return None
+
+        model = self.benchmark_run.model
+        if model != LLAMA3_8B:
+            return Issue(
+                validation=PARAM_VALIDATION.INVALID,
+                message=(
+                    f"--checkpoint-subset is not a legal combination with "
+                    f"model {model}: Rules.md 4.3.5 defines subset mode only "
+                    f"for the 8B model (one 8-GPU node claiming linear "
+                    f"scale-out). Run {model} at its full process count "
+                    f"instead."
+                ),
+                parameter="checkpoint_subset",
+                expected=LLAMA3_8B,
+                actual=model,
+            )
+
+        num_processes = self.benchmark_run.num_processes
+        if num_processes != LLM_SUBSET_PROCS:
+            return Issue(
+                validation=PARAM_VALIDATION.INVALID,
+                message=(
+                    f"--checkpoint-subset requires exactly "
+                    f"{LLM_SUBSET_PROCS} processes (Rules.md 4.3.5: one "
+                    f"8-GPU node), got {num_processes}."
+                ),
+                parameter="num_processes",
+                expected=LLM_SUBSET_PROCS,
+                actual=num_processes,
+            )
+
+        return None

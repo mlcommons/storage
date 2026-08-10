@@ -109,11 +109,22 @@ class TestCheckNumProcessesFailFast:
         checker = CheckpointingRunRulesChecker(run, logger=mock_logger)
         assert checker.check_num_processes() is None
 
-    @pytest.mark.parametrize("model", [LLAMA3_70B, LLAMA3_405B, LLAMA3_1T])
-    def test_subset_run_passes(self, mock_logger, model):
+    @pytest.mark.parametrize("model,verdict", [
+        (LLAMA3_70B, PARAM_VALIDATION.OPEN),
+        (LLAMA3_405B, PARAM_VALIDATION.INVALID),
+        (LLAMA3_1T, PARAM_VALIDATION.INVALID),
+    ])
+    def test_8_procs_large_model_no_longer_closed(self, mock_logger, model, verdict):
+        """Superseded by mlcommons/storage#841: the "8 (subset run)" CLOSED
+        allowance this test originally pinned traced to a missing "not" in
+        Rules.md 4.3.5 — subset mode is 8B-only. 70B@8 is a TP*PP multiple
+        (OPEN-eligible); 405B@8 / 1T@8 are INVALID. See
+        test_issue841_subset_mode_gate.py for the full surface."""
         run = _make_chkpt_run(model, LLM_SUBSET_PROCS, mock_logger)
         checker = CheckpointingRunRulesChecker(run, logger=mock_logger)
-        assert checker.check_num_processes() is None
+        issue = checker.check_num_processes()
+        assert issue is not None
+        assert issue.validation == verdict
 
     # ------------------ The reporter's exact scenario --------------------
 
