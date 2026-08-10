@@ -124,6 +124,7 @@ def _make_run(
     run_datetime: str = "",
     command: str = "run",
     num_processes: int = 8,
+    run_args: Optional[Dict[str, Any]] = None,
 ) -> BenchmarkRun:
     """Build a real ``BenchmarkRun`` from an in-memory ``BenchmarkRunData``.
 
@@ -144,6 +145,7 @@ def _make_run(
         metrics=metrics,
         result_dir=result_dir,
         accelerator=accelerator,
+        run_args=run_args or {},
     )
     return BenchmarkRun.from_data(data)
 
@@ -638,7 +640,8 @@ class TestCheckpointingFinalTableColumns:
     """
 
     def _run(self, tmp_path, *, model, parameters, ts="20260703_100000",
-             write_bw=45.0, write_dur=12.0, read_bw=52.0, read_dur=9.0):
+             write_bw=45.0, write_dur=12.0, read_bw=52.0, read_dur=9.0,
+             run_args=None):
         runs_root = tmp_path / "workload"
         result_dir = _write_checkpointing_result_dir(
             runs_root, ts,
@@ -656,6 +659,7 @@ class TestCheckpointingFinalTableColumns:
             parameters=parameters,
             accelerator=None,
             run_datetime=ts,
+            run_args=run_args,
         )
 
     def test_bw_durations_client_nodes_and_dp(self, tmp_path):
@@ -692,6 +696,22 @@ class TestCheckpointingFinalTableColumns:
 
         assert result["checkpoint_mode"] == "Subset"
         assert result["checkpoint_dp_instances"] == 2
+
+    def test_explicit_subset_flag_shows_subset(self, tmp_path):
+        """mlcommons/storage#841: an 8B run declared subset via the explicit
+        --checkpoint-subset arg is execution-identical to a full run, so the
+        args snapshot is the only subset signal — the Checkpoint Mode column
+        must honor it."""
+        gen = _make_bare_generator(tmp_path)
+        run = self._run(
+            tmp_path, model="llama3-8b",
+            parameters={"checkpoint": {"mode": "default"}},
+            run_args={"checkpoint_subset": True},
+        )
+
+        result = gen._aggregate_workload_metrics([run], warmup_set=set())
+
+        assert result["checkpoint_mode"] == "Subset"
 
     def test_bw_blank_when_scalar_absent(self, tmp_path):
         """A run missing the DLIO scalar -> present-but-blank B/W/duration."""
