@@ -476,9 +476,9 @@ root_folder (or any name you prefer)
 | Total Processes        | 8      | 64     | 512     | 1024   |
 | ZeRO                   | 3      | 3      | 1       | 1      |
 | Checkpoint size        | 105 GB | 912 GB | 5.29 TB | 18 TB  |
-| Subset: 8-Process Size | 105 GB | 114 GB | 94 GB   | 161 GB |
+| Subset: 8-Process Size | 105 GB | Invalid | Invalid | Invalid |
 
-4.3.5. **checkpointSubsetRunValidation** --  The `mlpstorage` command must accept a parameter telling it that this is a *subset* run and add that info to the output log file. The *submission validator* must flag an error if the `subset` argument is given but the total number of accelerators is not exactly 8, or the model is "8B".
+4.3.5. **checkpointSubsetRunValidation** --  The `mlpstorage` command must accept a parameter telling it that this is a *subset* run and add that info to the output log file. The *submission validator* must flag an error if the `subset` argument is given but the total number of accelerators is not exactly 8, or the model is not "8B".
 
 ## 4.4. Checkpointing Access Via POSIX API Options
 
