@@ -478,7 +478,11 @@ root_folder (or any name you prefer)
 | Checkpoint size        | 105 GB | 912 GB | 5.29 TB | 18 TB  |
 | Subset: 8-Process Size | 105 GB | Invalid | Invalid | Invalid |
 
-4.3.5. **checkpointSubsetRunValidation** --  The `mlpstorage` command must accept a parameter telling it that this is a *subset* run and add that info to the output log file. The *submission validator* must flag an error if the `subset` argument is given but the total number of accelerators is not exactly 8, or the model is not "8B".
+*The "Invalid" entries are deliberate: subset mode is defined only for the 8B model (see rule 4.3.5).*
+
+4.3.5. **checkpointSubsetRunValidation** --  The `mlpstorage` command must accept a parameter declaring the run a *subset* run and must record that declaration in the run's output log file. A *subset* run must use the "8B" model and a total of exactly 8 accelerators. The *submission validator* must flag an error for any *subset* run that uses any other model or any other accelerator count.
+
+*Aside (not part of the rule): subset mode exists for storage architectures that centrally manage storage local to the client nodes, whose aggregate checkpoint bandwidth therefore scales linearly with node count. One 8-GPU node running the 8B workload demonstrates such an architecture's per-node bandwidth; the larger models measure storage where checkpoint data must reach a shared central store, so no subset form is defined for them.*
 
 ## 4.4. Checkpointing Access Via POSIX API Options
 
@@ -490,7 +494,7 @@ root_folder (or any name you prefer)
 
 ## 4.6. Checkpointing OPEN versus CLOSED Options
 
-4.6.1. **checkpointClosedMpiProcesses** -- For CLOSED submissions, the number of MPI processes must be set to 8, 64, 512, and 1024 for the respective models.  (see table 2)
+4.6.1. **checkpointClosedMpiProcesses** -- For CLOSED submissions, the number of MPI processes must be set to 8, 64, 512, and 1024 for the respective models.  (see table 2)  No reduced-process form exists for the 70B, 405B, or 1T models; the only permitted *subset* run (the "8B" model, rule 4.3.5) uses that model's required 8 processes.
 
 4.6.2. **checkpointClosedAcceleratorsPerHost** -- For CLOSED submissions, submitters may adjust the number of simulated accelerators **per host**, as long as each host uses more than 4 simulated accelerators and the total number of simulated accelerators (the total number of processes) matches the requirement.  (see table 2)
 
