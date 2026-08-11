@@ -822,6 +822,10 @@ Two examples of a power requirements tables are shown below:
 
 System component and power supply unit names in the above tables are examples. Consistent names should be used in bill-of-material documentation, system diagrams and descriptive text.
 
+**Provisioned Power in the results table**
+
+The results table carries a ``Provisioned Power (W)`` column that is derived automatically from the system-description.yaml rather than filled in by hand. It is defined as the total nameplate rated power of all of the gear that is part of the storage system under test: the sum of ``nameplate_power_watts × unit_count`` over every PSU in ``psus_configured``, across every ``product_nodes`` entry (times the node ``quantity``) and every ``product_switches`` entry (times the switch ``unit_count``). Client nodes and ``rack_power_supplies`` are excluded — the same scoping as the ``total_rack_units`` sum. Redundancy is not netted out: the figure corresponds to the **Nameplate rated power** total of the Power Requirements Table above, restricted to the system under test, not to the design power. Cloud-based deployments carry no power information and show a blank cell; an on-premises system whose YAML does not itemize its PSUs also shows a blank cell (never 0).
+
 **System Topology**
 The system topology needs to show logical connections between the nodes and network devices listed in the system-description.yaml. The simplest form is made up of squares and lines with a square for each node and a line for each connection between the nodes. Every node listed in the system-description.yaml needs to have a representative visual in the topology diagram. For large deployments (larger than 4 nodes), use an appropriate scaling notation. For example, in a solution of 16 identical client nodes, show squares for the first and last nodes (with node names and numbers in the nodes) separated by "...". 
 

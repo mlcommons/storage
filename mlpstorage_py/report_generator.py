@@ -169,6 +169,7 @@ _SUT_FINAL_COLUMNS = [
     ("RU's", "sut_rus"),
     ("Integrated Client Storage (TiB)", "sut_integrated_client_storage"),
     ("Usable Capacity (TiB)", "sut_usable_capacity_tib"),
+    ("Provisioned Power (W)", "sut_provisioned_power_w"),
 ]
 
 # Per-workload metric/param blocks. ``__code__`` / ``__logs__`` are the
@@ -1008,6 +1009,7 @@ class ReportGenerator:
         'sut_rus',
         'sut_integrated_client_storage',
         'sut_usable_capacity_tib',
+        'sut_provisioned_power_w',
         'sut_code',
         'sut_logs',
     ]
@@ -1034,9 +1036,11 @@ class ReportGenerator:
 
         if category and orgname and systemname:
             base = f"{category}/{orgname}/systems/{systemname}"
-            _submission_name, rack_units, solution = (
+            _submission_name, rack_units, solution, sut = (
                 self._read_system_description(first_run, systemname))
             cols.update(self._derive_sut_cells(solution, systemname))
+            cols['sut_provisioned_power_w'] = (
+                self._derive_provisioned_power(sut, systemname))
             # Visible text (user-confirmed 2026-07-21): Name shows the
             # system name and links to the system-description.yaml;
             # Description shows literal "PDF" and links to the .pdf.
@@ -1095,14 +1099,14 @@ class ReportGenerator:
         Walks up from the run's ``result_dir`` to the first ancestor that
         contains ``systems/<systemname>.yaml`` (the ``<org>`` level of the
         submission tree). Returns
-        ``(submission_name, total_rack_units, solution_dict)``. The first
-        two are ``None`` and the third an empty dict when the file is
+        ``(submission_name, total_rack_units, solution_dict, sut_dict)``.
+        The first two are ``None`` and the dicts empty when the file is
         absent/unreadable — the caller then falls back to the systemname
         text, a blank RU cell and blank derived cells.
         """
         result_dir = getattr(first_run, 'result_dir', None)
         if not result_dir:
-            return None, None, {}
+            return None, None, {}, {}
         import yaml  # local import: pyyaml is a runtime dep, keep top clean
         from pathlib import Path
         start = Path(result_dir)
@@ -1116,16 +1120,17 @@ class ReportGenerator:
                     solution = sut.get('solution') or {}
                     return (solution.get('submission_name'),
                             sut.get('total_rack_units'),
-                            solution)
+                            solution,
+                            sut)
                 except (OSError, yaml.YAMLError) as e:
                     self.logger.warning(
                         "reportgen: could not read system description %s: %s",
                         candidate, e)
-                    return None, None, {}
+                    return None, None, {}, {}
         self.logger.warning(
             "reportgen: no systems/%s.yaml found above %s; SUT block will "
             "fall back to systemname + blank RUs.", systemname, result_dir)
-        return None, None, {}
+        return None, None, {}, {}
 
     def _derive_sut_cells(
         self, solution: Dict[str, Any], systemname: str,
@@ -1215,6 +1220,67 @@ class ReportGenerator:
             cells['sut_integrated_client_storage'] = int_client_store
 
         return cells
+
+    def _derive_provisioned_power(
+        self, sut: Dict[str, Any], systemname: str,
+    ) -> Any:
+        """``Provisioned Power (W)``: nameplate watts of the SUT's gear.
+
+        Formula (user decision D1 = "A"): the sum of
+        ``nameplate_power_watts * unit_count`` over every PSU configured on
+        every product node's chassis (times ``node.quantity``) and every
+        product switch (times ``switch.unit_count``). Redundancy is NOT
+        netted out — ``min_psus_active`` plays no part. Clients and
+        ``rack_power_supplies`` are excluded (D2), the same scoping as
+        schema rule 11's ``total_rack_units`` sum; rack PSUs feed the same
+        gear the chassis PSUs describe and would double-count.
+
+        Blank, never 0 (D3): for cloud deployments (the schema forbids
+        power fields there), for a missing/unknown ``deployment``, when
+        there are no ``product_nodes`` (16 live onprem YAMLs — a 0 W cell
+        would be misleading), and when ANY node or switch lacks an
+        itemized power block (no partial sums — the same never-half-built
+        contract as the ``Type`` cell).
+        """
+        if sut.get('deployment') != 'onprem':
+            return ""
+
+        def device_watts(power: Any) -> Optional[int]:
+            psus = (power or {}).get('psus_configured')
+            if not psus:
+                return None
+            try:
+                return sum(
+                    int(p['nameplate_power_watts']) * int(p['unit_count'])
+                    for p in psus
+                )
+            except (KeyError, TypeError, ValueError):
+                return None
+
+        nodes = sut.get('product_nodes') or []
+        if not nodes:
+            return ""
+
+        total = 0
+        for node in nodes:
+            watts = device_watts((node.get('chassis') or {}).get('power'))
+            if watts is None:
+                self.logger.warning(
+                    "reportgen: %s is onprem but a product node lacks an "
+                    "itemized power block; Provisioned Power will be blank.",
+                    systemname)
+                return ""
+            total += watts * int(node.get('quantity') or 1)
+        for switch in (sut.get('product_switches') or []):
+            watts = device_watts(switch.get('power'))
+            if watts is None:
+                self.logger.warning(
+                    "reportgen: %s is onprem but a product switch lacks an "
+                    "itemized power block; Provisioned Power will be blank.",
+                    systemname)
+                return ""
+            total += watts * int(switch.get('unit_count') or 1)
+        return total
 
     def _model_group_folder_for_workload(
         self, workload_result: 'Result'
