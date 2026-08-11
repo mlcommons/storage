@@ -33,27 +33,34 @@ pytest tests/integration -v
 
 ## CLI Usage
 
-The main entry point is `mlpstorage` with nested subcommands:
+The main entry point is `mlpstorage`. Benchmark commands sit under a required
+submission-mode positional (`closed`, `open`, `whatif`); commands that touch
+storage take a trailing `file|object` selector. Only training has a model
+positional — the other benchmarks select models via flags. `mlpstorage
+--help_all` prints the complete hand-curated command reference (kept in
+lockstep with the parser by `tests/unit/test_help_all_parity.py`).
 
 ```bash
-# Training benchmarks (unet3d, resnet50, cosmoflow)
-mlpstorage training datasize ...   # Calculate required dataset size
-mlpstorage training datagen ...    # Generate synthetic data
-mlpstorage training run ...        # Execute benchmark
-mlpstorage training configview ... # View final configuration
+# Training (model positional; closed/open models: unet3d, retinanet)
+mlpstorage closed training unet3d datasize ...          # Calculate required dataset size
+mlpstorage closed training unet3d datagen file ...      # Generate synthetic data
+mlpstorage closed training unet3d run file ...          # Execute benchmark
+mlpstorage closed training unet3d configview file ...   # View final configuration
 
-# Checkpointing benchmarks (llama3-8b, llama3-70b, llama3-405b, llama3-1t)
-mlpstorage checkpointing run ...
-mlpstorage checkpointing datagen ...
-mlpstorage checkpointing validate ...
+# Checkpointing (--model/-m required: llama3-8b, llama3-70b, llama3-405b, llama3-1t)
+mlpstorage closed checkpointing datasize --model llama3-8b ...
+mlpstorage closed checkpointing run file --model llama3-8b ...
+mlpstorage closed checkpointing configview file --model llama3-8b ...
 
 # Other benchmarks
-mlpstorage vectordb run ...        # Vector database (PREVIEW)
-mlpstorage kvcache run ...         # KV cache
+mlpstorage closed vectordb run file ...    # Vector database (index via --vdb-index)
+mlpstorage closed kvcache run ...          # KV cache (no file|object; model fixed in closed)
 
-# Utilities
-mlpstorage reports reportgen ...   # Generate submission reports
-mlpstorage history list/replay ... # Command history
+# Utilities (top-level, no mode positional)
+mlpstorage reports reportgen ...           # Generate submission reports
+mlpstorage history show/rerun ...          # Command history
+mlpstorage init <orgname> <results-dir>    # Pin orgname to a results-dir
+mlpstorage validate <submission-dir>       # Rules.md submission checker
 ```
 
 ## Architecture
@@ -132,20 +139,20 @@ When running the `mlpstorage` CLI for manual testing or integration tests, use:
 
 ```bash
 # Generate dataset for unet3d with 4 processes
-mlpstorage training datagen \
-    --model unet3d \
+mlpstorage closed training unet3d datagen file \
     --num-processes 4 \
     --data-dir /databases/mlps-v3.0/data/ \
-    --results-dir /databases/mlps-v3.0/results
+    --results-dir /databases/mlps-v3.0/results \
+    --systemname dev-system
 
-# Run training benchmark for unet3d with 2 h100 accelerators
-mlpstorage training run \
-    --model unet3d \
+# Run training benchmark for unet3d with 2 b200 accelerators
+mlpstorage closed training unet3d run file \
     --num-accelerators 2 \
-    --accelerator-type h100 \
+    --accelerator-type b200 \
     --client-host-memory-in-gb 64 \
     --data-dir /databases/mlps-v3.0/data/ \
-    --results-dir /databases/mlps-v3.0/results
+    --results-dir /databases/mlps-v3.0/results \
+    --systemname dev-system
 ```
 
 **Note**: These benchmarks require MPI (OpenMPI) to be installed. Install with:
@@ -160,10 +167,10 @@ sudo yum install openmpi
 ## Key Constants
 
 From `mlpstorage/config.py`:
-- Training models: `cosmoflow`, `resnet50`, `unet3d`
+- Training models: `unet3d`, `retinanet` (closed/open); whatif adds `cosmoflow`, `resnet50`, `dlrm`, `flux`
 - LLM models (checkpointing): `llama3-8b`, `llama3-70b`, `llama3-405b`, `llama3-1t`
-- Accelerators: `h100`, `a100`
-- Submission categories: `CLOSED`, `OPEN`
+- Accelerators: `b200`, `mi355` (closed/open); whatif adds `h100`, `a100`
+- Submission modes: `closed`, `open`, `whatif`
 
 ## GSD Workflow
 
