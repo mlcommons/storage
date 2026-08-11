@@ -62,6 +62,11 @@ def _system_yaml(
     usable_capacity_tib: float = 512,
     availability: str = "available",
     int_client_store_tib: float | None = None,
+    deployment: str | None = None,
+    product_nodes: list | None = None,
+    product_switches: list | None = None,
+    clients: list | None = None,
+    rack_power_supplies: list | None = None,
 ) -> dict:
     """A system-description dict carrying every field the SUT block reads."""
     solution = {
@@ -87,7 +92,18 @@ def _system_yaml(
     }
     if int_client_store_tib is not None:
         solution["int_client_store_tib"] = int_client_store_tib
-    return {"system_under_test": {"solution": solution, "total_rack_units": 14}}
+    sut: dict = {"solution": solution, "total_rack_units": 14}
+    if deployment is not None:
+        sut["deployment"] = deployment
+    if product_nodes is not None:
+        sut["product_nodes"] = product_nodes
+    if product_switches is not None:
+        sut["product_switches"] = product_switches
+    if clients is not None:
+        sut["clients"] = clients
+    if rack_power_supplies is not None:
+        sut["rack_power_supplies"] = rack_power_supplies
+    return {"system_under_test": sut}
 
 
 def _prepare_tree(tmp_path: pathlib.Path, sys_yaml: dict) -> pathlib.Path:
@@ -275,3 +291,128 @@ class TestDegradesGracefully:
         row = _acme_row(root)
         assert row["Type"] == ""
         assert row["Access Protocol"] == "POSIX"
+
+
+# --------------------------------------------------------------------------- #
+# Provisioned Power (W)                                                        #
+# --------------------------------------------------------------------------- #
+
+def _power(psus: list[tuple[int, int]], min_active: int = 1) -> dict:
+    """A PowerDevice dict: psus = [(unit_count, nameplate_power_watts), ...]."""
+    return {
+        "min_psus_active": min_active,
+        "psus_configured": [
+            {
+                "unit_count": count,
+                "nameplate_power_watts": watts,
+                "inlet_voltage": 240,
+                "efficiency": "Platinum",
+            }
+            for count, watts in psus
+        ],
+    }
+
+
+def _node(power: dict | None, quantity: int = 1) -> dict:
+    node: dict = {
+        "friendly_description": "storage node",
+        "quantity": quantity,
+        "chassis": {"model_name": "TestChassis", "rack_units": 1},
+        "operating_system": {"name": "Linux", "version": "6"},
+    }
+    if power is not None:
+        node["chassis"]["power"] = power
+    return node
+
+
+class TestProvisionedPower:
+    """`Provisioned Power (W)` = nameplate sum of every configured PSU on
+    product nodes (x quantity) and product switches (x unit_count).
+    Clients and rack_power_supplies are excluded — the same scoping as
+    schema rule 11's total_rack_units sum. Redundancy is NOT netted out:
+    min_psus_active plays no part (decision D1 = formula A). Cloud rows
+    and rows without itemized product-node power are blank, never 0
+    (decision D3)."""
+
+    def test_nameplate_sum_times_node_quantity(self, tmp_path):
+        root = _prepare_tree(tmp_path, _system_yaml(
+            deployment="onprem",
+            product_nodes=[_node(_power([(2, 1800)]), quantity=3)],
+        ))
+        assert _acme_row(root)["Provisioned Power (W)"] == 10800
+
+    def test_min_psus_active_does_not_reduce_the_sum(self, tmp_path):
+        """Formula A: 2 installed PSUs count in full even when only 1 must
+        be active."""
+        root = _prepare_tree(tmp_path, _system_yaml(
+            deployment="onprem",
+            product_nodes=[_node(_power([(2, 1800)], min_active=1))],
+        ))
+        assert _acme_row(root)["Provisioned Power (W)"] == 3600
+
+    def test_heterogeneous_psu_lists_are_summed(self, tmp_path):
+        root = _prepare_tree(tmp_path, _system_yaml(
+            deployment="onprem",
+            product_nodes=[_node(_power([(2, 1800), (1, 800)]))],
+        ))
+        assert _acme_row(root)["Provisioned Power (W)"] == 4400
+
+    def test_switches_included_times_unit_count(self, tmp_path):
+        root = _prepare_tree(tmp_path, _system_yaml(
+            deployment="onprem",
+            product_nodes=[_node(_power([(2, 1800)]))],
+            product_switches=[{
+                "unit_count": 2,
+                "vendor_name": "SwitchCo",
+                "model_name": "SW-100",
+                "rack_units": 1,
+                "power": _power([(2, 500)]),
+            }],
+        ))
+        # 3600 (node) + 2 switches x 1000 = 5600
+        assert _acme_row(root)["Provisioned Power (W)"] == 5600
+
+    def test_clients_are_excluded(self, tmp_path):
+        root = _prepare_tree(tmp_path, _system_yaml(
+            deployment="onprem",
+            product_nodes=[_node(_power([(2, 1800)]))],
+            clients=[_node(_power([(4, 2000)]), quantity=16)],
+        ))
+        assert _acme_row(root)["Provisioned Power (W)"] == 3600
+
+    def test_rack_power_supplies_are_excluded(self, tmp_path):
+        """Rack-level PSUs feed the same gear the chassis PSUs describe;
+        counting both would double-count (decision D2)."""
+        root = _prepare_tree(tmp_path, _system_yaml(
+            deployment="onprem",
+            product_nodes=[_node(_power([(2, 1800)]))],
+            rack_power_supplies=[_power([(4, 3000)])],
+        ))
+        assert _acme_row(root)["Provisioned Power (W)"] == 3600
+
+    def test_cloud_deployment_is_blank(self, tmp_path):
+        root = _prepare_tree(tmp_path, _system_yaml(deployment="cloud"))
+        assert _acme_row(root)["Provisioned Power (W)"] == ""
+
+    def test_onprem_without_product_nodes_is_blank_not_zero(self, tmp_path):
+        """16 live v3.0 onprem YAMLs have no product_nodes section; a 0 W
+        cell would be misleading — blank, like every other degraded cell."""
+        root = _prepare_tree(tmp_path, _system_yaml(deployment="onprem"))
+        assert _acme_row(root)["Provisioned Power (W)"] == ""
+
+    def test_any_node_missing_power_blanks_the_cell(self, tmp_path):
+        """Never a partial sum: one node without a power block blanks the
+        whole cell (same never-half-built contract as Type)."""
+        root = _prepare_tree(tmp_path, _system_yaml(
+            deployment="onprem",
+            product_nodes=[_node(_power([(2, 1800)])), _node(None)],
+        ))
+        assert _acme_row(root)["Provisioned Power (W)"] == ""
+
+    def test_missing_deployment_is_blank(self, tmp_path):
+        """Without a deployment declaration the cell cannot be
+        interpreted; degrade to blank even if power data is present."""
+        root = _prepare_tree(tmp_path, _system_yaml(
+            product_nodes=[_node(_power([(2, 1800)]))],
+        ))
+        assert _acme_row(root)["Provisioned Power (W)"] == ""
