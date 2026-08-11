@@ -334,8 +334,26 @@ class SystemUnderTest(StrictModel):
 
     @model_validator(mode='after')
     def check_deployment_rules(self) -> 'SystemUnderTest':
-        # Rules 1–6 (onprem) and 7–10 (cloud)
+        # Rules 1–6 + 18 (onprem) and 7–10 (cloud)
         if self.deployment == DeploymentMode.onprem:
+            # Rule 18: external storage must be itemized. The results
+            # table's Provisioned Power (W) cell derives from the power
+            # blocks on product_nodes/product_switches; a remote-storage
+            # system without a product_nodes section silently publishes a
+            # blank cell. 'local' systems are exempt — their storage draws
+            # through client PSUs (excluded from the power sum by
+            # definition) and rule 11 pins their rack-unit total to 0.
+            storage_loc = self.solution.architecture.storage_location
+            if (storage_loc in (StorageLocation.remote,
+                                StorageLocation.remote_and_local)
+                    and not self.product_nodes):
+                raise ValueError(
+                    f"product_nodes is required for onprem deployment when "
+                    f"storage_location is '{storage_loc.value}' — the "
+                    f"storage-side hardware and its power supplies must be "
+                    f"itemized (the results table's Provisioned Power (W) "
+                    f"cell is derived from them)"
+                )
             for i, node in enumerate(self.product_nodes or []):
                 if node.chassis.rack_units is None:
                     raise ValueError(f"product_nodes[{i}].chassis.rack_units is required for onprem deployment")
