@@ -588,6 +588,54 @@ class TestOnpremDeploymentRules:
 
 
 # ---------------------------------------------------------------------------
+# Rule 18: remote/remote_and_local onprem systems must itemize product_nodes
+# ---------------------------------------------------------------------------
+
+class TestRemoteOnpremProductNodes:
+    """An onprem system with external storage (storage_location remote or
+    remote_and_local) must carry a non-empty ``product_nodes`` section —
+    the results table's Provisioned Power (W) cell derives from the
+    product-side power blocks, and without the section it silently
+    publishes blank. ``local`` systems are exempt: their storage draws
+    through client PSUs (excluded from the sum by definition) and rule 11
+    pins their rack-unit total to 0."""
+
+    def test_rule18_remote_onprem_without_product_nodes(self):
+        doc = _onprem_doc()
+        del doc["system_under_test"]["product_nodes"]
+        doc["system_under_test"]["total_rack_units"] = 0
+        fail(doc, "product_nodes", "remote")
+
+    def test_rule18_empty_product_nodes_list_also_fails(self):
+        doc = _onprem_doc()
+        doc["system_under_test"]["product_nodes"] = []
+        doc["system_under_test"]["total_rack_units"] = 0
+        fail(doc, "product_nodes")
+
+    def test_rule18_remote_and_local_also_required(self):
+        doc = _onprem_doc(storage_location="remote_and_local")
+        del doc["system_under_test"]["product_nodes"]
+        doc["system_under_test"]["total_rack_units"] = 0
+        fail(doc, "product_nodes", "remote_and_local")
+
+    def test_rule18_local_onprem_exempt(self):
+        """FarmGPU-potato/SAMSUNG shape: drives in the clients, no
+        product-side gear — must stay valid with no product_nodes."""
+        doc = _local_doc()
+        del doc["system_under_test"]["product_nodes"]
+        doc["system_under_test"]["total_rack_units"] = 0
+        ok(doc)
+
+    def test_rule18_cloud_exempt(self):
+        doc = _cloud_doc()
+        del doc["system_under_test"]["product_nodes"]
+        ok(doc)
+
+    def test_rule18_satisfied_by_populated_onprem_doc(self):
+        ok(_onprem_doc())
+
+
+# ---------------------------------------------------------------------------
 # Rules 7–10: cloud deployment requirements
 # ---------------------------------------------------------------------------
 
