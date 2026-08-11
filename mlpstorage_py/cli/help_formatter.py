@@ -20,14 +20,22 @@ _HEADER_TEXT = """\
 
 SYNOPSIS_TEXT = """\
 SYNOPSIS
-  mlpstorage <closed|open|whatif> <benchmark> <model|algorithm> <command> <file|object> [OPTIONS]
+  mlpstorage <closed|open|whatif> training <model> <command> <file|object> [OPTIONS]
+  mlpstorage <closed|open|whatif> checkpointing <command> <file|object> [OPTIONS]
+  mlpstorage <closed|open|whatif> vectordb <command> <file|object> [OPTIONS]
+  mlpstorage <closed|open|whatif> kvcache <command> [OPTIONS]
   mlpstorage (reports|history|lockfile|version) [subcommand] [OPTIONS]
   mlpstorage init <orgname> <results-dir>
   mlpstorage validate <submission-dir> [OPTIONS]
   mlpstorage rules-coverage [--rules-md PATH]
 
   <closed|open|whatif>  — required first positional for benchmark commands
-  <model|algorithm>     — required second positional (see per-benchmark choices below)
+  <model>               — training only: required model positional
+                          (choices vary by mode; see the tree below).
+                          The other benchmarks select models via flags:
+                          checkpointing --model/-m (required),
+                          vectordb --vdb-index, kvcache --model/-m
+                          (open|whatif only; fixed in closed)
   <file|object>         — required storage selector for commands that touch storage
                           (absent on datasize; absent on all kvcache commands)"""
 
@@ -36,52 +44,47 @@ mlpstorage
 │
 ├── closed ──────────────────────────────────────────────────────
 │   ├── training
-│   │   └── unet3d | retinanet
+│   │   └── unet3d | retinanet            ← model positional
 │   │       ├── datasize                          {TR_DATASIZE_CLOSED}
 │   │       ├── datagen    file | object           {TR_DATAGEN_CLOSED}
 │   │       ├── run        file | object           {TR_RUN_CLOSED}
 │   │       └── configview file | object           {TR_CONFIGVIEW_CLOSED}
 │   │
-│   ├── checkpointing
-│   │   └── llama3-8b | llama3-70b | llama3-405b | llama3-1t
-│   │       ├── datasize                          {CK_DATASIZE_CLOSED}
-│   │       ├── run        file | object           {CK_RUN_CLOSED}
-│   │       └── configview file | object           {CK_CONFIGVIEW_CLOSED}
+│   ├── checkpointing                     ← model via --model/-m flag (required)
+│   │   ├── datasize                              {CK_DATASIZE_CLOSED}
+│   │   ├── run        file | object               {CK_RUN_CLOSED}
+│   │   └── configview file | object               {CK_CONFIGVIEW_CLOSED}
 │   │
-│   ├── vectordb
-│   │   └── DISKANN | HNSW | AISAQ
-│   │       ├── datasize                          {VDB_DATASIZE_CLOSED}
-│   │       ├── datagen    file | object           {VDB_DATAGEN_CLOSED}
-│   │       └── run        file | object           {VDB_RUN_CLOSED}
+│   ├── vectordb                          ← index via --vdb-index flag
+│   │   ├── datasize                              {VDB_DATASIZE_CLOSED}
+│   │   ├── datagen    file | object               {VDB_DATAGEN_CLOSED}
+│   │   └── run        file | object               {VDB_RUN_CLOSED}
 │   │
-│   └── kvcache                          ← no model positional in closed
+│   └── kvcache                           ← model fixed in closed
 │       ├── datasize                              {KV_DATASIZE_CLOSED}
 │       └── run                                   {KV_RUN_CLOSED}
 │
 ├── open ────────────────────────────────────────────────────────
 │   ├── training
-│   │   └── unet3d | retinanet
+│   │   └── unet3d | retinanet            ← model positional
 │   │       ├── datasize                          {TR_DATASIZE_OPEN}
 │   │       ├── datagen    file | object           {TR_DATAGEN_OPEN}
 │   │       ├── run        file | object           {TR_RUN_OPEN}
 │   │       └── configview file | object           {TR_CONFIGVIEW_OPEN}
 │   │
-│   ├── checkpointing
-│   │   └── llama3-8b | llama3-70b | llama3-405b | llama3-1t
-│   │       ├── datasize                          {CK_DATASIZE_OPEN}
-│   │       ├── run        file | object           {CK_RUN_OPEN}
-│   │       └── configview file | object           {CK_CONFIGVIEW_OPEN}
+│   ├── checkpointing                     ← model via --model/-m flag (required)
+│   │   ├── datasize                              {CK_DATASIZE_OPEN}
+│   │   ├── run        file | object               {CK_RUN_OPEN}
+│   │   └── configview file | object               {CK_CONFIGVIEW_OPEN}
 │   │
-│   ├── vectordb
-│   │   └── DISKANN | HNSW | AISAQ | IVF_FLAT | IVF_SQ8 | FLAT
-│   │       ├── datasize                          {VDB_DATASIZE_OPEN}
-│   │       ├── datagen    file | object           {VDB_DATAGEN_OPEN}
-│   │       └── run        file | object           {VDB_RUN_OPEN}
+│   ├── vectordb                          ← index via --vdb-index flag
+│   │   ├── datasize                              {VDB_DATASIZE_OPEN}
+│   │   ├── datagen    file | object               {VDB_DATAGEN_OPEN}
+│   │   └── run        file | object               {VDB_RUN_OPEN}
 │   │
-│   └── kvcache
-│       └── tiny-1b | mistral-7b | llama2-7b | llama3.1-8b | llama3.1-70b-instruct
-│           ├── datasize                          {KV_DATASIZE_OPEN}
-│           └── run                               {KV_RUN_OPEN}
+│   └── kvcache                           ← model via --model/-m flag (default: tiny-1b)
+│       ├── datasize                              {KV_DATASIZE_OPEN}
+│       └── run                                   {KV_RUN_OPEN}
 │
 ├── whatif ──────────────────────────────────────────────────────
 │   ├── training
@@ -91,29 +94,26 @@ mlpstorage
 │   │       ├── run        file | object           {TR_RUN_WHATIF}
 │   │       └── configview file | object           {TR_CONFIGVIEW_WHATIF}
 │   │
-│   ├── checkpointing
-│   │   └── llama3-8b | llama3-70b | llama3-405b | llama3-1t
-│   │       ├── datasize                          {CK_DATASIZE_WHATIF}
-│   │       ├── run        file | object           {CK_RUN_WHATIF}
-│   │       └── configview file | object           {CK_CONFIGVIEW_WHATIF}
+│   ├── checkpointing                     ← model via --model/-m flag (required)
+│   │   ├── datasize                              {CK_DATASIZE_WHATIF}
+│   │   ├── run        file | object               {CK_RUN_WHATIF}
+│   │   └── configview file | object               {CK_CONFIGVIEW_WHATIF}
 │   │
-│   ├── vectordb
-│   │   └── DISKANN | HNSW | AISAQ | IVF_FLAT | IVF_SQ8 | FLAT
-│   │       ├── datasize                          {VDB_DATASIZE_WHATIF}
-│   │       ├── datagen    file | object           {VDB_DATAGEN_WHATIF}
-│   │       └── run        file | object           {VDB_RUN_WHATIF}
+│   ├── vectordb                          ← index via --vdb-index flag
+│   │   ├── datasize                              {VDB_DATASIZE_WHATIF}
+│   │   ├── datagen    file | object               {VDB_DATAGEN_WHATIF}
+│   │   └── run        file | object               {VDB_RUN_WHATIF}
 │   │
-│   └── kvcache
-│       └── tiny-1b | mistral-7b | llama2-7b | llama3.1-8b | llama3.1-70b-instruct
-│           ├── datasize                          {KV_DATASIZE_WHATIF}
-│           └── run                               {KV_RUN_WHATIF}
+│   └── kvcache                           ← model via --model/-m flag (default: tiny-1b)
+│       ├── datasize                              {KV_DATASIZE_WHATIF}
+│       └── run                                   {KV_RUN_WHATIF}
 │
 ├── reports
 │   └── reportgen                                {RP_REPORTGEN}
 │
 ├── history
-│   ├── list                                     {HI_LIST}
-│   └── replay                                   {HI_REPLAY}
+│   ├── show                                     {HI_SHOW}
+│   └── rerun <id>                               {HI_RERUN}
 │
 ├── lockfile
 │   ├── generate                                 {LF_GENERATE}
@@ -121,31 +121,35 @@ mlpstorage
 │
 ├── init <orgname> <results-dir>                Pin orgname to a results-dir via the mlperf-results.yaml sentinel
 │
-├── validate <submission-dir>                    Run the Rules.md submission checker
-│       --submitters CSV                          Comma-separated submitter allowlist (default: all)
-│       --mlperf-version VERSION                  Spec version (default: v5.1)
-│       --csv PATH                                Summary CSV path (default: summary.csv)
-│       --skip-output-file                        Suppress per-submission output file
-│       --reference-checksum MD5                  Override REFERENCE_CHECKSUMS for code/ MD5 check
+├── validate <submission-dir>                    {VALIDATE}
 │
-├── rules-coverage                               Reconcile Rules.md IDs against @rule-decorated checks
-│       --rules-md PATH                           Path to Rules.md (default: project-root Rules.md)
+├── rules-coverage                               {RULES_COVERAGE}
 │
 └── version                                      {VERSION}
 
 Common argument groups
 
-CORE_STD — Standard arguments, all three modes
+CORE_STD — Standard arguments, every benchmark command and most utilities
   --results-dir/-rd PATH        Benchmark results directory
+                                (default: MLPERF_RESULTS_DIR env var, else a tempdir)
+  --systemname/-sn NAME         System-under-test name — folder under results/
+                                (default: MLPERF_SYSTEMNAME env var)
   --config-file/-c PATH         YAML overrides file (applied after CLI args)
   --debug                       Enable debug output
   --verbose                     Enable verbose output
   --stream-log-level LEVEL      Logging level (default: INFO)
+  --quiet                       Suppress the run configuration summary table
   --dry-run                     Print the command that would execute; do not run
   --verify-lockfile PATH        Validate installed packages against lockfile
   --skip-validation             Skip MPI/SSH/DLIO pre-run environment checks
+  --skip-ssh-check              Skip only the SSH connectivity preflight (for
+                                scheduler-launched runs: PALS mpiexec, srun)
+  --skip-fs-separation-gate     Bypass the CAP-03 same-filesystem hard gate
+                                (probe still runs; Rules.md 3.4.2/4.4.2/5.4.2
+                                still fail at validation time)
 
-OPEN_STD — Additional standard arguments, open and whatif modes only
+OPEN_STD — Additional standard arguments, open and whatif modes
+            (all commands except kvcache datasize)
   --loops N                     Repeat benchmark N times (default: 1)
   --allow-invalid-params/-aip   Do not abort on invalid DLIO parameters
 
@@ -156,7 +160,9 @@ MPI_ARGS — MPI execution arguments
   --allow-run-as-root           Permit execution as root (OpenMPI flag)
   --mpi-params PARAM...         Additional raw MPI parameters (repeatable)
 
-TIMESERIES — Time-series host metrics, open and whatif run commands only
+TIMESERIES — Time-series host metrics, run commands only
+             (training and checkpointing: open and whatif modes;
+              vectordb and kvcache: all three modes)
   --timeseries-interval SECS    Sample interval in seconds (default: 10.0)
   --skip-timeseries             Disable time-series collection entirely
   --max-timeseries-samples N    Per-host sample cap (default: 3600)
@@ -166,20 +172,21 @@ Placeholder definitions — TRAINING
 TR_DATASIZE_CLOSED
   Required:
     --max-accelerators/-ma N
-    --accelerator-type/-g {b200,mi355}
+    --accelerator-type/-at {b200,mi355}
     --client-host-memory-in-gb/-cm N
-    --data-dir/-dd PATH
+    --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
   Optional:
+    --data-dir/-dd PATH
     --num-client-hosts/-nc N        Derived from --hosts count if unset
     --dlio-bin-path/-dp PATH
     --exec-type/-et {mpi,docker}    (default: mpi)
     --hosts/-s HOST...              (default: 127.0.0.1)
+    --params/-p/--param KEY=VALUE...  DLIO overrides (CLOSED: restricted subset)
   + MPI_ARGS
   + CORE_STD  (--results-dir optional)
 
 TR_DATASIZE_OPEN
-  = TR_DATASIZE_CLOSED plus:
-    --params/-p KEY=VALUE...        DLIO parameter overrides (repeatable)
+  = TR_DATASIZE_CLOSED  (flags identical; --params unrestricted)
   + OPEN_STD
 
 TR_DATASIZE_WHATIF
@@ -191,19 +198,21 @@ TR_DATASIZE_WHATIF
 TR_DATAGEN_CLOSED
   Required:
     --num-processes/-np N
-    --results-dir/-rd PATH
-    --data-dir/-dd PATH
+    --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
+    --data-dir/-dd PATH             (required with file storage; object mode
+                                     may supply data_dir via --config-file)
     [storage positional: file | object]
   Optional:
     --dlio-bin-path/-dp PATH
     --exec-type/-et {mpi,docker}    (default: mpi)
     --hosts/-s HOST...              (default: 127.0.0.1)
+    --o-direct                      Route I/O through s3dlio's O_DIRECT local-fs mode
+    --params/-p/--param KEY=VALUE...  DLIO overrides (CLOSED: restricted subset)
   + MPI_ARGS
-  + CORE_STD
+  + CORE_STD  (--results-dir optional)
 
 TR_DATAGEN_OPEN
-  = TR_DATAGEN_CLOSED plus:
-    --params/-p KEY=VALUE...
+  = TR_DATAGEN_CLOSED  (flags identical; --params unrestricted)
   + OPEN_STD
 
 TR_DATAGEN_WHATIF
@@ -214,23 +223,27 @@ TR_DATAGEN_WHATIF
 TR_RUN_CLOSED
   Required:
     --num-accelerators/-na N
-    --accelerator-type/-g {b200,mi355}
+    --accelerator-type/-at {b200,mi355}
     --client-host-memory-in-gb/-cm N
-    --checkpoint-folder/-cf PATH
-    --results-dir/-rd PATH
-    --data-dir/-dd PATH
+    --results-dir/-rd PATH          (or MLPERF_RESULTS_DIR)
+    --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
+    --data-dir/-dd PATH             (required with file storage; object mode
+                                     may supply data_dir via --config-file)
     [storage positional: file | object]
   Optional:
     --num-client-hosts/-nc N
     --dlio-bin-path/-dp PATH
     --exec-type/-et {mpi,docker}    (default: mpi)
     --hosts/-s HOST...              (default: 127.0.0.1)
+    --o-direct                      Route I/O through s3dlio's O_DIRECT local-fs mode
+    --drop-caches-timeout-seconds N   Per-call timeout for the per-epoch
+                                      page-cache flush
+    --params/-p/--param KEY=VALUE...  DLIO overrides (CLOSED: restricted subset)
   + MPI_ARGS
   + CORE_STD
 
 TR_RUN_OPEN
-  = TR_RUN_CLOSED plus:
-    --params/-p KEY=VALUE...
+  = TR_RUN_CLOSED  (flags identical; --params unrestricted)
   + OPEN_STD
   + TIMESERIES
 
@@ -243,60 +256,78 @@ TR_RUN_WHATIF
 TR_CONFIGVIEW_CLOSED
   Required:
     --num-accelerators/-na N
-    --results-dir/-rd PATH
-    --data-dir/-dd PATH
+    --accelerator-type/-at {b200,mi355}
+    --client-host-memory-in-gb/-cm N
+    --results-dir/-rd PATH          (or MLPERF_RESULTS_DIR)
+    --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
     [storage positional: file | object]
   Optional:
+    --data-dir/-dd PATH
+    --num-client-hosts/-nc N
     --dlio-bin-path/-dp PATH
+    --exec-type/-et {mpi,docker}    (default: mpi)
+    --hosts/-s HOST...              (default: 127.0.0.1)
+    --o-direct
+    --params/-p/--param KEY=VALUE...
+  + MPI_ARGS
   + CORE_STD
 
 TR_CONFIGVIEW_OPEN
-  = TR_CONFIGVIEW_CLOSED plus:
-    --params/-p KEY=VALUE...
+  = TR_CONFIGVIEW_CLOSED  (flags identical; --params unrestricted)
   + OPEN_STD
 
 TR_CONFIGVIEW_WHATIF
-  = TR_CONFIGVIEW_OPEN  (model positional choices differ; flags identical)
+  = TR_CONFIGVIEW_OPEN but:
+    --accelerator-type choices: {h100,a100,b200,mi355}
 
 Placeholder definitions — CHECKPOINTING
 
 CK_DATASIZE_CLOSED
   Required:
+    --model/-m {llama3-8b,llama3-70b,llama3-405b,llama3-1t}
+    --num-processes/-np N
     --client-host-memory-in-gb/-cm N
   Optional:
     --hosts/-s HOST...              (default: 127.0.0.1)
+    --exec-type/-et {mpi,docker}    (default: mpi)
+    --dlio-bin-path/-dp PATH
     --num-checkpoints-read/-ncr N   (default: 10; closed allows 10 or 0)
     --num-checkpoints-write/-ncw N  (default: 10; closed allows 10 or 0)
-  + CORE_STD  (--results-dir optional)
+    --checkpoint-subset             (8B at 8 processes only; sizes a Subset run)
+  + MPI_ARGS
+  + CORE_STD  (--results-dir and --systemname optional)
   Note: closed runs use 10/10 by default. Use 10/0 then 0/10 in two
         invocations when a cache flush is required between phases
         (see Rules.md §4.7.1 and checkpointing/README.md).
 
 CK_DATASIZE_OPEN
   = CK_DATASIZE_CLOSED plus:
-    --dlio-bin-path/-dp PATH
-    --params/-p KEY=VALUE...
+    --params/-p KEY=VALUE...        DLIO parameter overrides (repeatable)
   + OPEN_STD
   Note: open allows any non-negative integer for --num-checkpoints-read/-write
 
 CK_DATASIZE_WHATIF
-  = CK_DATASIZE_OPEN  (model positional choices identical; flags identical)
+  = CK_DATASIZE_OPEN  (--model choices identical; flags identical)
 
 ──────────────────────────────────────────────────────────────────
 
 CK_RUN_CLOSED
   Required:
+    --model/-m {llama3-8b,llama3-70b,llama3-405b,llama3-1t}
     --num-processes/-np N
     --checkpoint-folder/-cf PATH
     --client-host-memory-in-gb/-cm N
-    --results-dir/-rd PATH
+    --results-dir/-rd PATH          (or MLPERF_RESULTS_DIR)
+    --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
     [storage positional: file | object]
   Optional:
     --checkpoint-subset             (8B at 8 processes only; declares a Subset run)
     --exec-type/-et {mpi,docker}    (default: mpi)
     --hosts/-s HOST...              (default: 127.0.0.1)
+    --dlio-bin-path/-dp PATH
     --num-checkpoints-read/-ncr N   (default: 10; closed allows 10 or 0)
     --num-checkpoints-write/-ncw N  (default: 10; closed allows 10 or 0)
+    --o-direct                      Route I/O through s3dlio's O_DIRECT local-fs mode
   + MPI_ARGS
   + CORE_STD
   Note: closed runs use 10/10 by default. Use 10/0 then 0/10 in two
@@ -311,7 +342,6 @@ CK_RUN_CLOSED
 
 CK_RUN_OPEN
   = CK_RUN_CLOSED plus:
-    --dlio-bin-path/-dp PATH
     --params/-p KEY=VALUE...
   + OPEN_STD
   + TIMESERIES
@@ -319,16 +349,27 @@ CK_RUN_OPEN
         and any non-negative integer for --num-checkpoints-read/-write
 
 CK_RUN_WHATIF
-  = CK_RUN_OPEN  (model positional choices identical; flags identical)
+  = CK_RUN_OPEN  (--model choices identical; flags identical)
 
 ──────────────────────────────────────────────────────────────────
 
 CK_CONFIGVIEW_CLOSED
   Required:
-    --results-dir/-rd PATH
+    --model/-m {llama3-8b,llama3-70b,llama3-405b,llama3-1t}
+    --num-processes/-np N
+    --client-host-memory-in-gb/-cm N
+    --results-dir/-rd PATH          (or MLPERF_RESULTS_DIR)
+    --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
     [storage positional: file | object]
   Optional:
+    --checkpoint-subset
+    --exec-type/-et {mpi,docker}    (default: mpi)
+    --hosts/-s HOST...              (default: 127.0.0.1)
     --dlio-bin-path/-dp PATH
+    --num-checkpoints-read/-ncr N   (default: 10)
+    --num-checkpoints-write/-ncw N  (default: 10)
+    --o-direct
+  + MPI_ARGS
   + CORE_STD
 
 CK_CONFIGVIEW_OPEN
@@ -343,28 +384,39 @@ Placeholder definitions — VECTORDB
 
 VDB_DATASIZE_CLOSED
   Optional:
+    --vdb-engine {milvus}           (default: milvus)
+    --vdb-index {DISKANN,HNSW,AISAQ}   Index family; names the result path
+                                       vector_database/<engine>/<index>/...
+    --index-type {DISKANN,HNSW,AISAQ}  Milvus index for storage estimation
+                                       (defaults to --vdb-index)
     --dimension N                   (default: 1536)
     --num-vectors N                 (default: 1,000,000)
-    --index-type {DISKANN,HNSW,AISAQ}  (default: DISKANN)
     --num-shards N                  (default: 1)
     --vector-dtype {FLOAT_VECTOR}   (default: FLOAT_VECTOR)
-  + CORE_STD  (--results-dir optional)
+  + CORE_STD  (--results-dir and --systemname optional)
 
 VDB_DATASIZE_OPEN
-  = VDB_DATASIZE_CLOSED but:
-    --index-type choices: {DISKANN,HNSW,AISAQ,IVF_FLAT,IVF_SQ8,FLAT}
+  = VDB_DATASIZE_CLOSED plus:
+    --vdb-index {DISKANN,HNSW,AISAQ,IVF_FLAT,IVF_SQ8,FLAT}   (open widens choices)
+    --index-type {DISKANN,HNSW,AISAQ,IVF_FLAT,IVF_SQ8,FLAT}
+    --params KEY=VALUE...
   + OPEN_STD
 
 VDB_DATASIZE_WHATIF
-  = VDB_DATASIZE_OPEN  (algorithm positional choices differ; flags identical)
+  = VDB_DATASIZE_OPEN  (flags identical)
 
 ──────────────────────────────────────────────────────────────────
 
 VDB_DATAGEN_CLOSED
   Required:
-    --results-dir/-rd PATH
+    --results-dir/-rd PATH          (or MLPERF_RESULTS_DIR)
+    --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
     [storage positional: file | object]
   Optional:
+    --vdb-engine {milvus}           (default: milvus)
+    --vdb-index {DISKANN,HNSW,AISAQ}
+    --index-type {DISKANN,HNSW,AISAQ}  Milvus index to create during load
+                                       (defaults to --vdb-index)
     --host/-s IP                    Milvus server address (default: 127.0.0.1)
     --port/-p N                     Milvus port (default: 19530)
     --collection NAME
@@ -377,22 +429,51 @@ VDB_DATAGEN_CLOSED
     --batch-size N                  (default: 1,000)
     --chunk-size N                  (default: 10,000)
     --force
+  VDB storage location (recorded for Rules.md 5.4.1; overrides config storage.*):
+    --storage-root PATH             Where the engine stores its data
+                                    (must differ from --results-dir)
+    --storage-type TYPE             Storage medium, e.g. local_fs, s3
+                                    (default: local_fs)
+  Distributed launch:
+    --distributed                   Fan datagen out across --hosts via MPI
+    --hosts HOST...                 (no -s short form here; -s is --host)
+    --npernode/--num-processes-per-client N  (default: 1)
+    --mpi-impl {mpich,openmpi}      (default: mpich)
+    --coordination {filesystem,mpi} (default: filesystem)
+    --rank-output-dir PATH          (default: /tmp/mlps_vdb)
+    --seed N                        (default: 42)
+    --ready-timeout SECS            (default: 7200)
+  + MPI_ARGS
   + CORE_STD
 
 VDB_DATAGEN_OPEN
-  = VDB_DATAGEN_CLOSED
+  = VDB_DATAGEN_CLOSED plus:
+    --vdb-index {DISKANN,HNSW,AISAQ,IVF_FLAT,IVF_SQ8,FLAT}   (open widens choices)
+    --index-type {DISKANN,HNSW,AISAQ,IVF_FLAT,IVF_SQ8,FLAT}
+    --M N                           HNSW M parameter (default: 16)
+    --ef-construction N             (default: 200)
+    --max-degree N                  (default: 16)
+    --inline-pq N                   (default: 16)
+    --search-list-size N            (default: 200)
+    --metric-type {COSINE,L2,IP}    (default: COSINE)
+    --compact                       Compact the collection after load
+    --monitor-interval SECS         (default: 5)
+    --params KEY=VALUE...
   + OPEN_STD
 
 VDB_DATAGEN_WHATIF
-  = VDB_DATAGEN_OPEN  (algorithm positional choices differ; flags identical)
+  = VDB_DATAGEN_OPEN  (flags identical)
 
 ──────────────────────────────────────────────────────────────────
 
 VDB_RUN_CLOSED
   Required:
-    --results-dir/-rd PATH
+    --results-dir/-rd PATH          (or MLPERF_RESULTS_DIR)
+    --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
     [storage positional: file | object]
   Optional:
+    --vdb-engine {milvus}           (default: milvus)
+    --vdb-index {DISKANN,HNSW,AISAQ}   Index already loaded in the target collection
     --host/-s IP                    (default: 127.0.0.1)
     --port/-p N                     (default: 19530)
     --collection NAME
@@ -400,18 +481,40 @@ VDB_RUN_CLOSED
     --num-query-processes N         (default: 1)
     --batch-size N                  (default: 1)
     --report-count N                (default: 100)
-    --mode {timed,query_count,sweep}  (default: timed)
-    --runtime N                     Mutually exclusive with --queries
+    --benchmark-mode {timed,query_count,sweep}  (default: timed)
+    --runtime N                     Seconds; mutually exclusive with --queries
     --queries N                     Mutually exclusive with --runtime
+    --num-query-vectors N           (default: 1000)
+    --search-limit N                (default: 10)
+    --search-ef N                   (default: 200)
+    --recall-k N                    K for recall@k (defaults to --search-limit)
+    --gt-collection NAME            Ground-truth FLAT collection
+                                    (default: <collection>_flat_gt)
+    --vector-dim N                  (default: 1536)
+  VDB storage location (recorded for Rules.md 5.4.1; overrides config storage.*):
+    --storage-root PATH
+    --storage-type TYPE
+  Distributed launch:
+    --distributed
+    --hosts HOST...                 (no -s short form here; -s is --host)
+    --npernode/--num-processes-per-client N  (default: 1)
+    --mpi-impl {mpich,openmpi}      (default: mpich)
+    --coordination {filesystem,mpi} (default: filesystem)
+    --rank-output-dir PATH          (default: /tmp/mlps_vdb)
+    --seed N                        (default: 42)
+    --ready-timeout SECS            (default: 7200)
+  + MPI_ARGS
+  + TIMESERIES
   + CORE_STD
 
 VDB_RUN_OPEN
-  = VDB_RUN_CLOSED
+  = VDB_RUN_CLOSED plus:
+    --vdb-index {DISKANN,HNSW,AISAQ,IVF_FLAT,IVF_SQ8,FLAT}   (open widens choices)
+    --params KEY=VALUE...
   + OPEN_STD
-  + TIMESERIES
 
 VDB_RUN_WHATIF
-  = VDB_RUN_OPEN  (algorithm positional choices differ; flags identical)
+  = VDB_RUN_OPEN  (flags identical)
 
 Placeholder definitions — KVCACHE
 
@@ -419,24 +522,20 @@ Note: kvcache never has a file|object storage positional (architectural constrai
 No object storage support at any level.
 
 KV_DATASIZE_CLOSED
-  (No model positional — closed runs fixed phase sequence using
+  (Model and cache-tier sizes fixed in closed: the phase sequence uses
    llama3.1-8b + llama3.1-70b-instruct automatically)
-  Required:
-    --num-users/-nu N
   Optional:
-    --cache-dir PATH
-  + CORE_STD  (--results-dir optional)
+    --cache-dir PATH                NVMe cache tier directory
+                                    (default: subdirectory of results)
+  + CORE_STD  (--results-dir and --systemname optional)
   Note: --gpu-mem-gb=16.0 and --cpu-mem-gb=32.0 fixed; not shown
 
 KV_DATASIZE_OPEN
-  Required:
-    --num-users/-nu N
-  Optional:
-    --cache-dir PATH
+  = KV_DATASIZE_CLOSED plus:
     --gpu-mem-gb FLOAT              (default: 16.0)
     --cpu-mem-gb FLOAT              (default: 32.0)
-  + CORE_STD  (--results-dir optional)
-  + OPEN_STD
+  Note: OPEN_STD (--loops / --allow-invalid-params) is NOT available on
+        kvcache datasize in any mode
 
 KV_DATASIZE_WHATIF
   = KV_DATASIZE_OPEN  (flags identical)
@@ -444,37 +543,33 @@ KV_DATASIZE_WHATIF
 ──────────────────────────────────────────────────────────────────
 
 KV_RUN_CLOSED
-  (No model positional — fixed 3-phase sequence)
+  (Fixed 3-phase sequence; model pair and load parameters are pinned)
   Required:
-    --num-users/-nu N
-    --results-dir/-rd PATH
+    --results-dir/-rd PATH          (or MLPERF_RESULTS_DIR)
+    --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
   Optional:
     --cache-dir PATH
     --kvcache-bin-path PATH
-    --npernode/--num-processes-per-client N  (default: 1)
     --exec-type/-et {mpi,docker}    (default: mpi)
     --num-processes/-np N
     --hosts/-s HOST...              (default: 127.0.0.1)
   + MPI_ARGS
+  + TIMESERIES
   + CORE_STD
   Note: the following are fixed in closed and not shown:
-    duration=60s, generation-mode=realistic, performance-profile=throughput,
+    gpu-mem-gb=16.0, cpu-mem-gb=32.0, duration=60s,
+    generation-mode=realistic, performance-profile=throughput,
     seed=42, trials=3, inter-option-delay=90s,
     disable-multi-turn=False, disable-prefix-caching=False,
     enable-rag=True, rag-num-docs=10,
     enable-autoscaling=True, autoscaler-mode=qos
 
 KV_RUN_OPEN
-  Required:
-    --num-users/-nu N
-    --results-dir/-rd PATH
-  Optional:
-    --cache-dir PATH
-    --kvcache-bin-path PATH
+  = KV_RUN_CLOSED plus:
+    --model/-m {tiny-1b,mistral-7b,llama2-7b,llama3.1-8b,llama3.1-70b-instruct}
+                                    (default: tiny-1b)
+    --num-users/-nu N               Concurrent users to simulate (default: 100)
     --npernode/--num-processes-per-client N  (default: 1)
-    --exec-type/-et {mpi,docker}    (default: mpi)
-    --num-processes/-np N
-    --hosts/-s HOST...              (default: 127.0.0.1)
     --gpu-mem-gb FLOAT              (default: 16.0)
     --cpu-mem-gb FLOAT              (default: 32.0)
     --duration/-d N                 Seconds (default: 60)
@@ -485,13 +580,14 @@ KV_RUN_OPEN
     --enable-rag
     --rag-num-docs N                (default: 10)
     --enable-autoscaling
-    --autoscaler-mode {qos,predictive}  (default: qos)
+    --autoscaler-mode {qos,capacity}  (default: qos)
     --seed N
     --trials N
     --inter-option-delay N
     --config PATH
-  + MPI_ARGS
-  + TIMESERIES
+    --max-concurrent-allocs N       Cap on concurrent in-flight cache allocations
+    --enable-latency-tracing        bpftrace block-layer device latency tracing
+                                    (requires root)
   + OPEN_STD
 
 KV_RUN_WHATIF
@@ -501,27 +597,19 @@ Placeholder definitions — UTILITY COMMANDS
 
 RP_REPORTGEN
   Required:
-    --results-dir/-rd PATH
-  Optional:
-    --config-file/-c PATH
-    --debug
-    --verbose
+    --results-dir/-rd PATH          (or MLPERF_RESULTS_DIR)
+  + CORE_STD  (every standard argument is accepted)
 
 ──────────────────────────────────────────────────────────────────
 
-HI_LIST
+HI_SHOW
   Optional:
-    --limit/-n N                    Show N most recent entries
-    --id/-i N                       Show specific entry by ID
-    --debug
-    --verbose
+    --limit/-n N                    Show the N most recent entries
+    --id/-i N                       Show a specific entry by ID
 
-HI_REPLAY
+HI_RERUN
   Required:
-    ID  (positional)                History entry ID to re-run
-  Optional:
-    --debug
-    --verbose
+    rerun_id  (positional)          History entry ID to re-run
 
 ──────────────────────────────────────────────────────────────────
 
@@ -533,6 +621,7 @@ LF_GENERATE
     --python-version VERSION
     --pyproject PATH                (default: pyproject.toml)
     --all                           Generate both requirements.txt and requirements-full.txt
+  + CORE_STD  (--results-dir required — or MLPERF_RESULTS_DIR)
 
 LF_VERIFY
   Optional:
@@ -540,6 +629,23 @@ LF_VERIFY
     --skip PKG                      Package to skip (repeatable)
     --allow-missing
     --strict
+  + CORE_STD  (--results-dir required — or MLPERF_RESULTS_DIR)
+
+──────────────────────────────────────────────────────────────────
+
+VALIDATE
+  Required:
+    input  (positional)             Submission directory to check
+  Optional:
+    --submitters CSV                Comma-separated submitter allowlist (default: all)
+    --mlperf-version VERSION        Spec version (default: v3.0)
+    --csv PATH                      Summary CSV path (default: summary.csv)
+    --skip-output-file              Suppress per-submission output file
+    --reference-checksum MD5        Override REFERENCE_CHECKSUMS for code/ MD5 check
+
+RULES_COVERAGE
+  Optional:
+    --rules-md PATH                 Path to Rules.md (default: project-root Rules.md)
 
 ──────────────────────────────────────────────────────────────────
 
