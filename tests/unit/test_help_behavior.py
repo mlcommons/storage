@@ -49,6 +49,17 @@ class TestHelpAll:
         out = capsys.readouterr().out
         assert 'SYNOPSIS' in out
 
+    def test_help_all_documents_checkpoint_subset(self, capsys):
+        """--checkpoint-subset (added with the parser in 828cc63, storage#841)
+        must appear in the curated reference — the page is hand-maintained,
+        not generated from argparse, so a parser-only change silently omits
+        the flag here."""
+        with patch('sys.argv', ['mlpstorage', '--help_all']):
+            with pytest.raises(SystemExit):
+                parse_arguments()
+        out = capsys.readouterr().out
+        assert '--checkpoint-subset' in out
+
     def test_help_all_prints_kv_section(self, capsys):
         with patch('sys.argv', ['mlpstorage', '--help_all']):
             with pytest.raises(SystemExit):
