@@ -293,7 +293,8 @@ def add_universal_arguments(parser, req_results, req_systemname=False):
     output_control.add_argument(
         "--stream-log-level",
         type=str,
-        default="INFO"
+        default="INFO",
+        help="Logging level for console output (default: INFO)"
     )
     output_control.add_argument(
         '--quiet',
@@ -360,11 +361,13 @@ def add_mpi_arguments(parser):
     )
     mpi_options.add_argument(
         '--oversubscribe',
-        action="store_true"
+        action="store_true",
+        help="Allow launching more MPI ranks than available CPU slots"
     )
     mpi_options.add_argument(
         '--allow-run-as-root',
-        action="store_true"
+        action="store_true",
+        help="Permit MPI execution as the root user (OpenMPI --allow-run-as-root)"
     )
     mpi_options.add_argument(
         '--mpi-btl',
