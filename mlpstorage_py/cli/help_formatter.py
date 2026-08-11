@@ -292,6 +292,7 @@ CK_RUN_CLOSED
     --results-dir/-rd PATH
     [storage positional: file | object]
   Optional:
+    --checkpoint-subset             (8B at 8 processes only; declares a Subset run)
     --exec-type/-et {mpi,docker}    (default: mpi)
     --hosts/-s HOST...              (default: 127.0.0.1)
     --num-checkpoints-read/-ncr N   (default: 10; closed allows 10 or 0)
