@@ -57,6 +57,21 @@ system_under_test:
 
     deployment:                     enum( 'onprem', 'cloud' )
     product_nodes:                  list( include( 'node_description' ), required=False )
+    # product_switches is for switches that are part of the storage solution
+    # ONLY: switches that talk exclusively to storage-solution nodes (e.g. a
+    # backend interconnect fabric with no clients attached). A switch the
+    # benchmark clients attach to is test infrastructure and must NOT be
+    # listed here, because entries here feed total_rack_units (rule 11) and
+    # the derived "Provisioned Power (W)" results column (review-chairs
+    # ruling, v3.0 review, 2026-08-14).
+    #
+    # v4.0 ENHANCEMENT IDEA (not implemented): submitters currently have no
+    # structured place to document test-infrastructure switches (the v3.0
+    # Everpure submission wanted to report a dedicated-but-client-attached
+    # 8-switch fabric honestly and had nowhere to put it). Add either a
+    # sibling `test_infrastructure_switches:` list (documented, excluded
+    # from rule 11 and from power derivation) or a per-switch
+    # `scope: solution|test_infrastructure` field on switch_description.
     product_switches:               list( include( 'switch_description' ), required=False )
     total_rack_units:               int( min=0, required=False )        # Sum of all RU's, not including clients
     rack_power_supplies:            list( include( 'power_device' ), required=False)
