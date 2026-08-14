@@ -244,7 +244,24 @@ class NodeDescription(StrictModel):
 
 
 class SwitchDescription(StrictModel):
-    """Describes a homogeneous group of network switches included in the storage solution."""
+    """Describes a homogeneous group of network switches included in the storage solution.
+
+    Scope (review-chairs ruling, v3.0 review, 2026-08-14): a switch belongs
+    in ``product_switches`` only if it talks exclusively to storage-solution
+    nodes. A switch the benchmark clients attach to is test infrastructure
+    and must be omitted, because entries here feed the rule-11
+    ``total_rack_units`` sum and reportgen's derived "Provisioned Power (W)"
+    column.
+
+    v4.0 ENHANCEMENT IDEA (not implemented): there is no structured slot for
+    documenting test-infrastructure switches — the v3.0 Everpure submission
+    wanted to honestly report a dedicated-but-client-attached 8-switch
+    fabric and could only do so in PDF prose / YAML comments. Options: a
+    sibling ``test_infrastructure_switches`` list excluded from rule 11 and
+    power derivation, or a ``scope: solution|test_infrastructure`` field
+    here whose ``test_infrastructure`` value excludes the entry from both
+    sums. Revisit when gearing up for the v4.0 submission round.
+    """
     unit_count:    int                      = Field(ge=1)
     vendor_name:   str                      = Field(min_length=1)
     model_name:    str                      = Field(min_length=1)
