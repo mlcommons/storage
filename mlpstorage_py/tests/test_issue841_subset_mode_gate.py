@@ -88,6 +88,7 @@ class TestCheckpointSubsetCliFlag:
         'run',
         '--model', 'llama3-8b',
         '--num-processes', '8',
+        '--accelerator-type', 'b200',
         '--client-host-memory-in-gb', '512',
         '--checkpoint-folder', '/ckpt',
         '--results-dir', '/tmp',
