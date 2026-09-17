@@ -157,16 +157,18 @@ def test_4_3_1_warns_once_per_workload_not_per_invocation(tmp_path, mock_logger)
 
 
 # ---------------------------------------------------------------------------
-# 4.3.4 aggregate_accelerator_memory — warnings-only (C2)
+# 4.3.4 aggregate_accelerator_memory — hard error
 # ---------------------------------------------------------------------------
 
-def test_4_3_4_insufficient_memory_warns_not_errors(tmp_path, mock_logger):
-    """4.3.4: aggregate accelerator memory < checkpoint size → WARNING, never fail.
+def test_4_3_4_insufficient_memory_errors(tmp_path, mock_logger):
+    """4.3.4: aggregate accelerator memory < checkpoint size → hard failure.
 
-    Late-stage submission-window doctrine: this check must not flip a
-    submission INVALID. With 8 accelerators (× the 80 GiB baseline = 640 GiB)
-    and a 1000 GiB checkpoint, the aggregate is insufficient, so the rule
-    warns via warn_violation and still returns True.
+    Rules.md 4.3.4 says the accelerator memory times the accelerator count
+    must be equal to or greater than the checkpoint size. With 8
+    accelerators (× the 80 GiB baseline = 640 GiB) and a 1000 GiB
+    checkpoint, the aggregate is insufficient, so the rule logs a
+    violation and returns False. (The v3.0 round downgraded this to a
+    warning — worklist C2; retired with the round.)
     """
     from mlpstorage_py.tests.conftest import build_submission
     root = build_submission(
@@ -176,14 +178,14 @@ def test_4_3_4_insufficient_memory_warns_not_errors(tmp_path, mock_logger):
     )
     check = _run_checkpointing_check(root, mock_logger)
     result = check.aggregate_accelerator_memory()
-    assert result is True
+    assert result is False
     assert any(
         m.startswith("[4.3.4 checkpointAggregateAcceleratorMemory]")
-        for m in mock_logger.warnings
-    ), f"expected [4.3.4 ...] warning; got warnings={mock_logger.warnings}"
+        for m in mock_logger.errors
+    ), f"expected [4.3.4 ...] error; got errors={mock_logger.errors}"
     assert not any(
-        m.startswith("[4.3.4 ") for m in mock_logger.errors
-    ), f"4.3.4 must warn, not error; got errors={mock_logger.errors}"
+        m.startswith("[4.3.4 ") for m in mock_logger.warnings
+    ), f"4.3.4 must error, not warn; got warnings={mock_logger.warnings}"
 
 
 def test_4_3_4_sufficient_memory_no_warning(tmp_path, mock_logger):
