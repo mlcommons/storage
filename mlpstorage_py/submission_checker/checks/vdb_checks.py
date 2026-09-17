@@ -648,10 +648,14 @@ class VdbCheck(BaseCheck):
         The raw ``flat_setup`` fields are read directly; the stored
         ``valid``/``result`` verdict is deliberately not trusted — issue #805
         showed a buggy run can record ``valid: true`` over a broken
-        measurement. A run whose ``result_verdict.json`` is absent, unreadable,
-        or carries no ``flat_setup`` record (e.g. a ``--no-create-flat`` worker
-        that validated the ground truth elsewhere) cannot be assessed here and
-        is warned, never failed.
+        measurement. A run whose ``result_verdict.json`` is absent or
+        unreadable fails: every current mlpstorage writes the record, so
+        without it the ground truth cannot be shown complete. (The v3.0
+        round warned instead, PR #809, so pre-#806 artifacts were not
+        false-failed; retired with the round.) A verdict that is present
+        but carries no ``flat_setup`` record (e.g. a ``--no-create-flat``
+        worker that validated the ground truth elsewhere) cannot be
+        assessed here and is warned, not failed.
         """
         valid = True
         if self.mode != "vector_database":
@@ -662,23 +666,24 @@ class VdbCheck(BaseCheck):
             any_run = True
             verdict_path = os.path.join(self.run_path, ts, "result_verdict.json")
             if not os.path.isfile(verdict_path):
-                self.warn_violation(
+                self.log_violation(
                     "5.3.5", "vdbGroundTruthIntegrity", self.path,
                     "no result_verdict.json at %s/%s; FLAT ground-truth "
-                    "coverage cannot be assessed (run predates the integrity "
-                    "record)",
+                    "coverage cannot be shown complete",
                     self.path, ts,
                 )
+                valid = False
                 continue
 
             verdict = self._read_result_verdict(verdict_path)
             if verdict is None:
-                self.warn_violation(
+                self.log_violation(
                     "5.3.5", "vdbGroundTruthIntegrity", self.path,
                     "result_verdict.json at %s/%s could not be read; FLAT "
-                    "ground-truth coverage not assessed",
+                    "ground-truth coverage cannot be shown complete",
                     self.path, ts,
                 )
+                valid = False
                 continue
 
             flat_setup = verdict.get("flat_setup") if isinstance(verdict, dict) else None
