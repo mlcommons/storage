@@ -165,10 +165,9 @@ def test_issue_812_bookend_gap_still_flags_a_genuine_long_pause(tmp_path):
     """The #813 source-swap must not neuter the check: a genuinely long quiet
     window measured on the *bookends* must still surface under 2.1.24.
 
-    Worklist A7 (Curtis, 2026-07-24): the gap breach is a WARNING, not an
-    error — mirroring the §4.7.1 downgrade in cache_flush_validation /
-    check_invocation_structure. The run stays valid but the 5-minute pause
-    against 10 s invocations must be reported via warn_violation.
+    A 5-minute pause against 10 s invocations is a hard 2.1.24 error.
+    (The v3.0 round reported it as a warning — worklist A7, the third
+    enforcement point of the §4.7.1 relaxation; retired with the round.)
     """
     write = (
         {"start": "2025-07-11T19:49:58", "end": "2025-07-11T19:50:12"},
@@ -184,24 +183,21 @@ def test_issue_812_bookend_gap_still_flags_a_genuine_long_pause(tmp_path):
     )
     check = _make_directory_check(tmp_path, [write, read])
     valid = check.checkpointing_timestamp_gap_check()
-    assert valid is True, (
-        "A7: a gap breach warns instead of invalidating — valid must stay True"
+    assert valid is False, "a gap breach invalidates the submission"
+    check.log.warning.assert_not_called()
+    assert check.log.error.call_count == 1, (
+        "the 5-minute bookend gap must be reported, as an error"
     )
-    check.log.error.assert_not_called()
-    assert check.log.warning.call_count == 1, (
-        "the 5-minute bookend gap must still be reported, as a warning"
-    )
-    warned = check.log.warning.call_args[0][0]
-    assert "Gap between checkpoints" in warned
+    errored = check.log.error.call_args[0][0]
+    assert "Gap between checkpoints" in errored
 
 
 # ---------------------------------------------------------------------------
-# Worklist A7 (2026-07-24): 2.1.24 gap breach downgraded to a warning on the
-# integration branch (third enforcement point of the §4.7.1 relaxation), and
-# the message is labeled as an upper bound when the gap was measured from the
-# DLIO summary fallback — the fallback charges read-side startup + write-side
-# cluster collection against the quiet window (this check's own docstring),
-# so the number overstates the true gap on large topologies.
+# Worklist A7 (2026-07-24) labeled a 2.1.24 breach as an upper bound when the
+# gap was measured from the DLIO summary fallback — the fallback charges
+# read-side startup + write-side cluster collection against the quiet window
+# (this check's own docstring), so the number overstates the true gap on large
+# topologies. The label survives the post-v3.0 return to a hard error.
 # ---------------------------------------------------------------------------
 
 
@@ -222,8 +218,8 @@ def test_a7_bookend_measured_breach_is_not_labeled_upper_bound(tmp_path):
     )
     check = _make_directory_check(tmp_path, [write, read])
     check.checkpointing_timestamp_gap_check()
-    warned = check.log.warning.call_args[0][0]
-    assert "upper bound" not in warned
+    errored = check.log.error.call_args[0][0]
+    assert "upper bound" not in errored
 
 
 def test_a7_summary_fallback_breach_is_labeled_upper_bound(tmp_path):
@@ -244,19 +240,18 @@ def test_a7_summary_fallback_breach_is_labeled_upper_bound(tmp_path):
     )
     check = _make_directory_check(tmp_path, [write, read])
     valid = check.checkpointing_timestamp_gap_check()
-    assert valid is True
-    check.log.error.assert_not_called()
-    assert check.log.warning.call_count == 1
-    warned = check.log.warning.call_args[0][0]
-    assert "upper bound" in warned, (
+    assert valid is False
+    check.log.warning.assert_not_called()
+    assert check.log.error.call_count == 1
+    errored = check.log.error.call_args[0][0]
+    assert "upper bound" in errored, (
         "summary-fallback gap must be labeled an upper bound"
     )
 
 
 def test_a7_unparseable_timestamps_remain_a_hard_error(tmp_path):
-    """The A7 downgrade covers ONLY the gap breach; garbage timestamp data
-    is still a hard 2.1.24 error (mirrors the #834 scope: missing/
-    unparseable stay errors)."""
+    """Garbage timestamp data is a hard 2.1.24 error (it was even during
+    the v3.0 round, when only the gap breach itself was downgraded)."""
     checkpoint_files = [
         (
             {"start": "not-a-timestamp", "end": "2025-07-11T19:54:25"},

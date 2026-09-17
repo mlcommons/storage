@@ -166,11 +166,13 @@ class TestChkpt02_CacheFlushValidation:
         assert result is True
         assert mock_logger.errors == []
 
-    def test_split_mode_with_45s_gap_warns_not_fails(self, tmp_path, mock_logger):
-        """Split-mode with 45s gap → warn_violation, not a hard failure.
+    def test_split_mode_with_45s_gap_fails(self, tmp_path, mock_logger):
+        """Split-mode with 45s gap → log_violation, hard failure.
 
-        Special-build relaxation: a §4.7.1 gap breach is reported as a
-        warning so the submission is not invalidated.
+        Rules.md §4.7.1 bounds the failover callout at 30 seconds. The
+        v3.0 round reported a breach as a warning (special build PR #834,
+        then worklist A7 for every submitter); the round is closed and
+        the breach invalidates the submission again.
         """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(
@@ -181,13 +183,16 @@ class TestChkpt02_CacheFlushValidation:
         )
         check = _run_checkpointing_check(root, mock_logger)
         result = check.cache_flush_validation()
-        assert result is True
-        assert mock_logger.errors == []
+        assert result is False
         assert any(
+            e.startswith("[4.7.1 checkpointCacheFlushValidation]")
+            and "exceeds 30-second limit" in e
+            for e in mock_logger.errors
+        ), f"Expected 30-second-limit error; got errors={mock_logger.errors!r}"
+        assert not any(
             w.startswith("[4.7.1 checkpointCacheFlushValidation]")
-            and "exceeds 30-second limit" in w
             for w in mock_logger.warnings
-        ), f"Expected 30-second-limit warning; got warnings={mock_logger.warnings!r}"
+        ), mock_logger.warnings
 
     def test_split_mode_missing_timestamps_emits_4_7_1(self, tmp_path, mock_logger):
         """Split-mode without write summary end_time → [4.7.1] 'missing end_time'."""
@@ -222,9 +227,14 @@ class TestChkpt02_CacheFlushValidation:
         assert mock_logger.errors == []
         assert mock_logger.warnings == []
 
-    def test_split_mode_legacy_origin_gap_over_30_emits_warning_not_error(self, tmp_path, mock_logger):
-        """Backward-compat: pre-fix results dir with 45s legacy gap → warn_violation,
-        not log_violation. Honors the rule that was in force when the run was produced."""
+    def test_split_mode_legacy_origin_gap_over_30_is_error(self, tmp_path, mock_logger):
+        """Backward-compat: pre-fix results dir with 45s legacy gap → log_violation.
+
+        The legacy read.summary.start_time origin is still measured (no
+        crash, no parse failure) and the message still says the reading
+        is not authoritative, but a breach is a hard failure: a results
+        dir that predates the gap-origin fix must be re-run with a
+        current mlpstorage."""
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(
             tmp_path,
@@ -235,15 +245,17 @@ class TestChkpt02_CacheFlushValidation:
         )
         check = _run_checkpointing_check(root, mock_logger)
         result = check.cache_flush_validation()
-        # Legacy origin + gap > 30 → warning, not a hard failure.
-        assert result is True
-        assert mock_logger.errors == []
+        assert result is False
         assert any(
+            e.startswith("[4.7.1 checkpointCacheFlushValidation]")
+            and "exceeds 30-second limit" in e
+            and "predates the §4.7.1 gap-origin fix" in e
+            for e in mock_logger.errors
+        ), f"Expected legacy-origin over-limit error; got errors={mock_logger.errors!r}"
+        assert not any(
             w.startswith("[4.7.1 checkpointCacheFlushValidation]")
-            and "exceeds 30-second limit" in w
-            and "predates the §4.7.1 gap-origin fix" in w
             for w in mock_logger.warnings
-        ), f"Expected legacy-origin over-limit warning; got warnings={mock_logger.warnings!r}"
+        ), mock_logger.warnings
 
     def test_split_mode_negative_gap_emits_clock_skew_warning(self, tmp_path, mock_logger):
         """Split-mode with negative gap → warning (clock skew), not a hard violation."""
@@ -304,10 +316,9 @@ class TestChkpt02_CacheFlushValidation:
         teardown window is charged to the failover-callout budget — reproducing
         the original #782 bug on older results dirs.
 
-        45s teardown + 25s real gap ⇒ legacy gap = 70s ⇒ warning
-        (special-build relaxation: gap breaches never invalidate). The INFO
-        line must record the "write summary end" origin so the submitter can
-        see why the gap looks so large.
+        45s teardown + 25s real gap ⇒ legacy gap = 70s ⇒ hard error. The
+        INFO line must record the "write summary end" origin so the
+        submitter can see why the gap looks so large.
         """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(
@@ -320,13 +331,12 @@ class TestChkpt02_CacheFlushValidation:
         )
         check = _run_checkpointing_check(root, mock_logger)
         result = check.cache_flush_validation()
-        assert result is True
-        assert mock_logger.errors == []
+        assert result is False
         assert any(
-            w.startswith("[4.7.1 checkpointCacheFlushValidation]")
-            and "exceeds 30-second limit" in w
-            for w in mock_logger.warnings
-        ), f"Expected 30-second-limit warning; got warnings={mock_logger.warnings!r}"
+            e.startswith("[4.7.1 checkpointCacheFlushValidation]")
+            and "exceeds 30-second limit" in e
+            for e in mock_logger.errors
+        ), f"Expected 30-second-limit error; got errors={mock_logger.errors!r}"
         # INFO line must record the fallback origin.
         assert any(
             "[4.7.1 checkpointCacheFlushValidation]" in m
