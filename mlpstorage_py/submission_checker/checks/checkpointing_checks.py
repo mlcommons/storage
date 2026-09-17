@@ -313,13 +313,13 @@ class CheckpointingCheck(BaseCheck):
     @rule("4.3.4", "checkpointAggregateAcceleratorMemory")
     def aggregate_accelerator_memory(self):
         """
-        Verify total accelerator memory >= checkpoint size (warnings-only).
+        Verify total accelerator memory >= checkpoint size. (Rules.md 4.3.4)
 
-        The per-accelerator memory baseline is the H100's 80 GiB; checkpointing
-        metadata carries no accelerator-type field, so this is advisory. A
-        shortfall is surfaced to reviewers via ``warn_violation`` and never
-        flips a submission INVALID (late-window doctrine). Always returns True.
-        (Rules.md 4.3.4)
+        The per-accelerator memory baseline is the H100's 80 GiB because
+        checkpointing metadata carries no accelerator-type field; the
+        message names the baseline so a reviewer can re-check against the
+        actual accelerator. A shortfall is a hard failure. (The v3.0 round
+        downgraded it to a warning — worklist C2; retired with the round.)
         """
         valid = True
         if self.mode != "checkpointing":
@@ -334,7 +334,7 @@ class CheckpointingCheck(BaseCheck):
             total_accelerator_memory = num_accelerators * ACCELERATOR_MEMORY_GB
 
             if total_accelerator_memory < checkpoint_size_gb:
-                self.warn_violation(
+                self.log_violation(
                     "4.3.4", "checkpointAggregateAcceleratorMemory", self.path,
                     "aggregate accelerator memory %.2fGiB (%d accelerators x 80 GiB "
                     "H100 baseline) < checkpoint size %.2fGiB; verify against the "
@@ -343,6 +343,7 @@ class CheckpointingCheck(BaseCheck):
                     num_accelerators,
                     checkpoint_size_gb,
                 )
+                valid = False
 
         return valid
     
