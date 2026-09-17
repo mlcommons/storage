@@ -85,16 +85,12 @@ _VALID_WORKLOAD_CATEGORIES = frozenset({
 # Valid training workload names under training/
 _VALID_TRAINING_WORKLOADS = frozenset({"unet3d", "retinanet"})
 
-# Valid training phase directories under training/<workload>/
+# Valid training phase directories under training/<workload>/. All three are
+# required (Rules.md §2.1.12); a missing one is a hard structural error. (The
+# v3.0 round carried a warn-only carve-out for datasize/, which became a
+# required phase mid-round via PR #611; the carve-out was retired when the
+# round closed.)
 _VALID_TRAINING_PHASES = frozenset({"datasize", "datagen", "run"})
-# datasize/ is treated as required-but-warn-only during the current submission
-# window: it became a required phase after PR #611 (issue #608) taught the
-# loader and rule 3.3.1 to consume its metadata, but submissions produced
-# before that landing shipped without it. Rules.md §2.1.12 requires the
-# directory; the checker warns rather than errors on this specific phase
-# to avoid retroactively invalidating pre-#611 work already on disk. Missing
-# `datagen/` or `run/` remains a hard structural error.
-_WARN_ONLY_MISSING_TRAINING_PHASES = frozenset({"datasize"})
 
 # Valid checkpointing workload names under checkpointing/
 _VALID_CHECKPOINTING_WORKLOADS = frozenset({"llama3-8b", "llama3-70b", "llama3-405b", "llama3-1t"})
@@ -843,9 +839,8 @@ class SubmissionStructureCheck(BaseCheck):
     def training_phases_check(self):
         """STRUCT-12: each training workload dir must contain exactly {datasize, datagen, run}.
 
-        Missing `datagen/` or `run/` is a hard error. Missing `datasize/`
-        emits a `[2.1.12 DATASIZE-MISSING]` warning instead — see the
-        `_WARN_ONLY_MISSING_TRAINING_PHASES` note for rationale.
+        A missing phase directory is a hard error; an unexpected extra
+        directory is too.
         """
         valid = True
         for _division, _submitter, sub_path in self._iter_submitter_dirs():
@@ -865,16 +860,6 @@ class SubmissionStructureCheck(BaseCheck):
                     extra = phases - _VALID_TRAINING_PHASES
 
                     for m in sorted(missing):
-                        if m in _WARN_ONLY_MISSING_TRAINING_PHASES:
-                            self.warn_violation(
-                                "2.1.12", "trainingPhases",
-                                os.path.join(workload_path, m),
-                                "[2.1.12 DATASIZE-MISSING] required phase directory "
-                                "%r missing from training/%s",
-                                m, workload,
-                            )
-                            # warn-only: do not flip `valid`
-                            continue
                         self.log_violation(
                             "2.1.12", "trainingPhases",
                             os.path.join(workload_path, m),
