@@ -5,16 +5,18 @@ Pins the substantive contract of rule 3.3.1 against issue #608:
 * Reference values come from the ``datasize/`` and ``datagen/`` phases
   on disk, NOT from a placeholder ``NUM_DATASET_TRAIN_FILES`` dict.
 * Two-bound check: ``datasize <= run.num_files_train <= datagen``.
-* All violations are warnings (``warn_violation``), never errors. We
-  are mid submission-window; do not invalidate already-completed
-  submitter work.
-* Stable bracketed prefix tokens for grep-suppression
+* Every substantive violation is a hard error (``log_violation``) that
+  fails the rule. The v3.0 round shipped them all as warnings so
+  submissions already on disk were not retroactively invalidated (PR
+  #611); the round is closed and Rules.md 3.3.1 applies as written.
+* Stable bracketed prefix tokens for grep
   (``[3.3.1 DATAGEN-OVERRUN]``, ``[3.3.1 DATASIZE-UNDERRUN]``,
   ``[3.3.1 DATADIR-MISMATCH]``, ``[3.3.1 DATASIZE-REUSED]``,
   ``[3.3.1 DATASIZE-MISSING]``, ``[3.3.1 DATAGEN-MISSING]``,
-  ``[3.3.1 EVAL-FIELD-MISSING]``).
-
-The check always returns ``True`` because every category is warn-only.
+  ``[3.3.1 DATASIZE-MALFORMED]``).
+* ``[3.3.1 EVAL-FIELD-MISSING]`` stays a warning: models without an
+  eval phase legitimately omit ``num_files_eval``, so it is a
+  could-not-cross-check note rather than a rule violation.
 """
 from __future__ import annotations
 
@@ -255,7 +257,7 @@ class TestPositiveCases:
 
 
 # ---------------------------------------------------------------------- #
-# Warning cases — rule must STILL return True, but record warning
+# Violation cases — rule returns False and records an ERROR-level message
 # ---------------------------------------------------------------------- #
 
 
@@ -263,14 +265,28 @@ def _has_token(records, token: str) -> bool:
     return any(token in r.getMessage() for r in records)
 
 
-class TestWarningCases:
-    """All failure modes for 3.3.1 are warn-only mid submission-window.
+def _has_error_token(records, token: str) -> bool:
+    return any(
+        token in r.getMessage() and r.levelno >= logging.ERROR
+        for r in records
+    )
 
-    The rule must continue to return True so submissions are not
-    invalidated; the warning is recorded for submitter triage.
+
+def _no_error_tokens(records) -> bool:
+    return all(
+        r.levelno < logging.ERROR or "[3.3.1" not in r.getMessage()
+        for r in records
+    )
+
+
+class TestViolationCases:
+    """Every substantive 3.3.1 failure mode is a hard error.
+
+    The v3.0 round reported all of these as warnings (the rule always
+    returned True); post-round they fail the rule.
     """
 
-    def test_datagen_overrun_warns_with_stable_token(self, tmp_path, caplog):
+    def test_datagen_overrun_fails_with_stable_token(self, tmp_path, caplog):
         """run.num_files_train > datagen.num_files_train → DATAGEN-OVERRUN."""
         result, records = _materialize_scenario(
             tmp_path, caplog,
@@ -278,18 +294,13 @@ class TestWarningCases:
             datagen_num_files=84_375,
             run_num_files=120_000,
         )
-        assert result is True, "Warning-severity must not flip rule result"
-        assert _has_token(records, "[3.3.1 DATAGEN-OVERRUN]"), (
-            f"Expected stable token [3.3.1 DATAGEN-OVERRUN]; got: "
-            f"{[r.getMessage() for r in records]}"
+        assert result is False, "a datagen overrun must fail the rule"
+        assert _has_error_token(records, "[3.3.1 DATAGEN-OVERRUN]"), (
+            f"Expected ERROR-level [3.3.1 DATAGEN-OVERRUN]; got: "
+            f"{[(r.levelname, r.getMessage()) for r in records]}"
         )
-        # Warning, never error.
-        assert all(
-            r.levelno < logging.ERROR or "[3.3.1" not in r.getMessage()
-            for r in records
-        ), "3.3.1 messages must be warning-level, never error"
 
-    def test_datasize_underrun_warns_with_stable_token(self, tmp_path, caplog):
+    def test_datasize_underrun_fails_with_stable_token(self, tmp_path, caplog):
         """run.num_files_train < datasize.num_files_train → DATASIZE-UNDERRUN."""
         result, records = _materialize_scenario(
             tmp_path, caplog,
@@ -297,14 +308,10 @@ class TestWarningCases:
             datagen_num_files=84_375,
             run_num_files=10_000,
         )
-        assert result is True
-        assert _has_token(records, "[3.3.1 DATASIZE-UNDERRUN]")
-        assert all(
-            r.levelno < logging.ERROR or "[3.3.1" not in r.getMessage()
-            for r in records
-        )
+        assert result is False
+        assert _has_error_token(records, "[3.3.1 DATASIZE-UNDERRUN]")
 
-    def test_datadir_mismatch_between_datasize_and_run_warns(self, tmp_path, caplog):
+    def test_datadir_mismatch_between_datasize_and_run_fails(self, tmp_path, caplog):
         """≥2 distinguishable datasize records, none matching the run's
         --data-dir → DATADIR-MISMATCH.
 
@@ -324,10 +331,10 @@ class TestWarningCases:
                 {"num_files_train": 84_375, "data_dir": "/data/other"},
             ],
         )
-        assert result is True
-        assert _has_token(records, "[3.3.1 DATADIR-MISMATCH]")
+        assert result is False
+        assert _has_error_token(records, "[3.3.1 DATADIR-MISMATCH]")
 
-    def test_datasize_reused_data_dir_warns(self, tmp_path, caplog):
+    def test_datasize_reused_data_dir_fails(self, tmp_path, caplog):
         """Two datasize phases targeting the same --data-dir → DATASIZE-REUSED.
 
         Two `datasize/<ts>/` directories both reference `/data/shared`;
@@ -345,14 +352,14 @@ class TestWarningCases:
                 {"num_files_train": 84_375, "data_dir": "/data/shared"},
             ],
         )
-        assert result is True
-        assert _has_token(records, "[3.3.1 DATASIZE-REUSED]")
+        assert result is False
+        assert _has_error_token(records, "[3.3.1 DATASIZE-REUSED]")
 
-    def test_datasize_missing_entirely_warns(self, tmp_path, caplog):
-        """No `datasize/` directory → DATASIZE-MISSING warning, rule still passes.
+    def test_datasize_missing_entirely_fails(self, tmp_path, caplog):
+        """No `datasize/` directory → DATASIZE-MISSING error, rule fails.
 
         Per WRT 2 from #608 conversation: validator must look for the
-        datasize directory and warn when it is absent, not silent-skip.
+        datasize directory and report when it is absent, not silent-skip.
         """
         workload_dir = _build_training_tree(
             tmp_path,
@@ -365,11 +372,11 @@ class TestWarningCases:
         shutil.rmtree(workload_dir / "datasize")
         root = _scaffold_division_root(tmp_path, workload_dir)
         result, records = _run_rule(root, caplog)
-        assert result is True
-        assert _has_token(records, "[3.3.1 DATASIZE-MISSING]")
+        assert result is False
+        assert _has_error_token(records, "[3.3.1 DATASIZE-MISSING]")
 
-    def test_datagen_missing_entirely_warns(self, tmp_path, caplog):
-        """No `datagen/` directory → DATAGEN-MISSING warning, rule still passes."""
+    def test_datagen_missing_entirely_fails(self, tmp_path, caplog):
+        """No `datagen/` directory → DATAGEN-MISSING error, rule fails."""
         workload_dir = _build_training_tree(
             tmp_path,
             datasize_num_files=84_375,
@@ -380,15 +387,17 @@ class TestWarningCases:
         shutil.rmtree(workload_dir / "datagen")
         root = _scaffold_division_root(tmp_path, workload_dir)
         result, records = _run_rule(root, caplog)
-        assert result is True
-        assert _has_token(records, "[3.3.1 DATAGEN-MISSING]")
+        assert result is False
+        assert _has_error_token(records, "[3.3.1 DATAGEN-MISSING]")
 
     def test_eval_field_absent_in_run_summary_warns(self, tmp_path, caplog):
         """num_files_eval absent in run summary → EVAL-FIELD-MISSING warning.
 
         Per WRT 4: absent-key is NOT a silent skip; surface as a
         warning so submitters know the cross-check could not be
-        performed.
+        performed. This one stays a warning post-v3.0: models without
+        an eval phase legitimately omit the field, so it is not a rule
+        violation and must not fail the rule.
         """
         result, records = _materialize_scenario(
             tmp_path, caplog,
@@ -400,6 +409,7 @@ class TestWarningCases:
         )
         assert result is True
         assert _has_token(records, "[3.3.1 EVAL-FIELD-MISSING]")
+        assert _no_error_tokens(records)
 
 
 class TestDatadirMismatchFalsePositives:
@@ -475,14 +485,14 @@ class TestDatadirMismatchFalsePositives:
 
 
 class TestDatasizeMalformedCases:
-    """Rule 3.3.1 must warn when a datasize sentinel omits its output keys.
+    """Rule 3.3.1 must fail when a datasize sentinel omits its output keys.
 
     Rules.md §3.3.1 requires the datasize `*_metadata.json` to record
     ``num_files_train``, ``num_subfolders_train``, and ``total_disk_bytes``
     under ``parameters.dataset`` so a reviewer (or future run-checker
     cross-check against datagen's actual output) can verify that datagen
     produced at least what datasize prescribed. Missing outputs surface as
-    `[3.3.1 DATASIZE-MALFORMED]` (warn-only, submission-window doctrine).
+    an ERROR-level `[3.3.1 DATASIZE-MALFORMED]` and fail the rule.
     """
 
     def _build_and_drop_datasize_key(self, tmp_path, caplog, drop_key: str):
@@ -501,23 +511,23 @@ class TestDatasizeMalformedCases:
         root = _scaffold_division_root(tmp_path, workload_dir)
         return _run_rule(root, caplog)
 
-    def test_missing_num_subfolders_train_warns(self, tmp_path, caplog):
+    def test_missing_num_subfolders_train_fails(self, tmp_path, caplog):
         result, records = self._build_and_drop_datasize_key(
             tmp_path, caplog, "num_subfolders_train",
         )
-        assert result is True
-        assert _has_token(records, "[3.3.1 DATASIZE-MALFORMED]")
+        assert result is False
+        assert _has_error_token(records, "[3.3.1 DATASIZE-MALFORMED]")
         assert any(
             "num_subfolders_train" in r.getMessage() and "DATASIZE-MALFORMED" in r.getMessage()
             for r in records
         )
 
-    def test_missing_total_disk_bytes_warns(self, tmp_path, caplog):
+    def test_missing_total_disk_bytes_fails(self, tmp_path, caplog):
         result, records = self._build_and_drop_datasize_key(
             tmp_path, caplog, "total_disk_bytes",
         )
-        assert result is True
-        assert _has_token(records, "[3.3.1 DATASIZE-MALFORMED]")
+        assert result is False
+        assert _has_error_token(records, "[3.3.1 DATASIZE-MALFORMED]")
         assert any(
             "total_disk_bytes" in r.getMessage() and "DATASIZE-MALFORMED" in r.getMessage()
             for r in records
