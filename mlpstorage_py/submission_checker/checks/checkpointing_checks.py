@@ -1104,9 +1104,10 @@ class CheckpointingCheck(BaseCheck):
 
         Analog of TRAIN-02 for checkpointing. Per D-B5, shares
         _check_filesystem_separation helper. Per D-B7, silent-passes when
-        benchmark_API == 'object'. D-B8: when both the CAP-03 sidecar and
-        the df block are absent, emit a WARN under this rule ID so pre-#601
-        legacy runs are not blocked at ingest.
+        benchmark_API == 'object'. Same filesystem, or no evidence at all
+        (no CAP-03 sidecar and no df block — D-B8), is a hard error. (The
+        v3.0 round emitted both at WARN, PRs #788 and #800; retired with
+        the round.)
         """
         valid = True
         if self.mode != "checkpointing":
@@ -1121,10 +1122,11 @@ class CheckpointingCheck(BaseCheck):
             sidecar = read_fs_separation_sidecar(run_dir)
             if sidecar is not None:
                 if sidecar.get("same_filesystem"):
-                    self.warn_violation(
+                    self.log_violation(
                         "4.4.2", "checkpointFilesystemCheck", logfile_path,
                         "checkpoint_folder and results_dir are on the same filesystem",
                     )
+                    valid = False
                 continue
             args = metadata.get("args", {})
             # For checkpointing, checkpoint_folder is the "data path" analog (RESEARCH.md).
@@ -1135,18 +1137,18 @@ class CheckpointingCheck(BaseCheck):
             ok, df_found = _check_filesystem_separation(chkpt_args, logfile_path)
             if not df_found:
                 # D-B8: no CAP-03 sidecar AND no df block → no evidence of
-                # FS separation. Emit at WARN so pre-#601 legacy runs are
-                # not silently blocked at ingest; reviewers must confirm
-                # checkpoint_folder / results_dir separation manually.
-                self.warn_violation(
+                # FS separation → hard error.
+                self.log_violation(
                     "4.4.2", "checkpointFilesystemCheck", logfile_path,
                     "fs_separation.json sidecar not found and df block also absent; "
-                    "cannot verify checkpoint_folder/results_dir separation — reviewer must confirm manually",
+                    "cannot verify checkpoint_folder/results_dir separation",
                 )
+                valid = False
                 continue
             if not ok:
-                self.warn_violation(
+                self.log_violation(
                     "4.4.2", "checkpointFilesystemCheck", logfile_path,
                     "checkpoint_folder and results_dir are on the same filesystem",
                 )
+                valid = False
         return valid

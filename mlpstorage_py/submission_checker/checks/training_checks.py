@@ -1026,9 +1026,13 @@ class TrainingCheck(BaseCheck):
     def mlpstorage_filesystem_check(self):
         """Verify dataset directory and results directory are on different filesystems.
 
-        Parses the 'df' block from the run logfile (D-B1 anchored header). When the
-        system YAML declares benchmark_API == 'object', silent-passes per D-B7.
-        When the df block is absent, emits a violation (D-B4) — surfaces TODO-001.
+        The CAP-03 ``fs_separation.json`` sidecar is authoritative (#601);
+        the 'df' block in the run logfile (D-B1 anchored header) is the
+        pre-cutover fallback. When the system YAML declares benchmark_API
+        == 'object', silent-passes per D-B7. Same filesystem, or no evidence
+        at all (no sidecar and no df block — D-B8), is a hard error. (The
+        v3.0 round emitted both at WARN, PRs #788 and #800; retired with
+        the round.)
 
         TRAIN-02 implementation: replaces stub body with _check_filesystem_separation
         helper call (from checks/helpers.py, shipped in Plan 02-01).
@@ -1056,27 +1060,28 @@ class TrainingCheck(BaseCheck):
             sidecar = read_fs_separation_sidecar(run_dir)
             if sidecar is not None:
                 if sidecar.get("same_filesystem"):
-                    self.warn_violation(
+                    self.log_violation(
                         "3.4.2", "trainingMlpstorageFilesystemCheck", logfile_path,
                         "data_dir and results_dir are on the same filesystem",
                     )
+                    valid = False
                 continue
             args = metadata.get("args", {})
             ok, df_found = _check_filesystem_separation(args, logfile_path)
             if not df_found:
                 # D-B8: no CAP-03 sidecar AND no df block → no evidence of
-                # FS separation. Emit at WARN so pre-#601 legacy runs are
-                # not silently blocked at ingest; reviewers must confirm
-                # data_dir / results_dir separation manually.
-                self.warn_violation(
+                # FS separation → hard error.
+                self.log_violation(
                     "3.4.2", "trainingMlpstorageFilesystemCheck", logfile_path,
                     "fs_separation.json sidecar not found and df block also absent; "
-                    "cannot verify data_dir/results_dir separation — reviewer must confirm manually",
+                    "cannot verify data_dir/results_dir separation",
                 )
+                valid = False
                 continue
             if not ok:
-                self.warn_violation(
+                self.log_violation(
                     "3.4.2", "trainingMlpstorageFilesystemCheck", logfile_path,
                     "data_dir and results_dir are on the same filesystem",
                 )
+                valid = False
         return valid

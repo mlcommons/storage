@@ -828,7 +828,10 @@ class VdbCheck(BaseCheck):
 
         Reuses the canonical ``_check_filesystem_separation`` helper that
         TrainingCheck.3.4.2 / CheckpointingCheck.4.4.2 use. Object-API
-        submissions silent-pass (D-B7).
+        submissions silent-pass (D-B7). Same filesystem, or no evidence at
+        all (no CAP-03 sidecar and no df block — D-B8), is a hard error.
+        (The v3.0 round emitted both at WARN, PRs #788 and #800; retired
+        with the round.)
         """
         valid = True
         if self.mode != "vector_database":
@@ -854,11 +857,12 @@ class VdbCheck(BaseCheck):
             sidecar = read_fs_separation_sidecar(run_dir)
             if sidecar is not None:
                 if sidecar.get("same_filesystem"):
-                    self.warn_violation(
+                    self.log_violation(
                         "5.4.2", "vdbFilesystemCheck", logfile_path,
                         "vdbFilesystemCheck: vdb data path and results_dir are on the "
                         "same filesystem",
                     )
+                    valid = False
                 continue
             # _check_filesystem_separation looks up "data_dir" or
             # "checkpoint_folder"; for vdb the analog is storage_root. Synthesize
@@ -871,21 +875,21 @@ class VdbCheck(BaseCheck):
             ok, df_found = _check_filesystem_separation(shim_args, logfile_path)
             if not df_found:
                 # D-B8: no CAP-03 sidecar AND no df block → no evidence of
-                # FS separation. Emit at WARN so pre-#601 legacy runs are
-                # not silently blocked at ingest; reviewers must confirm
-                # storage_root / results_dir separation manually.
-                self.warn_violation(
+                # FS separation → hard error.
+                self.log_violation(
                     "5.4.2", "vdbFilesystemCheck", logfile_path,
                     "fs_separation.json sidecar not found and df block also absent; "
-                    "cannot verify vdb storage_root/results_dir separation — reviewer must confirm manually",
+                    "cannot verify vdb storage_root/results_dir separation",
                 )
+                valid = False
                 continue
             if not ok:
-                self.warn_violation(
+                self.log_violation(
                     "5.4.2", "vdbFilesystemCheck", logfile_path,
                     "vdbFilesystemCheck: vdb data path and results_dir are on the "
                     "same filesystem",
                 )
+                valid = False
 
         if not any_run:
             self._vdb_loader_gap_warning("5.4.2", "vdbFilesystemCheck")
