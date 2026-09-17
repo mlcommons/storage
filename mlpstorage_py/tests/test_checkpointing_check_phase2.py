@@ -706,21 +706,20 @@ class TestChkpt06_CheckpointFilesystemCheck:
         )
         check = _run_checkpointing_check(root, mock_logger)
         result = check.checkpoint_filesystem_check()
-        assert result is True
-        assert mock_logger.errors == []
-        assert len(mock_logger.warnings) >= 1
-        assert mock_logger.warnings[0].startswith("[4.4.2 checkpointFilesystemCheck]"), \
-            f"Expected [4.4.2 checkpointFilesystemCheck]; got {mock_logger.warnings[0]!r}"
-        assert "same filesystem" in mock_logger.warnings[0]
+        assert result is False
+        assert mock_logger.warnings == []
+        assert len(mock_logger.errors) >= 1
+        assert mock_logger.errors[0].startswith("[4.4.2 checkpointFilesystemCheck]"), \
+            f"Expected [4.4.2 checkpointFilesystemCheck]; got {mock_logger.errors[0]!r}"
+        assert "same filesystem" in mock_logger.errors[0]
 
     def test_df_not_found_emits_4_4_2_missing(self, tmp_path, mock_logger):
-        """No sidecar AND no df logfile → WARN [4.4.2] (D-B8, #601).
+        """No sidecar AND no df logfile → ERROR [4.4.2] (D-B8, #601).
 
         D-B8 evidence-gap path: when neither the CAP-03 sidecar nor the
-        df block is present, the rule has no evidence of FS separation.
-        Emitted at WARN (not hard-fail) so pre-#601 legacy submissions
-        without the sidecar are not blocked at ingest — reviewers must
-        confirm separation manually.
+        df block is present, the rule has no evidence of FS separation
+        and fails. (PR #800 softened this to WARN for the v3.0 round;
+        retired with the round.)
         """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(
@@ -731,12 +730,12 @@ class TestChkpt06_CheckpointFilesystemCheck:
         )
         check = _run_checkpointing_check(root, mock_logger)
         result = check.checkpoint_filesystem_check()
-        assert result is True
-        assert mock_logger.errors == []
-        assert len(mock_logger.warnings) >= 1
-        assert mock_logger.warnings[0].startswith("[4.4.2 checkpointFilesystemCheck]"), \
-            f"Expected [4.4.2 checkpointFilesystemCheck]; got {mock_logger.warnings[0]!r}"
-        assert "sidecar not found" in mock_logger.warnings[0]
+        assert result is False
+        assert mock_logger.warnings == []
+        assert len(mock_logger.errors) >= 1
+        assert mock_logger.errors[0].startswith("[4.4.2 checkpointFilesystemCheck]"), \
+            f"Expected [4.4.2 checkpointFilesystemCheck]; got {mock_logger.errors[0]!r}"
+        assert "sidecar not found" in mock_logger.errors[0]
 
     def test_object_api_silent_passes(self, tmp_path, mock_logger):
         """benchmark_API='object' → silent-pass; no errors emitted (D-B7)."""
