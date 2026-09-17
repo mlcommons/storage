@@ -435,7 +435,8 @@ class TestDatadirMismatchFalsePositives:
             data_dir_datagen="/data/unet3d",
             data_dir_run="/data/unet3d",
         )
-        assert result is True
+        # The matched record's UNDERRUN is a hard error post-v3.0.
+        assert result is False
         assert not _has_token(records, "[3.3.1 DATADIR-MISMATCH]"), (
             f"null-data-dir datasize must not mismatch (A2); got: "
             f"{[r.getMessage() for r in records]}"
@@ -459,9 +460,10 @@ class TestDatadirMismatchFalsePositives:
             data_dir_datagen="/data/new",
             data_dir_run="/data/new",
         )
-        assert result is True
+        # The matched record's UNDERRUN is a hard error post-v3.0.
+        assert result is False
         assert not _has_token(records, "[3.3.1 DATADIR-MISMATCH]")
-        assert _has_token(records, "[3.3.1 DATASIZE-UNDERRUN]")
+        assert _has_error_token(records, "[3.3.1 DATASIZE-UNDERRUN]")
 
     def test_a2_pruned_datasize_metadata_no_mismatch(self, tmp_path, caplog):
         """Datasize metadata pruned by the submitter → the record drops out
@@ -476,8 +478,9 @@ class TestDatadirMismatchFalsePositives:
             meta.unlink()
         root = _scaffold_division_root(tmp_path, workload_dir)
         result, records = _run_rule(root, caplog)
-        assert result is True
-        assert _has_token(records, "[3.3.1 DATASIZE-MALFORMED]")
+        # MALFORMED is a hard error post-v3.0.
+        assert result is False
+        assert _has_error_token(records, "[3.3.1 DATASIZE-MALFORMED]")
         assert not _has_token(records, "[3.3.1 DATADIR-MISMATCH]"), (
             "pruned datasize metadata is already reported as MALFORMED; "
             "a per-run MISMATCH on top is noise (A2)"

@@ -35,11 +35,21 @@ GUARDED_METHODS = [
 ]
 
 
+# Minimal datasize/datagen records so rule 3.3.1's post-v3.0 hard errors for
+# a missing phase do not fire — these tests are about None-summary tolerance.
+_PHASE_META = {
+    "args": {"data_dir": "/data"},
+    "parameters": {"dataset": {"num_files_train": 0, "num_subfolders_train": 0,
+                               "total_disk_bytes": 0}},
+}
+
+
 def _make_training_check(tmp_path, run_files):
     log = MagicMock()
     config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
     submissions_logs = SubmissionLogs(
-        datagen_files=[],
+        datagen_files=[(None, dict(_PHASE_META), "20250101_120001")],
+        datasize_files=[(None, dict(_PHASE_META), "20250101_110001")],
         run_files=run_files,
         system_file=None,
         loader_metadata=LoaderMetadata(

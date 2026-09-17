@@ -310,15 +310,18 @@ class TrainingCheck(BaseCheck):
         when ≥2 distinguishable datasize records exist and none match
         (a genuine ambiguity).
 
-        All violations are warnings (``warn_violation``) — mid
-        submission-window, do not invalidate work already on disk.
-        After the window closes the appropriate violations may be
-        promoted to errors; the stable bracketed tokens
-        (``[3.3.1 DATAGEN-OVERRUN]``, etc.) give submitter CI a
-        grep-stable suppression surface in the meantime.
+        Every substantive violation is a hard error (``log_violation``)
+        and fails the rule; the stable bracketed tokens
+        (``[3.3.1 DATAGEN-OVERRUN]``, etc.) keep the findings
+        grep-stable. Only ``[3.3.1 EVAL-FIELD-MISSING]`` remains a
+        warning: models without an eval phase legitimately omit
+        ``num_files_eval``, so it is a could-not-cross-check note, not
+        a violation. (The v3.0 round shipped all of these as warnings
+        via PR #611 so work already on disk was not retroactively
+        invalidated; that doctrine was retired when the round closed.)
 
         Missing datasize/datagen phases emit ``[3.3.1 DATASIZE-MISSING]``
-        / ``[3.3.1 DATAGEN-MISSING]`` warnings rather than silent skip.
+        / ``[3.3.1 DATAGEN-MISSING]`` errors rather than silent skip.
 
         See `.planning/BACKLOG.md` B-04 for the post-window manifest
         extension that closes the "but is the data really on disk?"
@@ -343,29 +346,32 @@ class TrainingCheck(BaseCheck):
         datagen_num_files_train, datagen_data_dir = self._extract_latest_datagen_cardinality(datagen_files)
 
         if not datasize_files:
-            self.warn_violation(
+            self.log_violation(
                 "3.3.1", "trainingRunDataMatchesDatasize", self.path,
                 "[3.3.1 DATASIZE-MISSING] no datasize/ phase found; "
                 "rule 3.3.1 cross-check skipped",
             )
-        else:
-            self._warn_malformed_datasize_metadata(datasize_files)
+            valid = False
+        elif not self._check_datasize_metadata_well_formed(datasize_files):
+            valid = False
         if not datagen_files:
-            self.warn_violation(
+            self.log_violation(
                 "3.3.1", "trainingRunDataMatchesDatasize", self.path,
                 "[3.3.1 DATAGEN-MISSING] no datagen/ phase found; "
                 "upper-bound check skipped",
             )
+            valid = False
 
-        # Warn once per reused --data-dir, regardless of how many runs reference it.
+        # Fail once per reused --data-dir, regardless of how many runs reference it.
         for data_dir, records in datasize_by_dir.items():
             if len(records) > 1:
-                self.warn_violation(
+                self.log_violation(
                     "3.3.1", "trainingRunDataMatchesDatasize", self.path,
                     "[3.3.1 DATASIZE-REUSED] %d datasize/ phases target --data-dir %r; "
                     "cannot determine authoritative cardinality",
                     len(records), data_dir,
                 )
+                valid = False
 
         for summary, metadata, ts in self.submissions_logs.run_files:
             if summary is None or metadata is None:
@@ -386,40 +392,45 @@ class TrainingCheck(BaseCheck):
                 if (ds_num_files_train is not None
                         and run_num_files_train is not None
                         and run_num_files_train < ds_num_files_train):
-                    self.warn_violation(
+                    self.log_violation(
                         "3.3.1", "trainingRunDataMatchesDatasize", self.path,
                         "[3.3.1 DATASIZE-UNDERRUN] run/%s num_files_train (%s) < "
                         "datasize num_files_train (%s); representative-benchmark "
                         "floor not met",
                         ts, run_num_files_train, ds_num_files_train,
                     )
+                    valid = False
             elif datasize_by_dir and run_data_dir is not None:
                 # ≥2 distinguishable datasize records and none matched this
                 # run's --data-dir (A2: an empty grouping — all metadata
                 # pruned — is already reported as DATASIZE-MALFORMED, and
                 # the single-record / all-null-dir cases match above).
-                self.warn_violation(
+                self.log_violation(
                     "3.3.1", "trainingRunDataMatchesDatasize", self.path,
                     "[3.3.1 DATADIR-MISMATCH] run/%s --data-dir %r has no matching "
                     "datasize/ phase; lower-bound check skipped",
                     ts, run_data_dir,
                 )
+                valid = False
 
             # Upper bound against datagen.
             if (datagen_num_files_train is not None
                     and run_num_files_train is not None
                     and run_num_files_train > datagen_num_files_train):
-                self.warn_violation(
+                self.log_violation(
                     "3.3.1", "trainingRunDataMatchesDatasize", self.path,
                     "[3.3.1 DATAGEN-OVERRUN] run/%s num_files_train (%s) > "
                     "datagen num_files_train (%s); run consumed more data than "
                     "datagen produced",
                     ts, run_num_files_train, datagen_num_files_train,
                 )
+                valid = False
 
             # num_files_eval mirror — absent-key is a warning, NOT silent skip
-            # (issue #608 WRT 4). Models without an eval phase will warn once
-            # per run; the stable token lets submitter CI suppress per-model.
+            # (issue #608 WRT 4). Models without an eval phase legitimately
+            # omit the field, so this stays a warning (not a violation) and
+            # never fails the rule; the stable token lets submitter CI
+            # suppress it per model.
             if run_num_files_eval is None:
                 self.warn_violation(
                     "3.3.1", "trainingRunDataMatchesDatasize", self.path,
@@ -428,41 +439,45 @@ class TrainingCheck(BaseCheck):
                     ts,
                 )
 
-        # Warn-only invariant: rule passes regardless of warnings recorded.
         return valid
 
     _DATASIZE_REQUIRED_OUTPUT_KEYS = ("num_files_train", "num_subfolders_train", "total_disk_bytes")
 
-    def _warn_malformed_datasize_metadata(self, datasize_files):
-        """Warn when a datasize sentinel omits the Rules.md §3.3.1 output keys.
+    def _check_datasize_metadata_well_formed(self, datasize_files):
+        """Fail when a datasize sentinel omits the Rules.md §3.3.1 output keys.
 
         Every ``training/<model>/datasize/<ts>/`` sentinel must record its
         computed outputs — ``num_files_train``, ``num_subfolders_train``,
         and ``total_disk_bytes`` — under ``parameters.dataset`` so a
         reviewer (and, once wired, the datagen cross-check) can verify
         that datagen produced at least what datasize prescribed. Absent
-        metadata or absent keys emit ``[3.3.1 DATASIZE-MALFORMED]``
-        (warn-level, submission-window doctrine).
+        metadata or absent keys emit an ERROR-level
+        ``[3.3.1 DATASIZE-MALFORMED]``. Returns ``False`` when any
+        sentinel is malformed.
         """
+        well_formed = True
         for _summary, metadata, ts in datasize_files:
             if metadata is None:
-                self.warn_violation(
+                self.log_violation(
                     "3.3.1", "trainingRunDataMatchesDatasize", self.path,
                     "[3.3.1 DATASIZE-MALFORMED] datasize/%s has no readable "
                     "metadata file; sentinel cannot be cross-checked",
                     ts,
                 )
+                well_formed = False
                 continue
             dataset_params = (metadata.get("parameters", {}) or {}).get("dataset", {}) or {}
             missing = [k for k in self._DATASIZE_REQUIRED_OUTPUT_KEYS if dataset_params.get(k) is None]
             if missing:
-                self.warn_violation(
+                self.log_violation(
                     "3.3.1", "trainingRunDataMatchesDatasize", self.path,
                     "[3.3.1 DATASIZE-MALFORMED] datasize/%s metadata missing "
                     "required output key(s) %s under parameters.dataset; "
                     "sentinel cannot be fully cross-checked",
                     ts, ", ".join(missing),
                 )
+                well_formed = False
+        return well_formed
 
     @staticmethod
     def _to_int(v):
