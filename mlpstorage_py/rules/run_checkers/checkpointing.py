@@ -7,9 +7,11 @@ Validates checkpointing benchmark parameters for individual runs.
 from typing import Optional
 
 from mlpstorage_py.config import (
+    ACCELERATOR_MEMORY_GB,
     BENCHMARK_TYPES,
     LLAMA3_8B,
     LLM_ALLOWED_VALUES,
+    LLM_CHECKPOINT_SIZE_GB,
     LLM_MODELS,
     LLM_SUBSET_PROCS,
     PARAM_VALIDATION,
@@ -122,6 +124,63 @@ class CheckpointingRunRulesChecker(RunRulesChecker):
             expected=f"{closed_gpus} (CLOSED); "
                      f"positive multiple of {gpu_per_dp} (OPEN)",
             actual=num_processes,
+        )
+
+    def check_accelerator_memory(self) -> Optional[Issue]:
+        """Pre-flight gate on Rules.md 4.3.4 (checkpointAggregateAcceleratorMemory).
+
+        The memory of the accelerator declared with ``--accelerator-type``
+        times ``--num-processes`` must be at least the model's checkpoint
+        size (Rules.md Table 2, ``LLM_CHECKPOINT_SIZE_GB``). Every CLOSED
+        process count clears the bar on every accelerator; the gate matters
+        for OPEN runs that use fewer processes. Failing here saves the DLIO
+        run time between a misconfigured launch and the eventual
+        ``mlpstorage validate`` call, which re-checks the same rule against
+        the checkpoint size DLIO actually wrote.
+
+        Silent-passes when the run carries no accelerator (results dirs
+        produced before the flag existed, which reportgen still loads — the
+        submission validator fails those) or when the model is not one of
+        the four recognized LLMs (``check_model`` owns that surface).
+        """
+        model = self.benchmark_run.model
+        accelerator = self.benchmark_run.accelerator
+        if accelerator is None or model not in LLM_CHECKPOINT_SIZE_GB:
+            return None
+
+        memory_per_accelerator = ACCELERATOR_MEMORY_GB.get(accelerator)
+        if memory_per_accelerator is None:
+            return Issue(
+                validation=PARAM_VALIDATION.INVALID,
+                message=(
+                    f"accelerator_type={accelerator!r} has no entry in the "
+                    f"accelerator memory table (known: "
+                    f"{', '.join(sorted(ACCELERATOR_MEMORY_GB))}); cannot "
+                    f"verify Rules.md 4.3.4."
+                ),
+                parameter="accelerator_type",
+                expected=sorted(ACCELERATOR_MEMORY_GB),
+                actual=accelerator,
+            )
+
+        num_processes = self.benchmark_run.num_processes
+        checkpoint_size_gb = LLM_CHECKPOINT_SIZE_GB[model]
+        aggregate_gb = num_processes * memory_per_accelerator
+        if aggregate_gb >= checkpoint_size_gb:
+            return None
+
+        return Issue(
+            validation=PARAM_VALIDATION.INVALID,
+            message=(
+                f"aggregate simulated accelerator memory {aggregate_gb} GB "
+                f"({num_processes} x {accelerator} at {memory_per_accelerator} GB) "
+                f"is below the {model} checkpoint size of {checkpoint_size_gb} GB "
+                f"(Rules.md 4.3.4, Table 2). Increase --num-processes or choose "
+                f"an accelerator with more memory."
+            ),
+            parameter="accelerator_type",
+            expected=f">= {checkpoint_size_gb} GB aggregate",
+            actual=f"{aggregate_gb} GB",
         )
 
     def check_subset_mode(self) -> Optional[Issue]:
