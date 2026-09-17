@@ -193,24 +193,14 @@ class TrainingCheck(BaseCheck):
                 min_samples_memory = (total_host_memory * HOST_MEMORY_MULTIPLIER *
                                     1024 * 1024 * 1024 / record_length)
 
-                # v3.0-round grandfather: ceil-minus-one, not ceil. Datasets
-                # generated before the floor->ceil datagen alignment (mlpstorage
-                # <3.0.43, commit f9d414d) were sized with integer floor division
-                # in rules/utils.py, so a ceil threshold here rejects a valid
-                # pre-alignment dataset by exactly one file (e.g. 4710038 <
-                # 4710039). We can't just floor this expression: datagen floored
-                # via integer `//` while this check recomputes the same formula
-                # as a float chain, so float drift can push floor() one above the
-                # recorded count and still reject. `ceil-1` equals floor() for
-                # non-integer ratios and grants one extra file of slack exactly at
-                # the integer boundary where that drift bites — absorbing the
-                # bounded <=1-file divergence. Stays int-vs-int (no "N < N"
-                # display bug) and still rejects genuinely undersized runs (short
-                # by >1 file). REVERT to plain math.ceil once the v3.0 round
-                # closes — post-alignment datagen ceils, so newer datasets pass
-                # either way. See memory grandfather-floor-3.1.2-revert.
+                # Threshold is a plain ceil. The v3.0 round carried a
+                # ceil-minus-one grandfather clause (PR #831) for datasets
+                # sized by mlpstorage < 3.0.43, which floored; every datagen
+                # since f9d414d ceils, so the clause was retired once the
+                # round closed and Rules.md 3.1.2's exact-match wording
+                # applies again.
                 min_samples = max(min_samples_steps, min_samples_memory)
-                min_total_files = math.ceil(min_samples / num_samples_per_file) - 1
+                min_total_files = math.ceil(min_samples / num_samples_per_file)
                 min_files_size_gb = min_samples * record_length / 1024 / 1024 / 1024
 
                 # Verify actual matches expected
