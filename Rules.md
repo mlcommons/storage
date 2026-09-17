@@ -461,7 +461,16 @@ root_folder (or any name you prefer)
 
 4.3.3. **checkpointModelConfigurationReq** -- The benchmark must be run with one of the four model configuration detailed below.
 
-4.3.4. **checkpointAggregateAcceleratorMemory** -- The aggregate simulated accelerator memory across all nodes must be sufficient to accommodate the model’s checkpoint size.  That is, the GB of memory associated with the chosen accelerator (eg: H100) times the accelerator count must be equal to or greater than the total checkpoint size for that scale of checkpoint.  (see table 2)
+4.3.4. **checkpointAggregateAcceleratorMemory** -- The aggregate simulated accelerator memory across all nodes must be sufficient to accommodate the model’s checkpoint size.  That is, the GB of memory associated with the chosen accelerator times the accelerator count must be equal to or greater than the total checkpoint size for that scale of checkpoint.  (see table 2)  The chosen accelerator is declared with `--accelerator-type` on `checkpointing run` and recorded in the run's metadata; the *submission validator* multiplies the accelerator's memory from Table 3 by the run's accelerator count and fails a run whose product is below the checkpoint size it wrote, whose metadata records no accelerator, or whose accelerator is not in Table 3.  The `mlpstorage` command applies the same check against the Table 2 checkpoint size before launching a run.
+
+**Table 3 Simulated accelerator memory**
+
+| Accelerator | Memory (GB) | Divisions        |
+|-------------|-------------|------------------|
+| b200        | 180         | CLOSED, OPEN     |
+| mi355       | 288         | CLOSED, OPEN     |
+| h100        | 80          | whatif only      |
+| a100        | 80          | whatif only      |
 
 **Table 2 LLM models**
 
@@ -479,6 +488,8 @@ root_folder (or any name you prefer)
 | Subset: 8-Process Size | 105 GB | Invalid | Invalid | Invalid |
 
 *The "Invalid" entries are deliberate: subset mode is defined only for the 8B model (see rule 4.3.5).*
+
+*Units: the "Checkpoint size" row is in binary units (GiB and TiB, 1024-based) as reported by the benchmark's `checkpoint_size_GB`, even though it is labeled GB/TB. The values are the ones the v3.0 round validated against and are kept as-is so v4.0 results remain comparable with v3.0.*
 
 4.3.5. **checkpointSubsetRunValidation** --  The `mlpstorage` command must accept a parameter declaring the run a *subset* run and must record that declaration in the run's output log file. A *subset* run must use the "8B" model and a total of exactly 8 accelerators. The *submission validator* must flag an error for any *subset* run that uses any other model or any other accelerator count.
 

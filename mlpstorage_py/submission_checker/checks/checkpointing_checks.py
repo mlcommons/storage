@@ -5,6 +5,7 @@ from ..configuration.configuration import Config
 from ..dlio_summary_helpers import per_host_memory_gb
 from ..loader import SubmissionLogs
 from ..rule_registry import rule
+from mlpstorage_py.config import ACCELERATOR_MEMORY_GB
 from .helpers import (
     _check_filesystem_separation,
     _latest_final_collection_timestamp,
@@ -315,38 +316,61 @@ class CheckpointingCheck(BaseCheck):
         """
         Verify total accelerator memory >= checkpoint size. (Rules.md 4.3.4)
 
-        The per-accelerator memory baseline is the H100's 80 GiB because
-        checkpointing metadata carries no accelerator-type field; the
-        message names the baseline so a reviewer can re-check against the
-        actual accelerator. A shortfall is a hard failure. (The v3.0 round
-        downgraded it to a warning — worklist C2; retired with the round.)
+        The simulated accelerator is what ``--accelerator-type`` recorded
+        under metadata ``accelerator`` (with ``args.accelerator_type`` as a
+        fallback); its memory comes from ``ACCELERATOR_MEMORY_GB``. A run
+        that never recorded its accelerator, or names one the table does not
+        know, cannot be verified and fails. (Before the flag existed this
+        check assumed an 80 GiB H100 for every run.)
         """
         valid = True
         if self.mode != "checkpointing":
             return valid
 
-        ACCELERATOR_MEMORY_GB = 80  # H100 baseline (advisory)
-
-        for summary, metadata, _ in self._iter_valid_files():
+        for summary, metadata, ts in self._iter_valid_files():
             checkpoint_size_gb = summary.get("metric", {}).get("checkpoint_size_GB", 0)
             num_accelerators = summary.get("num_accelerators", 0)
+            accelerator = (
+                metadata.get("accelerator")
+                or (metadata.get("args") or {}).get("accelerator_type")
+            )
 
-            total_accelerator_memory = num_accelerators * ACCELERATOR_MEMORY_GB
+            if not accelerator:
+                self.log_violation(
+                    "4.3.4", "checkpointAggregateAcceleratorMemory", self.path,
+                    "run %s: accelerator type not recorded in metadata, so the "
+                    "aggregate accelerator memory cannot be verified against the "
+                    "%.2fGiB checkpoint; re-run with a current mlpstorage and "
+                    "--accelerator-type (Rules.md 4.3.4).",
+                    ts, checkpoint_size_gb,
+                )
+                valid = False
+                continue
 
+            memory_per_accelerator = ACCELERATOR_MEMORY_GB.get(accelerator)
+            if memory_per_accelerator is None:
+                self.log_violation(
+                    "4.3.4", "checkpointAggregateAcceleratorMemory", self.path,
+                    "run %s: unknown accelerator type %r (known: %s); cannot "
+                    "verify aggregate accelerator memory (Rules.md 4.3.4).",
+                    ts, accelerator, ", ".join(sorted(ACCELERATOR_MEMORY_GB)),
+                )
+                valid = False
+                continue
+
+            total_accelerator_memory = num_accelerators * memory_per_accelerator
             if total_accelerator_memory < checkpoint_size_gb:
                 self.log_violation(
                     "4.3.4", "checkpointAggregateAcceleratorMemory", self.path,
-                    "aggregate accelerator memory %.2fGiB (%d accelerators x 80 GiB "
-                    "H100 baseline) < checkpoint size %.2fGiB; verify against the "
-                    "actual accelerator's memory (Rules.md 4.3.4).",
-                    total_accelerator_memory,
-                    num_accelerators,
-                    checkpoint_size_gb,
+                    "run %s: aggregate accelerator memory %.2fGiB (%d x %s at "
+                    "%d GiB) < checkpoint size %.2fGiB (Rules.md 4.3.4).",
+                    ts, total_accelerator_memory, num_accelerators, accelerator,
+                    memory_per_accelerator, checkpoint_size_gb,
                 )
                 valid = False
 
         return valid
-    
+
     def _get_nested_value(self, config_dict, key_path):
         """
         Get a value from nested dictionary using dot notation.

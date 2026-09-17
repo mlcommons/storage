@@ -74,6 +74,11 @@ HELP_MESSAGES = {
         "Accelerator to simulate for the benchmark. A specific accelerator defines the data access "
         "sizes and rates for each supported workload"
     ),
+    'checkpoint_accelerator_type': (
+        "Accelerator the checkpointing ranks simulate. Recorded in the run metadata; the "
+        "submission validator multiplies its memory by --num-processes and requires the "
+        "product to cover the model's checkpoint size (Rules.md 4.3.4)"
+    ),
     'num_accelerators_datasize': (
         "Max number of simulated accelerators. In multi-host configurations the accelerators "
         "will be initiated in a round-robin fashion to ensure equal distribution of "

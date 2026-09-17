@@ -1342,3 +1342,77 @@ class TestClosedStorageOptionsPrefetchWindowIssue666:
             'storage.storage_options.prefetch_window'
             not in TrainingRunRulesChecker.OPEN_ALLOWED_PARAMS
         )
+
+
+class TestCheckpointingRunRulesCheckerAcceleratorMemory:
+    """Pre-flight Rules.md 4.3.4 gate: memory of the declared accelerator times
+    the process count must cover the model's Table 2 checkpoint size, so a
+    misconfigured launch fails before DLIO runs instead of hours later in
+    ``mlpstorage validate``.
+
+    Runs that carry no accelerator (results dirs produced before
+    ``--accelerator-type`` existed, which reportgen still loads) are skipped
+    here; the submission validator owns that failure.
+    """
+
+    @pytest.fixture
+    def mock_logger(self):
+        return MagicMock()
+
+    def _run(self, mock_logger, *, model, num_processes, accelerator):
+        data = BenchmarkRunData(
+            benchmark_type=BENCHMARK_TYPES.checkpointing,
+            model=model,
+            command="run",
+            run_datetime="20260917_120000",
+            num_processes=num_processes,
+            parameters={},
+            override_parameters={},
+            accelerator=accelerator,
+        )
+        return BenchmarkRun.from_data(data, mock_logger)
+
+    def test_closed_process_count_always_passes(self, mock_logger):
+        # 1024 x 80 GB = 81920 GB >= 18000 GB even on the smallest accelerator.
+        run = self._run(mock_logger, model="llama3-1t", num_processes=1024, accelerator="h100")
+        checker = CheckpointingRunRulesChecker(run, logger=mock_logger)
+        assert checker.check_accelerator_memory() is None
+
+    def test_open_undersized_aggregate_is_invalid(self, mock_logger):
+        # 70B checkpoint is 912 GB; 8 x b200 (180 GB) = 1440 GB passes but
+        # 4 x b200 = 720 GB does not.
+        run = self._run(mock_logger, model="llama3-70b", num_processes=4, accelerator="b200")
+        checker = CheckpointingRunRulesChecker(run, logger=mock_logger)
+        issue = checker.check_accelerator_memory()
+        assert issue is not None
+        assert issue.validation == PARAM_VALIDATION.INVALID
+        assert "b200" in issue.message and "912" in issue.message
+        assert issue.parameter == "accelerator_type"
+
+    def test_open_sufficient_aggregate_passes(self, mock_logger):
+        run = self._run(mock_logger, model="llama3-70b", num_processes=8, accelerator="b200")
+        checker = CheckpointingRunRulesChecker(run, logger=mock_logger)
+        assert checker.check_accelerator_memory() is None
+
+    def test_accelerator_memory_is_looked_up_not_assumed(self, mock_logger):
+        # Same 4-process 70B shape: mi355 (288 GB x 4 = 1152 GB) covers 912 GB.
+        run = self._run(mock_logger, model="llama3-70b", num_processes=4, accelerator="mi355")
+        checker = CheckpointingRunRulesChecker(run, logger=mock_logger)
+        assert checker.check_accelerator_memory() is None
+
+    def test_missing_accelerator_is_skipped(self, mock_logger):
+        run = self._run(mock_logger, model="llama3-70b", num_processes=4, accelerator=None)
+        checker = CheckpointingRunRulesChecker(run, logger=mock_logger)
+        assert checker.check_accelerator_memory() is None
+
+    def test_unknown_accelerator_is_invalid(self, mock_logger):
+        run = self._run(mock_logger, model="llama3-8b", num_processes=8, accelerator="tpu-v9")
+        checker = CheckpointingRunRulesChecker(run, logger=mock_logger)
+        issue = checker.check_accelerator_memory()
+        assert issue is not None and issue.validation == PARAM_VALIDATION.INVALID
+        assert "tpu-v9" in issue.message
+
+    def test_unknown_model_is_skipped(self, mock_logger):
+        run = self._run(mock_logger, model="not-a-model", num_processes=1, accelerator="b200")
+        checker = CheckpointingRunRulesChecker(run, logger=mock_logger)
+        assert checker.check_accelerator_memory() is None

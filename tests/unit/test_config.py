@@ -370,3 +370,42 @@ class TestDefaultSystemname:
         monkeypatch.delenv('MLPERF_SYSTEMNAME', raising=False)
         assert cfg_mod._resolve_default_systemname() == ''
 
+
+
+class TestAcceleratorMemoryTable:
+    """Rules.md 4.3.4 needs the memory of the chosen accelerator, so every
+    accelerator the CLI accepts must have a per-accelerator memory entry."""
+
+    def test_every_accelerator_has_positive_memory(self):
+        from mlpstorage_py.config import ACCELERATORS, ACCELERATOR_MEMORY_GB
+        for accel in ACCELERATORS:
+            assert accel in ACCELERATOR_MEMORY_GB, accel
+            assert ACCELERATOR_MEMORY_GB[accel] > 0, accel
+
+    def test_table_has_no_unknown_accelerators(self):
+        from mlpstorage_py.config import ACCELERATORS, ACCELERATOR_MEMORY_GB
+        assert set(ACCELERATOR_MEMORY_GB) == set(ACCELERATORS)
+
+    def test_h100_baseline_is_80_gb(self):
+        """The value the validator assumed for every run before the table existed."""
+        from mlpstorage_py.config import ACCELERATOR_MEMORY_GB, H100
+        assert ACCELERATOR_MEMORY_GB[H100] == 80
+
+
+class TestLlmCheckpointSizeTable:
+    """Rules.md Table 2 checkpoint sizes, used by the pre-flight 4.3.4 gate."""
+
+    def test_every_llm_model_has_a_checkpoint_size(self):
+        from mlpstorage_py.config import LLM_MODELS, LLM_CHECKPOINT_SIZE_GB
+        for model in LLM_MODELS:
+            assert model in LLM_CHECKPOINT_SIZE_GB, model
+            assert LLM_CHECKPOINT_SIZE_GB[model] > 0, model
+
+    def test_table_2_values(self):
+        from mlpstorage_py.config import (
+            LLM_CHECKPOINT_SIZE_GB, LLAMA3_8B, LLAMA3_70B, LLAMA3_405B, LLAMA3_1T,
+        )
+        assert LLM_CHECKPOINT_SIZE_GB[LLAMA3_8B] == 105
+        assert LLM_CHECKPOINT_SIZE_GB[LLAMA3_70B] == 912
+        assert LLM_CHECKPOINT_SIZE_GB[LLAMA3_405B] == 5290
+        assert LLM_CHECKPOINT_SIZE_GB[LLAMA3_1T] == 18000

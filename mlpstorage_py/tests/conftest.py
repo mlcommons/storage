@@ -423,6 +423,9 @@ def build_submission(tmp_path, **overrides) -> Path:
       ``args.checkpoint_folder`` in each checkpoint metadata.json.
     * ``chkpt_results_dir`` (str | None) — CHKPT-06: sets ``args.results_dir``
       in each checkpoint metadata.json.
+    * ``chkpt_accelerator`` (str | None, default "b200") — rule 4.3.4: the
+      simulated accelerator recorded under metadata ``accelerator`` (what
+      ``--accelerator-type`` writes). ``None`` reproduces a pre-flag run.
     * ``chkpt_summary_checkpoint_size_GB`` (int | float | None) — rule 4.3.1:
       when non-None, injects ``summary.metric.checkpoint_size_GB`` into each
       checkpoint summary.json. Required to exercise
@@ -495,6 +498,7 @@ def build_submission(tmp_path, **overrides) -> Path:
     chkpt_checkpoint_folder = overrides.pop("chkpt_checkpoint_folder", None)
     chkpt_results_dir = overrides.pop("chkpt_results_dir", None)
     chkpt_summary_checkpoint_size_GB = overrides.pop("chkpt_summary_checkpoint_size_GB", None)
+    chkpt_accelerator = overrides.pop("chkpt_accelerator", "b200")
     chkpt_summary_num_accelerators = overrides.pop("chkpt_summary_num_accelerators", None)
     run_data_dir = overrides.pop("run_data_dir", None)
     run_results_dir = overrides.pop("run_results_dir", None)
@@ -863,6 +867,8 @@ def build_submission(tmp_path, **overrides) -> Path:
                 chkpt_meta["verification"] = chkpt_verification
                 chkpt_meta["args"]["model"] = chkpt_meta_model
                 chkpt_meta["args"]["num_processes"] = chkpt_num_processes
+                chkpt_meta["accelerator"] = chkpt_accelerator
+                chkpt_meta["args"]["accelerator_type"] = chkpt_accelerator
                 # Apply checkpoint_folder override
                 if chkpt_checkpoint_folder is not None:
                     chkpt_meta["args"]["checkpoint_folder"] = chkpt_checkpoint_folder

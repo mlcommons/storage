@@ -62,6 +62,20 @@ MI355 = "mi355"
 ACCELERATORS = [H100, A100, B200, MI355]
 ACCELERATORS_CLOSED = [B200, MI355]
 
+# Memory of each simulated accelerator, in GB, for Rules.md 4.3.4
+# (checkpointAggregateAcceleratorMemory): memory × accelerator count must
+# cover the model's checkpoint size. Values are the per-device HBM capacity
+# from the vendor datasheets — H100 SXM/PCIe 80 GB; A100 80 GB (the 40 GB
+# variant is not the MLPerf reference part); B200 180 GB (NVIDIA's HGX B200
+# datasheet figure; the 192 GB launch number was pre-production); MI355X
+# 288 GB. Keep in lockstep with ACCELERATORS.
+ACCELERATOR_MEMORY_GB = {
+    H100: 80,
+    A100: 80,
+    B200: 180,
+    MI355: 288,
+}
+
 OPEN = "open"
 CLOSED = "closed"
 CATEGORIES = [OPEN, CLOSED]
@@ -89,6 +103,17 @@ LLM_SIZE_BY_RANK = {
     LLAMA3_405B: (755, 4533),
     LLAMA3_70B: (130, 781),
     LLAMA3_8B: (15, 90)
+}
+
+# Rules.md Table 2 "Checkpoint size" per model, in GB. Used by the pre-flight
+# Rules.md 4.3.4 gate (CheckpointingRunRulesChecker.check_accelerator_memory)
+# before DLIO launches; the submission validator uses the checkpoint_size_GB
+# that DLIO actually measured instead.
+LLM_CHECKPOINT_SIZE_GB = {
+    LLAMA3_8B: 105,
+    LLAMA3_70B: 912,
+    LLAMA3_405B: 5290,
+    LLAMA3_1T: 18000,
 }
 
 CHECKPOINT_RANKS_STRINGS = "\n    ".join(

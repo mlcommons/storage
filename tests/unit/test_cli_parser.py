@@ -42,7 +42,7 @@ class TestOpenClosedEquivalence:
 
     def test_checkpointing_open_closed_defaults_match(self):
         """Verify Checkpointing 'closed' forces read/write checkpoint counts to match 'open' defaults."""
-        base_args = ['checkpointing', 'run', '-cm', '1024', '-m', 'llama3-8b', '-np', '2', '-cf', '/tmp/ckpt', '-rd', '/tmp', '-sn', 'sys-v1', 'file']
+        base_args = ['checkpointing', 'run', '-cm', '1024', '-m', 'llama3-8b', '-np', '2', '-at', 'b200', '-cf', '/tmp/ckpt', '-rd', '/tmp', '-sn', 'sys-v1', 'file']
 
         with patch('sys.argv', ['mlpstorage', 'closed'] + base_args):
             args_closed = parse_arguments()
@@ -78,7 +78,7 @@ class TestCLIStructureAndCombinations:
         ("04", ['training', 'unet3d', 'configview', '-na', '4', '-cm', '64', '-at', 'b200', '-rd', '/tmp', '-sn', 'sys-v1', 'file'], 'training', 'configview'),
 
         # Checkpointing — --model stays as a flag; storage type is positional
-        ("05", ['checkpointing', 'run', '-cm', '1024', '-m', 'llama3-8b', '-np', '4', '-cf', '/tmp/ckpt', '-rd', '/tmp', '-sn', 'sys-v1', 'file'], 'checkpointing', 'run'),
+        ("05", ['checkpointing', 'run', '-cm', '1024', '-m', 'llama3-8b', '-np', '4', '-at', 'b200', '-cf', '/tmp/ckpt', '-rd', '/tmp', '-sn', 'sys-v1', 'file'], 'checkpointing', 'run'),
         ("06", ['checkpointing', 'datasize', '-cm', '1024', '-m', 'llama3-8b', '-np', '4', '-sn', 'sys-v1'], 'checkpointing', 'datasize'),
 
         # KVCache closed mode: model/num-users are not accepted in closed mode
@@ -157,7 +157,7 @@ class TestCustomValidation:
         """Checkpointing validate_args should reject negative checkpoint counts."""
         test_args = [
             'mlpstorage', 'closed', 'checkpointing', 'run',
-            '-cm', '1024', '-m', 'llama3-8b', '-np', '2', '-cf', '/tmp/ckpt', '-rd', '/tmp',
+            '-cm', '1024', '-m', 'llama3-8b', '-np', '2', '-at', 'b200', '-cf', '/tmp/ckpt', '-rd', '/tmp',
             '-sn', 'sys-v1', 'file',
             '--num-checkpoints-read', '-5'
         ]
@@ -445,7 +445,7 @@ class TestSystemname:
         ]),
         ('checkpointing-run', [
             'closed', 'checkpointing', 'run',
-            '-cm', '1024', '-m', 'llama3-8b', '-np', '2',
+            '-cm', '1024', '-m', 'llama3-8b', '-np', '2', '-at', 'b200',
             '-cf', '/tmp/ckpt', '-rd', '/r', 'file',
         ]),
         ('vectordb-run', [
@@ -648,3 +648,61 @@ class TestSystemname:
         # tests (see _resolve_default_systemname docstring in config.py).
         import mlpstorage_py.config as cfg_mod
         assert cfg_mod._resolve_default_systemname() == 'env-sys'
+
+
+class TestCheckpointingAcceleratorType:
+    """Checkpointing run/configview declare the simulated accelerator.
+
+    Rules.md 4.3.4 needs the memory of the chosen accelerator, and nothing in
+    a checkpointing run recorded which accelerator was simulated — the
+    validator assumed an 80 GiB H100 for every run. ``--accelerator-type``
+    mirrors the training flag: required on the result-emitting subcommands,
+    mode-gated choices (closed/open: b200, mi355; whatif adds h100, a100),
+    and absent from datasize, which sizes by host memory only.
+    """
+
+    _RUN = ['checkpointing', 'run', '-cm', '1024', '-m', 'llama3-8b', '-np', '8',
+            '-cf', '/tmp/ckpt', '-rd', '/tmp', '-sn', 'sys-v1', 'file']
+    _CONFIGVIEW = ['checkpointing', 'configview', '-cm', '1024', '-m', 'llama3-8b',
+                   '-np', '8', '-rd', '/tmp', '-sn', 'sys-v1', 'file']
+
+    def _parse(self, mode, argv):
+        with patch('sys.argv', ['mlpstorage', mode] + argv):
+            return parse_arguments()
+
+    def test_run_requires_accelerator_type(self):
+        with pytest.raises(SystemExit) as exc:
+            self._parse('closed', self._RUN)
+        assert exc.value.code != 0
+
+    @pytest.mark.parametrize('accel', ['b200', 'mi355'])
+    def test_closed_run_accepts_closed_accelerators(self, accel):
+        args = self._parse('closed', self._RUN + ['--accelerator-type', accel])
+        assert args.accelerator_type == accel
+
+    def test_short_alias(self):
+        args = self._parse('closed', self._RUN + ['-at', 'b200'])
+        assert args.accelerator_type == 'b200'
+
+    @pytest.mark.parametrize('mode', ['closed', 'open'])
+    def test_closed_and_open_reject_whatif_accelerators(self, mode):
+        with pytest.raises(SystemExit):
+            self._parse(mode, self._RUN + ['--accelerator-type', 'h100'])
+
+    @pytest.mark.parametrize('accel', ['h100', 'a100', 'b200', 'mi355'])
+    def test_whatif_accepts_every_accelerator(self, accel):
+        args = self._parse('whatif', self._RUN + ['--accelerator-type', accel])
+        assert args.accelerator_type == accel
+
+    def test_configview_requires_accelerator_type(self):
+        with pytest.raises(SystemExit):
+            self._parse('closed', self._CONFIGVIEW)
+        args = self._parse('closed', self._CONFIGVIEW + ['--accelerator-type', 'mi355'])
+        assert args.accelerator_type == 'mi355'
+
+    def test_datasize_does_not_take_accelerator_type(self):
+        datasize = ['checkpointing', 'datasize', '-cm', '1024', '-m', 'llama3-8b', '-np', '8']
+        args = self._parse('closed', datasize)
+        assert getattr(args, 'accelerator_type', None) is None
+        with pytest.raises(SystemExit):
+            self._parse('closed', datasize + ['--accelerator-type', 'b200'])
