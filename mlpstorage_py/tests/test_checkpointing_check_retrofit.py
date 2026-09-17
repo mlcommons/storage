@@ -157,51 +157,93 @@ def test_4_3_1_warns_once_per_workload_not_per_invocation(tmp_path, mock_logger)
 
 
 # ---------------------------------------------------------------------------
-# 4.3.4 aggregate_accelerator_memory — hard error
+# 4.3.4 aggregate_accelerator_memory — recorded accelerator's memory, hard error
 # ---------------------------------------------------------------------------
 
-def test_4_3_4_insufficient_memory_errors(tmp_path, mock_logger):
-    """4.3.4: aggregate accelerator memory < checkpoint size → hard failure.
-
-    Rules.md 4.3.4 says the accelerator memory times the accelerator count
-    must be equal to or greater than the checkpoint size. With 8
-    accelerators (× the 80 GiB baseline = 640 GiB) and a 1000 GiB
-    checkpoint, the aggregate is insufficient, so the rule logs a
-    violation and returns False. (The v3.0 round downgraded this to a
-    warning — worklist C2; retired with the round.)
-    """
+def _run_4_3_4(tmp_path, mock_logger, **overrides):
     from mlpstorage_py.tests.conftest import build_submission
-    root = build_submission(
-        tmp_path,
-        chkpt_summary_num_accelerators=8,
-        chkpt_summary_checkpoint_size_GB=1000,
-    )
+    root = build_submission(tmp_path, **overrides)
     check = _run_checkpointing_check(root, mock_logger)
-    result = check.aggregate_accelerator_memory()
-    assert result is False
-    assert any(
-        m.startswith("[4.3.4 checkpointAggregateAcceleratorMemory]")
-        for m in mock_logger.errors
-    ), f"expected [4.3.4 ...] error; got errors={mock_logger.errors}"
-    assert not any(
-        m.startswith("[4.3.4 ") for m in mock_logger.warnings
-    ), f"4.3.4 must error, not warn; got warnings={mock_logger.warnings}"
+    return check.aggregate_accelerator_memory()
 
 
-def test_4_3_4_sufficient_memory_no_warning(tmp_path, mock_logger):
-    """Aggregate accelerator memory >= checkpoint size → no warning, returns True."""
-    from mlpstorage_py.tests.conftest import build_submission
-    root = build_submission(
-        tmp_path,
-        chkpt_summary_num_accelerators=8,
-        chkpt_summary_checkpoint_size_GB=100,  # 8*80=640 GiB >= 100
+def _msgs_4_3_4(mock_logger):
+    return [m for m in mock_logger.warnings + mock_logger.errors
+            if m.startswith("[4.3.4 checkpointAggregateAcceleratorMemory]")]
+
+
+def test_4_3_4_uses_recorded_accelerator_memory_to_pass(tmp_path, mock_logger):
+    """mi355 (288 GB) x 8 = 2304 GB covers a 2000 GB checkpoint."""
+    result = _run_4_3_4(
+        tmp_path, mock_logger, chkpt_accelerator="mi355",
+        chkpt_summary_num_accelerators=8, chkpt_summary_checkpoint_size_GB=2000,
     )
-    check = _run_checkpointing_check(root, mock_logger)
-    result = check.aggregate_accelerator_memory()
     assert result is True
-    assert not any(
-        m.startswith("[4.3.4 ") for m in mock_logger.warnings + mock_logger.errors
-    ), f"expected no 4.3.4 violation; got {mock_logger.warnings + mock_logger.errors}"
+    assert _msgs_4_3_4(mock_logger) == []
+
+
+def test_4_3_4_uses_recorded_accelerator_memory_to_fail(tmp_path, mock_logger):
+    """b200 (180 GB) x 8 = 1440 GB does not cover a 2000 GB checkpoint."""
+    result = _run_4_3_4(
+        tmp_path, mock_logger, chkpt_accelerator="b200",
+        chkpt_summary_num_accelerators=8, chkpt_summary_checkpoint_size_GB=2000,
+    )
+    assert result is False
+    errors = [m for m in mock_logger.errors
+              if m.startswith("[4.3.4 checkpointAggregateAcceleratorMemory]")]
+    assert errors, mock_logger.errors
+    assert "b200" in errors[0] and "180" in errors[0], errors[0]
+    assert not any(m.startswith("[4.3.4 ") for m in mock_logger.warnings)
+
+
+def test_4_3_4_no_longer_assumes_an_h100(tmp_path, mock_logger):
+    """8 x 80 GB H100 baseline (640 GB) used to fail a 1000 GB checkpoint for
+    every run; a recorded b200 (8 x 180 = 1440 GB) now passes it, and a
+    recorded h100 still fails it."""
+    assert _run_4_3_4(
+        tmp_path, mock_logger, chkpt_accelerator="b200",
+        chkpt_summary_num_accelerators=8, chkpt_summary_checkpoint_size_GB=1000,
+    ) is True
+    assert _msgs_4_3_4(mock_logger) == []
+    assert _run_4_3_4(
+        tmp_path / "h100", mock_logger, chkpt_accelerator="h100",
+        chkpt_summary_num_accelerators=8, chkpt_summary_checkpoint_size_GB=1000,
+    ) is False
+    assert any("h100" in m for m in mock_logger.errors), mock_logger.errors
+
+
+def test_4_3_4_missing_accelerator_type_fails(tmp_path, mock_logger):
+    """A run that never recorded its accelerator (pre --accelerator-type) cannot
+    be verified and fails, naming the missing field."""
+    result = _run_4_3_4(
+        tmp_path, mock_logger, chkpt_accelerator=None,
+        chkpt_summary_num_accelerators=8, chkpt_summary_checkpoint_size_GB=100,
+    )
+    assert result is False
+    errors = [m for m in mock_logger.errors
+              if m.startswith("[4.3.4 checkpointAggregateAcceleratorMemory]")]
+    assert errors and "accelerator type" in errors[0] and "not recorded" in errors[0], errors
+
+
+def test_4_3_4_unknown_accelerator_type_fails(tmp_path, mock_logger):
+    result = _run_4_3_4(
+        tmp_path, mock_logger, chkpt_accelerator="tpu-v9",
+        chkpt_summary_num_accelerators=8, chkpt_summary_checkpoint_size_GB=100,
+    )
+    assert result is False
+    errors = [m for m in mock_logger.errors
+              if m.startswith("[4.3.4 checkpointAggregateAcceleratorMemory]")]
+    assert errors and "tpu-v9" in errors[0], errors
+
+
+def test_4_3_4_sufficient_memory_no_message(tmp_path, mock_logger):
+    """Aggregate accelerator memory >= checkpoint size → silent pass."""
+    result = _run_4_3_4(
+        tmp_path, mock_logger,
+        chkpt_summary_num_accelerators=8, chkpt_summary_checkpoint_size_GB=100,
+    )
+    assert result is True
+    assert _msgs_4_3_4(mock_logger) == []
 
 
 # ---------------------------------------------------------------------------
