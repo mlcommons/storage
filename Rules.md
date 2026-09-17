@@ -489,6 +489,8 @@ root_folder (or any name you prefer)
 
 *The "Invalid" entries are deliberate: subset mode is defined only for the 8B model (see rule 4.3.5).*
 
+*Units: the "Checkpoint size" row is in binary units (GiB and TiB, 1024-based) as reported by the benchmark's `checkpoint_size_GB`, even though it is labeled GB/TB. The values are the ones the v3.0 round validated against and are kept as-is so v4.0 results remain comparable with v3.0.*
+
 4.3.5. **checkpointSubsetRunValidation** --  The `mlpstorage` command must accept a parameter declaring the run a *subset* run and must record that declaration in the run's output log file. A *subset* run must use the "8B" model and a total of exactly 8 accelerators. The *submission validator* must flag an error for any *subset* run that uses any other model or any other accelerator count.
 
 *Aside (not part of the rule): subset mode exists for storage architectures that centrally manage storage local to the client nodes, whose aggregate checkpoint bandwidth therefore scales linearly with node count. One 8-GPU node running the 8B workload demonstrates such an architecture's per-node bandwidth; the larger models measure storage where checkpoint data must reach a shared central store, so no subset form is defined for them.*
