@@ -870,10 +870,12 @@ class Test_5_4_1_VdbPathArgs:
     """§5.4.1 vdbPathArgs — storage-root recording (issue #802).
 
     For file-API runs the storage path (storage_root) and results_dir must both
-    be set and differ. The storage-root plumbing shipped mid-v3.0, so for the
-    v3.0 ruleset a missing/duplicate path is a WARNING (advisory, valid stays
-    True); a later ruleset version restores the hard error. Object-API runs
-    have no submitter-owned local path, so they silent-pass (§5.5.1 owns the
+    be set and differ; a missing or duplicate path is a hard failure. The
+    storage-root plumbing shipped mid-v3.0 and that round carried a
+    version-gated WARN-only relaxation (PR #815) for submissions produced
+    before it; the round is closed and the relaxation is retired, so the
+    rule fails under every ruleset version. Object-API runs have no
+    submitter-owned local path, so they silent-pass (§5.5.1 owns the
     backend check).
     """
 
@@ -893,9 +895,9 @@ class Test_5_4_1_VdbPathArgs:
         assert _violations(mock_logger, "5.4.1", "vdbPathArgs") == []
         assert _warnings(mock_logger, "5.4.1", "vdbPathArgs") == []
 
-    def test_missing_storage_root_warns_in_v3(self, tmp_path, mock_logger):
-        # The issue #802 scenario: real VDB metadata carries no storage_root.
-        # For v3.0 this is advisory — a WARNING, and the run stays valid.
+    def test_missing_storage_root_hard_errors_in_v3(self, tmp_path, mock_logger):
+        # The issue #802 scenario: VDB metadata carries no storage_root.
+        # Post-v3.0 this is a hard failure under the v3.0 ruleset too.
         leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "DISKANN")
         run_files = [
             (_summary_run(),
@@ -903,14 +905,14 @@ class Test_5_4_1_VdbPathArgs:
              "20260618_120100"),
         ]
         check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
-        assert check.vdb_path_args() is True
-        assert _violations(mock_logger, "5.4.1", "vdbPathArgs") == []
+        assert check.vdb_path_args() is False
+        assert _warnings(mock_logger, "5.4.1", "vdbPathArgs") == []
         assert any(
-            "storage_root" in w or "data path" in w
-            for w in _warnings(mock_logger, "5.4.1", "vdbPathArgs")
-        ), _warnings(mock_logger, "5.4.1", "vdbPathArgs")
+            "storage_root" in v or "data path" in v
+            for v in _violations(mock_logger, "5.4.1", "vdbPathArgs")
+        ), _violations(mock_logger, "5.4.1", "vdbPathArgs")
 
-    def test_equal_paths_warn_in_v3(self, tmp_path, mock_logger):
+    def test_equal_paths_hard_error_in_v3(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "DISKANN")
         run_files = [
             (_summary_run(),
@@ -918,17 +920,17 @@ class Test_5_4_1_VdbPathArgs:
              "20260618_120100"),
         ]
         check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
-        assert check.vdb_path_args() is True
-        assert _violations(mock_logger, "5.4.1", "vdbPathArgs") == []
+        assert check.vdb_path_args() is False
+        assert _warnings(mock_logger, "5.4.1", "vdbPathArgs") == []
         assert any(
-            "must differ" in w
-            for w in _warnings(mock_logger, "5.4.1", "vdbPathArgs")
+            "must differ" in v
+            for v in _violations(mock_logger, "5.4.1", "vdbPathArgs")
         )
 
     def test_missing_storage_root_hard_errors_in_later_version(
         self, tmp_path, mock_logger
     ):
-        # The v3.0 leniency is scoped: a later ruleset restores the hard error.
+        # Same hard error under a later ruleset version (no version gate).
         leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "DISKANN")
         run_files = [
             (_summary_run(),
