@@ -965,35 +965,29 @@ class TestStruct12_TrainingPhases:
         assert result is False
         assert any("[2.1.12 trainingPhases]" in m for m in mock_logger.errors)
 
-    def test_missing_datasize_phase_warns_but_passes(self, tmp_path, mock_logger):
-        """Missing datasize/ → warn-level (DATASIZE-MISSING), rule still passes.
+    def test_missing_datasize_phase_errors(self, tmp_path, mock_logger):
+        """Missing datasize/ → hard structural error, like datagen/ and run/.
 
-        Rules.md §2.1.12 requires the datasize phase, but the checker enforces
-        it at warn-level during the current submission window (see
-        ``_WARN_ONLY_MISSING_TRAINING_PHASES`` note). Regression pin against
-        the retroactive-invalidation concern raised when datasize/ was
-        first added to the required set.
+        Rules.md §2.1.12 requires the datasize phase. The v3.0 round
+        enforced it at warn-level (``_WARN_ONLY_MISSING_TRAINING_PHASES``)
+        so submissions produced before PR #611 were not retroactively
+        invalidated; the round is closed and the carve-out is retired.
         """
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(tmp_path, omit_datasize_phase=True)
         check = _make_check(root, mock_logger)
         result = run_one_check(check, "training_phases_check", mock_logger)
-        assert result is True
+        assert result is False
         assert any(
-            "[2.1.12 trainingPhases]" in m and "DATASIZE-MISSING" in m
-            for m in mock_logger.warnings
-        )
-        # Must NOT surface as an error (warn-only doctrine).
+            "[2.1.12 trainingPhases]" in m and "'datasize'" in m
+            for m in mock_logger.errors
+        ), mock_logger.errors
         assert not any(
-            "DATASIZE-MISSING" in m for m in mock_logger.errors
-        )
+            "[2.1.12 trainingPhases]" in m for m in mock_logger.warnings
+        ), mock_logger.warnings
 
     def test_missing_datagen_phase_still_errors(self, tmp_path, mock_logger):
-        """Missing datagen/ → hard error, unchanged from pre-datasize behavior.
-
-        Pins that the warn-only carve-out is scoped to `datasize` — the
-        other required phases must still fail the check.
-        """
+        """Missing datagen/ → hard error, unchanged from pre-datasize behavior."""
         import shutil
         from mlpstorage_py.tests.conftest import build_submission
         root = build_submission(tmp_path)
