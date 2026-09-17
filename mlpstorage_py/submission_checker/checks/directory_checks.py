@@ -538,12 +538,10 @@ class DirectoryCheck(BaseCheck):
 
         # Order chronologically by start time, then check end→start gap for
         # each consecutive pair against the slower invocation's duration.
-        #
-        # Worklist A7 (2026-07-24): a gap breach WARNS instead of
-        # invalidating — the third enforcement point of the §4.7.1
-        # relaxation (cache_flush_validation and check_invocation_structure
-        # were downgraded in the same batch). Unparseable timestamps above
-        # remain hard errors.
+        # A breach is a hard error. (The v3.0 round downgraded it to a
+        # warning — worklist A7, the third enforcement point of the §4.7.1
+        # relaxation; retired when the round closed. The upper-bound label
+        # for summary-fallback measurements stays.)
         invocations.sort(key=lambda x: x[0])
         for first, second in zip(invocations, invocations[1:]):
             first_start, first_end, _, _, first_end_fb = first
@@ -562,7 +560,7 @@ class DirectoryCheck(BaseCheck):
                         "startup/collection overhead inflates this number, "
                         "so treat it as an upper bound on the true gap)"
                     )
-                self.warn_violation(
+                self.log_violation(
                     "2.1.24", "checkpointingTimestampGap", self.checkpointing_path,
                     "Gap between checkpoints is %s, which is >= the slower "
                     "invocation's duration %s. Benchmark activity between "
@@ -570,6 +568,7 @@ class DirectoryCheck(BaseCheck):
                     gap,
                     slower,
                 )
+                valid = False
 
         return valid
     

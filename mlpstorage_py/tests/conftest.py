@@ -378,8 +378,8 @@ def build_submission(tmp_path, **overrides) -> Path:
       (simulates a results dir produced by an mlpstorage version predating
       storage#714). Exercises the backward-compat fallback path in
       ``cache_flush_validation`` — the check falls back to
-      ``read.summary.start_time`` and downgrades a 30-second breach from
-      hard failure to warning.
+      ``read.summary.start_time`` and labels any 30-second breach as a
+      non-authoritative measurement (still a hard failure).
     * ``chkpt_omit_invocation_end_time`` (bool, default False) — CHKPT-02
       (storage#782): when True, do NOT emit ``invocation_end_time`` in
       write-side metadata (simulates a results dir produced by an mlpstorage

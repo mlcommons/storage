@@ -669,8 +669,10 @@ class CheckpointingCheck(BaseCheck):
         DLIO summary field:
 
           * missing ``read.metadata.invocation_start_time`` →
-            ``read.summary.start_time`` (predates #714). Downgrades a gap
-            breach to ``warn_violation``.
+            ``read.summary.start_time`` (predates #714). A breach measured
+            this way is still a hard failure; the message notes that the
+            reading includes per-invocation framework startup and points
+            the submitter at a re-run with a current mlpstorage.
           * missing ``write.metadata.invocation_end_time`` → the latest
             post-benchmark ``collection_timestamp`` in the write-phase
             metadata, when present (the last node to finish the final cluster
@@ -682,9 +684,9 @@ class CheckpointingCheck(BaseCheck):
             in the gap; the submitter should re-run with a current mlpstorage
             to get the honest measurement.
 
-        **Special-build relaxation** — a gap breach (>30s) is reported as a
-        ``warn_violation`` rather than a hard failure, so it never
-        invalidates the submission.
+        A gap breach (>30s) is a hard failure. (The v3.0 round reported it
+        as a warning — special build PR #834, then worklist A7 for every
+        submitter; that relaxation was retired when the round closed.)
 
         A negative gap indicates NTP skew between the write and read nodes
         (the metadata fields are timestamped on their respective invocation
@@ -738,8 +740,8 @@ class CheckpointingCheck(BaseCheck):
             if read_start is None:
                 # Backward-compat fallback for results dirs that predate
                 # storage#714 and don't carry invocation_start_time.
-                # Measure against read.summary.start_time and downgrade
-                # any breach to warn_violation below.
+                # Measure against read.summary.start_time; a breach is
+                # still a hard failure, labeled as non-authoritative below.
                 read_start = (read_summary or {}).get("start_time") or (read_summary or {}).get("start")
                 read_origin_label = "read summary start"
                 used_legacy_read_origin = True
@@ -790,12 +792,12 @@ class CheckpointingCheck(BaseCheck):
                 continue
             if gap_seconds > 30:
                 if used_legacy_read_origin:
-                    # Pre-fix results dir: honor the rule that was in force
-                    # when the run was produced by warning rather than
-                    # failing. The gap measurement here includes per-
-                    # invocation framework startup and is not authoritative
-                    # against the new (invocation_start_time-based) rule.
-                    self.warn_violation(
+                    # Pre-fix results dir: the gap measurement includes
+                    # per-invocation framework startup and is not
+                    # authoritative against the invocation_start_time-based
+                    # rule, but a breach still fails — the remedy is a
+                    # re-run with a current mlpstorage.
+                    self.log_violation(
                         "4.7.1", "checkpointCacheFlushValidation", self.path,
                         "failover-callout gap %.1f seconds exceeds 30-second "
                         "limit, measured against read.summary.start_time "
@@ -808,10 +810,9 @@ class CheckpointingCheck(BaseCheck):
                         "(write end=%s, read start=%s)",
                         gap_seconds, write_end, read_start,
                     )
+                    valid = False
                     continue
-                # Special-build relaxation: a gap breach is reported as a
-                # warning rather than invalidating the submission.
-                self.warn_violation(
+                self.log_violation(
                     "4.7.1", "checkpointCacheFlushValidation", self.path,
                     "failover-callout gap %.1f seconds exceeds 30-second limit "
                     "(%s=%s, %s=%s)",
@@ -819,6 +820,7 @@ class CheckpointingCheck(BaseCheck):
                     write_origin_label, write_end,
                     read_origin_label, read_start,
                 )
+                valid = False
         return valid
 
     @rule("4.7.1", "checkpointCacheFlushValidation")
