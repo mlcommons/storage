@@ -63,7 +63,7 @@ For a submission, the sequence is the following:
 
 The default options will run the read and write checkpoints in a single mlpstorage call. For example, the following command will execute a sequence of writing 10 checkpoints and reading those same 10 checkpoints.
 ```bash
-mlpstorage checkpointing run --client-host-memory-in-gb 512 --model llama3-8b --num-processes 8 --checkpoint-folder /mnt/checkpoint_test
+mlpstorage checkpointing run --client-host-memory-in-gb 512 --model llama3-8b --num-processes 8 --accelerator-type b200 --checkpoint-folder /mnt/checkpoint_test
 ```
 
 If caches need to be cleared use the following parameters for the WRITE and READ tests. 
@@ -74,7 +74,7 @@ If caches need to be cleared use the following parameters for the WRITE and READ
 
 In the above example, the write tests would be executed first with this command which will do the writes but no reads.
 ```bash
-mlpstorage checkpointing run --client-host-memory-in-gb 512 --model llama3-8b --num-processes 8 --checkpoint-folder /mnt/checkpoint_test --num-checkpoints-read=0
+mlpstorage checkpointing run --client-host-memory-in-gb 512 --model llama3-8b --num-processes 8 --accelerator-type b200 --checkpoint-folder /mnt/checkpoint_test --num-checkpoints-read=0
 ```
 
 After the write tests complete, clear the caches on your hosts. A standard linux system would use a command like this:
@@ -85,7 +85,7 @@ The end result of "clearing caches" is that 100% data for the read phase should 
 
 Finally, with the same example the read tests would be executed with the following command which indicates no writes during this phase:
 ```bash
-mlpstorage checkpointing run --client-host-memory-in-gb 512 --model llama3-8b --num-processes 8 --checkpoint-folder /mnt/checkpoint_test --num-checkpoints-write=0
+mlpstorage checkpointing run --client-host-memory-in-gb 512 --model llama3-8b --num-processes 8 --accelerator-type b200 --checkpoint-folder /mnt/checkpoint_test --num-checkpoints-write=0
 ```
 
 Caches need to be cleared by the user outside of the mlpstorage tool.
@@ -114,7 +114,7 @@ We enforce ``fsync`` to be applied during checkpoint writes to ensure data is fl
 * ``default`` mode (``WORLD_SIZE = TP*PP*DP`` as listed in Table 2): 
   ```bash
   # Perform checkpoint writes  (make sure the number of hosts is WORLD_SIZE/num_processes_per_host)
-  mlpstorage checkpointing run --model llama3-405b \
+  mlpstorage checkpointing run --model llama3-405b --accelerator-type b200 \
     --hosts ip1 ip2 .... \
     --num-processes 512 \
     --num-checkpoints-read 0 \
@@ -126,7 +126,7 @@ We enforce ``fsync`` to be applied during checkpoint writes to ensure data is fl
   ... 
 
   # perform checkpoint reads
-  mlpstorage checkpointing run --model llama3-405b \
+  mlpstorage checkpointing run --model llama3-405b --accelerator-type b200 \
     --hosts ip1 ip2 .... \
     --num-processes 512 \
     --num-checkpoints-write 0 \
@@ -137,7 +137,7 @@ We enforce ``fsync`` to be applied during checkpoint writes to ensure data is fl
 * ``subset`` mode (on a single host with **8 simulated accelerators**)
   ```bash
   # Perform checkpoint writes (data parallelism must match Table 2)
-  mlpstorage checkpointing run --model llama3-405b \
+  mlpstorage checkpointing run --model llama3-405b --accelerator-type b200 \
     --hosts ip1 \
     --num-processes 8 \
     --num-checkpoints-read 0 \
@@ -147,7 +147,7 @@ We enforce ``fsync`` to be applied during checkpoint writes to ensure data is fl
   # Clear the cache 
   ... 
   # Perform checkpoint read (data parallelism must match Table 2)
-  mlpstorage checkpointing run --model llama3-405b \
+  mlpstorage checkpointing run --model llama3-405b --accelerator-type b200 \
     --hosts ip1 \
     --num-processes 8 \
     --num-checkpoints-write 0 \

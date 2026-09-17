@@ -598,6 +598,9 @@ Required positionals: `<model>` (one of `llama3-8b`, `llama3-70b`, `llama3-405b`
 - **`--num-processes <N>`, `-np <N>`**
   Number of accelerator ranks to emulate. Permitted values are model-specific (see `CHECKPOINT_RANKS_STRINGS` in `config.py`).
 
+- **`--accelerator-type <name>`, `-at <name>`**
+  Accelerator each rank simulates. Required for `run` and `configview`; not accepted by `datasize`. Closed and open accept `b200` and `mi355`; `whatif` also accepts `h100` and `a100`. Recorded in the run metadata so the submission validator can multiply the accelerator's memory (Rules.md Table 3) by `--num-processes` and require the product to cover the model's checkpoint size (Rules.md §4.3.4). The same check runs before launch against the Table 2 checkpoint size.
+
 - **`--num-checkpoints-read <N>`, `-ncr <N>`**
   Number of checkpoint read iterations. Default 10.
 

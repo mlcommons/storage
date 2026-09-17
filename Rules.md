@@ -461,7 +461,16 @@ root_folder (or any name you prefer)
 
 4.3.3. **checkpointModelConfigurationReq** -- The benchmark must be run with one of the four model configuration detailed below.
 
-4.3.4. **checkpointAggregateAcceleratorMemory** -- The aggregate simulated accelerator memory across all nodes must be sufficient to accommodate the model’s checkpoint size.  That is, the GB of memory associated with the chosen accelerator (eg: H100) times the accelerator count must be equal to or greater than the total checkpoint size for that scale of checkpoint.  (see table 2)
+4.3.4. **checkpointAggregateAcceleratorMemory** -- The aggregate simulated accelerator memory across all nodes must be sufficient to accommodate the model’s checkpoint size.  That is, the GB of memory associated with the chosen accelerator times the accelerator count must be equal to or greater than the total checkpoint size for that scale of checkpoint.  (see table 2)  The chosen accelerator is declared with `--accelerator-type` on `checkpointing run` and recorded in the run's metadata; the *submission validator* multiplies the accelerator's memory from Table 3 by the run's accelerator count and fails a run whose product is below the checkpoint size it wrote, whose metadata records no accelerator, or whose accelerator is not in Table 3.  The `mlpstorage` command applies the same check against the Table 2 checkpoint size before launching a run.
+
+**Table 3 Simulated accelerator memory**
+
+| Accelerator | Memory (GB) | Divisions        |
+|-------------|-------------|------------------|
+| b200        | 180         | CLOSED, OPEN     |
+| mi355       | 288         | CLOSED, OPEN     |
+| h100        | 80          | whatif only      |
+| a100        | 80          | whatif only      |
 
 **Table 2 LLM models**
 
