@@ -52,8 +52,19 @@ class TestToInt:
 # Helper — build a minimal TrainingCheck from crafted SubmissionLogs
 # ---------------------------------------------------------------------------
 
-def _make_check(tmp_path, mock_logger, datagen_files, run_files):
-    """Return a TrainingCheck wired with the given file tuples."""
+def _make_check(tmp_path, mock_logger, datagen_files, run_files, datasize_files=None):
+    """Return a TrainingCheck wired with the given file tuples.
+
+    ``datasize_files`` defaults to a single record prescribing the run's
+    own ``num_files_train`` so the post-v3.0 hard errors for a missing
+    datasize/ phase or an underrun do not fire — these tests are about
+    string-vs-int coercion, not the cross-check itself.
+    """
+    if datasize_files is None:
+        datasize_files = [
+            (None, _datasize_meta(run_files[0][0]["num_files_train"]),
+             "20250111_120000"),
+        ]
     config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
     lm = LoaderMetadata(
         division="closed",
@@ -65,12 +76,26 @@ def _make_check(tmp_path, mock_logger, datagen_files, run_files):
     )
     logs = SubmissionLogs(
         datagen_files=datagen_files,
-        datasize_files=[],
+        datasize_files=datasize_files,
         run_files=run_files,
         system_file=None,
         loader_metadata=lm,
     )
     return TrainingCheck(log=mock_logger, config=config, submissions_logs=logs)
+
+
+def _datasize_meta(num_files_train):
+    """Build a minimal datasize metadata dict prescribing num_files_train."""
+    return {
+        "args": {"data_dir": "/data/retinanet"},
+        "parameters": {
+            "dataset": {
+                "num_files_train": num_files_train,
+                "num_subfolders_train": 0,
+                "total_disk_bytes": 1,
+            }
+        },
+    }
 
 
 def _datagen_meta(num_files_train):
@@ -128,12 +153,13 @@ class TestRunDataMatchesDatasize_Issue681:
         assert result is True
         assert mock_logger.errors == []
 
-    def test_overrun_still_warns_after_coercion(self, tmp_path, mock_logger):
-        """When run > datagen (both strings), DATAGEN-OVERRUN warning is still emitted."""
+    def test_overrun_still_fails_after_coercion(self, tmp_path, mock_logger):
+        """When run > datagen (both strings), DATAGEN-OVERRUN is still emitted (as an error)."""
         datagen_files = [(None, _datagen_meta("1000"), "20250111_130000")]
         run_files = [(_run_summary("2000"), _run_meta(), "20250111_140001")]
         check = _make_check(tmp_path, mock_logger, datagen_files, run_files)
-        check.run_data_matches_datasize()
-        assert any("DATAGEN-OVERRUN" in w for w in mock_logger.warnings), (
-            "Expected DATAGEN-OVERRUN warning when run > datagen"
+        result = check.run_data_matches_datasize()
+        assert result is False
+        assert any("DATAGEN-OVERRUN" in e for e in mock_logger.errors), (
+            "Expected DATAGEN-OVERRUN error when run > datagen"
         )

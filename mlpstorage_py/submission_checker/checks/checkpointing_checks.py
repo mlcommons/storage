@@ -313,13 +313,13 @@ class CheckpointingCheck(BaseCheck):
     @rule("4.3.4", "checkpointAggregateAcceleratorMemory")
     def aggregate_accelerator_memory(self):
         """
-        Verify total accelerator memory >= checkpoint size (warnings-only).
+        Verify total accelerator memory >= checkpoint size. (Rules.md 4.3.4)
 
-        The per-accelerator memory baseline is the H100's 80 GiB; checkpointing
-        metadata carries no accelerator-type field, so this is advisory. A
-        shortfall is surfaced to reviewers via ``warn_violation`` and never
-        flips a submission INVALID (late-window doctrine). Always returns True.
-        (Rules.md 4.3.4)
+        The per-accelerator memory baseline is the H100's 80 GiB because
+        checkpointing metadata carries no accelerator-type field; the
+        message names the baseline so a reviewer can re-check against the
+        actual accelerator. A shortfall is a hard failure. (The v3.0 round
+        downgraded it to a warning — worklist C2; retired with the round.)
         """
         valid = True
         if self.mode != "checkpointing":
@@ -334,7 +334,7 @@ class CheckpointingCheck(BaseCheck):
             total_accelerator_memory = num_accelerators * ACCELERATOR_MEMORY_GB
 
             if total_accelerator_memory < checkpoint_size_gb:
-                self.warn_violation(
+                self.log_violation(
                     "4.3.4", "checkpointAggregateAcceleratorMemory", self.path,
                     "aggregate accelerator memory %.2fGiB (%d accelerators x 80 GiB "
                     "H100 baseline) < checkpoint size %.2fGiB; verify against the "
@@ -343,6 +343,7 @@ class CheckpointingCheck(BaseCheck):
                     num_accelerators,
                     checkpoint_size_gb,
                 )
+                valid = False
 
         return valid
     
@@ -669,8 +670,10 @@ class CheckpointingCheck(BaseCheck):
         DLIO summary field:
 
           * missing ``read.metadata.invocation_start_time`` →
-            ``read.summary.start_time`` (predates #714). Downgrades a gap
-            breach to ``warn_violation``.
+            ``read.summary.start_time`` (predates #714). A breach measured
+            this way is still a hard failure; the message notes that the
+            reading includes per-invocation framework startup and points
+            the submitter at a re-run with a current mlpstorage.
           * missing ``write.metadata.invocation_end_time`` → the latest
             post-benchmark ``collection_timestamp`` in the write-phase
             metadata, when present (the last node to finish the final cluster
@@ -682,9 +685,9 @@ class CheckpointingCheck(BaseCheck):
             in the gap; the submitter should re-run with a current mlpstorage
             to get the honest measurement.
 
-        **Special-build relaxation** — a gap breach (>30s) is reported as a
-        ``warn_violation`` rather than a hard failure, so it never
-        invalidates the submission.
+        A gap breach (>30s) is a hard failure. (The v3.0 round reported it
+        as a warning — special build PR #834, then worklist A7 for every
+        submitter; that relaxation was retired when the round closed.)
 
         A negative gap indicates NTP skew between the write and read nodes
         (the metadata fields are timestamped on their respective invocation
@@ -738,8 +741,8 @@ class CheckpointingCheck(BaseCheck):
             if read_start is None:
                 # Backward-compat fallback for results dirs that predate
                 # storage#714 and don't carry invocation_start_time.
-                # Measure against read.summary.start_time and downgrade
-                # any breach to warn_violation below.
+                # Measure against read.summary.start_time; a breach is
+                # still a hard failure, labeled as non-authoritative below.
                 read_start = (read_summary or {}).get("start_time") or (read_summary or {}).get("start")
                 read_origin_label = "read summary start"
                 used_legacy_read_origin = True
@@ -790,12 +793,12 @@ class CheckpointingCheck(BaseCheck):
                 continue
             if gap_seconds > 30:
                 if used_legacy_read_origin:
-                    # Pre-fix results dir: honor the rule that was in force
-                    # when the run was produced by warning rather than
-                    # failing. The gap measurement here includes per-
-                    # invocation framework startup and is not authoritative
-                    # against the new (invocation_start_time-based) rule.
-                    self.warn_violation(
+                    # Pre-fix results dir: the gap measurement includes
+                    # per-invocation framework startup and is not
+                    # authoritative against the invocation_start_time-based
+                    # rule, but a breach still fails — the remedy is a
+                    # re-run with a current mlpstorage.
+                    self.log_violation(
                         "4.7.1", "checkpointCacheFlushValidation", self.path,
                         "failover-callout gap %.1f seconds exceeds 30-second "
                         "limit, measured against read.summary.start_time "
@@ -808,10 +811,9 @@ class CheckpointingCheck(BaseCheck):
                         "(write end=%s, read start=%s)",
                         gap_seconds, write_end, read_start,
                     )
+                    valid = False
                     continue
-                # Special-build relaxation: a gap breach is reported as a
-                # warning rather than invalidating the submission.
-                self.warn_violation(
+                self.log_violation(
                     "4.7.1", "checkpointCacheFlushValidation", self.path,
                     "failover-callout gap %.1f seconds exceeds 30-second limit "
                     "(%s=%s, %s=%s)",
@@ -819,6 +821,7 @@ class CheckpointingCheck(BaseCheck):
                     write_origin_label, write_end,
                     read_origin_label, read_start,
                 )
+                valid = False
         return valid
 
     @rule("4.7.1", "checkpointCacheFlushValidation")
@@ -1048,8 +1051,10 @@ class CheckpointingCheck(BaseCheck):
         ``SCHEMA_ERROR_RULE_MAP`` tagged with 4.7.4 — those catch
         declaration-side defects that surface before any benchmark runs).
 
-        Warnings-only enforcement (never fails — submission-window
-        doctrine): a completed checkpointing run has already demonstrated
+        Warnings-only enforcement (never fails): Rules.md 4.7.4 only
+        requires the capabilities to be *listed*, so a contradictory value
+        is advisory by specification. A completed checkpointing run has
+        already demonstrated
         simultaneous R/W on the shared namespace via the CAP-02 probe, so a
         system description that declares either capability as ``false``
         CONTRADICTS the run it accompanies. The validator surfaces that
@@ -1102,9 +1107,10 @@ class CheckpointingCheck(BaseCheck):
 
         Analog of TRAIN-02 for checkpointing. Per D-B5, shares
         _check_filesystem_separation helper. Per D-B7, silent-passes when
-        benchmark_API == 'object'. D-B8: when both the CAP-03 sidecar and
-        the df block are absent, emit a WARN under this rule ID so pre-#601
-        legacy runs are not blocked at ingest.
+        benchmark_API == 'object'. Same filesystem, or no evidence at all
+        (no CAP-03 sidecar and no df block — D-B8), is a hard error. (The
+        v3.0 round emitted both at WARN, PRs #788 and #800; retired with
+        the round.)
         """
         valid = True
         if self.mode != "checkpointing":
@@ -1119,10 +1125,11 @@ class CheckpointingCheck(BaseCheck):
             sidecar = read_fs_separation_sidecar(run_dir)
             if sidecar is not None:
                 if sidecar.get("same_filesystem"):
-                    self.warn_violation(
+                    self.log_violation(
                         "4.4.2", "checkpointFilesystemCheck", logfile_path,
                         "checkpoint_folder and results_dir are on the same filesystem",
                     )
+                    valid = False
                 continue
             args = metadata.get("args", {})
             # For checkpointing, checkpoint_folder is the "data path" analog (RESEARCH.md).
@@ -1133,18 +1140,18 @@ class CheckpointingCheck(BaseCheck):
             ok, df_found = _check_filesystem_separation(chkpt_args, logfile_path)
             if not df_found:
                 # D-B8: no CAP-03 sidecar AND no df block → no evidence of
-                # FS separation. Emit at WARN so pre-#601 legacy runs are
-                # not silently blocked at ingest; reviewers must confirm
-                # checkpoint_folder / results_dir separation manually.
-                self.warn_violation(
+                # FS separation → hard error.
+                self.log_violation(
                     "4.4.2", "checkpointFilesystemCheck", logfile_path,
                     "fs_separation.json sidecar not found and df block also absent; "
-                    "cannot verify checkpoint_folder/results_dir separation — reviewer must confirm manually",
+                    "cannot verify checkpoint_folder/results_dir separation",
                 )
+                valid = False
                 continue
             if not ok:
-                self.warn_violation(
+                self.log_violation(
                     "4.4.2", "checkpointFilesystemCheck", logfile_path,
                     "checkpoint_folder and results_dir are on the same filesystem",
                 )
+                valid = False
         return valid

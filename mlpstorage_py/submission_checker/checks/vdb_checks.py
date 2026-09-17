@@ -114,13 +114,6 @@ _CLOSED_ALLOWED_PARAMS = frozenset({
 })
 
 
-# Ruleset versions for which §5.4.1 vdbPathArgs reports a missing/duplicate VDB
-# storage path as a WARNING rather than a hard failure. The storage-root
-# recording (storage#802) shipped mid-v3.0, so pre-fix v3.0 submissions cannot
-# carry it; a later round restores the hard error by dropping v3.0 from this set.
-_VDB_PATH_ARGS_WARN_VERSIONS = frozenset({"v3.0"})
-
-
 # Additional OPEN params beyond the CLOSED set (Rules.md §5.6.5 table).
 # Backend-specific params (pgvector lists/probes, Elasticsearch m / ef_construction
 # / num_candidates, etc.) are NOT enumerable up-front; non-Milvus backends are
@@ -655,10 +648,14 @@ class VdbCheck(BaseCheck):
         The raw ``flat_setup`` fields are read directly; the stored
         ``valid``/``result`` verdict is deliberately not trusted — issue #805
         showed a buggy run can record ``valid: true`` over a broken
-        measurement. A run whose ``result_verdict.json`` is absent, unreadable,
-        or carries no ``flat_setup`` record (e.g. a ``--no-create-flat`` worker
-        that validated the ground truth elsewhere) cannot be assessed here and
-        is warned, never failed.
+        measurement. A run whose ``result_verdict.json`` is absent or
+        unreadable fails: every current mlpstorage writes the record, so
+        without it the ground truth cannot be shown complete. (The v3.0
+        round warned instead, PR #809, so pre-#806 artifacts were not
+        false-failed; retired with the round.) A verdict that is present
+        but carries no ``flat_setup`` record (e.g. a ``--no-create-flat``
+        worker that validated the ground truth elsewhere) cannot be
+        assessed here and is warned, not failed.
         """
         valid = True
         if self.mode != "vector_database":
@@ -669,23 +666,24 @@ class VdbCheck(BaseCheck):
             any_run = True
             verdict_path = os.path.join(self.run_path, ts, "result_verdict.json")
             if not os.path.isfile(verdict_path):
-                self.warn_violation(
+                self.log_violation(
                     "5.3.5", "vdbGroundTruthIntegrity", self.path,
                     "no result_verdict.json at %s/%s; FLAT ground-truth "
-                    "coverage cannot be assessed (run predates the integrity "
-                    "record)",
+                    "coverage cannot be shown complete",
                     self.path, ts,
                 )
+                valid = False
                 continue
 
             verdict = self._read_result_verdict(verdict_path)
             if verdict is None:
-                self.warn_violation(
+                self.log_violation(
                     "5.3.5", "vdbGroundTruthIntegrity", self.path,
                     "result_verdict.json at %s/%s could not be read; FLAT "
-                    "ground-truth coverage not assessed",
+                    "ground-truth coverage cannot be shown complete",
                     self.path, ts,
                 )
+                valid = False
                 continue
 
             flat_setup = verdict.get("flat_setup") if isinstance(verdict, dict) else None
@@ -764,11 +762,11 @@ class VdbCheck(BaseCheck):
         backend with no submitter-owned local path, so a storage root is not
         required here — the backend is validated under §5.5.1.
 
-        Severity (storage#802): the storage-root plumbing shipped mid-v3.0, so
-        for the v3.0 ruleset a missing or duplicate path is a WARNING and the
-        run stays valid; a later ruleset version restores the hard error (see
-        ``_VDB_PATH_ARGS_WARN_VERSIONS``). A correctly configured run emits no
-        message at all.
+        A missing or duplicate path is a hard failure under every ruleset
+        version. (The v3.0 round carried a version-gated WARN-only
+        relaxation, PR #815, because the storage-root plumbing of
+        storage#802 shipped mid-round; it was retired when the round
+        closed.) A correctly configured run emits no message at all.
         """
         valid = True
         if self.mode != "vector_database":
@@ -779,10 +777,6 @@ class VdbCheck(BaseCheck):
         # 5.4.2's object-API handling.
         if self._get_benchmark_api() == "object":
             return valid
-
-        warn_only = (
-            getattr(self.config, "version", None) in _VDB_PATH_ARGS_WARN_VERSIONS
-        )
 
         any_run = False
         for summary, metadata, ts in self._iter_run_files():
@@ -805,44 +799,32 @@ class VdbCheck(BaseCheck):
             results_dir = args.get("results_dir")
 
             if not data_path:
-                if self._emit_path_arg_finding(
-                    warn_only,
+                self.log_violation(
+                    "5.4.1", "vdbPathArgs", self.path,
                     "vdbPathArgs: vdb data path (storage_root) not set in "
                     "metadata at %s/%s",
                     self.path, ts,
-                ):
-                    valid = False
+                )
+                valid = False
             if not results_dir:
-                if self._emit_path_arg_finding(
-                    warn_only,
+                self.log_violation(
+                    "5.4.1", "vdbPathArgs", self.path,
                     "vdbPathArgs: results_dir not set in metadata at %s/%s",
                     self.path, ts,
-                ):
-                    valid = False
+                )
+                valid = False
             if data_path and results_dir and data_path == results_dir:
-                if self._emit_path_arg_finding(
-                    warn_only,
+                self.log_violation(
+                    "5.4.1", "vdbPathArgs", self.path,
                     "vdbPathArgs: vdb data path %s and results_dir %s must differ",
                     data_path, results_dir,
-                ):
-                    valid = False
+                )
+                valid = False
 
         if not any_run:
             self._vdb_loader_gap_warning("5.4.1", "vdbPathArgs")
 
         return valid
-
-    def _emit_path_arg_finding(self, warn_only, msg, *args):
-        """Emit a §5.4.1 finding at WARN (v3.0 round) or ERROR (later rulesets).
-
-        Returns ``True`` when the finding is a hard failure that must flip
-        ``valid`` to False; ``False`` when it was emitted as an advisory warning.
-        """
-        if warn_only:
-            self.warn_violation("5.4.1", "vdbPathArgs", self.path, msg, *args)
-            return False
-        self.log_violation("5.4.1", "vdbPathArgs", self.path, msg, *args)
-        return True
 
     @rule("5.4.2", "vdbFilesystemCheck")
     def vdb_filesystem_check(self):
@@ -851,7 +833,10 @@ class VdbCheck(BaseCheck):
 
         Reuses the canonical ``_check_filesystem_separation`` helper that
         TrainingCheck.3.4.2 / CheckpointingCheck.4.4.2 use. Object-API
-        submissions silent-pass (D-B7).
+        submissions silent-pass (D-B7). Same filesystem, or no evidence at
+        all (no CAP-03 sidecar and no df block — D-B8), is a hard error.
+        (The v3.0 round emitted both at WARN, PRs #788 and #800; retired
+        with the round.)
         """
         valid = True
         if self.mode != "vector_database":
@@ -877,11 +862,12 @@ class VdbCheck(BaseCheck):
             sidecar = read_fs_separation_sidecar(run_dir)
             if sidecar is not None:
                 if sidecar.get("same_filesystem"):
-                    self.warn_violation(
+                    self.log_violation(
                         "5.4.2", "vdbFilesystemCheck", logfile_path,
                         "vdbFilesystemCheck: vdb data path and results_dir are on the "
                         "same filesystem",
                     )
+                    valid = False
                 continue
             # _check_filesystem_separation looks up "data_dir" or
             # "checkpoint_folder"; for vdb the analog is storage_root. Synthesize
@@ -894,21 +880,21 @@ class VdbCheck(BaseCheck):
             ok, df_found = _check_filesystem_separation(shim_args, logfile_path)
             if not df_found:
                 # D-B8: no CAP-03 sidecar AND no df block → no evidence of
-                # FS separation. Emit at WARN so pre-#601 legacy runs are
-                # not silently blocked at ingest; reviewers must confirm
-                # storage_root / results_dir separation manually.
-                self.warn_violation(
+                # FS separation → hard error.
+                self.log_violation(
                     "5.4.2", "vdbFilesystemCheck", logfile_path,
                     "fs_separation.json sidecar not found and df block also absent; "
-                    "cannot verify vdb storage_root/results_dir separation — reviewer must confirm manually",
+                    "cannot verify vdb storage_root/results_dir separation",
                 )
+                valid = False
                 continue
             if not ok:
-                self.warn_violation(
+                self.log_violation(
                     "5.4.2", "vdbFilesystemCheck", logfile_path,
                     "vdbFilesystemCheck: vdb data path and results_dir are on the "
                     "same filesystem",
                 )
+                valid = False
 
         if not any_run:
             self._vdb_loader_gap_warning("5.4.2", "vdbFilesystemCheck")

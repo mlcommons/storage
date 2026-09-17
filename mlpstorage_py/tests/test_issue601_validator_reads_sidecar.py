@@ -262,16 +262,16 @@ class TestRule3_4_2_TrainingSidecar:
 
         result = check.mlpstorage_filesystem_check()
 
-        assert result is True
-        assert check.log.error.call_args_list == []
-        violations = [str(c) for c in check.log.warning.call_args_list]
+        assert result is False
+        assert check.log.warning.call_args_list == []
+        violations = [str(c) for c in check.log.error.call_args_list]
         assert any("same filesystem" in v for v in violations), violations
 
     def test_no_sidecar_no_df_fires_db8(self, tmp_path):
-        """Missing sidecar AND missing df-block → D-B8 WARN under 3.4.2.
+        """Missing sidecar AND missing df-block → D-B8 hard error under 3.4.2.
 
-        Downgraded from hard-fail to WARN so pre-#601 legacy runs are not
-        blocked at ingest — reviewers verify separation manually.
+        PR #800 downgraded this to WARN for the v3.0 round so pre-#601
+        legacy runs were not blocked at ingest; retired with the round.
         """
         leaf, ts_dir, run_files = _build_training_tree(
             tmp_path, write_sidecar=False, write_logfile=True,
@@ -280,12 +280,12 @@ class TestRule3_4_2_TrainingSidecar:
 
         result = check.mlpstorage_filesystem_check()
 
-        assert result is True
-        assert check.log.error.call_args_list == []
-        violations = [str(c) for c in check.log.warning.call_args_list]
+        assert result is False
+        assert check.log.warning.call_args_list == []
+        violations = [str(c) for c in check.log.error.call_args_list]
         assert any(
             "[3.4.2 trainingMlpstorageFilesystemCheck]" in v for v in violations
-        ), f"expected a 3.4.2 warning; got: {violations}"
+        ), f"expected a 3.4.2 error; got: {violations}"
 
 
 # ---------------------------------------------------------------------------
@@ -319,9 +319,9 @@ class TestRule4_4_2_CheckpointingSidecar:
 
         result = check.checkpoint_filesystem_check()
 
-        assert result is True
-        assert check.log.error.call_args_list == []
-        violations = [str(c) for c in check.log.warning.call_args_list]
+        assert result is False
+        assert check.log.warning.call_args_list == []
+        violations = [str(c) for c in check.log.error.call_args_list]
         assert any("same filesystem" in v for v in violations), violations
 
 
@@ -352,7 +352,7 @@ class TestRule5_4_2_VdbSidecar:
 
         result = check.vdb_filesystem_check()
 
-        assert result is True
-        assert check.log.error.call_args_list == []
-        violations = [str(c) for c in check.log.warning.call_args_list]
+        assert result is False
+        assert check.log.warning.call_args_list == []
+        violations = [str(c) for c in check.log.error.call_args_list]
         assert any("same filesystem" in v for v in violations), violations

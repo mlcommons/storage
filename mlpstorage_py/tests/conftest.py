@@ -378,8 +378,8 @@ def build_submission(tmp_path, **overrides) -> Path:
       (simulates a results dir produced by an mlpstorage version predating
       storage#714). Exercises the backward-compat fallback path in
       ``cache_flush_validation`` — the check falls back to
-      ``read.summary.start_time`` and downgrades a 30-second breach from
-      hard failure to warning.
+      ``read.summary.start_time`` and labels any 30-second breach as a
+      non-authoritative measurement (still a hard failure).
     * ``chkpt_omit_invocation_end_time`` (bool, default False) — CHKPT-02
       (storage#782): when True, do NOT emit ``invocation_end_time`` in
       write-side metadata (simulates a results dir produced by an mlpstorage
@@ -1025,8 +1025,17 @@ def build_submission(tmp_path, **overrides) -> Path:
                 # 5.4.2 vdbFilesystemCheck reads a CAP-03 fs_separation.json
                 # sidecar per timestamp (falls back to df-block parsing);
                 # the sidecar is the simpler path for a synthetic fixture.
+                # 5.3.5 vdbGroundTruthIntegrity requires a result_verdict.json
+                # per run whose flat_setup shows a complete ground truth.
                 vdb_run_dir = index_path / "run"
                 vdb_run_dir.mkdir()
+                vdb_result_verdict = {
+                    "result": "valid",
+                    "valid": True,
+                    "num_queries_evaluated": 1000,
+                    "flat_setup": {"ok": True, "coverage": 1.0,
+                                   "total_vectors": 1000, "copied_vectors": 1000},
+                }
                 for i in range(5):
                     vdb_run_ts = vdb_run_dir / f"2025011{3 + i}_140000"
                     vdb_run_ts.mkdir()
@@ -1038,6 +1047,9 @@ def build_submission(tmp_path, **overrides) -> Path:
                     )
                     (vdb_run_ts / "fs_separation.json").write_text(
                         json.dumps({"same_filesystem": False}), encoding="utf-8"
+                    )
+                    (vdb_run_ts / "result_verdict.json").write_text(
+                        json.dumps(vdb_result_verdict), encoding="utf-8"
                     )
 
             # ---------------------------------------------------------------

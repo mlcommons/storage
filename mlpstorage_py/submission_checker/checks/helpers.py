@@ -115,7 +115,7 @@ def _check_filesystem_separation(
       - ``(False, True)``  — same mount (violation; caller emits [3.4.2] or [4.4.2])
       - ``(False, False)`` — df block not found / logfile missing (D-B4; when
                               the CAP-03 sidecar is also absent, caller emits
-                              a WARN under the D-B8 evidence-gap path)
+                              a hard error under the D-B8 evidence-gap path)
 
     **D-B3 silent-skip:** returns ``(True, True)`` when either ``data_dir`` or
     ``results_dir`` is absent from *metadata_args*. The sibling check
@@ -131,7 +131,7 @@ def _check_filesystem_separation(
     line when it is too long) is OUT OF SCOPE for this MVP. TODO-001 defines a
     machine-readable ``df`` output contract that will supersede this parser.
     Until then, real submissions with wrapped device names fall through to
-    the D-B8 evidence-gap WARN path (unless a CAP-03 sidecar is present),
+    the D-B8 evidence-gap error path (unless a CAP-03 sidecar is present),
     which is the desired gap-surfacing behaviour.
 
     Args:
@@ -174,7 +174,7 @@ def _check_filesystem_separation(
     # multi-line-device-name parse limitation and the substring-matching
     # fragility called out in WR-06's silent-pass case. Until that migration
     # lands, real submissions with wrapped device names fall through to the
-    # D-B8 evidence-gap WARN path (unless a CAP-03 sidecar is present).
+    # D-B8 evidence-gap error path (unless a CAP-03 sidecar is present).
     mounts = []
     header_end = content.find("\n", match.end())  # find the end of the header line
     if header_end == -1:

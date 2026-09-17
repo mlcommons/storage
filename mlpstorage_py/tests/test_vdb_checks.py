@@ -736,9 +736,13 @@ class Test_5_3_5_VdbGroundTruthIntegrity:
     invalidates the run. The raw flat_setup fields are read directly; the
     stored verdict string is not trusted (issue #805 showed it can be wrong).
 
-    A missing/unreadable result_verdict.json (pre-#806 artifacts, or a
-    --no-create-flat worker whose verdict carries flat_setup: null) is "not
-    assessable": it warns but never false-fails a run.
+    A missing or unreadable result_verdict.json is a hard failure: every
+    current mlpstorage writes it, so its absence means the ground truth
+    cannot be shown complete. (The v3.0 round warned instead, PR #809, so
+    pre-#806 artifacts were not false-failed; retired with the round.) A
+    verdict that is present but carries ``flat_setup: null`` — the
+    --no-create-flat worker that validated the ground truth elsewhere —
+    remains "not assessable" and warns.
     """
 
     def _write_verdict(self, leaf, ts, flat_setup, valid=True):
@@ -812,14 +816,16 @@ class Test_5_3_5_VdbGroundTruthIntegrity:
         viol = _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity")
         assert len([v for v in viol if "coverage" in v]) == len(_DEFAULT_RUN_TIMESTAMPS)
 
-    def test_missing_result_verdict_warns_not_fails(self, tmp_path, mock_logger):
-        # No result_verdict.json — a pre-#806 artifact. Not assessable.
+    def test_missing_result_verdict_fails(self, tmp_path, mock_logger):
+        # No result_verdict.json — post-v3.0 the ground truth cannot be
+        # shown complete, so the run fails.
         leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "AISAQ")
         run_files = [(_summary_run(), _metadata(), _DEFAULT_RUN_TIMESTAMPS[0])]
         check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
-        assert check.vdb_ground_truth_integrity() is True
-        assert _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity") == []
-        assert _warnings(mock_logger, "5.3.5", "vdbGroundTruthIntegrity")
+        assert check.vdb_ground_truth_integrity() is False
+        assert _warnings(mock_logger, "5.3.5", "vdbGroundTruthIntegrity") == []
+        viol = _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity")
+        assert any("no result_verdict.json" in v for v in viol), viol
 
     def test_null_flat_setup_warns_not_fails(self, tmp_path, mock_logger):
         # --no-create-flat worker path: verdict present, flat_setup null.
@@ -832,7 +838,7 @@ class Test_5_3_5_VdbGroundTruthIntegrity:
         assert _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity") == []
         assert _warnings(mock_logger, "5.3.5", "vdbGroundTruthIntegrity")
 
-    def test_unreadable_result_verdict_warns_not_fails(self, tmp_path, mock_logger):
+    def test_unreadable_result_verdict_fails(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "AISAQ")
         ts = _DEFAULT_RUN_TIMESTAMPS[0]
         (leaf / "run" / ts / "result_verdict.json").write_text(
@@ -840,8 +846,10 @@ class Test_5_3_5_VdbGroundTruthIntegrity:
         )
         run_files = [(_summary_run(), _metadata(), ts)]
         check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
-        assert check.vdb_ground_truth_integrity() is True
-        assert _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity") == []
+        assert check.vdb_ground_truth_integrity() is False
+        assert _warnings(mock_logger, "5.3.5", "vdbGroundTruthIntegrity") == []
+        viol = _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity")
+        assert any("could not be read" in v for v in viol), viol
 
     def test_noop_on_non_vdb_mode(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "AISAQ")
@@ -870,10 +878,12 @@ class Test_5_4_1_VdbPathArgs:
     """§5.4.1 vdbPathArgs — storage-root recording (issue #802).
 
     For file-API runs the storage path (storage_root) and results_dir must both
-    be set and differ. The storage-root plumbing shipped mid-v3.0, so for the
-    v3.0 ruleset a missing/duplicate path is a WARNING (advisory, valid stays
-    True); a later ruleset version restores the hard error. Object-API runs
-    have no submitter-owned local path, so they silent-pass (§5.5.1 owns the
+    be set and differ; a missing or duplicate path is a hard failure. The
+    storage-root plumbing shipped mid-v3.0 and that round carried a
+    version-gated WARN-only relaxation (PR #815) for submissions produced
+    before it; the round is closed and the relaxation is retired, so the
+    rule fails under every ruleset version. Object-API runs have no
+    submitter-owned local path, so they silent-pass (§5.5.1 owns the
     backend check).
     """
 
@@ -893,9 +903,9 @@ class Test_5_4_1_VdbPathArgs:
         assert _violations(mock_logger, "5.4.1", "vdbPathArgs") == []
         assert _warnings(mock_logger, "5.4.1", "vdbPathArgs") == []
 
-    def test_missing_storage_root_warns_in_v3(self, tmp_path, mock_logger):
-        # The issue #802 scenario: real VDB metadata carries no storage_root.
-        # For v3.0 this is advisory — a WARNING, and the run stays valid.
+    def test_missing_storage_root_hard_errors_in_v3(self, tmp_path, mock_logger):
+        # The issue #802 scenario: VDB metadata carries no storage_root.
+        # Post-v3.0 this is a hard failure under the v3.0 ruleset too.
         leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "DISKANN")
         run_files = [
             (_summary_run(),
@@ -903,14 +913,14 @@ class Test_5_4_1_VdbPathArgs:
              "20260618_120100"),
         ]
         check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
-        assert check.vdb_path_args() is True
-        assert _violations(mock_logger, "5.4.1", "vdbPathArgs") == []
+        assert check.vdb_path_args() is False
+        assert _warnings(mock_logger, "5.4.1", "vdbPathArgs") == []
         assert any(
-            "storage_root" in w or "data path" in w
-            for w in _warnings(mock_logger, "5.4.1", "vdbPathArgs")
-        ), _warnings(mock_logger, "5.4.1", "vdbPathArgs")
+            "storage_root" in v or "data path" in v
+            for v in _violations(mock_logger, "5.4.1", "vdbPathArgs")
+        ), _violations(mock_logger, "5.4.1", "vdbPathArgs")
 
-    def test_equal_paths_warn_in_v3(self, tmp_path, mock_logger):
+    def test_equal_paths_hard_error_in_v3(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "DISKANN")
         run_files = [
             (_summary_run(),
@@ -918,17 +928,17 @@ class Test_5_4_1_VdbPathArgs:
              "20260618_120100"),
         ]
         check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
-        assert check.vdb_path_args() is True
-        assert _violations(mock_logger, "5.4.1", "vdbPathArgs") == []
+        assert check.vdb_path_args() is False
+        assert _warnings(mock_logger, "5.4.1", "vdbPathArgs") == []
         assert any(
-            "must differ" in w
-            for w in _warnings(mock_logger, "5.4.1", "vdbPathArgs")
+            "must differ" in v
+            for v in _violations(mock_logger, "5.4.1", "vdbPathArgs")
         )
 
     def test_missing_storage_root_hard_errors_in_later_version(
         self, tmp_path, mock_logger
     ):
-        # The v3.0 leniency is scoped: a later ruleset restores the hard error.
+        # Same hard error under a later ruleset version (no version gate).
         leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "DISKANN")
         run_files = [
             (_summary_run(),
@@ -1013,10 +1023,10 @@ class Test_5_4_2_VdbFilesystemCheck:
         check = _make_vdb_check(
             leaf, "closed", mock_logger, run_files=run_files,
         )
-        assert check.vdb_filesystem_check() is True
-        assert _violations(mock_logger, "5.4.2", "vdbFilesystemCheck") == []
-        warn = _warnings(mock_logger, "5.4.2", "vdbFilesystemCheck")
-        assert any("same filesystem" in v for v in warn), warn
+        assert check.vdb_filesystem_check() is False
+        assert _warnings(mock_logger, "5.4.2", "vdbFilesystemCheck") == []
+        viol = _violations(mock_logger, "5.4.2", "vdbFilesystemCheck")
+        assert any("same filesystem" in v for v in viol), viol
 
 
 # ===========================================================================
