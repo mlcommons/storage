@@ -70,7 +70,7 @@ def test_open_training_accepts_open_only_params():
 def test_checkpointing_checkpoint_folder_is_changeable(mode):
     """Rules.md §4.6 Table 3: --checkpoint-folder is Changeable in CLOSED and OPEN."""
     argv = ['mlpstorage', mode, 'checkpointing', 'run',
-            '-cm', '64', '-m', 'llama3-8b', '-np', '8',
+            '-cm', '64', '-m', 'llama3-8b', '-np', '8', '-at', 'b200',
             '-cf', '/tmp/some/custom/path', '-rd', '/tmp',
             '-sn', 'sys-v1', 'file']
     with patch('sys.argv', argv):
@@ -87,7 +87,7 @@ def test_checkpointing_dlio_bin_path_is_accessible(mode):
     regardless of mode.
     """
     argv = ['mlpstorage', mode, 'checkpointing', 'run',
-            '-cm', '64', '-m', 'llama3-8b', '-np', '8',
+            '-cm', '64', '-m', 'llama3-8b', '-np', '8', '-at', 'b200',
             '-cf', '/tmp/ckpt', '-rd', '/tmp',
             '-sn', 'sys-v1', 'file',
             '--dlio-bin-path', '/opt/custom/dlio']

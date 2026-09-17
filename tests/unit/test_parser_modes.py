@@ -123,7 +123,7 @@ class TestOpenGatedArgExclusion:
     def test_closed_checkpointing_rejects_loops(self):
         """closed checkpointing run must reject --loops with a non-zero SystemExit."""
         argv = ['mlpstorage', 'closed', 'checkpointing', 'run',
-                '-cm', '64', '-m', 'llama3-8b', '-np', '2',
+                '-cm', '64', '-m', 'llama3-8b', '-np', '2', '-at', 'b200',
                 '-cf', '/tmp', '-rd', '/tmp', '-sn', 'sys-v1', 'file',
                 '--loops', '2']
         with patch('sys.argv', argv):

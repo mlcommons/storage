@@ -315,6 +315,7 @@ CK_RUN_CLOSED
   Required:
     --model/-m {llama3-8b,llama3-70b,llama3-405b,llama3-1t}
     --num-processes/-np N
+    --accelerator-type/-at {b200,mi355}
     --checkpoint-folder/-cf PATH
     --client-host-memory-in-gb/-cm N
     --results-dir/-rd PATH          (or MLPERF_RESULTS_DIR)
@@ -349,7 +350,8 @@ CK_RUN_OPEN
         and any non-negative integer for --num-checkpoints-read/-write
 
 CK_RUN_WHATIF
-  = CK_RUN_OPEN  (--model choices identical; flags identical)
+  = CK_RUN_OPEN but:
+    --accelerator-type choices: {h100,a100,b200,mi355}
 
 ──────────────────────────────────────────────────────────────────
 
@@ -357,6 +359,7 @@ CK_CONFIGVIEW_CLOSED
   Required:
     --model/-m {llama3-8b,llama3-70b,llama3-405b,llama3-1t}
     --num-processes/-np N
+    --accelerator-type/-at {b200,mi355}
     --client-host-memory-in-gb/-cm N
     --results-dir/-rd PATH          (or MLPERF_RESULTS_DIR)
     --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
@@ -378,7 +381,8 @@ CK_CONFIGVIEW_OPEN
   + OPEN_STD
 
 CK_CONFIGVIEW_WHATIF
-  = CK_CONFIGVIEW_OPEN  (flags identical)
+  = CK_CONFIGVIEW_OPEN but:
+    --accelerator-type choices: {h100,a100,b200,mi355}
 
 Placeholder definitions — VECTORDB
 

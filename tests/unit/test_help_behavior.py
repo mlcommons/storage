@@ -284,7 +284,7 @@ class TestRegression:
         # checkpointing run with file storage positional
         (
             ['mlpstorage', 'closed', 'checkpointing', 'run',
-             '-cm', '1024', '-m', 'llama3-8b', '-np', '2',
+             '-cm', '1024', '-m', 'llama3-8b', '-np', '2', '-at', 'b200',
              '-cf', '/tmp/ckpt', '-rd', '/tmp', '-sn', 'sys-v1', 'file'],
             {'benchmark': 'checkpointing', 'command': 'run'},
         ),

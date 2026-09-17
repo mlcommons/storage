@@ -7,7 +7,10 @@ including datasize, run, and configview commands.
 
 import sys
 
-from mlpstorage_py.config import DEFAULT_HOSTS, EXEC_TYPE, LLM_MODELS, LLM_MODELS_CLOSED, EXIT_CODE
+from mlpstorage_py.config import (
+    ACCELERATORS, ACCELERATORS_CLOSED, DEFAULT_HOSTS, EXEC_TYPE, LLM_MODELS,
+    LLM_MODELS_CLOSED, EXIT_CODE,
+)
 from mlpstorage_py.cli.common_args import (
     HELP_MESSAGES,
     add_universal_arguments,
@@ -28,6 +31,7 @@ def add_checkpointing_arguments(parser, mode):
     """
     checkpointing_subparsers = parser.add_subparsers(dest="command", required=True)
     parser.required = True
+    accel_choices = ACCELERATORS if mode == "whatif" else ACCELERATORS_CLOSED
 
     # Create subcommand parsers
     datasize = checkpointing_subparsers.add_parser(
@@ -45,17 +49,20 @@ def add_checkpointing_arguments(parser, mode):
 
     for cmd_name, cmd_parser in [("datasize", datasize), ("run", run_benchmark),
                                   ("configview", configview)]:
-        _add_checkpointing_core_args(cmd_parser, cmd_name)
+        _add_checkpointing_core_args(cmd_parser, cmd_name, accel_choices)
         if mode in ("open", "whatif"):
             _add_checkpointing_open_args(cmd_parser, cmd_name)
 
 
-def _add_checkpointing_core_args(parser, command):
+def _add_checkpointing_core_args(parser, command, accel_choices):
     """Add core (closed/open/whatif) checkpointing arguments to a subcommand parser.
 
     Args:
         parser: The subcommand parser to add arguments to.
         command: The subcommand name ('datasize', 'run', 'configview').
+        accel_choices: Accelerator types accepted by --accelerator-type in
+            this submission mode (closed/open: ACCELERATORS_CLOSED; whatif:
+            every ACCELERATORS entry).
     """
     # Set defaults for open-gated attrs so they always exist in the namespace
     parser.set_defaults(
@@ -89,6 +96,18 @@ def _add_checkpointing_core_args(parser, command):
         required=True,
         help=HELP_MESSAGES['num_checkpoint_accelerators']
     )
+
+    # Accelerator type for run and configview — NOT datasize (which sizes by
+    # host memory and model only). Recorded in the run metadata so Rules.md
+    # 4.3.4 (checkpointAggregateAcceleratorMemory) can use the memory of the
+    # accelerator actually simulated instead of assuming an 80 GiB H100.
+    if command in ("run", "configview"):
+        parser.add_argument(
+            '--accelerator-type', '-at',
+            choices=accel_choices,
+            required=True,
+            help=HELP_MESSAGES['checkpoint_accelerator_type']
+        )
 
     parser.add_argument(
         '--exec-type', '-et',

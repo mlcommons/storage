@@ -408,6 +408,7 @@ class TestAddCheckpointingArguments:
             'run',
             '--model', 'llama3-70b',
             '--num-processes', '64',
+            '--accelerator-type', 'b200',
             '--client-host-memory-in-gb', '1024',
             '--checkpoint-folder', '/ckpt',
             '--results-dir', '/tmp',
@@ -424,6 +425,7 @@ class TestAddCheckpointingArguments:
             'run',
             '--model', 'llama3-8b',
             '--num-processes', '8',
+            '--accelerator-type', 'b200',
             '--client-host-memory-in-gb', '512',
             '--checkpoint-folder', '/ckpt',
             '--results-dir', '/tmp',
@@ -439,6 +441,7 @@ class TestAddCheckpointingArguments:
             'run',
             '--model', 'llama3-8b',
             '--num-processes', '8',
+            '--accelerator-type', 'b200',
             '--client-host-memory-in-gb', '512',
             '--checkpoint-folder', '/ckpt',
             '--results-dir', '/tmp',
@@ -452,6 +455,7 @@ class TestAddCheckpointingArguments:
         """Open mode should expose --loops for checkpointing run."""
         args = parser.parse_args([
             'run', '--model', 'llama3-8b', '--num-processes', '8',
+            '--accelerator-type', 'b200',
             '--client-host-memory-in-gb', '512', '--checkpoint-folder', '/ckpt',
             '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file',
             '--loops', '5',
@@ -462,6 +466,7 @@ class TestAddCheckpointingArguments:
         """Open mode should expose --params for checkpointing run."""
         args = parser.parse_args([
             'run', '--model', 'llama3-8b', '--num-processes', '8',
+            '--accelerator-type', 'b200',
             '--client-host-memory-in-gb', '512', '--checkpoint-folder', '/ckpt',
             '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file',
             '--params', 'k=v',
@@ -472,6 +477,7 @@ class TestAddCheckpointingArguments:
         """Open mode should expose --num-checkpoints-read."""
         args = parser.parse_args([
             'run', '--model', 'llama3-8b', '--num-processes', '8',
+            '--accelerator-type', 'b200',
             '--client-host-memory-in-gb', '512', '--checkpoint-folder', '/ckpt',
             '--results-dir', '/tmp', '--systemname', 'sys-v1',
             '--num-checkpoints-read', '20', 'file',
@@ -484,6 +490,7 @@ class TestAddCheckpointingArgumentsClosed:
 
     RUN_ARGS = [
         'run', '--model', 'llama3-8b', '--num-processes', '8',
+        '--accelerator-type', 'b200',
         '--client-host-memory-in-gb', '512', '--checkpoint-folder', '/ckpt',
         '--results-dir', '/tmp', '--systemname', 'sys-v1', 'file',
     ]

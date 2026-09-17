@@ -42,7 +42,7 @@ class TestOpenClosedEquivalence:
 
     def test_checkpointing_open_closed_defaults_match(self):
         """Verify Checkpointing 'closed' forces read/write checkpoint counts to match 'open' defaults."""
-        base_args = ['checkpointing', 'run', '-cm', '1024', '-m', 'llama3-8b', '-np', '2', '-cf', '/tmp/ckpt', '-rd', '/tmp', '-sn', 'sys-v1', 'file']
+        base_args = ['checkpointing', 'run', '-cm', '1024', '-m', 'llama3-8b', '-np', '2', '-at', 'b200', '-cf', '/tmp/ckpt', '-rd', '/tmp', '-sn', 'sys-v1', 'file']
 
         with patch('sys.argv', ['mlpstorage', 'closed'] + base_args):
             args_closed = parse_arguments()
@@ -78,7 +78,7 @@ class TestCLIStructureAndCombinations:
         ("04", ['training', 'unet3d', 'configview', '-na', '4', '-cm', '64', '-at', 'b200', '-rd', '/tmp', '-sn', 'sys-v1', 'file'], 'training', 'configview'),
 
         # Checkpointing — --model stays as a flag; storage type is positional
-        ("05", ['checkpointing', 'run', '-cm', '1024', '-m', 'llama3-8b', '-np', '4', '-cf', '/tmp/ckpt', '-rd', '/tmp', '-sn', 'sys-v1', 'file'], 'checkpointing', 'run'),
+        ("05", ['checkpointing', 'run', '-cm', '1024', '-m', 'llama3-8b', '-np', '4', '-at', 'b200', '-cf', '/tmp/ckpt', '-rd', '/tmp', '-sn', 'sys-v1', 'file'], 'checkpointing', 'run'),
         ("06", ['checkpointing', 'datasize', '-cm', '1024', '-m', 'llama3-8b', '-np', '4', '-sn', 'sys-v1'], 'checkpointing', 'datasize'),
 
         # KVCache closed mode: model/num-users are not accepted in closed mode
@@ -157,7 +157,7 @@ class TestCustomValidation:
         """Checkpointing validate_args should reject negative checkpoint counts."""
         test_args = [
             'mlpstorage', 'closed', 'checkpointing', 'run',
-            '-cm', '1024', '-m', 'llama3-8b', '-np', '2', '-cf', '/tmp/ckpt', '-rd', '/tmp',
+            '-cm', '1024', '-m', 'llama3-8b', '-np', '2', '-at', 'b200', '-cf', '/tmp/ckpt', '-rd', '/tmp',
             '-sn', 'sys-v1', 'file',
             '--num-checkpoints-read', '-5'
         ]
@@ -445,7 +445,7 @@ class TestSystemname:
         ]),
         ('checkpointing-run', [
             'closed', 'checkpointing', 'run',
-            '-cm', '1024', '-m', 'llama3-8b', '-np', '2',
+            '-cm', '1024', '-m', 'llama3-8b', '-np', '2', '-at', 'b200',
             '-cf', '/tmp/ckpt', '-rd', '/r', 'file',
         ]),
         ('vectordb-run', [

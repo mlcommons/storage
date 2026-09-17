@@ -60,7 +60,7 @@ class TestFlagScope:
     def test_checkpointing_rejects_flag(self):
         argv = [
             'mlpstorage', 'closed', 'checkpointing', 'run',
-            '-cm', '64', '-m', 'llama3-8b', '-np', '2',
+            '-cm', '64', '-m', 'llama3-8b', '-np', '2', '-at', 'b200',
             '-cf', '/tmp/ckpt', '-rd', '/tmp', 'file',
             '--drop-caches-timeout-seconds', '300',
         ]
