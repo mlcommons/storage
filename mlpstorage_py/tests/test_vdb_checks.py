@@ -736,9 +736,13 @@ class Test_5_3_5_VdbGroundTruthIntegrity:
     invalidates the run. The raw flat_setup fields are read directly; the
     stored verdict string is not trusted (issue #805 showed it can be wrong).
 
-    A missing/unreadable result_verdict.json (pre-#806 artifacts, or a
-    --no-create-flat worker whose verdict carries flat_setup: null) is "not
-    assessable": it warns but never false-fails a run.
+    A missing or unreadable result_verdict.json is a hard failure: every
+    current mlpstorage writes it, so its absence means the ground truth
+    cannot be shown complete. (The v3.0 round warned instead, PR #809, so
+    pre-#806 artifacts were not false-failed; retired with the round.) A
+    verdict that is present but carries ``flat_setup: null`` — the
+    --no-create-flat worker that validated the ground truth elsewhere —
+    remains "not assessable" and warns.
     """
 
     def _write_verdict(self, leaf, ts, flat_setup, valid=True):
@@ -812,14 +816,16 @@ class Test_5_3_5_VdbGroundTruthIntegrity:
         viol = _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity")
         assert len([v for v in viol if "coverage" in v]) == len(_DEFAULT_RUN_TIMESTAMPS)
 
-    def test_missing_result_verdict_warns_not_fails(self, tmp_path, mock_logger):
-        # No result_verdict.json — a pre-#806 artifact. Not assessable.
+    def test_missing_result_verdict_fails(self, tmp_path, mock_logger):
+        # No result_verdict.json — post-v3.0 the ground truth cannot be
+        # shown complete, so the run fails.
         leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "AISAQ")
         run_files = [(_summary_run(), _metadata(), _DEFAULT_RUN_TIMESTAMPS[0])]
         check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
-        assert check.vdb_ground_truth_integrity() is True
-        assert _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity") == []
-        assert _warnings(mock_logger, "5.3.5", "vdbGroundTruthIntegrity")
+        assert check.vdb_ground_truth_integrity() is False
+        assert _warnings(mock_logger, "5.3.5", "vdbGroundTruthIntegrity") == []
+        viol = _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity")
+        assert any("no result_verdict.json" in v for v in viol), viol
 
     def test_null_flat_setup_warns_not_fails(self, tmp_path, mock_logger):
         # --no-create-flat worker path: verdict present, flat_setup null.
@@ -832,7 +838,7 @@ class Test_5_3_5_VdbGroundTruthIntegrity:
         assert _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity") == []
         assert _warnings(mock_logger, "5.3.5", "vdbGroundTruthIntegrity")
 
-    def test_unreadable_result_verdict_warns_not_fails(self, tmp_path, mock_logger):
+    def test_unreadable_result_verdict_fails(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "AISAQ")
         ts = _DEFAULT_RUN_TIMESTAMPS[0]
         (leaf / "run" / ts / "result_verdict.json").write_text(
@@ -840,8 +846,10 @@ class Test_5_3_5_VdbGroundTruthIntegrity:
         )
         run_files = [(_summary_run(), _metadata(), ts)]
         check = _make_vdb_check(leaf, "closed", mock_logger, run_files=run_files)
-        assert check.vdb_ground_truth_integrity() is True
-        assert _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity") == []
+        assert check.vdb_ground_truth_integrity() is False
+        assert _warnings(mock_logger, "5.3.5", "vdbGroundTruthIntegrity") == []
+        viol = _violations(mock_logger, "5.3.5", "vdbGroundTruthIntegrity")
+        assert any("could not be read" in v for v in viol), viol
 
     def test_noop_on_non_vdb_mode(self, tmp_path, mock_logger):
         leaf = _build_vdb_leaf(tmp_path, "closed", "acme", "sys-1", "AISAQ")
