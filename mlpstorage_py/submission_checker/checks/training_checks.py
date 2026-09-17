@@ -764,8 +764,9 @@ class TrainingCheck(BaseCheck):
         ``warn_violation`` when the per-host max/min ratio for memory or CPU
         cores exceeds ``_NODE_CAPABILITY_DIVERGENCE_RATIO``, or when the
         collector already flagged inconsistencies. It always returns valid —
-        node heterogeneity is advisory, never a hard failure (submission-
-        window doctrine).
+        Rules.md 3.3.7 itself says "emit a warning (not fail the
+        validation)", so this is advisory by specification, not a
+        submission-round relaxation.
 
         No cluster_information, or a single-host cluster, is silently
         passed — there is nothing to compare.

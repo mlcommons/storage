@@ -1051,8 +1051,10 @@ class CheckpointingCheck(BaseCheck):
         ``SCHEMA_ERROR_RULE_MAP`` tagged with 4.7.4 — those catch
         declaration-side defects that surface before any benchmark runs).
 
-        Warnings-only enforcement (never fails — submission-window
-        doctrine): a completed checkpointing run has already demonstrated
+        Warnings-only enforcement (never fails): Rules.md 4.7.4 only
+        requires the capabilities to be *listed*, so a contradictory value
+        is advisory by specification. A completed checkpointing run has
+        already demonstrated
         simultaneous R/W on the shared namespace via the CAP-02 probe, so a
         system description that declares either capability as ``false``
         CONTRADICTS the run it accompanies. The validator surfaces that
