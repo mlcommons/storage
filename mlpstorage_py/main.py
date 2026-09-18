@@ -23,7 +23,12 @@ from mlpstorage_py.cli_parser import parse_arguments, validate_args, update_args
 from mlpstorage_py.config import HISTFILE, DATETIME_STR, EXIT_CODE, get_datetime_string, HYDRA_OUTPUT_SUBDIR
 from mlpstorage_py.debug import debugger_hook, MLPS_DEBUG
 from mlpstorage_py.history import HistoryTracker
-from mlpstorage_py.mlps_logging import setup_logging, apply_logging_options
+from mlpstorage_py.mlps_logging import (
+    setup_logging,
+    apply_logging_options,
+    attach_run_log_files,
+    emit_recap,
+)
 from mlpstorage_py.errors import (
     MLPStorageException,
     ConfigurationError,
@@ -34,7 +39,7 @@ from mlpstorage_py.errors import (
     DependencyError,
     ErrorCode,
 )
-from mlpstorage_py.error_messages import format_error, ErrorFormatter
+from mlpstorage_py.error_messages import format_error
 from mlpstorage_py.lockfile import (
     generate_lockfile,
     generate_lockfiles_for_project,
@@ -52,7 +57,6 @@ from mlpstorage_py.submission_checker.tools.legacy_migration import _check_and_m
 
 logger = setup_logging("MLPerfStorage")
 signal_received = False
-error_formatter = ErrorFormatter(use_colors=True)
 
 # CONTEXT.md D-12 — modes that DO NOT require a sentinel-resolved orgname.
 # Every other mode (closed, open, whatif, reports, history, validate) is
@@ -254,6 +258,14 @@ def run_benchmark(args, run_datetime):
 
     benchmark = benchmark_class(args, run_datetime=run_datetime, logger=logger)
 
+    # The leaf now exists: start mlpstorage.log / mlpstorage.errors.log inside
+    # it. Everything logged so far (argument parsing, environment validation,
+    # code-image capture, leaf reservation) is flushed in first.
+    run_logs = None
+    leaf = getattr(benchmark, 'run_result_output', None)
+    if leaf and os.path.isdir(leaf):
+        run_logs = attach_run_log_files(leaf)
+
     ret_code = EXIT_CODE.SUCCESS
 
     try:
@@ -276,6 +288,8 @@ def run_benchmark(args, run_datetime):
             benchmark.write_metadata()
         except Exception as e:
             logger.warning(f"Failed to write metadata: {str(e)}")
+        if run_logs is not None:
+            run_logs.detach()
 
     return ret_code
 
@@ -490,45 +504,35 @@ def main():
     Main entry point with comprehensive error handling.
 
     This function wraps _main_impl() to catch and handle all
-    exceptions with user-friendly error messages.
+    exceptions with user-friendly error messages, then prints the
+    end-of-invocation recap of every warning and error (nothing is
+    printed when the invocation was clean).
     """
     try:
         return _main_impl()
 
     except ConfigurationError as e:
         logger.error(str(e))
-        if e.suggestion:
-            logger.info(f"Suggestion: {e.suggestion}")
         return EXIT_CODE.CONFIG_ERROR if hasattr(EXIT_CODE, 'CONFIG_ERROR') else EXIT_CODE.FAILURE
 
     except BenchmarkExecutionError as e:
         logger.error(str(e))
-        if e.suggestion:
-            logger.info(f"Suggestion: {e.suggestion}")
         return EXIT_CODE.ERROR if hasattr(EXIT_CODE, 'ERROR') else EXIT_CODE.FAILURE
 
     except ValidationError as e:
         logger.error(str(e))
-        if e.suggestion:
-            logger.info(f"Suggestion: {e.suggestion}")
         return EXIT_CODE.FAILURE
 
     except FileSystemError as e:
         logger.error(str(e))
-        if e.suggestion:
-            logger.info(f"Suggestion: {e.suggestion}")
         return EXIT_CODE.FILE_NOT_FOUND if hasattr(EXIT_CODE, 'FILE_NOT_FOUND') else EXIT_CODE.FAILURE
 
     except MPIError as e:
         logger.error(str(e))
-        if e.suggestion:
-            logger.info(f"Suggestion: {e.suggestion}")
         return EXIT_CODE.FAILURE
 
     except DependencyError as e:
         logger.error(str(e))
-        if e.suggestion:
-            logger.info(f"Suggestion: {e.suggestion}")
         return EXIT_CODE.FAILURE
 
     except CodeImageError as e:
@@ -543,8 +547,6 @@ def main():
     except MLPStorageException as e:
         # Catch-all for any other custom exceptions
         logger.error(str(e))
-        if e.suggestion:
-            logger.info(f"Suggestion: {e.suggestion}")
         return EXIT_CODE.FAILURE
 
     except KeyboardInterrupt:
@@ -572,6 +574,12 @@ def main():
             logger.info("Run with --debug for full stack trace")
 
         return EXIT_CODE.ERROR if hasattr(EXIT_CODE, 'ERROR') else EXIT_CODE.FAILURE
+
+    finally:
+        # Runs after the matching except clause above (and on SystemExit), so
+        # the recap is the last thing on stderr. Silent when nothing was logged
+        # at WARNING or above.
+        emit_recap()
 
 
 if __name__ == "__main__":

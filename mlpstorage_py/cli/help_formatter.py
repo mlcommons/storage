@@ -139,6 +139,8 @@ CORE_STD — Standard arguments, every benchmark command and most utilities
   --verbose                     Enable verbose output
   --stream-log-level LEVEL      Logging level (default: INFO)
   --quiet                       Suppress the run configuration summary table
+  --color {auto,always,never}   Colour the log level tag (default: auto — only when
+                                stderr is a terminal; honours NO_COLOR)
   --dry-run                     Print the command that would execute; do not run
   --verify-lockfile PATH        Validate installed packages against lockfile
   --skip-validation             Skip MPI/SSH/DLIO pre-run environment checks

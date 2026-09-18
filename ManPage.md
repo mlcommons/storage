@@ -369,6 +369,8 @@ Every benchmark run writes:
 - **`*_metadata.json`** — run timestamp, benchmark type, model, full command line, all CLI argument values, cluster information (collected by `cluster_collector.py` over MPI), MPI configuration, environment variables (credentials redacted), final status.
 - **`*_timeseries.json`** — sampled host metrics (CPU, memory, disk I/O, network) collected at `--timeseries-interval` (default 10s) up to `--max-timeseries-samples` (default 3600). Single-host runs use a local collector; multi-host runs use SSH fan-out.
 - **`stdout.log` / `stderr.log`** — streamed subprocess output captured by `CommandExecutor`.
+- **`mlpstorage.log`** — every message `mlpstorage` itself logged during the invocation, at DEBUG level with `module:line`, uncoloured. Messages emitted before the run directory existed (argument parsing, environment validation, code-image capture) are buffered and written first, so the file is complete from process start.
+- **`mlpstorage.errors.log`** — the WARNING-and-above subset of `mlpstorage.log`. An empty file means the run logged no warnings or errors. Both files live inside the run's timestamp directory and are removed with it.
 - **`fs_separation.json`** — CAP-03 filesystem-separation sidecar written before workload launch. Rank-0 probes the data/checkpoint path against the results path with `os.link()` and records the `EXDEV`/same-fs result plus real-paths, ISO-8601 timestamp, and probing host. The submission checker's rules 3.4.2 / 4.4.2 / 5.4.2 read this file as their authoritative "different filesystems" input. Absent under `--skip-fs-separation-gate`.
 - **`results.json`** — aggregated summary across all timestamped run directories, used by `reportgen`.
 - **Command history** is appended to `<results-dir>/.history/` (consumed by `mlpstorage history`).
@@ -492,6 +494,9 @@ The `init` subcommand takes no flags — universal flags such as `--results-dir`
 
 - **`--quiet`**
   Suppress the run-configuration summary table printed before execution.
+
+- **`--color <mode>`**
+  Colour the level tag of console log lines: `auto` (default) colours only when stderr is a terminal and rich's `NO_COLOR` / `TERM=dumb` detection allows it; `always` forces ANSI colour (for `script`/CI logs that render it); `never` emits plain text. Only the tag is coloured — `✖ ERROR`, `⚠ WARNING`, `STATUS`, `RESULT` — never the message body, so lines stay greppable. The glyphs are always present, so severities remain distinguishable without colour.
 
 - **`--dry-run`**
   Resolve the final configuration and print the command that would execute, then exit without running anything. Intended for sanity-checking command lines.
@@ -1032,6 +1037,21 @@ No environment variables are diagnostic-only under the current inventory (2026-0
 - **Cross-ref:** `MLPSTORAGE_CHECKPOINT_URI_SCHEME` is documented as Owned (primary tier); mlpstorage writes it at `mlpstorage_py/benchmarks/dlio.py` during checkpointing setup. Not a duplicate `MANPAGE_ENV_VAR_TIERS` entry per D-12/D-13.
 
 There is intentionally no `MLPSTORAGE_ORGNAME` fallback consulted by non-init commands — orgname is sourced exclusively from the `mlperf-results.yaml` sentinel written by `mlpstorage init`. The row in the Owned table above documents where `mlpstorage init` reads the flag, not a runtime fallback path.
+
+## END-OF-RUN RECAP
+
+When an invocation logged at least one warning or error, `mlpstorage` prints a recap block to stderr just before exiting, after all DLIO output:
+
+```
+── mlpstorage finished with 1 error, 2 warnings ────────────────────
+  ✖ ERROR: [E101] results-dir `/x` has not been initialized.  (+1 more lines in the errors log)
+  ⚠ WARNING: Skipping environment validation (--skip-validation flag)
+  ⚠ WARNING: Failed to write metadata: ...
+  errors log: <run-dir>/mlpstorage.errors.log
+  full log:   <run-dir>/mlpstorage.log
+```
+
+Only the first line of each message is repeated; the full text was printed where it happened and is in `mlpstorage.errors.log`. A clean invocation prints no recap. The exit status is unaffected. Console log lines go to stderr; stdout carries only the workload's live output and machine-readable command output (`version`, `history show`), so `2>errors.txt` isolates every diagnostic line.
 
 ## EXIT STATUS
 

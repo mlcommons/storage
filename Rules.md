@@ -341,11 +341,13 @@ root_folder (or any name you prefer)
 			├──system-name-2.yaml
 			└──system-name-2.pdf
 ```
-2.29. **dlioLog** --  Since the "dlio_log" subdirectory has a similar structure in all cases, it is describe pictorially just below:
+2.29. **dlioLog** --  Since the "dlio_log" subdirectory has a similar structure in all cases, it is describe pictorially just below.  "mlpstorage.log" holds every message the `mlpstorage` tool itself logged during that invocation and "mlpstorage.errors.log" holds the WARNING-and-above subset; both are written by the tool and are informational for reviewers (the *submission validator* does not require them):
 ```
 └── YYYYMMDD_HHmmss
     ├── [training|checkpointing]_[datagen|run].stdout.log
     ├── [training|checkpointing]_[datagen|run].stderr.log
+    ├── mlpstorage.log
+    ├── mlpstorage.errors.log
     ├── *[output|per_epoch_stats|summary].json
     ├── dlio.log
     └── dlio_config
