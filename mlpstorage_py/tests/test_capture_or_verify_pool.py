@@ -125,12 +125,12 @@ class TestCaptureOrVerifyPool:
         )
         # First call captures.
         capture_or_verify_code_image(args, {}, log)
-        pool_dirs_after_first = _pool_dirs(results_dir / "Acme")
+        pool_dirs_after_first = _pool_dirs(results_dir / "code-images")
         assert len(pool_dirs_after_first) == 1, pool_dirs_after_first
 
         # Second call must not create a new pool dir.
         capture_or_verify_code_image(args, {}, log)
-        pool_dirs_after_second = _pool_dirs(results_dir / "Acme")
+        pool_dirs_after_second = _pool_dirs(results_dir / "code-images")
         assert len(pool_dirs_after_second) == 1, pool_dirs_after_second
         assert pool_dirs_after_first == pool_dirs_after_second
 
@@ -192,7 +192,7 @@ class TestCaptureOrVerifyPool:
         # Pool directory exists under <rd>/Acme/
         assert pool_dir is not None
         assert Path(pool_dir).is_dir()
-        pool_dirs = _pool_dirs(results_dir / "Acme")
+        pool_dirs = _pool_dirs(results_dir / "code-images")
         assert len(pool_dirs) == 1
 
         # POOL-02: .code-hash.json.hash[:8] == dir suffix
@@ -225,7 +225,7 @@ class TestCaptureOrVerifyPool:
         # Second capture
         capture_or_verify_code_image(args, {}, log)
 
-        pool_dirs = _pool_dirs(results_dir / "Acme")
+        pool_dirs = _pool_dirs(results_dir / "code-images")
         assert len(pool_dirs) == 2, pool_dirs
         # Distinct .code-hash.json hashes
         hashes = {
@@ -280,7 +280,7 @@ class TestCaptureOrVerifyPool:
         source's REAL hash is different → scan misses → new capture. The
         function completes successfully; no CodeImageError raised."""
         results_dir = tmp_path / "results"
-        org_root = results_dir / "Acme"
+        org_root = results_dir / "code-images"
         org_root.mkdir(parents=True)
         fake_pool = org_root / "code-deadbeef"
         fake_pool.mkdir()
@@ -319,7 +319,7 @@ class TestCaptureOrVerifyPool:
         )
         capture_or_verify_code_image(open_args, {}, log)
 
-        pool_dirs = _pool_dirs(results_dir / "Acme")
+        pool_dirs = _pool_dirs(results_dir / "code-images")
         assert len(pool_dirs) == 1, pool_dirs
 
     def test_open_then_closed_same_source_reuses_pool(
@@ -339,32 +339,29 @@ class TestCaptureOrVerifyPool:
         )
         capture_or_verify_code_image(closed_args, {}, log)
 
-        pool_dirs = _pool_dirs(results_dir / "Acme")
+        pool_dirs = _pool_dirs(results_dir / "code-images")
         assert len(pool_dirs) == 1, pool_dirs
 
-    # ---- POOL-03 per-org isolation ----
+    # ---- POOL-03: one tree-wide pool shared by every org ----
 
-    def test_two_orgs_maintain_separate_pool_dirs(
+    def test_two_orgs_share_one_pool_dir(
         self, tmp_path, fake_source_root, log
     ):
         results_dir = tmp_path / "results"
         results_dir.mkdir()
 
+        pools = []
         for org in ("Acme", "Beta"):
             args = _make_args(
                 mode="closed", command="run", results_dir=results_dir, orgname=org,
             )
-            capture_or_verify_code_image(args, {}, log)
+            pools.append(capture_or_verify_code_image(args, {}, log))
 
-        acme_pools = _pool_dirs(results_dir / "Acme")
-        beta_pools = _pool_dirs(results_dir / "Beta")
-        assert len(acme_pools) == 1, acme_pools
-        assert len(beta_pools) == 1, beta_pools
-        # Names should not cross-contaminate (each org owns its own subtree).
-        for p in acme_pools:
-            assert "Beta" not in str(p)
-        for p in beta_pools:
-            assert "Acme" not in str(p)
+        assert pools[0] == pools[1]
+        assert _pool_dirs(results_dir / "code-images") == [pools[0]]
+        # No per-org pool roots are created any more.
+        assert not (results_dir / "Acme").exists()
+        assert not (results_dir / "Beta").exists()
 
     # ---- PTR-01 + D-65 atomicity ordering ----
 
@@ -430,7 +427,7 @@ class TestCaptureOrVerifyPool:
         results_dir.mkdir()
 
         # Pre-seed the pool dir with matching live hash — the "winner"
-        org_root = results_dir / "Acme"
+        org_root = results_dir / "code-images"
         org_root.mkdir()
         winner_pool = org_root / f"code-{hash8}"
         winner_pool.mkdir()
@@ -482,7 +479,7 @@ class TestCaptureOrVerifyPool:
         import shutil
         shutil.rmtree(results_dir)
         results_dir.mkdir()
-        org_root = results_dir / "Acme"
+        org_root = results_dir / "code-images"
         org_root.mkdir()
         winner_pool = org_root / f"code-{hash8}"
         winner_pool.mkdir()
@@ -519,7 +516,7 @@ class TestCaptureOrVerifyPool:
         )
         pool_dir = capture_or_verify_code_image(args, {}, log)
         assert pool_dir is not None
-        pool_dirs = _pool_dirs(results_dir / "Acme")
+        pool_dirs = _pool_dirs(results_dir / "code-images")
         assert len(pool_dirs) == 1
         pointers = list(results_dir.rglob(".mlps-code-image"))
         assert len(pointers) == 1
@@ -568,7 +565,7 @@ class TestSentinelSelfHeal:
         )
         capture_or_verify_code_image(args, {}, log)
 
-        sentinel = results_dir / "Acme" / ".mlps-image-pool"
+        sentinel = results_dir / "code-images" / ".mlps-image-pool"
         assert sentinel.is_file(), (
             "capture on a fresh tree must write the sentinel; "
             "otherwise CHECK-04 D-91 flags the tree as partial-migration"
@@ -590,7 +587,7 @@ class TestSentinelSelfHeal:
         )
         # First capture writes both pool and sentinel.
         capture_or_verify_code_image(args, {}, log)
-        sentinel = results_dir / "Acme" / ".mlps-image-pool"
+        sentinel = results_dir / "code-images" / ".mlps-image-pool"
         assert sentinel.is_file()
 
         # Simulate a pre-fix tree: pool dir on disk, sentinel deleted.
@@ -615,7 +612,7 @@ class TestSentinelSelfHeal:
             mode="closed", command="run", results_dir=results_dir, orgname="Acme",
         )
         capture_or_verify_code_image(args, {}, log)
-        sentinel = results_dir / "Acme" / ".mlps-image-pool"
+        sentinel = results_dir / "code-images" / ".mlps-image-pool"
         first_content = sentinel.read_text()
         first_mtime = sentinel.stat().st_mtime_ns
 

@@ -64,7 +64,7 @@ For cloud-specific credential and endpoint env vars consumed by s3dlio for Azure
 
 2.1.1. **submitterRootDirectory** --  The submission structure must start from a single directory whose name is the name of the submitter.  This can be any string, but a blank or any other character in that string that cannot be part of a POSIX filename should be replaced 1-for-1 with a dash character.
 
-2.1.2. **topLevelSubdirectories** --  Within the top-level directory of the submission structure there must be a directory named "closed" and/or one named "open", and nothing more, with one exception: dot-prefixed entries (whose names begin with "."), such as version-control metadata (".git/", ".gitignore") and CI configuration (".github/"), are permitted alongside "closed" and "open" because merged reviewer trees are typically distributed as git working trees.  These names are case-sensitive.
+2.1.2. **topLevelSubdirectories** --  Within the top-level directory of the submission structure there must be a directory named "closed" and/or one named "open", plus the code-image pool directory "code-images" (§2.1.6), and nothing more, with two exceptions: dot-prefixed entries (whose names begin with "."), such as version-control metadata (".git/", ".gitignore") and CI configuration (".github/"), are permitted because merged reviewer trees are typically distributed as git working trees; and a per-organization pool root (a directory named for a submitter that carries a ".mlps-image-pool" marker file) is permitted because the v3.0 release placed each organization's code images there.  These names are case-sensitive.
 
 2.1.3. **openMatchesClosed** --  Whichever of the "open" and "closed" hierarchies are present must be constructed using the same rules described in the sections below.  The two hierarchies are individually optional: a submitter may submit to only "closed", only "open", or both, and there is no requirement that a submitter present in one hierarchy also be present in the other.
 
@@ -72,18 +72,17 @@ For cloud-specific credential and endpoint env vars consumed by s3dlio for Azure
 
 2.1.5. **requiredSubdirectories** -- The required subdirectories at the submitter level differ between CLOSED and OPEN submissions:
 
-2.1.5.a. **requiredSubdirectoriesClosed** -- Within a CLOSED submitter directory, there must be exactly three directories: "code", "results", and "systems".  These names are case-sensitive.
+2.1.5.a. **requiredSubdirectoriesClosed** -- Within a CLOSED submitter directory, there must be exactly two directories: "results" and "systems".  These names are case-sensitive.  Code images are not stored at the submitter level; every run leaf inside `results/` names its image in the tree-level pool (§2.1.6).
 
-2.1.5.b. **requiredSubdirectoriesOpen** -- Within an OPEN submitter directory, there must be exactly two directories: "results" and "systems".  These names are case-sensitive.  The "code" directory does NOT appear at the OPEN submitter level; instead, a "code" directory is captured at each leaf inside `results/`.  The leaf shape is per-benchmark-type:
-- For "training" and "checkpointing" the leaf is `results/<systemname>/<type>/<model>/` (one capture per model).
-- For "vector_database" the leaf is `results/<systemname>/vector_database/<index_type>/` where `<index_type>` is the UPPERCASE token (`DISKANN`, `HNSW`, or `AISAQ`) (one capture per index type, because results across index types — e.g. AISAQ vs DISKANN vs HNSW — are not comparable and must live in separate trees).
-- For "kv_cache" the leaf is currently `results/<systemname>/<type>/` (one capture per type).  This is transitional pending finalization of the kv_cache directory structure below the type prefix.
+2.1.5.b. **requiredSubdirectoriesOpen** -- Within an OPEN submitter directory, there must be exactly two directories: "results" and "systems".  These names are case-sensitive.  OPEN runs use the same tree-level pool and per-leaf pointer as CLOSED runs (§2.1.6); nothing distinguishes the two divisions below the submitter directory except the rules that apply to the results.
 
 See §2.1.6 and §2.1.27.
 
 2.1.6. **codeDirectoryContents** -- Each "code" directory in the submission package must be a captured copy of the MLPerf Storage source tree that was used to generate the corresponding results, accompanied by a top-level ".code-hash.json" file that records the captured tree's hash and metadata.
 
-Code images are captured automatically by the `mlpstorage` CLI on every invocation of `closed|open datasize|datagen|run`.  Each captured image lives in a content-addressed pool at `<results-dir>/<orgname>/code-<hash8>/`, where `<hash8>` is the first eight lowercase hex digits of the captured tree's md5-tree-v2 hash.  The pool is shared across CLOSED and OPEN runs of the same source: if a run's live source hash matches an image already in the pool, the CLI reuses it; if the source has changed, the CLI captures a new `code-<newhash8>/` alongside the existing images (this is NOT a rejection — source iteration is supported).  Every run leaf also contains a `.mlps-code-image` pointer file that names the pool image whose hash matches the source that ran, so the submission tree preserves the run-to-image linkage across the flat pool layout.  See §2.1.27 for the per-leaf location conventions in OPEN submissions.
+Code images are captured automatically by the `mlpstorage` CLI on every invocation of `closed|open datasize|datagen|run`.  Each captured image lives in a content-addressed pool at `<results-dir>/code-images/code-<hash8>/`, where `<hash8>` is the first eight lowercase hex digits of the captured tree's md5-tree-v2 hash.  There is one pool per tree, marked by a `code-images/.mlps-image-pool` file, and it is shared by every organization and by CLOSED and OPEN runs alike: if a run's live source hash matches an image already in the pool, the CLI reuses it; if the source has changed, the CLI captures a new `code-<newhash8>/` alongside the existing images (this is NOT a rejection — source iteration is supported).  Every run leaf also contains a `.mlps-code-image` pointer file that names the pool image whose hash matches the source that ran, so the submission tree preserves the run-to-image linkage across the flat pool layout.  A merged reviewer tree therefore holds one `code-images/` directory in which identical images from different submitters coincide.
+
+The v3.0 release kept one pool per organization at `<results-dir>/<orgname>/code-<hash8>/` (marked by `<orgname>/.mlps-image-pool`).  The *submission validator* accepts that layout indefinitely — the v3.0 submissions tree is preserved as published — and resolves each leaf's pointer against `code-images/` first and the leaf's own organization pool second.  The CLI relocates a per-organization pool into `code-images/` the next time it captures into that results directory.
 
 The ".code-hash.json" schema is:
 - "hash": 32-character lowercase hex MD5 of the captured tree (excluding dotfiles, dotdirs, `test/`, `tests/`, `__pycache__/`, `.egg-info/`, `*.pyc`, and `.code-hash.json` itself).
@@ -146,9 +145,12 @@ configuration of storage system and to link together those results with the .pdf
 2.1.27. **directoryDiagram** --  Pictorially, here is what this looks like:
 ```
 root_folder (or any name you prefer)
+├── code-images
+│ 	├── .mlps-image-pool
+│ 	├── code-<hash8>
+│ 	└── ... (one directory per distinct captured source tree; see §2.1.6)
 ├── Closed
 │ 	└──<submitter_org>
-│	  	├── code
 │	  	├── results
 │	  	│	└──system-name-1
 │	  	│	 	├── training
@@ -246,7 +248,6 @@ root_folder (or any name you prefer)
 		│	└──system-name-1
 		│	 	├── training
 		│	 	│	├── unet3d
-		│		│	│	├── code  # captured per-leaf
 		│		│	│	├── datagen
 		│		│	│	│	└── YYYYMMDD_HHmmss
 		│		│	│	│		└── dlio_config
@@ -270,7 +271,6 @@ root_folder (or any name you prefer)
 		│		│	 			└── dlio_config
 	  	│	 	├── checkpointing
 	  	│	 	│	├── llama3-8b
-	  	│		│	│	├── code  # captured per-leaf
 	  	│		│	│	├──results.json
 	  	│		│	│	├── YYYYMMDD_HHmmss
 	  	│		│	│	│	└── dlio_config 
@@ -278,7 +278,6 @@ root_folder (or any name you prefer)
 	  	│		│	│	└── YYYYMMDD_HHmmss
 	  	│		│	│		└── dlio_config
 	  	│	 	│	├── llama3-70b
-	  	│		│	│	├── code  # captured per-leaf
 	  	│		│	│	├──results.json
 	  	│		│	│	├── YYYYMMDD_HHmmss
 	  	│		│	│	│	└── dlio_config 
@@ -286,7 +285,6 @@ root_folder (or any name you prefer)
 	  	│		│	│	└── YYYYMMDD_HHmmss
 	  	│		│	│		└── dlio_config
 	  	│	 	│	├── llama3-405b
-	  	│		│	│	├── code  # captured per-leaf
 	  	│		│	│	├──results.json
 	  	│		│	│	├── YYYYMMDD_HHmmss
 	  	│		│	│	│	└── dlio_config 
@@ -294,7 +292,6 @@ root_folder (or any name you prefer)
 	  	│		│	│	└── YYYYMMDD_HHmmss
 	  	│		│	│		└── dlio_config
 	  	│	 	│	└── llama3-1t
-	  	│		│		├── code  # captured per-leaf
 	  	│		│		├──results.json
 	  	│		│	 	├── YYYYMMDD_HHmmss
 	  	│		│	 	│	└── dlio_config 
@@ -303,7 +300,6 @@ root_folder (or any name you prefer)
 	  	│		│	 		└── dlio_config
 	  	│	 	└── vector_database
 		|			├── AISAQ
-	  	│	 		|	├── code  # captured per-leaf
 	  	│	 		|	├── datagen
 	  	│			|	│	└── YYYYMMDD_HHmmss
 	  	│			|	│		└── summary.json
@@ -314,7 +310,6 @@ root_folder (or any name you prefer)
 	  	│			|		└── YYYYMMDD_HHmmss
 	  	│			|			└── summary.json
 		|			├── DISKANN
-	  	│	 		|	├── code  # captured per-leaf
 	  	│	 		|	├── datagen
 	  	│			|	│	└── YYYYMMDD_HHmmss
 	  	│			|	│		└── summary.json
@@ -325,7 +320,6 @@ root_folder (or any name you prefer)
 	  	│			|		└── YYYYMMDD_HHmmss
 	  	│			|			└── summary.json
 		|			└── HNSW
-	  	│	 			├── code  # captured per-leaf
 	  	│	 			├── datagen
 	  	│				│	└── YYYYMMDD_HHmmss
 	  	│				│		└── summary.json

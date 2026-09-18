@@ -42,16 +42,16 @@ class TestMigrateEndToEnd:
 
         A fresh v1.0-layout tree (legacy code/ with valid .code-hash.json,
         3 run-leaf datetime dirs) must produce:
-        - One pool image at <rd>/Acme/code-<hash8>/
+        - One pool image at <rd>/code-images/code-<hash8>/
         - A .mlps-code-image pointer in every run leaf
-        - A .mlps-image-pool sentinel at <rd>/Acme/.mlps-image-pool
+        - A .mlps-image-pool sentinel at <rd>/code-images/.mlps-image-pool
         - Original legacy code/ dir deleted
         """
         rd = legacy_tree_factory(orgname="Acme", n_run_leaves=3)
         migrate_legacy_layout(rd, "Acme", log)
 
         # (a) Exactly one pool image under rd/Acme/
-        pools = pool_dirs(rd / "Acme")
+        pools = pool_dirs(rd / "code-images")
         assert len(pools) == 1, f"expected 1 pool dir, got {pools}"
 
         # (b) 3 pointer files in run leaves
@@ -64,7 +64,7 @@ class TestMigrateEndToEnd:
         )
 
         # (d) Sentinel written
-        assert (rd / "Acme" / ".mlps-image-pool").exists(), "sentinel must be written"
+        assert (rd / "code-images" / ".mlps-image-pool").exists(), "sentinel must be written"
 
         # (e) Exactly two status log lines (D-74)
         assert len(log.statuses) == 2, f"expected 2 status lines, got {log.statuses}"
@@ -118,7 +118,7 @@ class TestMigrateEndToEnd:
         migrate_legacy_layout(rd, "Acme", log)
 
         # Exactly one pool image (dedup M=1 from N=2).
-        pools = pool_dirs(rd / "Acme")
+        pools = pool_dirs(rd / "code-images")
         assert len(pools) == 1, f"dedup: expected 1 pool image, got {pools}"
 
         # Summary line contains "(1 unique)".
@@ -313,7 +313,7 @@ class TestMigrateEmptyRunLeaves:
         migrate_legacy_layout(rd, "Acme", log)
 
         # Sentinel written
-        assert (rd / "Acme" / ".mlps-image-pool").exists(), (
+        assert (rd / "code-images" / ".mlps-image-pool").exists(), (
             "sentinel must be written even with n_run_leaves=0"
         )
 
@@ -322,7 +322,7 @@ class TestMigrateEmptyRunLeaves:
         assert pointers == [], f"expected zero pointer files with n_run_leaves=0, got {pointers}"
 
         # Pool image still materialized
-        pools = pool_dirs(rd / "Acme")
+        pools = pool_dirs(rd / "code-images")
         assert len(pools) >= 1, "pool image must be materialized even with n_run_leaves=0"
 
     def test_fresh_tree_no_legacy_no_sentinel_written(self, tmp_path, log):
@@ -344,7 +344,7 @@ class TestMigrateEmptyRunLeaves:
         _check_and_migrate_legacy_layout(args, {}, log)
 
         # No sentinel — fresh tree has no migration event.
-        acme_root = rd / "Acme"
+        acme_root = rd / "code-images"
         sentinel_written = acme_root.exists() and (acme_root / ".mlps-image-pool").exists()
         assert not sentinel_written, (
             "fresh-tree (no legacy code/) must NOT receive a sentinel (A3b)"

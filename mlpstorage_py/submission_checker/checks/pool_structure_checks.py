@@ -1,11 +1,20 @@
-"""PoolStructureCheck — validates the v1.1 content-addressed pool layout.
+"""PoolStructureCheck — validates the content-addressed code-image pool layout.
 
 Implements CHECK-01..CHECK-04 (Phase 8) as a ``BaseCheck`` subclass with four
 ``@rule``-decorated methods. Runs as a pre-loop check in ``main.py:run()``
 after ``SubmissionStructureCheck`` and ``SystemYamlSchemaCheck``.
 
-Assumes Phase 7 migration has already run: a v1.0 tree (legacy ``code/`` dirs,
-no ``.mlps-image-pool`` sentinel) is a CHECK-04 failure, not a tolerated state.
+Two pool layouts are accepted, permanently:
+
+- the tree-wide pool at ``<root>/code-images/code-<hash8>/`` (current);
+- per-organization pools at ``<root>/<org>/code-<hash8>/`` (written by
+  earlier releases; the frozen v3.0 submissions tree carries 19 of them).
+
+Each pool root carries a ``.mlps-image-pool`` sentinel. A run leaf's pointer
+resolves against the global pool first, then the leaf's own org pool
+(``code_image.resolve_pool_image``). Assumes Phase 7 migration has already
+run: a v1.0 tree (legacy ``code/`` dirs) is a CHECK-04 failure, not a
+tolerated state.
 
 Each method follows the accumulate-don't-abort pattern (QUAL-01): it collects
 ALL violations in a subtree before returning ``False``, and NEVER raises out of
@@ -26,14 +35,18 @@ from ..rule_registry import rule
 from ..tools.code_image import (
     _find_matching_pool_image,
     _pool_dir_name,
+    _POOL_SENTINEL_FILENAME,
     _read_hash_file,
     _read_pointer,
     _scan_legacy_layout,
     CodeImageError,
     CodeTreeUnreadable,
+    GLOBAL_POOL_DIRNAME,
     MalformedHashFile,
     MissingHashFile,
     PointerMalformed,
+    global_pool_root,
+    resolve_pool_image,
     verify_image_self_consistent,
 )
 
@@ -120,19 +133,26 @@ class PoolStructureCheck(BaseCheck):
             for d in prune:
                 dirnames.remove(d)
 
+    def _global_pool_root(self) -> Path:
+        return global_pool_root(Path(self.root_path))
+
     def _discover_pool_orgs(self):
-        """Return a list of (submitter, pool_root_path) for every org that has
-        a ``.mlps-image-pool`` sentinel under the top-level results dir.
+        """Return ``[(label, pool_root_path)]`` for every pool root carrying a
+        ``.mlps-image-pool`` sentinel: the tree-wide ``code-images/`` first
+        (label ``GLOBAL_POOL_DIRNAME``), then each per-organization pool.
 
         Skips dot-prefixed entries and the reserved names ``closed``, ``open``,
         ``systems`` (D-83 / D-85).
         """
-        orgs = []
+        roots = []
+        global_root = self._global_pool_root()
+        if (global_root / _POOL_SENTINEL_FILENAME).exists():
+            roots.append((GLOBAL_POOL_DIRNAME, global_root))
         try:
             entries = os.listdir(self.root_path)
         except OSError:
-            return orgs
-        skip = {"closed", "open", "systems"}
+            return roots
+        skip = {"closed", "open", "systems", GLOBAL_POOL_DIRNAME}
         for entry in sorted(entries):
             if entry.startswith("."):
                 continue
@@ -141,9 +161,23 @@ class PoolStructureCheck(BaseCheck):
             candidate = Path(self.root_path) / entry
             if not candidate.is_dir():
                 continue
-            if (candidate / ".mlps-image-pool").exists():
-                orgs.append((entry, candidate))
-        return orgs
+            if (candidate / _POOL_SENTINEL_FILENAME).exists():
+                roots.append((entry, candidate))
+        return roots
+
+    def _referenced_hashes_by_org(self) -> dict[str, set[str]]:
+        """``{submitter: {full_hash, ...}}`` from every readable run-leaf pointer
+        across closed/ and open/. Unreadable pointers are CHECK-01's job."""
+        refs: dict[str, set[str]] = {}
+        for _division, submitter, sub_path in self._iter_submitter_dirs():
+            bucket = refs.setdefault(submitter, set())
+            for leaf_path in self._iter_datetime_leaves(sub_path):
+                try:
+                    _alg, full_hash = _read_pointer(Path(leaf_path), self.log)
+                    bucket.add(full_hash)
+                except (FileNotFoundError, PointerMalformed):
+                    pass
+        return refs
 
     # -----------------------------------------------------------------------
     # CHECK-01 — poolPointerResolution
@@ -152,44 +186,46 @@ class PoolStructureCheck(BaseCheck):
     @rule("CHECK-01", "poolPointerResolution")
     def pool_pointer_resolution_check(self):
         """CHECK-01: every datetime run-leaf must have a valid .mlps-code-image
-        pointer that resolves to an existing pool image.
+        pointer that resolves to an existing pool image — in the tree-wide
+        ``code-images/`` pool or in the org's own ``<org>/`` pool.
 
-        D-84: if an org has closed/ or open/ entries but no pool root, emit ONE
+        D-84: if an org has closed/ or open/ entries but no pool root at all
+        (neither ``code-images/`` nor ``<org>/`` carries a sentinel), emit ONE
         structural error per org instead of one per run leaf.
         D-93: missing pointer and dangling pointer both fire as CHECK-01, with
         distinct messages.
         """
         valid = True
-        seen_orgs = set()
+        root = Path(self.root_path)
+        global_root = self._global_pool_root()
+        global_sentinel = (global_root / _POOL_SENTINEL_FILENAME).exists()
+        orgs_without_pool: set[str] = set()
+        seen_orgs: set[str] = set()
 
         for division, submitter, sub_path in self._iter_submitter_dirs():
-            if submitter in seen_orgs:
-                # CHECK-01 org-level structural error already emitted; still
-                # walk leaves to catch dangling pointers when pool root IS found.
-                pass
-
-            org_root = Path(self.root_path) / submitter
-            pool_sentinel = org_root / ".mlps-image-pool"
+            org_root = root / submitter
+            org_sentinel = (org_root / _POOL_SENTINEL_FILENAME).exists()
 
             if submitter not in seen_orgs:
                 seen_orgs.add(submitter)
-                # D-84: if pool sentinel is absent, emit one structural error
-                # per org and skip per-leaf checks for this org.
-                if not pool_sentinel.exists():
+                # D-84: no pool root anywhere → one structural error per org.
+                if not global_sentinel and not org_sentinel:
+                    orgs_without_pool.add(submitter)
                     self.log_violation(
                         "CHECK-01", "poolPointerResolution",
                         str(org_root),
-                        "No pool root found for org %s: missing %s/.mlps-image-pool. "
-                        "Auto-migration fires on the next `mlpstorage {closed|open} "
-                        "<benchmark> {datasize|datagen|run}` invocation against this "
+                        "No code-image pool found for org %s: neither %s/%s nor "
+                        "%s/%s exists. Auto-migration fires on the next "
+                        "`mlpstorage {closed|open} <benchmark> "
+                        "{datasize|datagen|run}` invocation against this "
                         "--results-dir; `mlpstorage validate` does not migrate.",
-                        submitter, str(org_root),
+                        submitter,
+                        GLOBAL_POOL_DIRNAME, _POOL_SENTINEL_FILENAME,
+                        submitter, _POOL_SENTINEL_FILENAME,
                     )
                     valid = False
-                    continue
 
-            # Pool root exists; check each datetime leaf.
-            if not pool_sentinel.exists():
+            if submitter in orgs_without_pool:
                 # Already emitted structural error above; skip leaves.
                 continue
 
@@ -214,15 +250,15 @@ class PoolStructureCheck(BaseCheck):
                     valid = False
                     continue
 
-                # Resolve to pool image path
-                pool_dir = org_root / _pool_dir_name(full_hash)
-                if not pool_dir.is_dir():
+                if resolve_pool_image(root, full_hash, submitter) is None:
+                    name = _pool_dir_name(full_hash)
                     self.log_violation(
                         "CHECK-01", "poolPointerResolution",
                         leaf_path,
                         "run leaf %s .mlps-code-image references hash %s "
-                        "but code-%s/ not found in pool.",
-                        leaf_path, full_hash[:8], full_hash[:8],
+                        "but %s/ not found in pool (looked in %s/ and %s/).",
+                        leaf_path, full_hash[:8], name,
+                        GLOBAL_POOL_DIRNAME, submitter,
                     )
                     valid = False
 
@@ -310,27 +346,19 @@ class PoolStructureCheck(BaseCheck):
     def pool_orphan_check(self):
         """CHECK-03: every pool image must be referenced by at least one run leaf.
 
-        D-92: collect full hashes from ALL run leaves across closed/ AND open/
-        for the org before checking. Cross-division dedup means a pool image
-        referenced by either division is NOT an orphan.
+        D-92: references are collected from ALL run leaves across closed/ AND
+        open/ before checking. An image in the tree-wide ``code-images/``
+        pool is referenced when ANY organization's leaf names its hash; an
+        image in a per-organization pool is referenced only by that
+        organization's own leaves (its pool, its runs — unchanged from the
+        per-org era, so the frozen v3.0 tree validates exactly as before).
         """
         valid = True
+        by_org = self._referenced_hashes_by_org()
+        all_refs: set[str] = set().union(*by_org.values()) if by_org else set()
 
-        for submitter, pool_root in self._discover_pool_orgs():
-            # Collect all full hashes referenced by run leaves for this org
-            referenced_hashes: set[str] = set()
-            for _division, org_name, sub_path in self._iter_submitter_dirs():
-                if org_name != submitter:
-                    continue
-                for leaf_path in self._iter_datetime_leaves(sub_path):
-                    try:
-                        _alg, full_hash = _read_pointer(Path(leaf_path), self.log)
-                        referenced_hashes.add(full_hash)
-                    except (FileNotFoundError, PointerMalformed):
-                        # CHECK-01 already surfaces these; skip silently here
-                        pass
-
-            # Check each pool image against the referenced set
+        for label, pool_root in self._discover_pool_orgs():
+            referenced = all_refs if label == GLOBAL_POOL_DIRNAME else by_org.get(label, set())
             try:
                 pool_entries = list(pool_root.glob("code-*/"))
             except OSError:
@@ -345,7 +373,7 @@ class PoolStructureCheck(BaseCheck):
                     # CHECK-02 surfaces this; skip
                     continue
 
-                if stored_hash not in referenced_hashes:
+                if stored_hash not in referenced:
                     self.log_violation(
                         "CHECK-03", "poolOrphanCheck",
                         str(pool_dir),
@@ -368,22 +396,57 @@ class PoolStructureCheck(BaseCheck):
         D-81: legacy code/ dirs → actionable 'migrate first' message naming the
               first offender + count of remaining.
         D-91: pool images found but .mlps-image-pool absent → partial migration
-              failure.
+              failure. Applies to the tree-wide ``code-images/`` root and to
+              each per-organization root.
         D-90: sentinel present but no pool images → warn (not fail).
+
+        A per-organization pool that carries its sentinel is a supported
+        layout, not a legacy one: this check says nothing about it.
         """
         valid = True
-        seen_orgs: set[str] = set()
+        root = Path(self.root_path)
 
+        def _pool_images(pool_root: Path) -> list[Path]:
+            if not pool_root.is_dir():
+                return []
+            return [p for p in pool_root.glob("code-*/") if p.is_dir()]
+
+        # Tree-wide pool root: D-91 / D-90.
+        global_root = self._global_pool_root()
+        global_images = _pool_images(global_root)
+        global_sentinel = (global_root / _POOL_SENTINEL_FILENAME).exists()
+        if global_images and not global_sentinel:
+            self.log_violation(
+                "CHECK-04", "poolLegacyCheck",
+                str(global_root),
+                "Partial migration detected: %s/ holds pool images but no "
+                "%s sentinel. Auto-heal fires on the next `mlpstorage "
+                "{closed|open} <benchmark> {datasize|datagen|run}` "
+                "invocation against this --results-dir; `mlpstorage "
+                "validate` does not migrate.",
+                GLOBAL_POOL_DIRNAME, _POOL_SENTINEL_FILENAME,
+            )
+            valid = False
+        if global_sentinel and not global_images:
+            self.warn_violation(
+                "CHECK-04", "poolLegacyCheck",
+                str(global_root),
+                "Pool sentinel present in %s/ but no pool images found "
+                "— nothing to verify.",
+                GLOBAL_POOL_DIRNAME,
+            )
+
+        seen_orgs: set[str] = set()
         for _division, submitter, _sub_path in self._iter_submitter_dirs():
             if submitter in seen_orgs:
                 continue
             seen_orgs.add(submitter)
 
-            org_root = Path(self.root_path) / submitter
-            pool_sentinel = org_root / ".mlps-image-pool"
+            org_root = root / submitter
+            pool_sentinel = org_root / _POOL_SENTINEL_FILENAME
 
             # D-81: check for legacy code/ directories via _scan_legacy_layout
-            offenders = _scan_legacy_layout(Path(self.root_path), submitter)
+            offenders = _scan_legacy_layout(root, submitter)
             if offenders:
                 first = offenders[0]
                 remaining = len(offenders) - 1
@@ -408,8 +471,7 @@ class PoolStructureCheck(BaseCheck):
             # D-91: pool images present but .mlps-image-pool sentinel absent
             # (and no legacy code/ offenders — the more specific legacy error
             # has priority; only fire partial-migration if legacy dirs not found)
-            pool_images = list(org_root.glob("code-*/")) if org_root.is_dir() else []
-            pool_images = [p for p in pool_images if p.is_dir()]
+            pool_images = _pool_images(org_root)
 
             if pool_images and not pool_sentinel.exists() and not offenders:
                 self.log_violation(

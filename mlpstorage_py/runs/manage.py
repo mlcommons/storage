@@ -93,7 +93,8 @@ def _confirm(prompt: str, yes: bool, logger) -> bool:
 
 def _pool_roots(results_dir: str) -> List[Tuple[str, str]]:
     """``[(name, path)]`` for every top-level directory carrying a
-    ``.mlps-image-pool`` sentinel (today ``<results-dir>/<orgname>/``)."""
+    ``.mlps-image-pool`` sentinel: the tree-wide ``code-images/`` and any
+    per-organization ``<orgname>/`` pool an earlier release wrote."""
     roots = []
     try:
         entries = sorted(os.listdir(results_dir))

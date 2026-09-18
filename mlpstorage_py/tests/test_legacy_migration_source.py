@@ -149,19 +149,23 @@ def test_HandEditedCodeImage_subclasses_CodeImageError():
     assert str(e) == "hand-edited code image detected at 'x'"
 
 
-def test_exactly_two_log_status_call_sites_in_module():
-    """Exactly two log.status() call sites in legacy_migration.py (D-74).
+def test_exactly_two_log_status_call_sites_per_migration_routine():
+    """Two log.status() call sites per migration routine in legacy_migration.py (D-74).
 
     Read the source of legacy_migration.py and count occurrences of
-    ``log.status(`` excluding comment lines. Assert count == 2 — the header
-    line and the completion summary line. Any additional log.status() calls
-    would violate D-74's "concise user-facing output" requirement.
+    ``log.status(`` excluding comment lines. The module holds two migration
+    routines — ``migrate_legacy_layout`` (legacy ``code/`` → pool) and
+    ``migrate_org_pool`` (per-organization pool → tree-wide ``code-images/``)
+    — and each is allowed exactly a header line and a completion summary
+    line, so the module total is 4. Any additional log.status() calls would
+    violate D-74's "concise user-facing output" requirement.
     """
     source = Path("mlpstorage_py/submission_checker/tools/legacy_migration.py").read_text()
     non_comment = "\n".join(
         line for line in source.splitlines() if not line.lstrip().startswith("#")
     )
     count = non_comment.count("log.status(")
-    assert count == 2, (
-        f"D-74 requires exactly 2 log.status call sites, found {count}"
+    assert count == 4, (
+        f"D-74 requires exactly 2 log.status call sites per migration routine "
+        f"(4 in total), found {count}"
     )

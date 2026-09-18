@@ -71,16 +71,17 @@ class TestPerOrgMigrationIsolation:
         Plant legacy trees for both Acme and Bravo under the same results_dir.
         Invoke migrate_legacy_layout scoped to Acme. Assert:
         - Bravo's legacy code/ directory is unchanged (still present, same content).
-        - <rd>/Bravo/.mlps-image-pool does not exist (no sentinel for Bravo).
-        - Acme migration completes normally (sentinel written, legacy deleted).
+        - Bravo's run leaves received no pointers.
+        - Acme migration completes normally (tree-wide pool sentinel written,
+          legacy deleted).
         """
         rd = legacy_tree_factory(orgname="Acme", n_run_leaves=1)
         bravo_legacy = _plant_bravo_legacy(rd)
 
         migrate_legacy_layout(rd, "Acme", log)
 
-        # (a) Acme sentinel written
-        assert (rd / "Acme" / ".mlps-image-pool").exists(), "Acme sentinel must be written"
+        # (a) Tree-wide pool sentinel written
+        assert (rd / "code-images" / ".mlps-image-pool").exists(), "pool sentinel must be written"
 
         # (b) Acme legacy dir gone
         assert not (rd / "closed" / "Acme" / "code").exists(), (
@@ -92,22 +93,22 @@ class TestPerOrgMigrationIsolation:
             "Bravo's legacy code/ must remain intact when migrating Acme"
         )
 
-        # (d) Bravo has no sentinel (migration not invoked for Bravo)
-        bravo_sentinel = rd / "Bravo" / ".mlps-image-pool"
-        assert not bravo_sentinel.exists(), (
-            "Bravo must NOT have a sentinel when only Acme was migrated (D-70 per-org scoping)"
+        # (d) Bravo's leaves received no pointers (migration not invoked for Bravo)
+        bravo_pointers = list((rd / "closed" / "Bravo").rglob(".mlps-code-image"))
+        assert not bravo_pointers, (
+            "Bravo must NOT receive pointers when only Acme was migrated (D-70 per-org scoping)"
         )
 
     def test_running_second_org_migrates_independently(
         self, tmp_path, legacy_tree_factory, log
     ):
-        """Migrating Acme then Bravo produces independent pool sentinels for each.
+        """Migrating Acme then Bravo fills the one tree-wide pool.
 
         After migrating Acme, migrate Bravo separately. Assert:
-        - <rd>/Acme/.mlps-image-pool exists (Acme sentinel written).
-        - <rd>/Bravo/.mlps-image-pool exists (Bravo sentinel written).
-        - The two sentinel paths are distinct (no cross-org pool dir sharing).
-        - Each org's pool lives under its own org root (D-70 per-org scoping).
+        - both legacy code/ dirs are gone and every leaf of both orgs has a
+          pointer;
+        - every image lives under <rd>/code-images/;
+        - no per-org pool root was created.
         """
         rd = legacy_tree_factory(orgname="Acme", n_run_leaves=1)
         _plant_bravo_legacy(rd)
@@ -119,22 +120,13 @@ class TestPerOrgMigrationIsolation:
         log_bravo = MockLogger()
         migrate_legacy_layout(rd, "Bravo", log_bravo)
 
-        # Both sentinels present
-        assert (rd / "Acme" / ".mlps-image-pool").exists(), "Acme sentinel must be written"
-        assert (rd / "Bravo" / ".mlps-image-pool").exists(), "Bravo sentinel must be written"
+        assert (rd / "code-images" / ".mlps-image-pool").exists()
+        assert not (rd / "closed" / "Acme" / "code").exists()
+        assert not (rd / "closed" / "Bravo" / "code").exists()
+        for org in ("Acme", "Bravo"):
+            assert list((rd / "closed" / org).rglob(".mlps-code-image")), org
 
-        # Each org has at least one pool image in its own root
-        acme_pools = pool_dirs(rd / "Acme")
-        bravo_pools = pool_dirs(rd / "Bravo")
-        assert len(acme_pools) >= 1, f"Acme must have at least 1 pool image, got {acme_pools}"
-        assert len(bravo_pools) >= 1, f"Bravo must have at least 1 pool image, got {bravo_pools}"
-
-        # Pools are in separate org roots (no cross-org sharing)
-        acme_pool_parents = {p.parent for p in acme_pools}
-        bravo_pool_parents = {p.parent for p in bravo_pools}
-        assert acme_pool_parents == {rd / "Acme"}, (
-            f"Acme pools must live under rd/Acme, got {acme_pool_parents}"
-        )
-        assert bravo_pool_parents == {rd / "Bravo"}, (
-            f"Bravo pools must live under rd/Bravo, got {bravo_pool_parents}"
-        )
+        pools = pool_dirs(rd / "code-images")
+        assert len(pools) >= 1, f"expected at least one image, got {pools}"
+        assert {p.parent for p in pools} == {rd / "code-images"}
+        assert not (rd / "Acme").exists() and not (rd / "Bravo").exists()

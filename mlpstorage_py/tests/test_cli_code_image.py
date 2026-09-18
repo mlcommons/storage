@@ -303,7 +303,7 @@ class TestEnvVarPathTraversal:
 #
 # The D-21 "delete `code/` and re-run to re-capture" recovery message applied
 # to the legacy single-`code/` layout. Phase 6 replaces that with a
-# content-addressed pool at `<results_dir>/<orgname>/code-<hash8>/` (D-64);
+# content-addressed pool at `<results_dir>/code-images/code-<hash8>/` (D-64);
 # any legacy `code/` present at capture time is refused via
 # `LegacyLayoutDetected` (D-63), with Phase 7 owning the migration. The
 # missing/malformed .code-hash.json recovery workflow is now covered at

@@ -212,7 +212,7 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         # The historical LAY-06 in-``__init__`` capture (a per-mode copy under
         # ``<rd>/{closed,open}/<orgname>/code/``) was retired in Phase 6 Plan
         # 06-03 (D-60): two coexisting capture paths collapsed to one
-        # content-addressed pool at ``<rd>/<orgname>/code-<hash8>/``.
+        # content-addressed pool at ``<rd>/code-images/code-<hash8>/``.
 
         self.metadata_filename = f"{self.BENCHMARK_TYPE.value}_{self.run_datetime}_metadata.json"
         self.metadata_file_path = os.path.join(self.run_result_output, self.metadata_filename)

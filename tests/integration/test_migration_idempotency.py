@@ -2,7 +2,7 @@
 
 Covers Phase 7 decisions D-70/D-71 and requirement MIG-02:
   - MIG-02a: sentinel short-circuit — second invocation skips migration scan
-    when <rd>/<org>/.mlps-image-pool sentinel is already present (O(2) syscalls)
+    when <rd>/code-images/.mlps-image-pool sentinel is already present (O(2) syscalls)
   - MIG-02b: crash-resumability — re-invoking migration after a simulated SIGKILL
     at any of the four D-71 step boundaries converges to the same final state as
     an uninterrupted migration
@@ -53,7 +53,7 @@ class TestSentinelShortCircuit:
 
         # First call: migrate normally so the sentinel is written.
         migrate_legacy_layout(rd, "Acme", log)
-        assert (rd / "Acme" / ".mlps-image-pool").exists()
+        assert (rd / "code-images" / ".mlps-image-pool").exists()
 
         # Spy on _scan_legacy_layout to confirm it is NOT called.
         spy = MagicMock(wraps=lm._scan_legacy_layout)
@@ -96,7 +96,7 @@ class TestSentinelShortCircuit:
 
         # First call: migrate normally so the sentinel is written.
         migrate_legacy_layout(rd, "Acme", log)
-        assert (rd / "Acme" / ".mlps-image-pool").exists()
+        assert (rd / "code-images" / ".mlps-image-pool").exists()
 
         # Clear ALL logger accumulators.
         log.statuses.clear()
@@ -144,7 +144,7 @@ class TestCrashResume:
         present, all run leaves have pointers, legacy code/ deleted.
         """
         rd = legacy_tree_factory(orgname="Acme", n_run_leaves=3)
-        org_root = rd / "Acme"
+        org_root = rd / "code-images"
 
         # Patch step 2 to raise before writing any pointers.
         def _fail(*a, **kw):
@@ -183,7 +183,7 @@ class TestCrashResume:
         leaves have pointers, legacy code/ dirs deleted on the resume run.
         """
         rd = legacy_tree_factory(orgname="Acme", n_run_leaves=3)
-        org_root = rd / "Acme"
+        org_root = rd / "code-images"
 
         # Patch step 3 to raise before deleting legacy dirs.
         def _fail(*a, **kw):
@@ -227,7 +227,7 @@ class TestCrashResume:
         silently (no log.status lines for N=0 per D-74).
         """
         rd = legacy_tree_factory(orgname="Acme", n_run_leaves=3)
-        org_root = rd / "Acme"
+        org_root = rd / "code-images"
 
         # Patch step 4 to raise before writing the sentinel.
         def _fail(*a, **kw):
@@ -269,7 +269,7 @@ class TestCrashResume:
         via atomic os.rename, so re-running overwrites cleanly).
         """
         rd = legacy_tree_factory(orgname="Acme", n_run_leaves=3)
-        org_root = rd / "Acme"
+        org_root = rd / "code-images"
 
         # Stateful mock: let first call succeed, raise on 2nd and later calls.
         orig = lm._write_pointer_atomic

@@ -1069,20 +1069,24 @@ class ReportGenerator:
         name). Returns ``None`` when the pointer is absent or unreadable —
         the caller then leaves Code/Logs blank.
 
-        The URL is ``<org>/code-<hash8>/`` with **no** division component.
-        Pool images live at ``org_root = results_dir / orgname``, which
-        code_image._capture_new_pool_image documents as mode-agnostic by
-        design (D-64): one pool per organization, shared across the CLOSED
-        and OPEN divisions. ``category`` is accepted for signature
-        stability but is deliberately not part of the path — prefixing it
-        is what made all 356 links in the v3.0 tree dangle.
+        The URL is ``code-images/code-<hash8>/`` when the image lives in
+        the tree-wide pool, else ``<org>/code-<hash8>/`` (the
+        per-organization pool earlier releases wrote; the v3.0 tree uses
+        it). Neither carries a division component: the pool is shared
+        across CLOSED and OPEN (D-64). ``category`` is accepted for
+        signature stability but is deliberately not part of the path —
+        prefixing it is what made all 356 links in the v3.0 tree dangle.
+
+        The tree-wide pool is looked for by walking up from the run leaf,
+        so this works whether ``--results-dir`` was the tree root or a
+        per-system slice.
         """
         result_dir = getattr(first_run, 'result_dir', None)
         if not result_dir:
             return None
         from pathlib import Path
         from mlpstorage_py.submission_checker.tools.code_image import (
-            _read_pointer, _pool_dir_name, CodeImageError,
+            _read_pointer, _pool_dir_name, CodeImageError, GLOBAL_POOL_DIRNAME,
         )
         try:
             _alg, full_hash = _read_pointer(Path(result_dir), self.logger)
@@ -1091,7 +1095,12 @@ class ReportGenerator:
                 "reportgen: no/invalid code-image pointer at %s: %s; "
                 "Code/Logs will be blank.", result_dir, e)
             return None
-        return f"{orgname}/{_pool_dir_name(full_hash)}/"
+        name = _pool_dir_name(full_hash)
+        leaf = Path(result_dir)
+        for ancestor in [leaf, *leaf.parents]:
+            if (ancestor / GLOBAL_POOL_DIRNAME / name).is_dir():
+                return f"{GLOBAL_POOL_DIRNAME}/{name}/"
+        return f"{orgname}/{name}/"
 
     def _read_system_description(self, first_run: Any, systemname: str):
         """Locate + parse ``systems/<systemname>.yaml`` for a workload.

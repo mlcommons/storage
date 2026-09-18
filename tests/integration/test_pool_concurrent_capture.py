@@ -11,7 +11,7 @@ produce exactly one `code-<hash8>/` (D-66 first-writer-wins via
 `os.rename` + non-empty tmp target). The race loser observes ENOTEMPTY,
 reads the winner's `.code-hash.json`, verifies its `hash` matches the live
 hash (byte-equal content), and silently returns the winner's path. No
-`.code-<hash8>.tmp.<pid>/` sibling is leaked into `org_root` on either
+`.code-<hash8>.tmp.<pid>/` sibling is leaked into the pool root on either
 branch (Pitfall 4 cleanup contract).
 
 Also covers the D-66 loser branch directly: pre-seeding a pool dir with a
@@ -121,7 +121,7 @@ class TestConcurrentCapture:
                 f"iter {iteration}: worker 2 crashed with exitcode {p2.exitcode}"
             )
 
-            org_root = iter_rd / "Acme"
+            org_root = iter_rd / "code-images"
             pools = pool_dirs(org_root)
             assert len(pools) == 1, (
                 f"iter {iteration}: D-66 violated — expected 1 pool dir, got {pools}"
@@ -167,8 +167,8 @@ class TestConcurrentCapture:
         assert full_live_hash is not None
         hash8 = full_live_hash[:8]
 
-        # Pre-seed <rd>/Acme/code-<hash8>/ with a matching .code-hash.json.
-        org_root = rd / "Acme"
+        # Pre-seed <rd>/code-images/code-<hash8>/ with a matching .code-hash.json.
+        org_root = rd / "code-images"
         org_root.mkdir()
         pre_pool = org_root / f"code-{hash8}"
         pre_pool.mkdir()
@@ -189,7 +189,7 @@ class TestConcurrentCapture:
         # Reuse: returned pool is the pre-seeded one — no new dir written.
         assert Path(returned) == pre_pool
 
-        # Still exactly one pool dir under <rd>/Acme/.
+        # Still exactly one pool dir under <rd>/code-images/.
         pools = pool_dirs(org_root)
         assert len(pools) == 1
         assert pools[0] == pre_pool

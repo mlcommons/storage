@@ -75,8 +75,8 @@ class TestSourceChangeCapturesNewImage:
         )
         pool_dir_2 = capture_or_verify_code_image(args2, {}, log)
 
-        # SC-3: two DISTINCT pool dirs exist under <rd>/Acme/.
-        org_root = rd / "Acme"
+        # SC-3: two DISTINCT pool dirs exist under <rd>/code-images/.
+        org_root = rd / "code-images"
         pools = pool_dirs(org_root)
         assert len(pools) == 2, (
             f"SC-3 violated: expected 2 pool dirs after source change, got {pools}"

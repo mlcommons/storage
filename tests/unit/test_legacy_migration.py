@@ -188,15 +188,16 @@ class TestPreCheckHelper:
     def test_sentinel_present_skips_scan(self, tmp_path, monkeypatch):
         """_check_and_migrate_legacy_layout skips scan when sentinel already present.
 
-        If <results_dir>/<orgname>/.mlps-image-pool exists, the helper must
-        return immediately without calling _scan_legacy_layout (O(2) syscall
-        fast path — D-70). Assert via monkeypatch spy that _scan_legacy_layout
+        If <results_dir>/code-images/.mlps-image-pool exists and there is no
+        <results_dir>/<orgname>/ to relocate, the helper must return
+        immediately without calling _scan_legacy_layout (O(2) syscall fast
+        path — D-70). Assert via monkeypatch spy that _scan_legacy_layout
         call_count == 0.
         """
         results_dir = tmp_path / "results"
-        org_root = results_dir / "Acme"
-        org_root.mkdir(parents=True)
-        (org_root / ".mlps-image-pool").write_text(
+        pool_root = results_dir / "code-images"
+        pool_root.mkdir(parents=True)
+        (pool_root / ".mlps-image-pool").write_text(
             "mlpstorage_version=1.0\nmigration_completed_at=2026-01-01T00:00:00Z\n"
         )
 
@@ -207,29 +208,21 @@ class TestPreCheckHelper:
         _check_and_migrate_legacy_layout(args, {}, _make_log())
         assert scan_spy.call_count == 0, "sentinel present: _scan_legacy_layout must NOT be called"
 
-    def test_pool_dirs_present_but_no_sentinel_triggers_migration(self, tmp_path, monkeypatch):
-        """Issue #716: sentinel-absent + pool-present + no-legacy must migrate.
+    def test_pool_dirs_present_but_no_sentinel_writes_sentinel(self, tmp_path, monkeypatch):
+        """Issue #716: sentinel-absent + pool-present + no-legacy must self-heal.
 
-        Fresh-tree flow: capture_or_verify_code_image creates
-        ``<org>/code-<hash8>/`` pool dirs but never writes the sentinel. If a
-        subsequent submission-mode invocation still finds no sentinel and no
-        legacy ``code/`` dirs, the pre-check must call migrate_legacy_layout
-        so it can write the sentinel via its N=0 recovery branch — otherwise
+        A capture that crashed before writing the sentinel leaves
+        ``code-images/code-<hash8>/`` without ``.mlps-image-pool``. The next
+        submission-mode invocation must write the sentinel — otherwise
         CHECK-04 D-91 flags the tree as partial-migration forever.
         """
         results_dir = tmp_path / "results"
-        org_root = results_dir / "Acme"
-        org_root.mkdir(parents=True)
-        # Pool dir exists (capture_or_verify_code_image ran on a prior invocation).
-        (org_root / "code-deadbeef").mkdir()
-        # Sentinel does NOT exist.
-        assert not (org_root / ".mlps-image-pool").exists()
+        pool_root = results_dir / "code-images"
+        pool_root.mkdir(parents=True)
+        (pool_root / "code-deadbeef").mkdir()
+        assert not (pool_root / ".mlps-image-pool").exists()
 
-        # No legacy code/ dirs.
         monkeypatch.setattr(lm, "_scan_legacy_layout", lambda rd, org: [])
-
-        migrate_spy = MagicMock()
-        monkeypatch.setattr(lm, "migrate_legacy_layout", migrate_spy)
 
         args = Namespace(
             mode="closed", command="run", results_dir=str(results_dir),
@@ -237,10 +230,26 @@ class TestPreCheckHelper:
         )
         _check_and_migrate_legacy_layout(args, {}, _make_log())
 
-        assert migrate_spy.call_count == 1, (
-            "pool dirs present + sentinel absent + no legacy: "
-            "migrate_legacy_layout must be called so N=0 branch writes the sentinel"
+        assert (pool_root / ".mlps-image-pool").is_file()
+
+    def test_org_pool_present_triggers_relocation(self, tmp_path, monkeypatch):
+        """A per-org pool (with or without sentinel) is handed to migrate_org_pool."""
+        results_dir = tmp_path / "results"
+        org_root = results_dir / "Acme"
+        org_root.mkdir(parents=True)
+        (org_root / "code-deadbeef").mkdir()
+
+        monkeypatch.setattr(lm, "_scan_legacy_layout", lambda rd, org: [])
+        relocate_spy = MagicMock(return_value=1)
+        monkeypatch.setattr(lm, "migrate_org_pool", relocate_spy)
+
+        args = Namespace(
+            mode="closed", command="run", results_dir=str(results_dir),
+            orgname="Acme", systemname=None,
         )
+        _check_and_migrate_legacy_layout(args, {}, _make_log())
+        assert relocate_spy.call_count == 1
+        assert relocate_spy.call_args.args[1] == "Acme"
 
     def test_no_pool_dirs_and_no_legacy_does_not_migrate(self, tmp_path, monkeypatch):
         """Fresh-tree pre-capture path stays a no-op.

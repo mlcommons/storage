@@ -1,7 +1,11 @@
 """One-shot legacy migration coordinator for Phase 7.
 
 Performs automatic, idempotent, crash-resumable migration of v1.0-layout
-``code/`` directories into the Phase 6 content-addressed pool.
+``code/`` directories into the content-addressed pool, and (PR4 of the
+results-dir hygiene effort) relocation of a per-organization pool at
+``<results_dir>/<orgname>/code-*/`` into the tree-wide pool at
+``<results_dir>/code-images/``. Both steps are driven by
+``_check_and_migrate_legacy_layout`` before every capture.
 
 Design decisions:
 - D-70: Migration invoked by an explicit pre-check before capture_or_verify_code_image.
@@ -17,6 +21,7 @@ Design decisions:
 
 Public API:
     migrate_legacy_layout(results_dir, orgname, log) -> None
+    migrate_org_pool(results_dir, orgname, log) -> int
     _check_and_migrate_legacy_layout(args, env, log) -> None
     _read_sentinel(sentinel_path, log) -> dict[str, str]
     VerifiedLegacyImage (dataclass)
@@ -24,6 +29,7 @@ Public API:
 
 from __future__ import annotations
 
+import errno
 import os
 import re
 import shutil
@@ -42,14 +48,18 @@ from mlpstorage_py.submission_checker.tools.code_image import (
     _capture_new_pool_image,
     _find_matching_pool_image,
     _now_utc_iso,
+    _POOL_SENTINEL_FILENAME,
     _read_hash_file,
     _scan_legacy_layout,
     _write_pointer_atomic,
+    global_pool_root,
+    verify_image_self_consistent,
 )
 from mlpstorage_py.submission_checker.tools.code_checksum import compute_code_tree_md5
 
-# Authoritative "migration done" signal per D-72.
-_SENTINEL_FILENAME = ".mlps-image-pool"
+# Authoritative "this directory is a pool root" signal per D-72. Defined in
+# code_image (the writer needs it too); re-exported here for the readers.
+_SENTINEL_FILENAME = _POOL_SENTINEL_FILENAME
 
 # Datetime-shaped run-leaf directory names: `YYYYMMDD_HHMMSS`. Mirrors
 # `_TIMESTAMP_RE` in submission_checker/checks/pool_structure_checks.py so
@@ -142,11 +152,11 @@ def _verify_all_legacy_dirs(
 # ---------------------------------------------------------------------------
 
 def _materialize_pool_images(
-    org_root: Path,
+    pool_root: Path,
     verified: list[VerifiedLegacyImage],
     log,
 ) -> dict[str, Path]:
-    """Pass 2 step 1: materialize each verified image into the Phase 6 pool (D-71).
+    """Pass 2 step 1: materialize each verified image into the pool (D-71).
 
     Returns a live_hash→pool_dir map used by step 2.
     """
@@ -154,12 +164,12 @@ def _materialize_pool_images(
     for v in verified:
         if v.live_hash in hash_to_pool:
             continue
-        existing = _find_matching_pool_image(org_root, v.live_hash, log)
+        existing = _find_matching_pool_image(pool_root, v.live_hash, log)
         if existing is not None:
             log.debug("dedup: legacy %s already materialized at %s", v.legacy_path, existing)
             hash_to_pool[v.live_hash] = existing
             continue
-        pool_dir = _capture_new_pool_image(org_root, v.legacy_path, v.live_hash, log)
+        pool_dir = _capture_new_pool_image(pool_root, v.legacy_path, v.live_hash, log)
         log.debug("materialized legacy %s as %s", v.legacy_path, pool_dir.name)
         hash_to_pool[v.live_hash] = pool_dir
     return hash_to_pool
@@ -194,10 +204,10 @@ def _delete_legacy_dirs(verified: list[VerifiedLegacyImage], log) -> None:
             log.debug("legacy %s already deleted (resume path)", v.legacy_path)
 
 
-def _write_sentinel_atomic(org_root: Path, log) -> Path:
+def _write_sentinel_atomic(pool_root: Path, log) -> Path:
     """Pass 2 step 4 (LAST): write ``.mlps-image-pool`` via tmp + os.rename (D-65, D-72)."""
-    sentinel = org_root / _SENTINEL_FILENAME
-    tmp = org_root / f"{_SENTINEL_FILENAME}.tmp.{os.getpid()}"
+    sentinel = pool_root / _SENTINEL_FILENAME
+    tmp = pool_root / f"{_SENTINEL_FILENAME}.tmp.{os.getpid()}"
     if tmp.exists():
         tmp.unlink(missing_ok=True)
     content = (
@@ -293,26 +303,141 @@ def migrate_legacy_layout(results_dir: Path, orgname: str, log) -> None:
     # pass 1 raises.
     verified = _verify_all_legacy_dirs(results_dir, orgname, log)
 
-    org_root = results_dir / orgname
-    org_root.mkdir(parents=True, exist_ok=True)
+    pool_root = global_pool_root(results_dir)
+    pool_root.mkdir(parents=True, exist_ok=True)
 
     if not verified:
         # Sentinel absent + no legacy code/ (e.g. step-3-done-but-step-4-crashed).
         # N=0 is not a migration event — no status lines (D-74).
-        _write_sentinel_atomic(org_root, log)
+        _write_sentinel_atomic(pool_root, log)
         return
 
     n = len(verified)
     log.status(f"Migrating legacy code-image layout under {orgname} ({n} images)...")
 
     # D-71 FIXED STEP ORDER — do not reorder.
-    hash_to_pool = _materialize_pool_images(org_root, verified, log)                          # step 1
+    hash_to_pool = _materialize_pool_images(pool_root, verified, log)                         # step 1
     _write_pointers_for_migrated_leaves(results_dir, orgname, verified, hash_to_pool, log)    # step 2
     _delete_legacy_dirs(verified, log)                                                         # step 3
-    _write_sentinel_atomic(org_root, log)                                                      # step 4
+    _write_sentinel_atomic(pool_root, log)                                                     # step 4
 
     m = len(hash_to_pool)
     log.status(f"Migrated {n} legacy code images into pool ({m} unique).")
+
+
+# ---------------------------------------------------------------------------
+# Per-organization pool → tree-wide pool relocation
+# ---------------------------------------------------------------------------
+
+def _org_pool_images(org_root: Path) -> list[Path]:
+    """``code-*`` directories directly under ``org_root`` (sorted; [] if absent)."""
+    if not org_root.is_dir():
+        return []
+    return sorted(p for p in org_root.glob("code-*") if p.is_dir())
+
+
+def migrate_org_pool(results_dir: Path, orgname: str, log) -> int:
+    """Relocate ``<results_dir>/<orgname>/code-*/`` into ``<results_dir>/code-images/``.
+
+    Earlier releases kept one pool per organization at the org root. The
+    tree-wide pool replaces it; run leaves are untouched because pointers
+    are hash-only. Idempotent and crash-resumable — every step leaves a
+    state that a re-run completes, and readers accept both layouts
+    throughout:
+
+      1. ensure the global pool root and its sentinel exist;
+      2. move each image (``os.rename``; copy+delete on EXDEV). When the
+         global pool already holds an image of the same name, the kept copy
+         is verified self-consistent before the duplicate is deleted;
+      3. remove the org-level sentinel;
+      4. remove the org directory if nothing else is in it.
+
+    Returns the number of images moved or de-duplicated (0 when there was
+    no per-organization pool). Emits exactly two status lines when N > 0
+    (D-74), none otherwise.
+
+    Raises:
+        HandEditedCodeImage: an org-pool image has no usable
+            ``.code-hash.json`` (nothing to name the target by), or the
+            global copy that would replace a duplicate does not re-hash to
+            its own recorded digest.
+    """
+    org_root = Path(results_dir) / orgname
+    images = _org_pool_images(org_root)
+    org_sentinel = org_root / _SENTINEL_FILENAME
+    if not images and not org_sentinel.exists():
+        return 0
+
+    pool_root = global_pool_root(results_dir)
+    n = len(images)
+    if n:
+        log.status(
+            f"Relocating {orgname}'s code-image pool into "
+            f"{pool_root.name}/ ({n} images)..."
+        )
+
+    # Step 1: global pool root + sentinel first, so a crash after any move
+    # leaves a tree that validates (CHECK-04 D-91 wants the sentinel).
+    pool_root.mkdir(parents=True, exist_ok=True)
+    if not (pool_root / _SENTINEL_FILENAME).exists():
+        _write_sentinel_atomic(pool_root, log)
+
+    # Step 2: move / de-duplicate.
+    for image in images:
+        try:
+            stored = _read_hash_file(image, log)["hash"]
+        except (MissingHashFile, MalformedHashFile) as e:
+            raise HandEditedCodeImage(
+                f"cannot relocate pool image {str(image)!r}: {e}. "
+                f"Fix or delete it, then re-run."
+            ) from e
+        target = pool_root / image.name
+        if target.is_dir():
+            if not verify_image_self_consistent(target, log):
+                raise HandEditedCodeImage(
+                    f"pool image {str(target)!r} does not re-hash to its own "
+                    f".code-hash.json; refusing to delete the duplicate at "
+                    f"{str(image)!r}. Fix or delete one of them, then re-run."
+                )
+            kept = _read_hash_file(target, log)["hash"]
+            if kept != stored:
+                raise HandEditedCodeImage(
+                    f"pool images {str(image)!r} and {str(target)!r} share a "
+                    f"name but record different hashes ({stored} vs {kept}). "
+                    f"Fix or delete one of them, then re-run."
+                )
+            shutil.rmtree(image)
+            log.debug("dropped duplicate %s (kept %s)", image, target)
+            continue
+        try:
+            os.rename(str(image), str(target))
+        except OSError as e:
+            if e.errno != errno.EXDEV:
+                raise
+            # Pool root on another filesystem: copy byte-for-byte (keeping
+            # the original .code-hash.json) into a dot-prefixed tmp sibling,
+            # rename it into place, then delete the original. A crash
+            # mid-copy leaves only the invisible tmp, which the next run
+            # discards and redoes.
+            tmp = pool_root / f".{image.name}.tmp.{os.getpid()}"
+            shutil.rmtree(tmp, ignore_errors=True)
+            shutil.copytree(image, tmp, symlinks=True)
+            os.rename(str(tmp), str(target))
+            shutil.rmtree(image)
+        log.debug("moved %s -> %s", image, target)
+
+    # Step 3 + 4: retire the org-level pool root.
+    org_sentinel.unlink(missing_ok=True)
+    for stray in org_root.glob(f"{_SENTINEL_FILENAME}.tmp.*"):
+        stray.unlink(missing_ok=True)
+    try:
+        org_root.rmdir()
+    except OSError:
+        log.debug("%s not empty; leaving it in place", org_root)
+
+    if n:
+        log.status(f"Relocated {n} code images into {pool_root.name}/.")
+    return n
 
 
 # ---------------------------------------------------------------------------
@@ -322,13 +447,20 @@ def migrate_legacy_layout(results_dir: Path, orgname: str, log) -> None:
 def _check_and_migrate_legacy_layout(args, env, log) -> None:
     """Fast-path pre-check per D-70. Called BEFORE ``capture_or_verify_code_image``.
 
-    O(2) syscalls when sentinel present (common case after first migration).
-    Gates on submission mode/command; resolves orgname via same shape as
-    capture_or_verify_code_image.
+    Gates on submission mode/command; resolves orgname via the same shape
+    as capture_or_verify_code_image. Then, in order:
 
-    Fresh-tree behaviour (A3b): sentinel absent + no legacy code/ → return without
-    writing sentinel. The sentinel marks "migration ran here"; fresh trees have no
-    migration event.
+    1. legacy ``code/`` dirs under ``{closed,open}/<orgname>/`` →
+       ``migrate_legacy_layout`` (materializes into ``code-images/``);
+    2. a per-organization pool at ``<results_dir>/<orgname>/`` (sentinel
+       and/or ``code-*`` images) → ``migrate_org_pool``;
+    3. images in ``code-images/`` without its sentinel (the #716 shape:
+       a capture that crashed before writing it) → write the sentinel.
+
+    Fast path (D-70): when ``code-images/.mlps-image-pool`` exists and
+    ``<results_dir>/<orgname>/`` does not, there is nothing to migrate —
+    two ``exists`` probes, no scan, no writes. Fresh trees get no sentinel
+    until the first capture creates the pool.
     """
     mode = getattr(args, "mode", None)
     if mode not in _SUBMISSION_MODES:
@@ -348,20 +480,15 @@ def _check_and_migrate_legacy_layout(args, env, log) -> None:
     if not results_dir.exists():
         return
 
-    org_root = results_dir / orgname
-    sentinel = org_root / _SENTINEL_FILENAME
-    if sentinel.exists():
+    pool_root = global_pool_root(results_dir)
+    global_sentinel = pool_root / _SENTINEL_FILENAME
+    if global_sentinel.exists() and not (results_dir / orgname).exists():
         return
 
-    offenders = _scan_legacy_layout(results_dir, orgname)
-    if not offenders:
-        # Sentinel absent + no legacy code/ dirs. If pool images already exist
-        # (capture_or_verify_code_image ran first on a fresh tree), we must
-        # still write the sentinel — otherwise CHECK-04 D-91 will flag the
-        # tree as a partial migration forever. migrate_legacy_layout handles
-        # the N=0 case by just writing the sentinel atomically.
-        if org_root.is_dir() and any(org_root.glob("code-*")):
-            migrate_legacy_layout(results_dir, orgname, log)
-        return
+    if _scan_legacy_layout(results_dir, orgname):
+        migrate_legacy_layout(results_dir, orgname, log)
 
-    migrate_legacy_layout(results_dir, orgname, log)
+    migrate_org_pool(results_dir, orgname, log)
+
+    if not global_sentinel.exists() and _org_pool_images(pool_root):
+        _write_sentinel_atomic(pool_root, log)

@@ -8,7 +8,7 @@ Exercises the full Phase-1 stack:
   `<rd>/<mode>/<orgname>/results/<sys>/<benchmark>/<model>/<command>/<datetime>/`
   shape (LAY-05 / LAY-07).
 * `capture_or_verify_code_image` writes the content-addressed pool image
-  at `<rd>/<orgname>/code-<hash8>/` (mode-agnostic per D-64) and a
+  at `<rd>/code-images/code-<hash8>/` (tree-wide, mode-agnostic) and a
   `.mlps-code-image` pointer inside the run leaf (Phase 6 D-60..D-67).
   The pre-Phase-6 per-mode `code/` subtree (LAY-06) was retired in
   Plan 06-03; Plan 06-04 owns the exhaustive pool-layout integration
@@ -181,7 +181,7 @@ class TestInitThenRunLayout:
 
     Rewritten in Phase 6 Plan 06-03: the pre-Phase-6 per-mode
     ``<rd>/closed/<orgname>/code/`` copy was retired; capture now writes a
-    content-addressed pool image at ``<rd>/<orgname>/code-<hash8>/`` plus a
+    content-addressed pool image at ``<rd>/code-images/code-<hash8>/`` plus a
     ``.mlps-code-image`` pointer inside the run leaf (D-63..D-67, POOL-01,
     PTR-01, UX-01). Plan 06-04 owns exhaustive pool-layout coverage; this
     test is a smoke check that the surviving helper honors the pool shape
@@ -207,7 +207,7 @@ class TestInitThenRunLayout:
         assert run_dir.is_dir()
 
         # Phase 6: capture writes a content-addressed pool image under
-        # <rd>/<orgname>/code-<hash8>/ (mode-agnostic per D-64). Env is empty
+        # <rd>/code-images/code-<hash8>/ (tree-wide, mode-agnostic). Env is empty
         # because args.orgname/args.systemname are populated (HARDEN-03).
         args = _make_capture_args(
             results_dir=rd, mode="closed", orgname="Acme",
@@ -215,10 +215,10 @@ class TestInitThenRunLayout:
         )
         pool_dir = capture_or_verify_code_image(args, {}, _capture_logger())
         assert pool_dir is not None
-        assert pool_dir.parent == rd / "Acme"
+        assert pool_dir.parent == rd / "code-images"
 
         # Exactly one pool image after a single CLOSED capture (POOL-01).
-        pool_dirs = list((rd / "Acme").glob("code-*"))
+        pool_dirs = list((rd / "code-images").glob("code-*"))
         assert len(pool_dirs) == 1
         assert pool_dirs[0] == pool_dir
 
@@ -265,14 +265,14 @@ class TestWhatifLayoutShape:
         result = capture_or_verify_code_image(args, {}, _capture_logger())
         assert result is None
         # No pool image directories under <rd>/<orgname>/ from a whatif call.
-        assert not list((rd / "Acme").glob("code-*"))
+        assert not list((rd / "code-images").glob("code-*"))
 
 
 class TestOpenLayoutShape:
     """OPEN mode: pool image lives at the same content-addressed path as CLOSED.
 
     Phase 6 D-64 collapses CLOSED and OPEN into the SAME mode-agnostic pool
-    at ``<rd>/<orgname>/code-<hash8>/`` (POOL-04 cross-mode dedup). Plan
+    at ``<rd>/code-images/code-<hash8>/`` (POOL-04 cross-mode dedup). Plan
     06-04 owns exhaustive cross-mode assertions; this test is a smoke
     check that OPEN honors the pool shape and that repeated captures of
     the same source hash reuse the same pool image.
@@ -295,7 +295,7 @@ class TestOpenLayoutShape:
         assert run_dir == expected
         assert run_dir.is_dir()
 
-        # OPEN capture writes the pool image at <rd>/<orgname>/code-<hash8>/.
+        # OPEN capture writes the pool image at <rd>/code-images/code-<hash8>/.
         args_datagen = _make_capture_args(
             results_dir=rd, mode="open", orgname="Acme",
             benchmark="training", command="datagen",
@@ -304,7 +304,7 @@ class TestOpenLayoutShape:
             args_datagen, {}, _capture_logger(),
         )
         assert first_pool is not None
-        assert first_pool.parent == rd / "Acme"
+        assert first_pool.parent == rd / "code-images"
         assert first_pool.name.startswith("code-")
 
         # A second OPEN capture with the same source hash but different
@@ -318,7 +318,7 @@ class TestOpenLayoutShape:
             args_run, {}, _capture_logger(),
         )
         assert second_pool == first_pool
-        pool_dirs = list((rd / "Acme").glob("code-*"))
+        pool_dirs = list((rd / "code-images").glob("code-*"))
         assert len(pool_dirs) == 1
 
 

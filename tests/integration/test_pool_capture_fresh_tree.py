@@ -6,7 +6,7 @@ against the already-landed `capture_or_verify_code_image` rewrite from
 Plan 06-02:
 
 * A fresh (empty) `--results-dir` invocation writes exactly one pool image at
-  `<rd>/<orgname>/code-<hash8>/` (mode-agnostic per D-64) with a valid
+  `<rd>/code-images/code-<hash8>/` (tree-wide, mode-agnostic) with a valid
   `.code-hash.json` sidecar (POOL-01, POOL-02).
 * The run leaf receives an atomic `.mlps-code-image` pointer whose content is
   `md5-tree-v2:<full-32-hex>` (PTR-01, D-61).
@@ -56,15 +56,15 @@ class TestFreshTreePoolCapture:
 
         pool_dir = capture_or_verify_code_image(args, {}, log)
 
-        # 1. Pool image exists at <rd>/Acme/code-<hash8>/ (POOL-01, D-64 mode-agnostic).
+        # 1. Pool image exists at <rd>/code-images/code-<hash8>/ (POOL-01, D-64 mode-agnostic).
         assert pool_dir is not None
         assert Path(pool_dir).is_dir()
-        assert Path(pool_dir).parent == rd / "Acme", (
-            f"expected pool under <rd>/Acme/, got parent {Path(pool_dir).parent}"
+        assert Path(pool_dir).parent == rd / "code-images", (
+            f"expected pool under <rd>/code-images/, got parent {Path(pool_dir).parent}"
         )
 
         # Exactly ONE pool dir after a single fresh-tree capture.
-        org_root = rd / "Acme"
+        org_root = rd / "code-images"
         pool_glob = sorted(org_root.glob("code-*"))
         assert len(pool_glob) == 1, pool_glob
         assert pool_glob[0] == Path(pool_dir)
@@ -153,9 +153,9 @@ class TestFreshTreeLegacyRefuse:
             f"expected D-63 substring in error message; got {exc_info.value!r}"
         )
 
-        # No pool image was written under <rd>/Acme/ — the refuse is BEFORE
+        # No pool image was written under <rd>/code-images/ — the refuse is BEFORE
         # any writes per D-63 contract.
-        org_root = rd / "Acme"
+        org_root = rd / "code-images"
         pool_glob = list(org_root.glob("code-*")) if org_root.is_dir() else []
         assert pool_glob == [], (
             f"D-63 violated: pool image written despite legacy layout — {pool_glob}"
@@ -186,6 +186,6 @@ class TestFreshTreeLegacyRefuse:
 
         assert "Legacy code-image layout detected" in str(exc_info.value)
         # No pool image written.
-        org_root = rd / "Acme"
+        org_root = rd / "code-images"
         pool_glob = list(org_root.glob("code-*")) if org_root.is_dir() else []
         assert pool_glob == []
