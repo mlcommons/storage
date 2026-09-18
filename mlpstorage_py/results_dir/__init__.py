@@ -21,7 +21,10 @@ that takes ``--results-dir`` once the gate lands in Slice 4):
     * ``NonEmptyDirError``
 - Constants:
     * ``MLPERF_RESULTS_FILENAME``  = ``"mlperf-results.yaml"``
-    * ``MLPERF_RESULTS_VERSION``  = ``1``
+    * ``MLPERF_RESULTS_VERSION``  = ``2``
+- Resolution (``user_config.py``):
+    * ``resolve_results_dir(cli_value) -> (path, source)``
+    * ``DEFAULT_RESULTS_DIR`` = ``"~/mlpstorage-results"``
 
 The constants live in this module to keep the import graph acyclic: both
 ``schema.py`` and ``sentinel.py`` import-free of each other can pull them
@@ -42,7 +45,10 @@ Refs: 01-canonical-layout-and-init / 01-01-PLAN.md
 # ``sentinel.py`` (which depends on ``mlpstorage_py.VERSION`` resolution).
 
 MLPERF_RESULTS_FILENAME: str = "mlperf-results.yaml"
-MLPERF_RESULTS_VERSION: int = 1
+# Version 2 (results-dir resolver): the tree carries its own command history
+# under ``.mlps/`` and ``init`` records the path as the per-user default.
+# Version 1 trees (v3.0 tooling) are read identically.
+MLPERF_RESULTS_VERSION: int = 2
 
 # --- Errors ----------------------------------------------------------------- #
 from mlpstorage_py.results_dir.errors import (  # noqa: E402
@@ -84,7 +90,16 @@ try:  # pragma: no cover — bootstrap-only fallback path
 except ImportError:  # pragma: no cover
     pass
 
+from mlpstorage_py.results_dir.user_config import (  # noqa: E402
+    DEFAULT_RESULTS_DIR,
+    resolve_results_dir,
+    user_config_path,
+)
+
 __all__ = [
+    "DEFAULT_RESULTS_DIR",
+    "resolve_results_dir",
+    "user_config_path",
     "MLPERF_RESULTS_FILENAME",
     "MLPERF_RESULTS_VERSION",
     "MlperfResultsSentinel",

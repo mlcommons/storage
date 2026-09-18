@@ -25,7 +25,7 @@ SYNOPSIS
   mlpstorage <closed|open|whatif> vectordb <command> <file|object> [OPTIONS]
   mlpstorage <closed|open|whatif> kvcache <command> [OPTIONS]
   mlpstorage (reports|history|lockfile|version) [subcommand] [OPTIONS]
-  mlpstorage init <orgname> <results-dir>
+  mlpstorage init <orgname> [results-dir]
   mlpstorage validate <submission-dir> [OPTIONS]
   mlpstorage rules-coverage [--rules-md PATH]
 
@@ -119,7 +119,8 @@ mlpstorage
 │   ├── generate                                 {LF_GENERATE}
 │   └── verify                                   {LF_VERIFY}
 │
-├── init <orgname> <results-dir>                Pin orgname to a results-dir via the mlperf-results.yaml sentinel
+├── init <orgname> [results-dir]                Pin orgname to a results-dir (default ~/mlpstorage-results)
+│                                                and record it as the default for every later command
 │
 ├── validate <submission-dir>                    {VALIDATE}
 │
@@ -131,7 +132,9 @@ Common argument groups
 
 CORE_STD — Standard arguments, every benchmark command and most utilities
   --results-dir/-rd PATH        Benchmark results directory
-                                (default: MLPSTORAGE_RESULTS_DIR env var; no tempdir fallback)
+                                (resolved: this flag > MLPSTORAGE_RESULTS_DIR env var >
+                                 the results-dir recorded by `mlpstorage init`;
+                                 no tempdir fallback)
   --systemname/-sn NAME         System-under-test name — folder under results/
                                 (default: MLPSTORAGE_SYSTEMNAME env var)
   --config-file/-c PATH         YAML overrides file (applied after CLI args)
@@ -185,7 +188,7 @@ TR_DATASIZE_CLOSED
     --hosts/-s HOST...              (default: 127.0.0.1)
     --params/-p/--param KEY=VALUE...  DLIO overrides (CLOSED: restricted subset)
   + MPI_ARGS
-  + CORE_STD  (--results-dir optional)
+  + CORE_STD  (--results-dir resolved: flag > MLPSTORAGE_RESULTS_DIR > init default)
 
 TR_DATASIZE_OPEN
   = TR_DATASIZE_CLOSED  (flags identical; --params unrestricted)
@@ -211,7 +214,7 @@ TR_DATAGEN_CLOSED
     --o-direct                      Route I/O through s3dlio's O_DIRECT local-fs mode
     --params/-p/--param KEY=VALUE...  DLIO overrides (CLOSED: restricted subset)
   + MPI_ARGS
-  + CORE_STD  (--results-dir optional)
+  + CORE_STD  (--results-dir resolved: flag > MLPSTORAGE_RESULTS_DIR > init default)
 
 TR_DATAGEN_OPEN
   = TR_DATAGEN_CLOSED  (flags identical; --params unrestricted)
@@ -297,7 +300,7 @@ CK_DATASIZE_CLOSED
     --num-checkpoints-write/-ncw N  (default: 10; closed allows 10 or 0)
     --checkpoint-subset             (8B at 8 processes only; sizes a Subset run)
   + MPI_ARGS
-  + CORE_STD  (--results-dir and --systemname optional)
+  + CORE_STD  (--results-dir resolved: flag > MLPSTORAGE_RESULTS_DIR > init default; --systemname optional)
   Note: closed runs use 10/10 by default. Use 10/0 then 0/10 in two
         invocations when a cache flush is required between phases
         (see Rules.md §4.7.1 and checkpointing/README.md).
@@ -399,7 +402,7 @@ VDB_DATASIZE_CLOSED
     --num-vectors N                 (default: 1,000,000)
     --num-shards N                  (default: 1)
     --vector-dtype {FLOAT_VECTOR}   (default: FLOAT_VECTOR)
-  + CORE_STD  (--results-dir and --systemname optional)
+  + CORE_STD  (--results-dir resolved: flag > MLPSTORAGE_RESULTS_DIR > init default; --systemname optional)
 
 VDB_DATASIZE_OPEN
   = VDB_DATASIZE_CLOSED plus:
@@ -533,7 +536,7 @@ KV_DATASIZE_CLOSED
   Optional:
     --cache-dir PATH                NVMe cache tier directory
                                     (default: subdirectory of results)
-  + CORE_STD  (--results-dir and --systemname optional)
+  + CORE_STD  (--results-dir resolved: flag > MLPSTORAGE_RESULTS_DIR > init default; --systemname optional)
   Note: --gpu-mem-gb=16.0 and --cpu-mem-gb=32.0 fixed; not shown
 
 KV_DATASIZE_OPEN
@@ -627,7 +630,7 @@ LF_GENERATE
     --python-version VERSION
     --pyproject PATH                (default: pyproject.toml)
     --all                           Generate both requirements.txt and requirements-full.txt
-  + CORE_STD  (--results-dir required — or MLPSTORAGE_RESULTS_DIR)
+  + CORE_STD  (--results-dir resolved: flag > MLPSTORAGE_RESULTS_DIR > init default)
 
 LF_VERIFY
   Optional:
@@ -635,7 +638,7 @@ LF_VERIFY
     --skip PKG                      Package to skip (repeatable)
     --allow-missing
     --strict
-  + CORE_STD  (--results-dir required — or MLPSTORAGE_RESULTS_DIR)
+  + CORE_STD  (--results-dir resolved: flag > MLPSTORAGE_RESULTS_DIR > init default)
 
 ──────────────────────────────────────────────────────────────────
 
@@ -665,11 +668,17 @@ INIT
   Required (positional):
     orgname                         Organization name to pin to this results-dir
                                     (Rules.md §2.1.5 submitter identity)
+  Optional (positional):
     results-dir                     Filesystem path to initialize as a results-dir
+                                    (default: ~/mlpstorage-results)
   Behavior:
     Writes <results-dir>/mlperf-results.yaml as the sentinel that subsequent
-    commands read to resolve orgname. Creates <results-dir> if absent (parent
-    must exist). Idempotent when the sentinel already pins the same orgname;
+    commands read to resolve orgname, and records <results-dir> in
+    ~/.config/mlpstorage/config.yaml ($XDG_CONFIG_HOME honoured) as the
+    default every later command uses when --results-dir and
+    MLPSTORAGE_RESULTS_DIR are both absent. Creates <results-dir> if absent
+    (parent must exist). Idempotent when the sentinel already pins the same
+    orgname (the default is re-recorded, which is how you switch trees);
     refuses to overwrite a sentinel that pins a different orgname.
 """
 

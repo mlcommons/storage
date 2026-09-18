@@ -230,7 +230,7 @@ class TestEnvVarMigrationCliParserGate:
 
         err = capsys.readouterr().err
         assert (
-            "--results-dir/-rd is required: pass it on the command line or set MLPSTORAGE_RESULTS_DIR"
+            "--results-dir/-rd is required: run `mlpstorage init <orgname> [path]` once to record a default, pass it on the command line, or set MLPSTORAGE_RESULTS_DIR"
             in err
         )
         assert (

@@ -48,10 +48,7 @@ from types import SimpleNamespace
 from mlpstorage_py import __version__ as MLPSTORAGE_VERSION
 from mlpstorage_py.config import BENCHMARK_TYPES
 from mlpstorage_py.errors import ConfigurationError, ErrorCode
-from mlpstorage_py.rules.utils import (
-    MLPSTORAGE_ORGNAME_ENVVAR,
-    MLPSTORAGE_SYSTEMNAME_ENVVAR,
-)
+from mlpstorage_py.rules.utils import MLPSTORAGE_SYSTEMNAME_ENVVAR
 from .code_checksum import compute_code_tree_md5
 from ..constants import MD5_EXCLUDE_FILENAMES, MD5_EXCLUDE_PREFIXES
 
@@ -860,7 +857,8 @@ def capture_or_verify_code_image(args, env, log):
 
     - Gates on ``(args.mode, args.command)``: returns None unless mode is in
       ``{closed, open}`` AND command is in ``{datasize, datagen, run}`` (D-10).
-    - Reads + validates MLPSTORAGE_ORGNAME (and MLPSTORAGE_SYSTEMNAME for OPEN)
+    - Validates args.orgname (pinned from the sentinel by main's LAY-03 gate;
+      no environment fallback) and MLPSTORAGE_SYSTEMNAME for OPEN
       from ``env`` — this helper is the SOLE reader of those env vars in the
       codebase (Gemini MEDIUM trust-contract finding closed; D-05).
     - Applies POSIX regex (Rules.md §2.1.1) AND inline ``.``/``..`` path-traversal
@@ -917,31 +915,27 @@ def capture_or_verify_code_image(args, env, log):
     if command not in _SUBMISSION_COMMANDS:
         return None
 
-    # 3. Read + validate orgname (D-04, D-05).
-    # HARDEN-03: prefer args.orgname (populated by main._main_impl's LAY-03
-    # gate from the mlperf-results.yaml sentinel — main.py:356-389) before
-    # falling back to env. The defensive getattr() handles non-CLI args
-    # constructed without an orgname attribute (e.g., legacy test fixtures).
-    # Trust-contract intent (D-05) preserved: this helper remains the sole
-    # READER of MLPSTORAGE_ORGNAME env var (args.orgname is the LAY-03 hook,
-    # not a separate env source).
-    orgname = getattr(args, "orgname", None) or env.get(MLPSTORAGE_ORGNAME_ENVVAR)
+    # 3. Validate orgname (D-04, D-05). It is args.orgname, populated by
+    # main._main_impl's LAY-03 gate from the mlperf-results.yaml sentinel.
+    # There is no environment fallback: an un-pinned orgname means the
+    # results-dir was never initialized. The defensive getattr() handles
+    # non-CLI args constructed without an orgname attribute (test fixtures).
+    orgname = getattr(args, "orgname", None)
     if not orgname:
         raise ConfigurationError(
-            "MLPSTORAGE_ORGNAME environment variable is required for closed|open runs",
-            parameter=MLPSTORAGE_ORGNAME_ENVVAR,
+            "orgname is not pinned: the results-dir has not been initialized",
+            parameter="orgname",
             suggestion=(
-                "export MLPSTORAGE_ORGNAME=<your_org>, or run "
-                "`mlpstorage init <orgname> <results-dir>` to pin orgname "
-                "via mlperf-results.yaml (HARDEN-03 / LAY-03)"
+                "Run `mlpstorage init <orgname> [path]` once; orgname comes "
+                "only from the mlperf-results.yaml sentinel it writes."
             ),
             code=ErrorCode.CONFIG_MISSING_REQUIRED,
         )
     if not _SUBMITTER_NAME_RE.match(orgname):
         raise ConfigurationError(
-            f"MLPSTORAGE_ORGNAME={orgname!r} is not a POSIX-filename-safe identifier "
+            f"orgname {orgname!r} is not a POSIX-filename-safe identifier "
             f"(Rules.md §2.1.1: ^[A-Za-z0-9._-]+$)",
-            parameter=MLPSTORAGE_ORGNAME_ENVVAR,
+            parameter="orgname",
             suggestion="Use only letters, digits, '.', '_', or '-'",
             code=ErrorCode.CONFIG_INVALID_VALUE,
         )
@@ -951,9 +945,9 @@ def capture_or_verify_code_image(args, env, log):
     # are reserved path segments"` is the spec contract used by Plan 05's tests.
     if orgname in _RESERVED_PATH_SEGMENTS:
         raise ConfigurationError(
-            f"MLPSTORAGE_ORGNAME={orgname!r} is not a permitted value: "
+            f"orgname {orgname!r} is not a permitted value: "
             f"'.' and '..' are reserved path segments",
-            parameter=MLPSTORAGE_ORGNAME_ENVVAR,
+            parameter="orgname",
             suggestion="Choose an orgname that is not '.' or '..'",
             code=ErrorCode.CONFIG_INVALID_VALUE,
         )

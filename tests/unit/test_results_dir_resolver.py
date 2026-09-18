@@ -283,7 +283,7 @@ class TestSentinelVersionTwo:
 
         (tmp_path / "mlperf-results.yaml").write_text(
             "mlperf_results_version: 1\norgname: Acme\n"
-            "initialized_at: 2026-01-01T00:00:00+00:00\n"
+            "initialized_at: '2026-01-01T00:00:00+00:00'\n"
             "initialized_by: mlpstorage 3.0.46\n"
         )
         assert resolve_orgname(str(tmp_path)) == "Acme"
@@ -298,7 +298,8 @@ _DATASIZE_ARGV = {
                  "--accelerator-type", "b200", "--max-accelerators", "8",
                  "--client-host-memory-in-gb", "64", "--systemname", "s"],
     "checkpointing": ["closed", "checkpointing", "datasize",
-                      "--model", "llama3-8b", "--client-host-memory-in-gb", "64"],
+                      "--model", "llama3-8b", "--client-host-memory-in-gb", "64",
+                      "--num-processes", "8"],
     "vectordb": ["closed", "vectordb", "datasize"],
     "kvcache": ["closed", "kvcache", "datasize"],
 }

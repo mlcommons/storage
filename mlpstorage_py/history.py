@@ -3,8 +3,16 @@ import shlex
 import sys
 from typing import Union
 
-from mlpstorage_py.config import HISTFILE, DATETIME_STR, EXIT_CODE
+from mlpstorage_py.config import DATETIME_STR, EXIT_CODE
 from mlpstorage_py.mlps_logging import setup_logging
+
+#: Command history lives inside the results-dir it describes.
+HISTORY_RELPATH = os.path.join(".mlps", "history")
+
+
+def history_file_for(results_dir: str) -> str:
+    """``<results-dir>/.mlps/history``."""
+    return os.path.join(results_dir, HISTORY_RELPATH)
 
 
 class HistoryTracker:
@@ -13,8 +21,8 @@ class HistoryTracker:
     Each line contains sequence_id, datetime, and the full command separated by commas.
     """
 
-    def __init__(self, history_file=None, logger=None):
-        self.history_file = history_file or HISTFILE
+    def __init__(self, history_file, logger=None):
+        self.history_file = history_file
         self.logger = logger or setup_logging(name="HistoryTracker", stream_log_level="INFO")
         self._ensure_history_file_exists()
 

@@ -11,7 +11,7 @@
 ## SYNOPSIS
 
 ```
-mlpstorage init <orgname> <path>
+mlpstorage init <orgname> [<path>]
 mlpstorage <mode> <benchmark> [<model|index>] <command> [<storage>] --systemname <name> [OPTIONS]
 mlpstorage reports reportgen [OPTIONS]
 mlpstorage history (show|rerun) [OPTIONS]
@@ -31,7 +31,7 @@ Where:
 - `<orgname>` is the submitter / organization name pinned to the results-dir by `mlpstorage init`; `[A-Za-z0-9._-]+`, case-sensitive
 - `<name>` (for `--systemname`) is the per-run system-under-test identifier; required on every emitting subcommand (`run`, `datagen`, `configview`, `history rerun`; optional for `reportgen`), and may be supplied via the `MLPSTORAGE_SYSTEMNAME` environment variable
 
-Before any emitting subcommand can run, the `<results-dir>` must be initialized with `mlpstorage init`. The single bootstrap command `mlpstorage init <orgname> <path>` writes a `mlperf-results.yaml` sentinel that pins orgname to the directory; every later non-init command reads it as authoritative.
+Before any emitting subcommand can run, the `<results-dir>` must be initialized with `mlpstorage init`. The single bootstrap command `mlpstorage init <orgname> [<path>]` writes a `mlperf-results.yaml` sentinel that pins orgname to the directory (default path `~/mlpstorage-results`) and records the path in `~/.config/mlpstorage/config.yaml` as this user's default results-dir; every later non-init command reads the sentinel as authoritative and resolves its results-dir as `--results-dir` > `MLPSTORAGE_RESULTS_DIR` > that recorded default, so `--results-dir` is normally never typed.
 
 ## DESCRIPTION
 
@@ -124,17 +124,35 @@ mlpstorage
 
 ### `mlpstorage init` and the `mlperf-results.yaml` sentinel
 
-A results-dir becomes usable for emitting subcommands only after `mlpstorage init <orgname> <path>` succeeds. `init` is the *only* command that takes `<orgname>` on the command line and the *only* command that creates the results-dir if the parent directory exists. It atomically writes:
+A results-dir becomes usable for emitting subcommands only after `mlpstorage init <orgname> [<path>]` succeeds. `init` is the *only* command that takes `<orgname>` on the command line and the *only* command that creates the results-dir if the parent directory exists. With no `<path>` it uses `~/mlpstorage-results`. It atomically writes:
 
 ```yaml
 # <path>/mlperf-results.yaml
-mlperf_results_version: 1
+mlperf_results_version: 2
 orgname: <orgname>
 initialized_at: <ISO-8601 UTC timestamp>
 initialized_by: mlpstorage <version>
 ```
 
 The orgname must match `[A-Za-z0-9._-]+` (Rules §2.1.5 submitter naming) and the comparison is case-sensitive — `Acme` and `acme` are two different organizations and writing one then re-running `init` with the other raises `DoubleInitError`. Re-running `init` with the same orgname is a no-op and returns success, so init is safe to script.
+
+Version 2 trees (written by this release) keep their command history under `<path>/.mlps/`; version 1 trees written by v3.0 tooling are read identically.
+
+### The recorded default results-dir
+
+On success — first init or idempotent re-init — `init` also writes `results_dir: <absolute path>` into the per-user config file `$XDG_CONFIG_HOME/mlpstorage/config.yaml` (`~/.config/mlpstorage/config.yaml` when `XDG_CONFIG_HOME` is unset or relative), keeping any other keys the file holds. Every later command resolves its results-dir in this order and prints the winner on a `results-dir: <path> (from <source>)` status line:
+
+1. `--results-dir` on the command line (or `results_dir` in a `--config-file` YAML);
+2. the `MLPSTORAGE_RESULTS_DIR` environment variable;
+3. `results_dir` in the per-user config file.
+
+The most recent `init` wins, so re-running `init` against a second tree is how you switch defaults; `--results-dir` and `MLPSTORAGE_RESULTS_DIR` remain for CI and for one-off runs against another tree. When none of the three tiers supplies a path, the CLI fails at parse time:
+
+```
+error: --results-dir/-rd is required: run `mlpstorage init <orgname> [path]` once to record a default, pass it on the command line, or set MLPSTORAGE_RESULTS_DIR
+```
+
+The config file supplies defaults only for flags that describe the *environment* (today: `results_dir`); it never supplies workload-selecting flags such as model, accelerator type or count, so a stale file cannot reshape a run.
 
 ### Bypass set
 
@@ -261,11 +279,13 @@ VectorDB does not use `--data-dir`; vectors are loaded directly into the databas
 
 ## RESULTS DIRECTORY (`--results-dir`)
 
-The results directory accumulates every artifact produced by `mlpstorage` as each new invocation of `mlpstorage` executes. The default is `$MLPSTORAGE_RESULTS_DIR` if set, otherwise it must be supplied explicitly. Its layout follows the canonical Rules.md §2.1 shape from the moment `mlpstorage init` creates the sentinel:
+The results directory accumulates every artifact produced by `mlpstorage` as each new invocation of `mlpstorage` executes. It is resolved as `--results-dir` > `$MLPSTORAGE_RESULTS_DIR` > the default recorded by `mlpstorage init` (see ORGNAME PINNING); every command needs one, and the CLI refuses at parse time when none of the three tiers supplies it. Its layout follows the canonical Rules.md §2.1 shape from the moment `mlpstorage init` creates the sentinel:
 
 ```
 <results-dir>/
 ├── mlperf-results.yaml                   sentinel written by `mlpstorage init` (LAY-02)
+├── .mlps/
+│   └── history                           command history for this tree (`mlpstorage history`)
 ├── <mode>/                               closed | open | whatif (one or more)
 │   └── <orgname>/                        from sentinel; same for every run
 │       ├── systems/
@@ -275,7 +295,7 @@ The results directory accumulates every artifact produced by `mlpstorage` as eac
 │               └── <benchmark-specific tail>
 ```
 
-Every `run` adds a timestamped directory under its benchmark-specific tail; unwanted results can simply be removed from the tree (history records remain in `.history/`).
+Every `run` adds a timestamped directory under its benchmark-specific tail; unwanted results can simply be removed from the tree (history records remain in `.mlps/history`).
 
 ### Training results
 
@@ -373,7 +393,7 @@ Every benchmark run writes:
 - **`mlpstorage.errors.log`** — the WARNING-and-above subset of `mlpstorage.log`. An empty file means the run logged no warnings or errors. Both files live inside the run's timestamp directory and are removed with it.
 - **`fs_separation.json`** — CAP-03 filesystem-separation sidecar written before workload launch. Rank-0 probes the data/checkpoint path against the results path with `os.link()` and records the `EXDEV`/same-fs result plus real-paths, ISO-8601 timestamp, and probing host. The submission checker's rules 3.4.2 / 4.4.2 / 5.4.2 read this file as their authoritative "different filesystems" input. Absent under `--skip-fs-separation-gate`.
 - **`results.json`** — aggregated summary across all timestamped run directories, used by `reportgen`.
-- **Command history** is appended to `<results-dir>/.history/` (consumed by `mlpstorage history`).
+- **Command history** is appended to `<results-dir>/.mlps/history` (consumed by `mlpstorage history`). Only invocations that resolved an initialized results-dir are recorded, so history never creates files inside a tree that `init` has not claimed.
 
 ### Aggregate Interpretation
 
@@ -461,21 +481,21 @@ The options below are grouped by scope. Flags that appear under multiple command
 ### Init options
 
 ```
-mlpstorage init <orgname> <path>
+mlpstorage init <orgname> [<path>]
 ```
 
 - **`<orgname>`** (positional, required)
   Submitter / organization name to pin to the results-dir. Must match `[A-Za-z0-9._-]+` (Rules §2.1.5). Comparison is case-sensitive.
 
-- **`<path>`** (positional, required)
-  Filesystem path of the results-dir to initialize. Parent directory must exist; `<path>` is created if absent. Refuses to initialize a non-empty directory unless it already holds a `mlperf-results.yaml` sentinel whose orgname matches (idempotent re-init).
+- **`<path>`** (positional, optional; default `~/mlpstorage-results`)
+  Filesystem path of the results-dir to initialize. Parent directory must exist; `<path>` is created if absent. Refuses to initialize a non-empty directory unless it already holds a `mlperf-results.yaml` sentinel whose orgname matches (idempotent re-init). On success the absolute path is recorded as this user's default results-dir in `~/.config/mlpstorage/config.yaml`.
 
-The `init` subcommand takes no flags — universal flags such as `--results-dir`, `--systemname`, `--debug`, etc. are not registered on the init parser, because the results-dir is the second positional and the sentinel does not yet exist.
+The `init` subcommand takes no flags — universal flags such as `--results-dir`, `--systemname`, `--debug`, etc. are not registered on the init parser, because the results-dir is the optional second positional and the sentinel does not yet exist.
 
 ### Universal options (every non-init command)
 
 - **`--results-dir <path>`, `-rd <path>`**
-  Root directory for all written artifacts. Required for any command that writes results. Defaults to `$MLPSTORAGE_RESULTS_DIR` if set. Must already be initialized with `mlpstorage init`; commands that consult the orgname-resolution gate refuse to run otherwise.
+  Root directory for all written artifacts. Required for every benchmark command (`datasize` included) and for `reports`, `lockfile` and `history`. Resolved as this flag > `$MLPSTORAGE_RESULTS_DIR` > the default recorded by `mlpstorage init`, and the winner is printed on a `results-dir: <path> (from <source>)` status line. Must already be initialized with `mlpstorage init`; commands that consult the orgname-resolution gate refuse to run otherwise.
 
 - **`--systemname <name>`, `-sn <name>`**
   System-under-test identifier for the current run. Required on every emitting subcommand (`run`, `datagen`, `configview`, `history rerun`). Defaults to `$MLPSTORAGE_SYSTEMNAME`. Each mode (closed/open/whatif) owns its own `<systemname>.yaml` under the per-mode `systems/` directory, so the same name across modes is fine. See the Reports subsection for reportgen's optional-systemname multi-system-fallback behavior.
@@ -873,8 +893,8 @@ Training's closed cadence is 1 warmup run + 5 measured runs. When two runs share
 ### History
 
 ```
-mlpstorage history show  [-n <N>] [-i <ID>] --results-dir <path>
-mlpstorage history rerun <ID>             --results-dir <path>
+mlpstorage history show  [-n <N>] [-i <ID>]
+mlpstorage history rerun <ID>
 ```
 
 - **`show`**
@@ -882,7 +902,7 @@ mlpstorage history rerun <ID>             --results-dir <path>
   - **`--id <N>`, `-i <N>`** — only the entry with this ID.
 - **`rerun`**
   - **`<rerun_id>`** (positional, required) — ID of the historical command to re-execute.
-- **`--results-dir`, `-rd`** (required) — points at the results tree whose history to consult; history is kept under `<results-dir>/.history/`.
+- `history` takes no `--results-dir` (issue #721: `rerun` replays the stored command line verbatim). The tree whose `<results-dir>/.mlps/history` is consulted resolves from `MLPSTORAGE_RESULTS_DIR`, else the default recorded by `mlpstorage init`; with neither, the command fails with the same actionable error as every other command.
 
 ### Lockfile
 
@@ -945,11 +965,10 @@ This section enumerates every environment variable mlpstorage reads or borrows, 
 
 | Env var | Read by | Default when unset | Notes |
 |---|---|---|---|
-| `MLPSTORAGE_RESULTS_DIR` | all emitting subcommands | none — CLI fails at parse time with loud error (see Phase 5 D-02 template) | Required on every emitting subcommand; path must already be initialized with `mlpstorage init`. |
+| `MLPSTORAGE_RESULTS_DIR` | every command that takes `--results-dir`, plus `history` | the results-dir recorded by `mlpstorage init` in the per-user config file; with neither, the CLI fails at parse time with a loud error | Second tier of results-dir resolution (`--results-dir` > this > recorded default); path must already be initialized with `mlpstorage init`. |
 | `MLPSTORAGE_SYSTEMNAME` | all emitting subcommands | none — CLI fails at parse time with loud error (see Phase 5 D-02 template) | Required on every emitting subcommand; per-run system-under-test identifier. |
 | `MLPSTORAGE_DATA_DIR` | all emitting subcommands | [not set] | Optional fallback for `--data-dir`; if unset the flag must be supplied explicitly. |
 | `MLPSTORAGE_CHECKPOINT_FOLDER` | all emitting subcommands | [not set] | Optional fallback for `--checkpoint-folder`; if unset the flag must be supplied explicitly. |
-| `MLPSTORAGE_ORGNAME` | `mlpstorage_py/submission_checker/tools/code_image.py` (code-image pool tool) | [not set] | Read only by the code-image pool tool to name the pool entry; every benchmark and utility subcommand sources orgname from the `mlperf-results.yaml` sentinel written by `mlpstorage init`. |
 | `MLPS_CHECKPOINT_MP_START_METHOD` | `mlpstorage_py/checkpointing/streaming_checkpoint.py` (`MP_START_METHOD_ENV`) | [not set] — `forkserver` on the object-storage path, `fork` otherwise | Overrides the multiprocessing start method for the streaming checkpoint writer; the `mp_start_method` constructor argument wins when both are given. `fork` is refused on the object-storage path because it deadlocks (#642). |
 | `MLPSTORAGE_CHECKPOINT_URI_SCHEME` | `mlpstorage_py/checkpointing/storage_writers/__init__.py:44` (via `CHECKPOINT_URI_SCHEME_ENV` constant) | [not set] | Selects checkpoint storage backend (`s3`, `file`, etc.). `[internal-write]` — also written by `mlpstorage_py/benchmarks/dlio.py` during checkpointing setup. |
 | `KVCACHE_SELECTED_WORKLOADS` | `kv-cache-wrapper.sh` (shell dispatch layer); displayed by `run_summary.py:546` | [not set] | `[shell-wrapper-read]` — filters which kvcache workloads run; unset = run all. Functionally owned by mlpstorage; only the shell wrapper reads it. |
@@ -983,6 +1002,7 @@ The same preflight bypass also fires for HPE/Cray PALS `mpiexec` when any `PALS_
 
 | Env var | Read by | Default when unset | Notes |
 |---|---|---|---|
+| `XDG_CONFIG_HOME` | `mlpstorage_py/results_dir/user_config.py` | `~/.config` | XDG Base Directory contract: locates the per-user config file `<XDG_CONFIG_HOME>/mlpstorage/config.yaml` that `mlpstorage init` writes and every command reads for the default results-dir. A relative value is ignored per the spec. |
 | `BUCKET` | `mlpstorage_py/storage_config.py` | [not set] | S3 bucket name for object-storage runs; required when `--storage object` is selected. |
 | `STORAGE_LIBRARY` | `mlpstorage_py/storage_config.py` | `'s3dlio'` | Storage client library selection; defaults to `s3dlio`. |
 | `STORAGE_URI_SCHEME` | `mlpstorage_py/storage_config.py` | `'s3'` | URI scheme for storage paths; defaults to `s3`. |
@@ -1036,7 +1056,7 @@ No environment variables are diagnostic-only under the current inventory (2026-0
 - **Cross-ref:** `AWS_ENDPOINT_URL` is documented as AWS-borrowed (primary tier); mlpstorage overwrites it at `s3dlio_writer.py:168` during multi-endpoint selection. Not a duplicate `MANPAGE_ENV_VAR_TIERS` entry per D-13.
 - **Cross-ref:** `MLPSTORAGE_CHECKPOINT_URI_SCHEME` is documented as Owned (primary tier); mlpstorage writes it at `mlpstorage_py/benchmarks/dlio.py` during checkpointing setup. Not a duplicate `MANPAGE_ENV_VAR_TIERS` entry per D-12/D-13.
 
-There is intentionally no `MLPSTORAGE_ORGNAME` fallback consulted by non-init commands — orgname is sourced exclusively from the `mlperf-results.yaml` sentinel written by `mlpstorage init`. The row in the Owned table above documents where `mlpstorage init` reads the flag, not a runtime fallback path.
+There is no `MLPSTORAGE_ORGNAME` environment variable — orgname is sourced exclusively from the `mlperf-results.yaml` sentinel written by `mlpstorage init`, and nothing in the codebase reads such a variable.
 
 ## END-OF-RUN RECAP
 
@@ -1075,7 +1095,7 @@ A subset of the structured error codes a submitter may encounter at the CLI:
 
 ## EXAMPLES
 
-Initialize a fresh results-dir for organization "Acme":
+Initialize a fresh results-dir for organization "Acme". `init` records `/mnt/results` as the default results-dir, so none of the commands below pass `--results-dir`:
 
 ```
 mlpstorage init Acme /mnt/results
@@ -1088,16 +1108,16 @@ export MLPSTORAGE_SYSTEMNAME=acme-prod-v1
 
 mlpstorage closed training unet3d datasize \
     --accelerator-type b200 --max-accelerators 8 \
-    --client-host-memory-in-gb 512 --results-dir /mnt/results
+    --client-host-memory-in-gb 512
 
 mlpstorage closed training unet3d datagen file \
     --num-processes 16 --data-dir /mnt/dataset \
-    --client-host-memory-in-gb 512 --results-dir /mnt/results
+    --client-host-memory-in-gb 512
 
 mlpstorage closed training unet3d run file \
     --accelerator-type b200 --num-accelerators 8 \
     --client-host-memory-in-gb 512 \
-    --data-dir /mnt/dataset --results-dir /mnt/results
+    --data-dir /mnt/dataset
 ```
 
 The first `run` will auto-write `/mnt/results/closed/Acme/systems/acme-prod-v1.yaml`. Subsequent runs in the same mode/orgname/systemname diff against this file; rename + `--systemname <new>` (or remove the file) to start fresh.
@@ -1109,8 +1129,7 @@ mlpstorage closed checkpointing llama3-70b run object \
     --num-processes 64 --client-host-memory-in-gb 1024 \
     --checkpoint-folder s3://bucket/checkpoints \
     --hosts host1,host2,host3,host4 \
-    --systemname acme-prod-v1 \
-    --results-dir /mnt/results
+    --systemname acme-prod-v1
 ```
 
 Open-mode VectorDB sweep against a remote Milvus:
@@ -1120,8 +1139,7 @@ mlpstorage open vectordb DISKANN run file \
     --host milvus.lab --port 19530 --collection bench_1m \
     --benchmark-mode sweep --runtime 600 \
     --num-query-processes 8 \
-    --systemname acme-vdb-lab \
-    --results-dir /mnt/results
+    --systemname acme-vdb-lab
 ```
 
 Validate a prepared submission directory:
@@ -1135,10 +1153,11 @@ mlpstorage validate /submissions/acme \
 
 - `<repo>/configs/dlio/workload/*.yaml` — bundled DLIO workload templates for training and checkpointing.
 - `<repo>/Rules.md` — authoritative submission rules.
+- `~/.config/mlpstorage/config.yaml` (`$XDG_CONFIG_HOME/mlpstorage/config.yaml`) — per-user defaults written by `mlpstorage init`; today only `results_dir`. Hand edits are kept.
 - `<results-dir>/mlperf-results.yaml` — sentinel written by `mlpstorage init`; pins orgname to the results-dir.
 - `<results-dir>/<mode>/<orgname>/systems/<systemname>.yaml` — auto-generated partial system description; one per mode; see SYSTEM DESCRIPTION.
 - `<results-dir>/<mode>/<orgname>/results/<systemname>/...` — per-run output trees as documented under RESULTS DIRECTORY.
-- `<results-dir>/.history/` — command history consumed by `mlpstorage history`.
+- `<results-dir>/.mlps/history` — command history consumed by `mlpstorage history`.
 - `<submission-dir>/<mode>/<submitter>/{code,systems,results}/` — submission package layout consumed by `mlpstorage validate`.
 
 ## SEE ALSO

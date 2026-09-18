@@ -81,11 +81,12 @@ def add_history_arguments(parser):
     )
 
     # Issue #721: history subcommands take no universal arguments. ``show``
-    # only reads ~/mlps_history; ``rerun`` replays the stored command line
-    # verbatim (--results-dir / --systemname / logging / etc. come from the
-    # stored command, not the rerun invocation). Any such flag on the rerun
-    # invocation would be misleading — argparse now rejects them with
-    # "unrecognized arguments".
+    # only reads <results-dir>/.mlps/history, resolving the results-dir from
+    # MLPSTORAGE_RESULTS_DIR or the default recorded by `mlpstorage init`;
+    # ``rerun`` replays the stored command line verbatim (--results-dir /
+    # --systemname / logging / etc. come from the stored command, not the
+    # rerun invocation). Any such flag on the rerun invocation would be
+    # misleading — argparse rejects them with "unrecognized arguments".
 
 
 def add_version_arguments(parser):

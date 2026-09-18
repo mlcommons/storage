@@ -79,16 +79,16 @@ class TestCLIStructureAndCombinations:
 
         # Checkpointing — --model stays as a flag; storage type is positional
         ("05", ['checkpointing', 'run', '-cm', '1024', '-m', 'llama3-8b', '-np', '4', '-at', 'b200', '-cf', '/tmp/ckpt', '-rd', '/tmp', '-sn', 'sys-v1', 'file'], 'checkpointing', 'run'),
-        ("06", ['checkpointing', 'datasize', '-cm', '1024', '-m', 'llama3-8b', '-np', '4', '-sn', 'sys-v1'], 'checkpointing', 'datasize'),
+        ("06", ['checkpointing', 'datasize', '-cm', '1024', '-m', 'llama3-8b', '-np', '4', '-sn', 'sys-v1', '-rd', '/tmp'], 'checkpointing', 'datasize'),
 
         # KVCache closed mode: model/num-users are not accepted in closed mode
         ("07", ['kvcache', 'run', '-rd', '/tmp', '-sn', 'sys-v1'], 'kvcache', 'run'),
-        ("08", ['kvcache', 'datasize'], 'kvcache', 'datasize'),
+        ("08", ['kvcache', 'datasize', '-rd', '/tmp'], 'kvcache', 'datasize'),
 
         # VectorDB
         ("09", ['vectordb', 'run', '-rd', '/tmp', '-sn', 'sys-v1', 'file'], 'vectordb', 'run'),
         ("10", ['vectordb', 'datagen', 'file', '-rd', '/tmp', '-sn', 'sys-v1'], 'vectordb', 'datagen'),
-        ("11", ['vectordb', 'datasize'], 'vectordb', 'datasize'),
+        ("11", ['vectordb', 'datasize', '-rd', '/tmp'], 'vectordb', 'datasize'),
 
         # Utilities — top-level siblings, no mode prefix needed (they are their own mode)
         ("12", ['reports', 'reportgen', '-rd', '/tmp', '-sn', 'sys-v1'], 'reports', 'reportgen'),
@@ -412,7 +412,7 @@ class TestSystemname:
     and continue to parse without --systemname.
 
     Issue #721: history {show, rerun} accept NO universal arguments — ``show``
-    just prints ~/mlps_history; ``rerun`` replays the stored command line
+    just prints <results-dir>/.mlps/history; ``rerun`` replays the stored command line
     verbatim so --results-dir / --systemname on the rerun invocation would be
     misleading. Argparse rejects them.
     """
@@ -703,7 +703,7 @@ class TestCheckpointingAcceleratorType:
         assert args.accelerator_type == 'mi355'
 
     def test_datasize_does_not_take_accelerator_type(self):
-        datasize = ['checkpointing', 'datasize', '-cm', '1024', '-m', 'llama3-8b', '-np', '8']
+        datasize = ['checkpointing', 'datasize', '-cm', '1024', '-m', 'llama3-8b', '-np', '8', '-rd', '/tmp']
         args = self._parse('closed', datasize)
         assert getattr(args, 'accelerator_type', None) is None
         with pytest.raises(SystemExit):

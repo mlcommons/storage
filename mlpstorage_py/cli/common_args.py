@@ -114,7 +114,11 @@ HELP_MESSAGES = {
         "and treat 'h2' as a stray positional argument. Use '--hosts h1 h2' or '--hosts=h1,h2' instead."
     ),
     'category': "Benchmark category to be submitted.",
-    'results_dir': "Directory where the benchmark results will be saved.",
+    'results_dir': (
+        "Directory where the benchmark results will be saved. Resolved as: "
+        "this flag, else MLPSTORAGE_RESULTS_DIR, else the results-dir "
+        "recorded by `mlpstorage init` in ~/.config/mlpstorage/config.yaml."
+    ),
     'params': (
         "Additional parameters to be passed to the benchmark. These will override the config file. "
         "\nFor a closed submission only a subset of params are supported. "
@@ -227,6 +231,16 @@ PROGRAM_DESCRIPTIONS = {
 }
 
 
+class _ResultsDirAction(argparse.Action):
+    """Store ``--results-dir`` and remember that it came from the command
+    line, so the post-parse resolver (``cli_parser``) can label the source
+    and skip the env-var / user-config tiers."""
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        setattr(namespace, self.dest, values)
+        setattr(namespace, "_mlps_results_dir_from_cli", True)
+
+
 def add_universal_arguments(parser, req_results, req_systemname=False, req_checkpoint_folder=False):
     """Add arguments common to all benchmarks and commands.
 
@@ -270,6 +284,7 @@ def add_universal_arguments(parser, req_results, req_systemname=False, req_check
     standard_args.add_argument(
         '--results-dir', '-rd',
         type=str,
+        action=_ResultsDirAction,
         default=ENV_FALLBACK_RESULTS_DIR,
         help=HELP_MESSAGES['results_dir']
     )

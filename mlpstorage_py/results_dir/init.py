@@ -47,6 +47,10 @@ from mlpstorage_py.results_dir.sentinel import (
     read_sentinel,
     write_sentinel,
 )
+from mlpstorage_py.results_dir.user_config import (
+    default_results_dir,
+    record_results_dir,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -56,13 +60,16 @@ def run_init(args) -> EXIT_CODE:
     sentinel.
 
     Args:
-        args: Namespace with ``args.orgname`` (str) and ``args.path`` (str).
-            ``args.mode`` is expected to be ``"init"`` but is not asserted —
-            the caller (``main._main_impl``) routes by mode already.
+        args: Namespace with ``args.orgname`` (str) and ``args.path`` (str or
+            ``None``; ``None`` means ``~/mlpstorage-results``). ``args.mode``
+            is expected to be ``"init"`` but is not asserted — the caller
+            (``main._main_impl``) routes by mode already.
 
     Returns:
         ``EXIT_CODE.SUCCESS`` on happy path AND on idempotent re-init with a
-        matching orgname.
+        matching orgname. Both record the path as the per-user default
+        results-dir (``~/.config/mlpstorage/config.yaml``), so re-running
+        ``init`` against an existing tree is how a user switches trees.
 
     Raises:
         ConfigurationError: Parent directory does not exist (D-09).
@@ -70,7 +77,7 @@ def run_init(args) -> EXIT_CODE:
         DoubleInitError: Target has a sentinel with a different orgname
             (D-11 mismatch refusal).
     """
-    target: str = args.path
+    target: str = args.path or default_results_dir()
     orgname: str = args.orgname
 
     # ── 1. D-09 — parent must already exist ────────────────────────────────
@@ -118,6 +125,7 @@ def run_init(args) -> EXIT_CODE:
                 f"results-dir {target!r} already initialized as "
                 f"{existing.orgname!r}; nothing to do."
             )
+            _record_default(target)
             return EXIT_CODE.SUCCESS
         raise DoubleInitError(
             f"results-dir {target!r} is already initialized as "
@@ -161,4 +169,14 @@ def run_init(args) -> EXIT_CODE:
         f"Initialized results-dir at {target!r} as orgname={orgname!r}; "
         f"sentinel: {written!r}"
     )
+    _record_default(target)
     return EXIT_CODE.SUCCESS
+
+
+def _record_default(target: str) -> None:
+    """Record ``target`` as this user's default results-dir and say so."""
+    config_path = record_results_dir(target)
+    logger.info(
+        f"Recorded {os.path.abspath(target)!r} as the default results-dir in "
+        f"{config_path!r}; later commands need no --results-dir."
+    )

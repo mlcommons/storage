@@ -1,7 +1,6 @@
 import datetime
 import enum
 import os
-import pathlib
 
 
 def check_env(setting, default_value=None):
@@ -31,7 +30,6 @@ def check_env(setting, default_value=None):
 
 
 MLPS_DEBUG = check_env('MLPS_DEBUG', False)
-HISTFILE = os.path.join(pathlib.Path.home(), "mlps_history")
 
 def get_datetime_string():
     return datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -178,7 +176,8 @@ MAX_NUM_FILES_TRAIN = 128*1024
 # mlpstorage_py.rules.*; doing so would create a cycle at interpreter
 # startup. tests/unit/test_no_import_cycles.py locks this invariant.
 # -----------------------------------------------------------------------------
-MLPSTORAGE_ORGNAME_ENVVAR = "MLPSTORAGE_ORGNAME"
+# There is deliberately no MLPSTORAGE_ORGNAME: orgname comes only from the
+# <results-dir>/mlperf-results.yaml sentinel written by `mlpstorage init`.
 MLPSTORAGE_SYSTEMNAME_ENVVAR = "MLPSTORAGE_SYSTEMNAME"
 MLPSTORAGE_RESULTS_DIR_ENVVAR = "MLPSTORAGE_RESULTS_DIR"
 MLPSTORAGE_DATA_DIR_ENVVAR = "MLPSTORAGE_DATA_DIR"
@@ -193,7 +192,6 @@ _LEGACY_ENVVAR_MAP = {
     MLPSTORAGE_SYSTEMNAME_ENVVAR: "MLPERF_SYSTEMNAME",
     MLPSTORAGE_RESULTS_DIR_ENVVAR: "MLPERF_RESULTS_DIR",
     MLPSTORAGE_DATA_DIR_ENVVAR: "MLPERF_DATA_DIR",
-    MLPSTORAGE_ORGNAME_ENVVAR: "MLPERF_ORGNAME",
 }
 
 # -----------------------------------------------------------------------------
@@ -227,19 +225,21 @@ _MANPAGE_SYNC_ALLOWLIST = frozenset({
     'MLPERF_SYSTEMNAME',   # migration-detection only per D-05, removal target v1.2
     'MLPERF_RESULTS_DIR',  # migration-detection only per D-05, removal target v1.2
     'MLPERF_DATA_DIR',     # migration-detection only per D-05 (read at cli/training_args.py:309)
-    'MLPERF_ORGNAME',      # migration-detection only per D-05, removal target v1.2
 })
 
 MANPAGE_ENV_VAR_TIERS = {
-    # -- Owned (8) --
+    # -- Owned (7) --
     'MLPSTORAGE_RESULTS_DIR': 'owned',
     'MLPSTORAGE_SYSTEMNAME': 'owned',
-    'MLPSTORAGE_ORGNAME': 'owned',
     'MLPSTORAGE_DATA_DIR': 'owned',
     'MLPSTORAGE_CHECKPOINT_FOLDER': 'owned',
     'MLPS_CHECKPOINT_MP_START_METHOD': 'owned',       # streaming_checkpoint.py MP_START_METHOD_ENV; constructor arg wins.
     'MLPSTORAGE_CHECKPOINT_URI_SCHEME': 'owned',      # dual-role: primary Owned; internal-write sub-tag in ManPage prose per D-12/D-13.
     'KVCACHE_SELECTED_WORKLOADS': 'owned',            # functional shell-wrapper contract per D-09.
+
+    # XDG Base Directory contract: locates the per-user config file that
+    # `mlpstorage init` writes (results_dir default). results_dir/user_config.py.
+    'XDG_CONFIG_HOME': 'storage-borrowed',
 
     # -- MPI-borrowed (5) --
     'MPI_RUN_BIN': 'mpi-borrowed',

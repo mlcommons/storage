@@ -705,6 +705,9 @@ class TestHistoryRerunOrgnameGate:
 
         uninit = tmp_path / "uninit"
         uninit.mkdir()
+        # `history` reads <results-dir>/.mlps/history; init records the
+        # default results-dir it resolves. The replayed entry points elsewhere.
+        _init_results_dir(tmp_path)
 
         replayed = Namespace(
             mode="closed",
@@ -747,6 +750,9 @@ class TestHistoryRerunOrgnameGate:
 
         uninit = tmp_path / "uninit"
         uninit.mkdir()
+        # `history` reads <results-dir>/.mlps/history; init records the
+        # default results-dir it resolves. The replayed entry points elsewhere.
+        _init_results_dir(tmp_path)
 
         replayed = Namespace(
             mode=bypass_mode,

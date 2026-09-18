@@ -133,7 +133,9 @@ def add_kvcache_arguments(parser, mode):
         # --systemname.
         add_universal_arguments(
             _parser,
-            req_results=(_parser is run_benchmark),
+            # Every closed/open/whatif command needs a results-dir; after
+            # `mlpstorage init` it resolves from the recorded default.
+            req_results=True,
             req_systemname=(_parser is run_benchmark),
         )
 

@@ -625,7 +625,7 @@ class TestAddHistoryArguments:
     """Tests for add_history_arguments function.
 
     Issue #721: history subcommands accept NO universal arguments.
-    ``show`` only reads ~/mlps_history; ``rerun`` replays the stored
+    ``show`` only reads <results-dir>/.mlps/history; ``rerun`` replays the stored
     command line verbatim (so --results-dir / --systemname / logging
     flags on the rerun invocation would be misleading — argparse
     rejects them).

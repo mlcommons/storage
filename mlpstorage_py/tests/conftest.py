@@ -20,6 +20,14 @@ import shutil
 from pathlib import Path
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _isolate_user_config(tmp_path_factory, monkeypatch):
+    """Keep the developer's real ~/.config/mlpstorage/config.yaml (written by
+    `mlpstorage init`) out of every test: point XDG_CONFIG_HOME at an empty
+    per-session directory so no results-dir default leaks into parsing."""
+    monkeypatch.setenv("XDG_CONFIG_HOME", str(tmp_path_factory.mktemp("xdg-config")))
 import yaml
 
 
