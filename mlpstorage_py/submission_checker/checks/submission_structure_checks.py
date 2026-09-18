@@ -57,6 +57,10 @@ _VALID_DIVISIONS = frozenset({"closed", "open"})
 # avoid pulling the helper module's runtime dependencies into the validator.
 _OPEN_TYPES_WITHOUT_MODEL = frozenset({"kv_cache"})
 
+# Tree-wide code-image pool root name; mirrors
+# tools.code_image.GLOBAL_POOL_DIRNAME for the same reason.
+_GLOBAL_POOL_DIRNAME = "code-images"
+
 # Mode-aware required submitter-level subdirectory sets per Rules.md §2.1.5 split (D-17).
 # CLOSED: {results, systems} at the submitter level (v1.1: code/ is now in the
 #         org-level content-addressed pool; not required here per D-80).
@@ -243,8 +247,9 @@ class SubmissionStructureCheck(BaseCheck):
 
     @rule("2.1.2", "topLevelSubdirectories")
     def top_level_subdirectories_check(self):
-        """STRUCT-02: top-level dirs must be a non-empty subset of {closed, open}
-        or recognized pool roots (D-83) or 'systems'.
+        """STRUCT-02: top-level dirs must be a non-empty subset of {closed, open},
+        the tree-wide code-image pool 'code-images', or recognized
+        per-organization pool roots (D-83).
 
         Case-sensitive set check — no .lower() (PITFALLS.md #2).
 
@@ -260,8 +265,11 @@ class SubmissionStructureCheck(BaseCheck):
         valid = True
         top_dirs = {e for e in list_dir(self.root_path) if not e.startswith(".")}
 
-        # Check for any unrecognised top-level dirs (D-83/D-85)
-        unexpected = top_dirs - _VALID_DIVISIONS
+        # Check for any unrecognised top-level dirs (D-83/D-85). The tree-wide
+        # code-image pool `code-images/` is a reserved name (its sentinel is
+        # CHECK-04's business); per-organization pool roots are recognized
+        # by their .mlps-image-pool sentinel.
+        unexpected = top_dirs - _VALID_DIVISIONS - {_GLOBAL_POOL_DIRNAME}
         for entry in sorted(unexpected):
             entry_path = os.path.join(self.root_path, entry)
             # D-83: dirs containing .mlps-image-pool are recognized pool roots
@@ -270,8 +278,9 @@ class SubmissionStructureCheck(BaseCheck):
             self.log_violation(
                 "2.1.2", "topLevelSubdirectories",
                 entry_path,
-                "unexpected top-level directory %r (expected only 'closed' and/or 'open', "
-                "or a recognized pool root containing .mlps-image-pool)",
+                "unexpected top-level directory %r (expected only 'closed' and/or "
+                "'open', the code-image pool 'code-images', or a per-organization "
+                "pool root containing .mlps-image-pool)",
                 entry,
             )
             valid = False

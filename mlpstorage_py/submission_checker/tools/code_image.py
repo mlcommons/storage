@@ -140,7 +140,7 @@ class LegacyLayoutDetected(CodeImageError):
     under ``<results_dir>/{closed,open}/<orgname>/`` (D-63, Phase 6).
 
     Phase 6 replaces the legacy single-``code/`` layout with a content-addressed
-    pool at ``<results_dir>/<orgname>/code-<hash8>/``. Any legacy ``code/`` present
+    pool at ``<results_dir>/code-images/code-<hash8>/``. Any legacy ``code/`` present
     at capture time is refused BEFORE any writes — the strict single-layout
     invariant is what Phase 8's CHECK-04 assumes. Migration is Phase 7's job.
 
@@ -573,6 +573,60 @@ def _pool_dir_name(full_hash: str) -> str:
     return f"code-{full_hash[:8]}"
 
 
+# Tree-wide content-addressed pool root: ``<results_dir>/code-images/``. One
+# pool per results-dir, shared by every organization and both divisions.
+# Trees captured by earlier releases carry per-organization pools at
+# ``<results_dir>/<orgname>/``; those stay readable forever (the frozen v3.0
+# submissions tree has 19 of them) and are relocated into the global pool by
+# ``legacy_migration.migrate_org_pool`` the next time the CLI captures into
+# the tree.
+GLOBAL_POOL_DIRNAME = "code-images"
+
+# Marks a directory as a code-image pool root (global or per-organization).
+# Two ``key=value`` lines; see ``legacy_migration._write_sentinel_atomic``.
+_POOL_SENTINEL_FILENAME = ".mlps-image-pool"
+
+
+def global_pool_root(results_dir: Path) -> Path:
+    """Return ``<results_dir>/code-images/`` (not created)."""
+    return Path(results_dir) / GLOBAL_POOL_DIRNAME
+
+
+def resolve_pool_image(
+    results_dir: Path, full_hash: str, orgname: str | None = None
+) -> Path | None:
+    """Locate the pool image for ``full_hash`` in ``results_dir``.
+
+    Search order: the global pool ``code-images/code-<hash8>/`` first. Then,
+    with ``orgname`` given, that organization's own pool
+    ``<orgname>/code-<hash8>/`` and nothing else — a leaf never resolves
+    through another organization's pool, exactly as in the per-org era.
+    Without ``orgname`` (callers that only have a hash, e.g. ``runs``), every
+    top-level directory carrying a ``.mlps-image-pool`` sentinel is tried.
+    Returns the first directory that exists, or None. Existence only —
+    CHECK-02 owns content verification.
+    """
+    results_dir = Path(results_dir)
+    name = _pool_dir_name(full_hash)
+    candidate = global_pool_root(results_dir) / name
+    if candidate.is_dir():
+        return candidate
+    if orgname:
+        candidate = results_dir / orgname / name
+        return candidate if candidate.is_dir() else None
+    try:
+        entries = sorted(os.listdir(results_dir))
+    except OSError:
+        return None
+    for entry in entries:
+        if entry.startswith(".") or entry == GLOBAL_POOL_DIRNAME:
+            continue
+        root = results_dir / entry
+        if (root / _POOL_SENTINEL_FILENAME).is_file() and (root / name).is_dir():
+            return root / name
+    return None
+
+
 def _write_pointer_atomic(run_leaf: Path, full_hash: str, log) -> None:
     """Write `_POINTER_FILENAME` inside run_leaf atomically (D-61, D-65).
 
@@ -679,7 +733,7 @@ def _scan_legacy_layout(results_dir: Path, orgname: str) -> list[Path]:
 
     Bounded: at most one ``is_dir()`` syscall per submission mode (two total).
     Phase 6 replaces the single-``code/`` layout with a content-addressed
-    pool at ``<results_dir>/<orgname>/code-<hash8>/`` (D-64). Any legacy
+    pool at ``<results_dir>/code-images/code-<hash8>/`` (D-64). Any legacy
     ``code/`` present at capture time means the tree was captured under a
     pre-Phase-6 mlpstorage and must be migrated (Phase 7). This helper is
     the runtime refusal predicate; the caller raises ``LegacyLayoutDetected``.
@@ -709,9 +763,9 @@ def _scan_legacy_layout(results_dir: Path, orgname: str) -> list[Path]:
 
 
 def _find_matching_pool_image(
-    org_root: Path, live_hash: str, log
+    pool_root: Path, live_hash: str, log
 ) -> Path | None:
-    """Scan ``<org_root>/code-*/`` for a pool image whose ``.code-hash.json``
+    """Scan ``<pool_root>/code-*/`` for a pool image whose ``.code-hash.json``
     ``hash`` field equals ``live_hash``. Return the first match, else None.
 
     Single-walk / glob-then-parse-hash-file. Does NOT re-hash pool images at
@@ -720,7 +774,7 @@ def _find_matching_pool_image(
     self-consistency is Phase 8's CHECK-02, not runtime capture.
 
     Args:
-        org_root: ``<results_dir>/<orgname>/`` (mode-agnostic per D-64).
+        pool_root: ``<results_dir>/code-images/`` (tree-wide, mode-agnostic).
         live_hash: 32-lowercase-hex md5-tree-v2 digest of the live source.
         log: Logger object; DEBUG-level "skip candidate" messages for
             non-conformant pool dirs.
@@ -733,9 +787,9 @@ def _find_matching_pool_image(
         A downstream ``.code-<hash8>.tmp.<pid>`` sibling is invisible to
         ``glob("code-*")`` because it starts with a leading dot (Pitfall 4).
     """
-    if not org_root.is_dir():
+    if not pool_root.is_dir():
         return None
-    for candidate in org_root.glob("code-*"):
+    for candidate in pool_root.glob("code-*"):
         if not candidate.is_dir():
             continue  # skip stray files
         try:
@@ -749,14 +803,14 @@ def _find_matching_pool_image(
 
 
 def _capture_new_pool_image(
-    org_root: Path, source_root: Path, live_hash: str, log
+    pool_root: Path, source_root: Path, live_hash: str, log
 ) -> Path:
     """Capture a new content-addressed pool image at
-    ``<org_root>/code-<hash8>/`` via write-tmp + ``os.rename`` (D-66
+    ``<pool_root>/code-<hash8>/`` via write-tmp + ``os.rename`` (D-66
     first-writer-wins).
 
     Sequence:
-      1. Copy source_root into ``<org_root>/.code-<hash8>.tmp.<pid>/`` via
+      1. Copy source_root into ``<pool_root>/.code-<hash8>.tmp.<pid>/`` via
          the existing ``_atomic_capture`` helper (D-17 atomicity contract).
       2. Write ``.code-hash.json`` INSIDE the tmp sibling BEFORE the rename
          so the target arrives non-empty (Pitfall 1 — guarantees ENOTEMPTY
@@ -768,13 +822,13 @@ def _capture_new_pool_image(
          ``PoolCorruption``.
 
     Args:
-        org_root: ``<results_dir>/<orgname>/`` (mode-agnostic per D-64).
+        pool_root: ``<results_dir>/code-images/`` (tree-wide, mode-agnostic).
         source_root: Live source tree to copy (result of ``find_source_root``).
         live_hash: 32-lowercase-hex md5-tree-v2 digest of source_root.
         log: Logger object.
 
     Returns:
-        Path to the pool dir at ``<org_root>/code-<hash8>/``.
+        Path to the pool dir at ``<pool_root>/code-<hash8>/``.
 
     Raises:
         PoolCorruption: D-66 loser branch found a pre-existing pool image
@@ -790,7 +844,7 @@ def _capture_new_pool_image(
         (RESEARCH Anti-Patterns).
     """
     hash8 = live_hash[:8]
-    tmp = org_root / f".code-{hash8}.tmp.{os.getpid()}"
+    tmp = pool_root / f".code-{hash8}.tmp.{os.getpid()}"
     if tmp.exists():
         # Stale from a prior crash between _atomic_capture and rename.
         shutil.rmtree(tmp, ignore_errors=True)
@@ -810,11 +864,11 @@ def _capture_new_pool_image(
         _write_hash_file(tmp, payload, log)
     except BaseException:
         # Cleanup on ANY failure (including KeyboardInterrupt / SystemExit)
-        # so we do not leak a stale .tmp sibling into org_root.
+        # so we do not leak a stale .tmp sibling into the pool root.
         shutil.rmtree(tmp, ignore_errors=True)
         raise
 
-    pool_dir = org_root / _pool_dir_name(live_hash)
+    pool_dir = pool_root / _pool_dir_name(live_hash)
     try:
         # .code-hash.json inside tmp guarantees ENOTEMPTY on race-loser's
         # rename attempt (D-66; Pitfall 1). Do NOT use os.replace here —
@@ -847,7 +901,7 @@ def capture_or_verify_code_image(args, env, log):
     """Capture-or-verify a content-addressed code-image pool at the submission tree.
 
     Phase 6 semantic core: hashes the live source tree, refuses if a legacy
-    ``code/`` layout is present (D-63), scans ``<results_dir>/<orgname>/code-*/``
+    ``code/`` layout is present (D-63), scans ``<results_dir>/code-images/code-*/``
     for a matching pool image (CAPVER-01), on-match reuses it and on-no-match
     captures a new ``code-<hash8>/`` via write-tmp + ``os.rename`` (D-66
     first-writer-wins, CAPVER-02), then always writes the ``.mlps-code-image``
@@ -866,9 +920,12 @@ def capture_or_verify_code_image(args, env, log):
       consensus finding).
     - Refuses (D-63) if a legacy ``code/`` layout is present under
       ``<results_dir>/{closed,open}/<orgname>/`` — Phase 7 owns the migration.
-    - Content-addressed pool is mode-agnostic per D-64: pool images live under
-      ``<results_dir>/<orgname>/code-<hash8>/``, so CLOSED and OPEN runs of the
-      same source hash reuse the same pool image (POOL-04).
+    - Content-addressed pool is tree-wide and mode-agnostic (D-64, PR4 of the
+      results-dir hygiene effort): pool images live under
+      ``<results_dir>/code-images/code-<hash8>/``, so CLOSED and OPEN runs of
+      any organization with the same source hash reuse one pool image
+      (POOL-04). Per-organization pools at ``<results_dir>/<orgname>/`` are
+      a read-only compatibility layout (see ``resolve_pool_image``).
     - Source change (CAPVER-03) captures a new pool image alongside the existing
       one; hash mismatch is NO LONGER an error. The pre-Phase-6 CLOSED and
       OPEN content-mismatch reject UX (UX-01) has been retired.
@@ -881,7 +938,7 @@ def capture_or_verify_code_image(args, env, log):
         log: Logger object with status/error/info/warning/debug methods.
 
     Returns:
-        Path | None: The pool image directory (``<results_dir>/<orgname>/code-<hash8>/``)
+        Path | None: The pool image directory (``<results_dir>/code-images/code-<hash8>/``)
         the caller's run resolves to, or None when gated off.
 
     Raises:
@@ -1013,7 +1070,7 @@ def capture_or_verify_code_image(args, env, log):
             code=ErrorCode.CONFIG_INVALID_VALUE,
         )
     # Issue #778: refuse when results_dir is inside source_root. The pool tmp
-    # lives under org_root = <results_dir>/<orgname>/, so _atomic_capture's
+    # lives under <results_dir>/code-images/, so _atomic_capture's
     # shutil.copytree(source_root, tmp) walks its own destination, copies
     # itself into itself, and blows out with ENAMETOOLONG. Even without the
     # recursion, compute_code_tree_md5(source_root) would fold prior-run
@@ -1035,10 +1092,12 @@ def capture_or_verify_code_image(args, env, log):
             code=ErrorCode.CONFIG_INVALID_VALUE,
         )
     # 6. Phase 6 pool + pointer flow (D-63..D-67, CAPVER-01/02/03, POOL-01..04,
-    # PTR-01, UX-01). Mode-agnostic org_root per D-64: pool images live under
-    # <results_dir>/<orgname>/code-<hash8>/, shared across closed and open.
-    org_root = results_dir / orgname
-    org_root.mkdir(parents=True, exist_ok=True)
+    # PTR-01, UX-01). The pool is tree-wide: images live under
+    # <results_dir>/code-images/code-<hash8>/, shared by every organization
+    # and both divisions. (Earlier releases used <results_dir>/<orgname>/;
+    # _check_and_migrate_legacy_layout relocates such a pool before we run.)
+    pool_root = global_pool_root(results_dir)
+    pool_root.mkdir(parents=True, exist_ok=True)
 
     # 6a. D-63: refuse pool writes when a legacy `code/` layout is present.
     # Phase 7 owns the migration; Phase 6 refuses BEFORE any writes so the
@@ -1066,11 +1125,11 @@ def capture_or_verify_code_image(args, env, log):
 
     # 6c. Try to reuse an existing pool image (CAPVER-01). On miss, capture
     # a new content-addressed pool image (CAPVER-02, D-66 first-writer-wins).
-    pool_dir = _find_matching_pool_image(org_root, live_hash, log)
+    pool_dir = _find_matching_pool_image(pool_root, live_hash, log)
     if pool_dir is not None:
         log.status(f"code image match found at {pool_dir}")
     else:
-        pool_dir = _capture_new_pool_image(org_root, source_root, live_hash, log)
+        pool_dir = _capture_new_pool_image(pool_root, source_root, live_hash, log)
         log.status(f"captured new pool image at {pool_dir}")
 
     # #725 Bug 2 safety net: stash the live hash on args so Benchmark.__init__
@@ -1089,11 +1148,10 @@ def capture_or_verify_code_image(args, env, log):
     # legacy_migration cycle (legacy_migration imports _scan_legacy_layout
     # from this module).
     from mlpstorage_py.submission_checker.tools.legacy_migration import (
-        _SENTINEL_FILENAME,
         _write_sentinel_atomic,
     )
-    if not (org_root / _SENTINEL_FILENAME).exists():
-        _write_sentinel_atomic(org_root, log)
+    if not (pool_root / _POOL_SENTINEL_FILENAME).exists():
+        _write_sentinel_atomic(pool_root, log)
 
     # 6d. Compute the run leaf via the canonical Rules.md §2.1 shape and
     # write the pointer file (PTR-01, D-65). We construct a lightweight

@@ -142,12 +142,13 @@ def _inject_code_pointer(root: pathlib.Path) -> None:
 
 
 def _inject_pool_image(root: pathlib.Path) -> pathlib.Path:
-    """Materialize the pool image where code_image.py actually puts it.
+    """Materialize the pool image in the v3.0 per-organization pool.
 
-    ``code_image.py`` builds the pool under ``org_root = results_dir /
-    orgname`` and documents that location as deliberately mode-agnostic
-    (D-64) — i.e. ``<repo-root>/<org>/code-<hash8>/``, with **no**
-    ``closed/`` or ``open/`` component. See _capture_new_pool_image.
+    Releases before the tree-wide ``code-images/`` pool put every image
+    under ``<repo-root>/<org>/code-<hash8>/`` (mode-agnostic, D-64) with
+    **no** ``closed/`` or ``open/`` component; the v3.0 tree still does.
+    reportgen must keep resolving that layout. The tree-wide layout is
+    covered in tests/unit/test_global_code_image_pool.py.
     """
     pool = root / "acme" / _CODE_DIR
     pool.mkdir(parents=True, exist_ok=True)

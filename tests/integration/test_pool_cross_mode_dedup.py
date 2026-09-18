@@ -10,7 +10,7 @@ Exercises the ROADMAP SC-4 assertion end-to-end against the already-landed
   pool image. Both pointer files carry identical hash content.
 
 The mode-agnostic pool layout (POOL-01, D-64) is what makes cross-mode dedup
-possible — pool images live at `<results_dir>/<orgname>/code-*/`, NOT at
+possible — pool images live at `<results_dir>/code-images/code-*/`, NOT at
 `<results_dir>/{closed,open}/<orgname>/code-*/`.
 
 Scope note (per SC#7): tests call `capture_or_verify_code_image` DIRECTLY
@@ -56,8 +56,8 @@ class TestCrossModeDedup:
         with patch("mlpstorage_py.rules.utils.DATETIME_STR", "20260704_140010"):
             pool_open = capture_or_verify_code_image(args_open, {}, log)
 
-        # D-64: mode-agnostic pool. Only ONE pool dir under <rd>/Acme/.
-        org_root = rd / "Acme"
+        # D-64: mode-agnostic pool. Only ONE pool dir under <rd>/code-images/.
+        org_root = rd / "code-images"
         pools = pool_dirs(org_root)
         assert len(pools) == 1, (
             f"SC-4 violated: expected 1 pool dir after closed→open, got {pools}"
@@ -94,7 +94,7 @@ class TestCrossModeDedup:
         with patch("mlpstorage_py.rules.utils.DATETIME_STR", "20260704_150010"):
             pool_closed = capture_or_verify_code_image(args_closed, {}, log)
 
-        org_root = rd / "Acme"
+        org_root = rd / "code-images"
         pools = pool_dirs(org_root)
         assert len(pools) == 1, (
             f"SC-4 symmetric violated: expected 1 pool dir after open→closed, got {pools}"

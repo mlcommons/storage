@@ -63,8 +63,8 @@ class TestPoolImageReuse:
         with patch("mlpstorage_py.rules.utils.DATETIME_STR", "20260704_120005"):
             pool_dir_2 = capture_or_verify_code_image(args2, {}, log)
 
-        # SC-2: only ONE pool dir under <rd>/Acme/ — the second call reused.
-        org_root = rd / "Acme"
+        # SC-2: only ONE pool dir under <rd>/code-images/ — the second call reused.
+        org_root = rd / "code-images"
         pools = pool_dirs(org_root)
         assert len(pools) == 1, (
             f"SC-2 violated: expected 1 pool dir after two same-source calls, got {pools}"

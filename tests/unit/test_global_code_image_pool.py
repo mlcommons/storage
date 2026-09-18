@@ -85,6 +85,18 @@ def _sentinel(pool_root: Path) -> Path:
     return s
 
 
+class _RecLog(_MockLog):
+    """_MockLog plus a record of status-level lines (D-74 counting)."""
+
+    def __init__(self):
+        super().__init__()
+        self.statuses: list[str] = []
+
+    def status(self, msg, *args):
+        self.statuses.append(msg % args if args else msg)
+        super().status(msg, *args)
+
+
 def _pool_check(root: Path) -> PoolStructureCheck:
     return PoolStructureCheck(log=_MockLog(), config=_make_config(), root_path=str(root))
 
@@ -209,7 +221,7 @@ class TestOrgPoolRelocation:
 
     def test_relocation_is_idempotent(self, rd):
         self._org_pool(rd)
-        log = _MockLog()
+        log = _RecLog()
         _check_and_migrate_legacy_layout(_capture_args(rd), {}, log)
         before = sorted(p.name for p in (rd / "code-images").iterdir())
         statuses_before = len(log.statuses)
@@ -227,7 +239,7 @@ class TestOrgPoolRelocation:
         images = self._org_pool(rd, n=1)
         img, h, _leaf_ = images[0]
         # The same content already sits in the global pool.
-        g_img, g_h = _build_pool_image(rd / "code-images")
+        g_img, g_h = _build_pool_image(rd / "code-images", content="[project]\nname='x0'\n")
         assert g_h == h and g_img.name == img.name
         _sentinel(rd / "code-images")
         (g_img / "marker").write_text("")  # would break self-consistency if re-hashed
@@ -255,7 +267,7 @@ class TestOrgPoolRelocation:
 
     def test_migrate_org_pool_returns_count_and_logs_two_status_lines(self, rd):
         self._org_pool(rd, n=2)
-        log = _MockLog()
+        log = _RecLog()
         assert migrate_org_pool(rd, "Acme", log) == 2
         assert len(log.statuses) == 2
         assert migrate_org_pool(rd, "Acme", log) == 0
@@ -331,6 +343,17 @@ class TestCheckerWithGlobalPool:
         with caplog.at_level("ERROR"):
             assert _pool_check(rd).pool_orphan_check() is True
         assert "CHECK-03" not in caplog.text
+
+    def test_check03_org_pool_image_needs_its_own_orgs_reference(self, rd, caplog):
+        """Per-org pools keep per-org semantics: an image in Acme/ that only
+        Beta's leaves name is still an orphan of Acme's pool (v3.0 parity)."""
+        img, h = _build_pool_image(rd / "Acme")
+        _sentinel(rd / "Acme")
+        _write_pointer_atomic(_leaf(rd, "Beta", "20260101_120000"), h, _MockLog())
+        (rd / "closed" / "Acme" / "results").mkdir(parents=True)
+        with caplog.at_level("ERROR"):
+            assert _pool_check(rd).pool_orphan_check() is False
+        assert img.name in caplog.text
 
     def test_check03_flags_unreferenced_global_image(self, rd, caplog):
         self._global_tree(rd)

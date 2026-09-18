@@ -290,6 +290,9 @@ The results directory accumulates every artifact produced by `mlpstorage` as eac
 │   ├── history                           command history for this tree (`mlpstorage history`)
 │   ├── runs.jsonl                        run ledger: stable IDs for every run leaf (`mlpstorage runs`)
 │   └── trash/<batch>/...                 leaves and pool images removed by `runs rm` / `runs gc`
+├── code-images/                          content-addressed code-image pool, one per tree (Rules.md §2.1.6)
+│   ├── .mlps-image-pool                  marks the pool root
+│   └── code-<hash8>/                     one captured source tree per distinct hash; run leaves point at it
 ├── <mode>/                               closed | open | whatif (one or more)
 │   └── <orgname>/                        from sentinel; same for every run
 │       ├── systems/
@@ -298,6 +301,8 @@ The results directory accumulates every artifact produced by `mlpstorage` as eac
 │           └── <systemname>/             from --systemname / MLPSTORAGE_SYSTEMNAME
 │               └── <benchmark-specific tail>
 ```
+
+Every `closed`/`open` `datasize`, `datagen` or `run` first captures the running source tree into `code-images/` (or reuses the image whose hash matches) and writes a `.mlps-code-image` pointer into the run leaf. Trees written by the v3.0 release hold that pool at `<results-dir>/<orgname>/` instead; the next capture into such a tree moves it into `code-images/`, and `mlpstorage validate` reads both layouts.
 
 Every `run` adds a timestamped directory under its benchmark-specific tail and receives a small stable ID in `.mlps/runs.jsonl`. `mlpstorage runs list` shows them with their status; `mlpstorage runs rm` moves unwanted ones into `.mlps/trash/` (restore by moving the leaf back), and `mlpstorage runs purge` deletes the trash. A leaf removed by hand simply disappears from the list; its ID is never reused. History records remain in `.mlps/history`.
 
@@ -1182,7 +1187,8 @@ mlpstorage validate /submissions/acme \
 - `<results-dir>/<mode>/<orgname>/systems/<systemname>.yaml` — auto-generated partial system description; one per mode; see SYSTEM DESCRIPTION.
 - `<results-dir>/<mode>/<orgname>/results/<systemname>/...` — per-run output trees as documented under RESULTS DIRECTORY.
 - `<results-dir>/.mlps/history` — command history consumed by `mlpstorage history`.
-- `<submission-dir>/<mode>/<submitter>/{code,systems,results}/` — submission package layout consumed by `mlpstorage validate`.
+- `<results-dir>/code-images/code-<hash8>/` — content-addressed code-image pool shared by every organization and division; `<results-dir>/<orgname>/code-<hash8>/` is the v3.0 per-organization layout, still read by `mlpstorage validate`.
+- `<submission-dir>/{code-images,<mode>/<submitter>/{systems,results}}/` — submission package layout consumed by `mlpstorage validate`.
 
 ## SEE ALSO
 
