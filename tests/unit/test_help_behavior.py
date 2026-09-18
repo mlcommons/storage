@@ -78,13 +78,13 @@ class TestHelpAll:
     def test_synopsis_lists_init(self):
         """`init` is a top-level subcommand and must appear in the SYNOPSIS."""
         from mlpstorage_py.cli.help_formatter import SYNOPSIS_TEXT
-        assert 'mlpstorage init <orgname> <results-dir>' in SYNOPSIS_TEXT, \
+        assert 'mlpstorage init <orgname> [results-dir]' in SYNOPSIS_TEXT, \
             'drift: init synopsis line missing — bare invocation and --help_all will hide it'
 
     def test_help_all_describes_init(self):
         """The comprehensive reference must document the init subcommand tree branch + section."""
         from mlpstorage_py.cli.help_formatter import HELP_ALL_TEXT
-        assert '├── init <orgname> <results-dir>' in HELP_ALL_TEXT, \
+        assert '├── init <orgname> [results-dir]' in HELP_ALL_TEXT, \
             'drift: init tree branch missing from HELP_ALL_TEXT'
         assert 'INIT\n' in HELP_ALL_TEXT, \
             'drift: INIT placeholder section missing from HELP_ALL_TEXT'

@@ -24,6 +24,13 @@ from mlpstorage_py.config import (
 )
 
 # Import modular argument builders from cli package
+from mlpstorage_py.results_dir.user_config import (
+    HOW_TO_SUPPLY,
+    SOURCE_CLI,
+    SOURCE_CONFIG_FILE_FLAG,
+    SOURCE_ENV,
+    resolve_results_dir,
+)
 from mlpstorage_py.cli import (
     HELP_MESSAGES,
     PROGRAM_DESCRIPTIONS,
@@ -292,6 +299,11 @@ def apply_yaml_config_overrides(args):
                 # Regular case - just override the value
                 args_dict[key] = value
 
+        if yaml_config.get('results_dir'):
+            # Explicit like the flag: the resolver must not override it
+            # with the env var or the per-user default.
+            args_dict['_mlps_results_dir_from_config_file'] = True
+
         # Convert back to Namespace
         return argparse.Namespace(**args_dict)
 
@@ -325,6 +337,7 @@ def validate_args(args):
     # checked here. Using argparse ``required=True`` would have short-
     # circuited before the env-var default applied — that is exactly the bug
     # CR-02 fixed.
+    _apply_results_dir_resolution(args)
     _check_universal_required_present(args)
     benchmark = getattr(args, 'benchmark', None)
     if benchmark == 'training':
@@ -335,6 +348,32 @@ def validate_args(args):
         validate_vectordb_arguments(args)
     if benchmark == 'kvcache':
         validate_kvcache_arguments(args)
+
+
+def _apply_results_dir_resolution(args):
+    """Fill ``args.results_dir`` when the command line did not supply it.
+
+    Order: ``--results-dir`` (or ``results_dir`` in a ``--config-file``
+    YAML) > ``MLPSTORAGE_RESULTS_DIR`` read now > ``results_dir`` recorded
+    by ``mlpstorage init`` in the per-user config file. The winning tier is
+    stored on ``args.results_dir_source`` (``None`` when nothing supplied a
+    value) so ``main`` can print it. Commands without a ``--results-dir``
+    flag are left alone.
+    """
+    if not hasattr(args, 'results_dir'):
+        return
+    if getattr(args, '_mlps_results_dir_from_config_file', False):
+        explicit, label = args.results_dir, SOURCE_CONFIG_FILE_FLAG
+    elif getattr(args, '_mlps_results_dir_from_cli', False):
+        explicit, label = args.results_dir, SOURCE_CLI
+    else:
+        explicit, label = None, SOURCE_CLI
+    path, source = resolve_results_dir(explicit, cli_source=label)
+    if path is None and args.results_dir:
+        # argparse's default captured MLPSTORAGE_RESULTS_DIR at import time.
+        path, source = args.results_dir, SOURCE_ENV
+    args.results_dir = path or ""
+    args.results_dir_source = source
 
 
 def _check_universal_required_present(args):
@@ -387,8 +426,12 @@ def _check_universal_required_present(args):
         if getattr(args, arg_attr, None):
             continue
         # D-02 verbatim template — kept on one physical line so the
-        # phase-wide grep for the exact template string finds it.
-        error_line = f"{long_flag}/{short_flag} is required: pass it on the command line or set MLPSTORAGE_{name_for_template}"
+        # phase-wide grep for the exact template string finds it. The
+        # results-dir line also names the third tier, `mlpstorage init`.
+        if arg_attr == "results_dir":
+            error_line = f"{long_flag}/{short_flag} is required: {HOW_TO_SUPPLY}"
+        else:
+            error_line = f"{long_flag}/{short_flag} is required: pass it on the command line or set MLPSTORAGE_{name_for_template}"
         # D-04 / D-05: adjacent migration hint when legacy env is set and
         # the new env is not. checkpoint_folder has no legacy pair, so its
         # envvar_name is not a key in _LEGACY_ENVVAR_MAP and the hint stays

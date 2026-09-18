@@ -242,7 +242,9 @@ def _add_training_core_args(parser, command, accel_choices):
 
     add_universal_arguments(
         parser,
-        req_results=(command in ("run", "configview")),
+        # Every closed/open/whatif command needs a results-dir; after
+        # `mlpstorage init` it resolves from the recorded default.
+        req_results=True,
         # D-10: training datagen/run/configview/datasize are all emitting
         # commands and require --systemname (LAY-04).
         req_systemname=(command in ("datagen", "run", "configview", "datasize")),

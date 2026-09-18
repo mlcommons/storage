@@ -124,7 +124,7 @@ class TestResultsDirLoudError:
         err = capsys.readouterr().err
         # D-02 verbatim template — full string, pinned.
         assert (
-            "error: --results-dir/-rd is required: pass it on the command line or set MLPSTORAGE_RESULTS_DIR"
+            "error: --results-dir/-rd is required: run `mlpstorage init <orgname> [path]` once to record a default, pass it on the command line, or set MLPSTORAGE_RESULTS_DIR"
             in err
         )
         # Single-line invariant: flag AND env var on the SAME line.
@@ -268,7 +268,7 @@ class TestMultipleMissingUniversalsAggregate:
 
         # Each of the three D-02 verbatim templates appears.
         assert (
-            "--results-dir/-rd is required: pass it on the command line or set MLPSTORAGE_RESULTS_DIR"
+            "--results-dir/-rd is required: run `mlpstorage init <orgname> [path]` once to record a default, pass it on the command line, or set MLPSTORAGE_RESULTS_DIR"
             in err
         )
         assert (

@@ -20,9 +20,9 @@ import traceback
 from mlpstorage_py._invocation import INVOCATION_START  # noqa: F401
 
 from mlpstorage_py.cli_parser import parse_arguments, validate_args, update_args
-from mlpstorage_py.config import HISTFILE, DATETIME_STR, EXIT_CODE, get_datetime_string, HYDRA_OUTPUT_SUBDIR
+from mlpstorage_py.config import DATETIME_STR, EXIT_CODE, get_datetime_string, HYDRA_OUTPUT_SUBDIR
 from mlpstorage_py.debug import debugger_hook, MLPS_DEBUG
-from mlpstorage_py.history import HistoryTracker
+from mlpstorage_py.history import HistoryTracker, history_file_for
 from mlpstorage_py.mlps_logging import (
     setup_logging,
     apply_logging_options,
@@ -50,8 +50,9 @@ from mlpstorage_py.lockfile import (
 )
 from mlpstorage_py.validation_helpers import validate_benchmark_environment
 from mlpstorage_py.progress import progress_context
-from mlpstorage_py.results_dir import resolve_orgname
+from mlpstorage_py.results_dir import MLPERF_RESULTS_FILENAME, resolve_orgname
 from mlpstorage_py.results_dir.errors import ResultsDirNotInitializedError
+from mlpstorage_py.results_dir.user_config import HOW_TO_SUPPLY, resolve_results_dir
 from mlpstorage_py.submission_checker.tools.code_image import capture_or_verify_code_image, CodeImageError
 from mlpstorage_py.submission_checker.tools.legacy_migration import _check_and_migrate_legacy_layout
 
@@ -294,6 +295,20 @@ def run_benchmark(args, run_datetime):
     return ret_code
 
 
+def _resolve_invocation_results_dir(args):
+    """``(path, source)`` for this invocation.
+
+    Commands that take ``--results-dir`` were resolved at parse time
+    (``cli_parser._apply_results_dir_resolution``). ``history`` takes no
+    such flag (issue #721) and resolves from ``MLPSTORAGE_RESULTS_DIR`` or
+    the per-user default recorded by ``mlpstorage init``.
+    """
+    if args.mode == "history":
+        return resolve_results_dir(None)
+    path = getattr(args, "results_dir", None) or None
+    return path, getattr(args, "results_dir_source", None)
+
+
 def _apply_lay03_orgname_gate(args):
     """LAY-03 orgname-resolution gate — pin ``args.orgname`` from the
     ``<results_dir>/mlperf-results.yaml`` sentinel.
@@ -395,10 +410,19 @@ def _main_impl():
 
     datetime_str = DATETIME_STR
 
-    hist = HistoryTracker(history_file=HISTFILE, logger=logger)
-    if args.mode != "history":
-        # Don't save history commands
-        hist.add_entry(sys.argv, datetime_str=datetime_str)
+    # Every command that has a results-dir says which tier supplied it, and
+    # its command line is appended to <results-dir>/.mlps/history — but only
+    # once the tree is initialized: writing into an un-initialized dir would
+    # make it non-empty and block the very `mlpstorage init` the gate below
+    # asks for. History commands themselves are not recorded.
+    results_dir, results_dir_source = _resolve_invocation_results_dir(args)
+    hist = None
+    if results_dir:
+        logger.status(f"results-dir: {results_dir} (from {results_dir_source})")
+        if os.path.isfile(os.path.join(results_dir, MLPERF_RESULTS_FILENAME)):
+            hist = HistoryTracker(history_file=history_file_for(results_dir), logger=logger)
+            if args.mode != "history":
+                hist.add_entry(sys.argv, datetime_str=datetime_str)
 
     # Bypass dispatch for utility modes that do NOT consume an orgname-pinned
     # results-dir. Per CONTEXT.md D-12 the bypass list is exactly four modes:
@@ -426,6 +450,19 @@ def _main_impl():
     # is the dir the Benchmark will actually write to — and re-apply logging
     # options from the (now-swapped) args.
     if args.mode == 'history':
+        if hist is None:
+            if results_dir is None:
+                raise ConfigurationError(
+                    "`mlpstorage history` reads <results-dir>/.mlps/history, "
+                    "but no results-dir resolved.",
+                    suggestion=HOW_TO_SUPPLY[0].upper() + HOW_TO_SUPPLY[1:] + ".",
+                    code=ErrorCode.CONFIG_MISSING_REQUIRED,
+                )
+            raise ConfigurationError(
+                f"results-dir `{results_dir}` has not been initialized.",
+                suggestion=f"Run `mlpstorage init <orgname> {results_dir}` first.",
+                code=ErrorCode.CONFIG_MISSING_REQUIRED,
+            )
         new_args = hist.handle_history_command(args)
 
         # Check if we got new args back (not just an exit code)

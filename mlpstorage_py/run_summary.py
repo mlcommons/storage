@@ -532,7 +532,6 @@ def print_run_summary(args) -> None:
     lines.append("--- Environment ---")
     lines.append(_row("MLPSTORAGE_RESULTS_DIR:",       os.environ.get('MLPSTORAGE_RESULTS_DIR',       '[not set]')))
     lines.append(_row("MLPSTORAGE_SYSTEMNAME:",        os.environ.get('MLPSTORAGE_SYSTEMNAME',        '[not set]')))
-    lines.append(_row("MLPSTORAGE_ORGNAME:",           os.environ.get('MLPSTORAGE_ORGNAME',           '[not set]')))
     lines.append(_row("MLPSTORAGE_DATA_DIR:",          os.environ.get('MLPSTORAGE_DATA_DIR',          '[not set]')))
     lines.append(_row("MLPSTORAGE_CHECKPOINT_FOLDER:", os.environ.get('MLPSTORAGE_CHECKPOINT_FOLDER', '[not set]')))
     lines.append(_row("MPI_RUN_BIN:",                  os.environ.get('MPI_RUN_BIN',                  '[not set]')))

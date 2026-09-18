@@ -47,7 +47,6 @@ from mlpstorage_py.submission_checker.tools.code_image import (
     _write_pointer_atomic,
 )
 from mlpstorage_py.submission_checker.tools.code_checksum import compute_code_tree_md5
-from mlpstorage_py.rules.utils import MLPSTORAGE_ORGNAME_ENVVAR
 
 # Authoritative "migration done" signal per D-72.
 _SENTINEL_FILENAME = ".mlps-image-pool"
@@ -339,7 +338,9 @@ def _check_and_migrate_legacy_layout(args, env, log) -> None:
     if command not in _SUBMISSION_COMMANDS:
         return
 
-    orgname = getattr(args, "orgname", None) or env.get(MLPSTORAGE_ORGNAME_ENVVAR)
+    # args.orgname is pinned from the sentinel by main's LAY-03 gate; there
+    # is no environment fallback.
+    orgname = getattr(args, "orgname", None)
     if not orgname:
         return
 

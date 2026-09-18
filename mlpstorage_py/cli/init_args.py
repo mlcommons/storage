@@ -1,11 +1,12 @@
 """
 CLI argument builder for the ``mlpstorage init`` subcommand.
 
-Registers two positionals — ``orgname`` and ``path`` — on the supplied
-subparser. No flags, no ``--results-dir`` (the ``path`` positional IS the
-results-dir target), no universal-arguments (per PATTERNS.md row
-``cli/init_args.py``: no sentinel exists yet at init time, so the
-``--results-dir`` defaulting logic does not apply).
+Registers two positionals — ``orgname`` and an optional ``path`` — on the
+supplied subparser. No flags, no ``--results-dir`` (the ``path`` positional
+IS the results-dir target; omitted, it is ``~/mlpstorage-results``), no
+universal-arguments (per PATTERNS.md row ``cli/init_args.py``: no sentinel
+exists yet at init time, so the ``--results-dir`` defaulting logic does not
+apply).
 
 Naming distinction (RESEARCH.md Pitfall 5): the ``<orgname>`` positional is
 the same identity as the per-submission ``submitter`` name in Rules.md §2.1.5,
@@ -42,12 +43,17 @@ def add_init_arguments(parser):
     parser.add_argument(
         "path",
         type=str,
+        nargs="?",
+        default=None,
         help=(
-            "Filesystem path to initialize as a results-dir. If the path does "
-            "not exist, it will be created (the parent directory must already "
-            "exist). If the path exists and is empty, it is initialized in "
-            "place; if it already contains an mlperf-results.yaml sentinel "
-            "with a matching orgname, init exits 0 (idempotent)."
+            "Filesystem path to initialize as a results-dir (default: "
+            "~/mlpstorage-results). If the path does not exist, it will be "
+            "created (the parent directory must already exist). If the path "
+            "exists and is empty, it is initialized in place; if it already "
+            "contains an mlperf-results.yaml sentinel with a matching "
+            "orgname, init exits 0 (idempotent). Either way the path is "
+            "recorded in ~/.config/mlpstorage/config.yaml as the default "
+            "results-dir for every later command."
         ),
     )
     return parser

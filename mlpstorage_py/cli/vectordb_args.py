@@ -455,7 +455,9 @@ def _add_vectordb_core_args(parser, command, index_choices):
 
     add_universal_arguments(
         parser,
-        req_results=(command in ("datagen", "run")),
+        # Every closed/open/whatif command needs a results-dir; after
+        # `mlpstorage init` it resolves from the recorded default.
+        req_results=True,
         # D-10 / LAY-04: vectordb datagen and run emit results; datasize is a
         # pre-flight calculation and does not need --systemname.
         req_systemname=(command in ("datagen", "run")),

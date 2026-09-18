@@ -15,7 +15,6 @@ from typing import Tuple, List, Optional
 from mlpstorage_py.config import (
     BENCHMARK_TYPES,
     DATETIME_STR,
-    MLPSTORAGE_ORGNAME_ENVVAR,
     MLPSTORAGE_SYSTEMNAME_ENVVAR,
 )
 from mlpstorage_py.errors import ConfigurationError, ErrorCode

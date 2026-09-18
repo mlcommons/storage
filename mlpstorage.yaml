@@ -1,4 +1,6 @@
-# Example configuration for global options to all commands
+# Sample for the --config-file/-c override mechanism (YAML applied on top of
+# the parsed command line). This is NOT the per-user config that
+# `mlpstorage init` writes to ~/.config/mlpstorage/config.yaml.
 hosts: 127.0.0.1
 data_dir: /mnt/nvme
 results_dir: /root/mlpstorage_results/

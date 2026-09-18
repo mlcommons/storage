@@ -51,8 +51,8 @@ class TestParserModeStructure:
 
     @pytest.mark.parametrize('benchmark, extra_args', [
         ('training',      ['unet3d', 'datasize', '-cm', '64', '-at', 'b200', '-ma', '4', '-rd', '/tmp', '-sn', 'sys-v1']),
-        ('checkpointing', ['datasize', '-cm', '64', '-m', 'llama3-8b', '-np', '2']),
-        ('vectordb',      ['datasize']),
+        ('checkpointing', ['datasize', '-cm', '64', '-m', 'llama3-8b', '-np', '2', '-rd', '/tmp']),
+        ('vectordb',      ['datasize', '-rd', '/tmp']),
         ('kvcache',       ['run', '-rd', '/tmp', '-sn', 'sys-v1']),
     ])
     def test_all_benchmarks_reachable_in_closed(self, benchmark, extra_args):
@@ -199,9 +199,9 @@ class TestOpenGatedArgExclusion:
 
     @pytest.mark.parametrize('mode, benchmark, sub_argv', [
         # kvcache — the direct repro for #444
-        ('closed',  'kvcache',       ['datasize']),
-        ('open',    'kvcache',       ['datasize']),
-        ('whatif',  'kvcache',       ['datasize']),
+        ('closed',  'kvcache',       ['datasize', '-rd', '/tmp']),
+        ('open',    'kvcache',       ['datasize', '-rd', '/tmp']),
+        ('whatif',  'kvcache',       ['datasize', '-rd', '/tmp']),
         # training — non-run subcommands have no --loops flag.
         # D-10/LAY-04: training datasize/datagen are emitting → require -sn.
         ('closed',  'training',      ['unet3d', 'datasize', '-cm', '64', '-at', 'b200', '-ma', '4', '-rd', '/tmp', '-sn', 'sys-v1']),
@@ -209,12 +209,12 @@ class TestOpenGatedArgExclusion:
         ('whatif',  'training',      ['unet3d', 'datasize', '-cm', '64', '-at', 'h100', '-ma', '4', '-rd', '/tmp', '-sn', 'sys-v1']),
         ('closed',  'training',      ['unet3d', 'datagen', '-np', '4', '-dd', '/tmp', 'file', '-rd', '/tmp', '-sn', 'sys-v1']),
         # checkpointing — datasize / configview (datasize is not emitting per plan).
-        ('closed',  'checkpointing', ['datasize', '-cm', '64', '-m', 'llama3-8b', '-np', '2']),
-        ('open',    'checkpointing', ['datasize', '-cm', '64', '-m', 'llama3-8b', '-np', '2']),
+        ('closed',  'checkpointing', ['datasize', '-cm', '64', '-m', 'llama3-8b', '-np', '2', '-rd', '/tmp']),
+        ('open',    'checkpointing', ['datasize', '-cm', '64', '-m', 'llama3-8b', '-np', '2', '-rd', '/tmp']),
         # vectordb — datasize is not emitting; datagen would be (not exercised here).
-        ('closed',  'vectordb',      ['datasize']),
-        ('open',    'vectordb',      ['datasize']),
-        ('whatif',  'vectordb',      ['datasize']),
+        ('closed',  'vectordb',      ['datasize', '-rd', '/tmp']),
+        ('open',    'vectordb',      ['datasize', '-rd', '/tmp']),
+        ('whatif',  'vectordb',      ['datasize', '-rd', '/tmp']),
     ])
     def test_non_run_subcommands_expose_loops_attr(self, mode, benchmark, sub_argv):
         """Every benchmark subcommand must populate args.loops so main.py can drive the run loop.

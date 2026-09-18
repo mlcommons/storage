@@ -291,9 +291,9 @@ class TestOrgnameSystemnameBanner:
     @patch('mlpstorage_py.run_summary.logger')
     def test_banner_environment_includes_all_mlpstorage_rows(self, mock_logger,
                                                              monkeypatch):
-        """Environment section contains all five MLPSTORAGE_* env-var rows
-        added by Plan 05-04 (RESULTS_DIR, SYSTEMNAME, ORGNAME, DATA_DIR,
-        CHECKPOINT_FOLDER).
+        """Environment section contains the four MLPSTORAGE_* env-var rows
+        (RESULTS_DIR, SYSTEMNAME, DATA_DIR, CHECKPOINT_FOLDER). There is no
+        ORGNAME row: orgname comes only from the results-dir sentinel.
         """
         from mlpstorage_py.run_summary import print_run_summary
 
@@ -305,7 +305,6 @@ class TestOrgnameSystemnameBanner:
         for row_label in (
             'MLPSTORAGE_RESULTS_DIR',
             'MLPSTORAGE_SYSTEMNAME',
-            'MLPSTORAGE_ORGNAME',
             'MLPSTORAGE_DATA_DIR',
             'MLPSTORAGE_CHECKPOINT_FOLDER',
         ):

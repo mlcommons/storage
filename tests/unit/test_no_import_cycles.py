@@ -120,11 +120,9 @@ class TestNoImportCycles:
             "mlpstorage_py/rules/utils.py must import from "
             "mlpstorage_py.config (positive D-11 direction)."
         )
-        # The two constants moved in Plan 05-01 per D-10.
-        assert "MLPSTORAGE_ORGNAME_ENVVAR" in text, (
-            "rules/utils.py does not reference MLPSTORAGE_ORGNAME_ENVVAR — "
-            "the D-10 single-source-of-truth import may have regressed."
-        )
+        # The constant moved in Plan 05-01 per D-10 (MLPSTORAGE_ORGNAME_ENVVAR
+        # was retired with the results-dir resolver: orgname comes only from
+        # the sentinel).
         assert "MLPSTORAGE_SYSTEMNAME_ENVVAR" in text, (
             "rules/utils.py does not reference MLPSTORAGE_SYSTEMNAME_ENVVAR — "
             "the D-10 single-source-of-truth import may have regressed."

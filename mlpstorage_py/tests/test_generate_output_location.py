@@ -74,15 +74,13 @@ def _benchmark(mode: str, model: str = "unet3d", command: str = "datagen",
 # ---------------------------------------------------------------------------
 
 def test_envvar_constants_exported():
-    """The module exports the two env-var-name constants for the dispatch
-    helper to consume."""
-    from mlpstorage_py.rules.utils import (
-        MLPSTORAGE_ORGNAME_ENVVAR,
-        MLPSTORAGE_SYSTEMNAME_ENVVAR,
-    )
+    """The module exports the systemname env-var-name constant for the
+    dispatch helper to consume. There is no orgname counterpart: orgname
+    comes only from the results-dir sentinel."""
+    from mlpstorage_py.rules import utils as rules_utils
 
-    assert MLPSTORAGE_ORGNAME_ENVVAR == "MLPSTORAGE_ORGNAME"
-    assert MLPSTORAGE_SYSTEMNAME_ENVVAR == "MLPSTORAGE_SYSTEMNAME"
+    assert rules_utils.MLPSTORAGE_SYSTEMNAME_ENVVAR == "MLPSTORAGE_SYSTEMNAME"
+    assert not hasattr(rules_utils, "MLPSTORAGE_ORGNAME_ENVVAR")
 
 
 # ---------------------------------------------------------------------------

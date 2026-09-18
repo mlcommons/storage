@@ -127,18 +127,19 @@ class TestGatingContract:
 
 class TestEnvVarFailFast:
     def test_missing_orgname_raises_configuration_error(self, tmp_path, log):
+        """No args.orgname means the LAY-03 gate never ran: the error points
+        at `mlpstorage init`, and the env var is not consulted."""
         args = _make_args(mode="closed", command="datagen", results_dir=tmp_path)
         with pytest.raises(ConfigurationError) as exc_info:
-            capture_or_verify_code_image(args, {}, log)
-        assert "MLPSTORAGE_ORGNAME" in str(exc_info.value)
-        assert exc_info.value.parameter == "MLPSTORAGE_ORGNAME"
+            capture_or_verify_code_image(args, {"MLPSTORAGE_ORGNAME": "acme"}, log)
+        assert "MLPSTORAGE_ORGNAME" not in str(exc_info.value)
+        assert exc_info.value.parameter == "orgname"
         assert "mlpstorage init" in (exc_info.value.suggestion or "")
 
     def test_missing_systemname_raises_configuration_error(self, tmp_path, log):
-        args = _make_args(mode="open", command="datagen", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "acme"}
+        args = _make_args(mode="open", command="datagen", results_dir=tmp_path, orgname="acme")
         with pytest.raises(ConfigurationError) as exc_info:
-            capture_or_verify_code_image(args, env, log)
+            capture_or_verify_code_image(args, {}, log)
         assert "MLPSTORAGE_SYSTEMNAME" in str(exc_info.value)
         assert exc_info.value.parameter == "MLPSTORAGE_SYSTEMNAME"
 
@@ -161,26 +162,27 @@ class TestEnvVarFailFast:
         assert result is not None
         assert getattr(args, "_validated_systemname", None) == "sys1"
 
-    def test_e101_only_when_both_args_and_env_absent(self, tmp_path, log):
-        """HARDEN-03 boundary: E101 fires ONLY when neither args.orgname
-        nor MLPSTORAGE_ORGNAME env var is set."""
+    def test_e101_when_args_orgname_absent(self, tmp_path, log):
+        """E101 fires when args.orgname is unset — the environment is never
+        consulted, so a stray MLPSTORAGE_ORGNAME cannot paper over a
+        results-dir that was never initialized."""
         args = _make_args(mode="closed", command="datagen", results_dir=tmp_path)
-        args.orgname = None  # explicit: both args and env are absent
+        args.orgname = None
         with pytest.raises(ConfigurationError) as exc_info:
-            capture_or_verify_code_image(args, {}, log)
-        assert "MLPSTORAGE_ORGNAME" in str(exc_info.value)
-        assert exc_info.value.parameter == "MLPSTORAGE_ORGNAME"
+            capture_or_verify_code_image(args, {"MLPSTORAGE_ORGNAME": "acme"}, log)
+        assert "MLPSTORAGE_ORGNAME" not in str(exc_info.value)
+        assert exc_info.value.parameter == "orgname"
 
     def test_orgname_with_space_rejected(self, tmp_path, log):
-        args = _make_args(mode="closed", command="run", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "bad name"}
+        args = _make_args(mode="closed", command="run", results_dir=tmp_path, orgname="bad name")
+        env = {}
         with pytest.raises(ConfigurationError) as exc_info:
             capture_or_verify_code_image(args, env, log)
         assert "Rules.md" in str(exc_info.value)
 
     def test_orgname_with_slash_rejected(self, tmp_path, log):
-        args = _make_args(mode="closed", command="run", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "evil/path"}
+        args = _make_args(mode="closed", command="run", results_dir=tmp_path, orgname="evil/path")
+        env = {}
         with pytest.raises(ConfigurationError):
             capture_or_verify_code_image(args, env, log)
 
@@ -191,28 +193,28 @@ class TestEnvVarFailFast:
 
 class TestPathTraversalGuard:
     def test_orgname_dot_rejected(self, tmp_path, log):
-        args = _make_args(mode="closed", command="run", results_dir=tmp_path)
+        args = _make_args(mode="closed", command="run", results_dir=tmp_path, orgname=".")
         with pytest.raises(ConfigurationError) as exc_info:
-            capture_or_verify_code_image(args, {"MLPSTORAGE_ORGNAME": "."}, log)
+            capture_or_verify_code_image(args, {}, log)
         msg = str(exc_info.value)
         assert "'.' and '..' are reserved path segments" in msg
 
     def test_orgname_dotdot_rejected(self, tmp_path, log):
-        args = _make_args(mode="closed", command="run", results_dir=tmp_path)
+        args = _make_args(mode="closed", command="run", results_dir=tmp_path, orgname="..")
         with pytest.raises(ConfigurationError) as exc_info:
-            capture_or_verify_code_image(args, {"MLPSTORAGE_ORGNAME": ".."}, log)
+            capture_or_verify_code_image(args, {}, log)
         assert "'.' and '..' are reserved path segments" in str(exc_info.value)
 
     def test_systemname_dot_rejected(self, tmp_path, log):
-        args = _make_args(mode="open", command="run", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "acme", "MLPSTORAGE_SYSTEMNAME": "."}
+        args = _make_args(mode="open", command="run", results_dir=tmp_path, orgname="acme")
+        env = {"MLPSTORAGE_SYSTEMNAME": "."}
         with pytest.raises(ConfigurationError) as exc_info:
             capture_or_verify_code_image(args, env, log)
         assert "'.' and '..' are reserved path segments" in str(exc_info.value)
 
     def test_systemname_dotdot_rejected(self, tmp_path, log):
-        args = _make_args(mode="open", command="run", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "acme", "MLPSTORAGE_SYSTEMNAME": ".."}
+        args = _make_args(mode="open", command="run", results_dir=tmp_path, orgname="acme")
+        env = {"MLPSTORAGE_SYSTEMNAME": ".."}
         with pytest.raises(ConfigurationError) as exc_info:
             capture_or_verify_code_image(args, env, log)
         assert "'.' and '..' are reserved path segments" in str(exc_info.value)
