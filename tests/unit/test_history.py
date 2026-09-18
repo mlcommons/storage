@@ -29,12 +29,15 @@ class TestHistoryTrackerInit:
         tracker = HistoryTracker(history_file=str(history_file))
         assert history_file.exists()
 
-    def test_uses_default_history_file(self):
-        """Should use default history file path."""
-        with patch('mlpstorage_py.history.HISTFILE', '/tmp/test_history'):
-            with patch('os.path.exists', return_value=True):
-                tracker = HistoryTracker()
-                assert tracker.history_file == '/tmp/test_history'
+    def test_history_file_lives_inside_the_results_dir(self, tmp_path):
+        """History is per results-dir: <results-dir>/.mlps/history."""
+        from mlpstorage_py.history import history_file_for
+
+        expected = str(tmp_path / ".mlps" / "history")
+        assert history_file_for(str(tmp_path)) == expected
+        tracker = HistoryTracker(history_file=history_file_for(str(tmp_path)))
+        assert tracker.history_file == expected
+        assert os.path.isfile(expected)
 
     def test_accepts_custom_logger(self, tmp_path):
         """Should accept custom logger."""

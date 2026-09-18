@@ -17,7 +17,6 @@ from mlpstorage_py import mlps_logging as ml
 def console_out(tmp_path, monkeypatch):
     from mlpstorage_py import main as main_mod
 
-    monkeypatch.setattr(main_mod, "HISTFILE", str(tmp_path / "history"))
     ml.reset_for_tests()
     buf = io.StringIO()
     ml.configure_console(color="never", file=buf)

@@ -127,18 +127,19 @@ class TestGatingContract:
 
 class TestEnvVarFailFast:
     def test_missing_orgname_raises_configuration_error(self, tmp_path, log):
+        """No args.orgname means the LAY-03 gate never ran: the error points
+        at `mlpstorage init`, and the env var is not consulted."""
         args = _make_args(mode="closed", command="datagen", results_dir=tmp_path)
         with pytest.raises(ConfigurationError) as exc_info:
-            capture_or_verify_code_image(args, {}, log)
-        assert "MLPSTORAGE_ORGNAME" in str(exc_info.value)
-        assert exc_info.value.parameter == "MLPSTORAGE_ORGNAME"
+            capture_or_verify_code_image(args, {"MLPSTORAGE_ORGNAME": "acme"}, log)
+        assert "MLPSTORAGE_ORGNAME" not in str(exc_info.value)
+        assert exc_info.value.parameter == "orgname"
         assert "mlpstorage init" in (exc_info.value.suggestion or "")
 
     def test_missing_systemname_raises_configuration_error(self, tmp_path, log):
-        args = _make_args(mode="open", command="datagen", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "acme"}
+        args = _make_args(mode="open", command="datagen", results_dir=tmp_path, orgname="acme")
         with pytest.raises(ConfigurationError) as exc_info:
-            capture_or_verify_code_image(args, env, log)
+            capture_or_verify_code_image(args, {}, log)
         assert "MLPSTORAGE_SYSTEMNAME" in str(exc_info.value)
         assert exc_info.value.parameter == "MLPSTORAGE_SYSTEMNAME"
 

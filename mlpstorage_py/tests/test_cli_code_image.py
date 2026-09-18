@@ -4,7 +4,7 @@
 Scope AFTER Plan 06-02 Task 5:
     CAP-07, CAP-08 gating (whatif/reports/validate/etc. + non-submission
         commands under closed|open)
-    D-04, D-05 MLPSTORAGE_ORGNAME / MLPSTORAGE_SYSTEMNAME validation
+    D-04, D-05 orgname (from args, pinned by the sentinel) / MLPSTORAGE_SYSTEMNAME validation
     Path-traversal '.' / '..' rejection (REVIEWS.md consensus finding,
         Gemini + plan-checker — _RESERVED_PATH_SEGMENTS guard).
 
@@ -87,13 +87,14 @@ def fake_source_root(tmp_path, monkeypatch):
 # make_args helper — small factory matching the helper's args shape.
 # ---------------------------------------------------------------------------
 
-def make_args(*, mode, command, results_dir, benchmark="training", model="unet3d"):
+def make_args(*, mode, command, results_dir, benchmark="training", model="unet3d", orgname=None):
     return SimpleNamespace(
         mode=mode,
         command=command,
         results_dir=str(results_dir),
         benchmark=benchmark,
         model=model,
+        orgname=orgname,  # pinned by main's LAY-03 gate from the sentinel
     )
 
 
@@ -183,8 +184,8 @@ class TestNoTouchSubcommands:
         # Sanity: each of the three result-generating commands triggers
         # capture-or-verify (returns a Path, creates code/), confirming the
         # gating set membership and that no command in the spec is missed.
-        args = make_args(mode="closed", command=command, results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "acme"}
+        args = make_args(mode="closed", command=command, results_dir=tmp_path, orgname="acme")
+        env = {}
         result = capture_or_verify_code_image(args, env, mock_logger)
         assert result is not None
         assert result.is_dir()
@@ -203,33 +204,33 @@ class TestEnvVarValidation:
         with pytest.raises(ConfigurationError) as exc_info:
             capture_or_verify_code_image(args, env, mock_logger)
         msg = str(exc_info.value)
-        assert "MLPSTORAGE_ORGNAME" in msg
-        # ConfigurationError.suggestion should mention the future setup command.
+        assert "MLPSTORAGE_ORGNAME" not in msg
+        # ConfigurationError.suggestion should mention the setup command.
         suggestion = getattr(exc_info.value, "suggestion", "") or getattr(
             exc_info.value.error, "suggestion", ""
         )
         assert "mlpstorage init" in suggestion, suggestion
 
     def test_missing_systemname_open(self, tmp_path, mock_logger):
-        args = make_args(mode="open", command="datagen", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "acme"}
+        args = make_args(mode="open", command="datagen", results_dir=tmp_path, orgname="acme")
+        env = {}
         with pytest.raises(ConfigurationError) as exc_info:
             capture_or_verify_code_image(args, env, mock_logger)
         assert "MLPSTORAGE_SYSTEMNAME" in str(exc_info.value)
 
     def test_invalid_posix_orgname(self, tmp_path, mock_logger):
         # Space is not in [A-Za-z0-9._-].
-        args = make_args(mode="closed", command="datagen", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "bad name"}
+        args = make_args(mode="closed", command="datagen", results_dir=tmp_path, orgname="bad name")
+        env = {}
         with pytest.raises(ConfigurationError) as exc_info:
             capture_or_verify_code_image(args, env, mock_logger)
         assert "Rules.md §2.1.1" in str(exc_info.value)
-        assert "MLPSTORAGE_ORGNAME" in str(exc_info.value)
+        assert "orgname" in str(exc_info.value)
 
     def test_invalid_posix_systemname(self, tmp_path, mock_logger):
         # Slash is not in [A-Za-z0-9._-] (path-traversal-adjacent).
-        args = make_args(mode="open", command="datagen", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "acme", "MLPSTORAGE_SYSTEMNAME": "with/slash"}
+        args = make_args(mode="open", command="datagen", results_dir=tmp_path, orgname="acme")
+        env = {"MLPSTORAGE_SYSTEMNAME": "with/slash"}
         with pytest.raises(ConfigurationError) as exc_info:
             capture_or_verify_code_image(args, env, mock_logger)
         assert "Rules.md §2.1.1" in str(exc_info.value)
@@ -253,20 +254,20 @@ class TestEnvVarPathTraversal:
     def test_orgname_dot_raises_configuration_error(
         self, tmp_path, bad_value, mock_logger
     ):
-        args = make_args(mode="closed", command="datagen", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": bad_value}
+        args = make_args(mode="closed", command="datagen", results_dir=tmp_path, orgname=bad_value)
+        env = {}
         with pytest.raises(ConfigurationError) as exc_info:
             capture_or_verify_code_image(args, env, mock_logger)
         msg = str(exc_info.value)
         assert "'.' and '..' are reserved path segments" in msg
-        assert "MLPSTORAGE_ORGNAME" in msg
+        assert "orgname" in msg
 
     @pytest.mark.parametrize("bad_value", [".", ".."])
     def test_systemname_dot_raises_configuration_error(
         self, tmp_path, bad_value, mock_logger
     ):
-        args = make_args(mode="open", command="datagen", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "acme", "MLPSTORAGE_SYSTEMNAME": bad_value}
+        args = make_args(mode="open", command="datagen", results_dir=tmp_path, orgname="acme")
+        env = {"MLPSTORAGE_SYSTEMNAME": bad_value}
         with pytest.raises(ConfigurationError) as exc_info:
             capture_or_verify_code_image(args, env, mock_logger)
         msg = str(exc_info.value)
@@ -281,16 +282,16 @@ class TestEnvVarPathTraversal:
         Confirms that the rejection in the prior two tests is specifically
         due to the '.'/'..' guard, not a different validation bug.
         """
-        args = make_args(mode="open", command="datagen", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "valid_name", "MLPSTORAGE_SYSTEMNAME": "valid_name"}
+        args = make_args(mode="open", command="datagen", results_dir=tmp_path, orgname="valid_name")
+        env = {"MLPSTORAGE_SYSTEMNAME": "valid_name"}
         result = capture_or_verify_code_image(args, env, mock_logger)
         assert result is not None
         assert result.exists()
 
     def test_filesystem_unchanged_after_path_traversal_reject(self, tmp_path, mock_logger):
         """The helper rejects BEFORE any mkdir — filesystem is untouched."""
-        args = make_args(mode="closed", command="datagen", results_dir=tmp_path)
-        env = {"MLPSTORAGE_ORGNAME": "."}
+        args = make_args(mode="closed", command="datagen", results_dir=tmp_path, orgname=".")
+        env = {}
         with pytest.raises(ConfigurationError):
             capture_or_verify_code_image(args, env, mock_logger)
         assert not (tmp_path / "closed").exists()
