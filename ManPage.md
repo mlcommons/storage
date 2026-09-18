@@ -373,6 +373,12 @@ Every benchmark run writes:
 - **`results.json`** — aggregated summary across all timestamped run directories, used by `reportgen`.
 - **Command history** is appended to `<results-dir>/.history/` (consumed by `mlpstorage history`).
 
+### Aggregate Interpretation
+
+Aggregate columns are informational and NOT a leaderboard-input contract. External ranking pipelines MUST compute their own aggregates from per-invocation summary.json files.
+
+This framing applies uniformly to every per-benchmark metric column `reportgen` emits in `results.csv`: the training `Read B/W (GiB/s)`; the checkpointing `Write B/W (GiB/s)`, `Write Duration (secs)`, `Read B/W (GiB/s)` and `Read Duration (secs)`; the VDB `Queries per Sec`, `Query Latency (ms)`, `Recall Percentage`, `Storage IOPs` and `Read B/W (GiB/s)` pass-through; and the KVCache per-option and aggregated `Throughput (tok/s)`, `Read B/W (GiB/s)`, `Write B/W (GiB/s)` and `P95 Read Latency (ms)`. The rollup math is implemented per benchmark type in `report_generator.py` (`_aggregate_training`, `_aggregate_checkpointing`, `_aggregate_vdb`, `_aggregate_kvcache`); for KVCache it is additionally specified by Rules.md §6.3.4.
+
 ## VALIDATOR
 
 `mlpstorage` ships a layered validation system whose ultimate authority is `Rules.md` in the repository root.
@@ -928,12 +934,104 @@ Reports which Rules.md IDs are referenced by `@rule(rule_id=...)`-decorated chec
 
 ## ENVIRONMENT
 
-- **`MLPSTORAGE_RESULTS_DIR`** — default value for `--results-dir` when the flag is not supplied. The path must still have been initialized with `mlpstorage init`.
-- **`MLPSTORAGE_SYSTEMNAME`** — default value for `--systemname` / `-sn` when the flag is not supplied. Emitting subcommands require systemname to be set via flag or env; an empty value is rejected at parse time.
-- **`MLPSTORAGE_DATA_DIR`** — fallback value for `--data-dir` for some commands.
-- **`MPI_RUN_BIN`** — overrides the path used when invoking `mpirun`.
+This section enumerates every environment variable mlpstorage reads or borrows, grouped by ownership tier. Seven tiers: Owned (mlpstorage authors the name), MPI-borrowed / AWS-borrowed / Storage-borrowed (third-party contracts mlpstorage consumes), Storage-backend (s3dlio Rust layer, not Python code), Diagnostic (mlpstorage internal reads surfaced for troubleshooting), and Internal-write (mlpstorage may overwrite user-set values during execution). An automated sync test (`tests/unit/test_env_var_manpage_sync.py`) asserts this section stays symmetric with the actual `os.environ` reads in the codebase.
 
-There is intentionally **no `MLPSTORAGE_ORGNAME` environment variable** (nor a legacy `MLPERF_ORGNAME`) and no `--orgname` flag on benchmark subcommands. Orgname is sourced exclusively from the `mlperf-results.yaml` sentinel written by `mlpstorage init`.
+### Owned
+
+| Env var | Read by | Default when unset | Notes |
+|---|---|---|---|
+| `MLPSTORAGE_RESULTS_DIR` | all emitting subcommands | none — CLI fails at parse time with loud error (see Phase 5 D-02 template) | Required on every emitting subcommand; path must already be initialized with `mlpstorage init`. |
+| `MLPSTORAGE_SYSTEMNAME` | all emitting subcommands | none — CLI fails at parse time with loud error (see Phase 5 D-02 template) | Required on every emitting subcommand; per-run system-under-test identifier. |
+| `MLPSTORAGE_DATA_DIR` | all emitting subcommands | [not set] | Optional fallback for `--data-dir`; if unset the flag must be supplied explicitly. |
+| `MLPSTORAGE_CHECKPOINT_FOLDER` | all emitting subcommands | [not set] | Optional fallback for `--checkpoint-folder`; if unset the flag must be supplied explicitly. |
+| `MLPSTORAGE_ORGNAME` | `mlpstorage_py/submission_checker/tools/code_image.py` (code-image pool tool) | [not set] | Read only by the code-image pool tool to name the pool entry; every benchmark and utility subcommand sources orgname from the `mlperf-results.yaml` sentinel written by `mlpstorage init`. |
+| `MLPS_CHECKPOINT_MP_START_METHOD` | `mlpstorage_py/checkpointing/streaming_checkpoint.py` (`MP_START_METHOD_ENV`) | [not set] — `forkserver` on the object-storage path, `fork` otherwise | Overrides the multiprocessing start method for the streaming checkpoint writer; the `mp_start_method` constructor argument wins when both are given. `fork` is refused on the object-storage path because it deadlocks (#642). |
+| `MLPSTORAGE_CHECKPOINT_URI_SCHEME` | `mlpstorage_py/checkpointing/storage_writers/__init__.py:44` (via `CHECKPOINT_URI_SCHEME_ENV` constant) | [not set] | Selects checkpoint storage backend (`s3`, `file`, etc.). `[internal-write]` — also written by `mlpstorage_py/benchmarks/dlio.py` during checkpointing setup. |
+| `KVCACHE_SELECTED_WORKLOADS` | `kv-cache-wrapper.sh` (shell dispatch layer); displayed by `run_summary.py:546` | [not set] | `[shell-wrapper-read]` — filters which kvcache workloads run; unset = run all. Functionally owned by mlpstorage; only the shell wrapper reads it. |
+
+### MPI-borrowed
+
+| Env var | Read by | Default when unset | Notes |
+|---|---|---|---|
+| `MPI_RUN_BIN` | `mlpstorage_py/utils.py` (MPI launcher resolution) | [not set] | Overrides the `mpirun` binary path; if unset mlpstorage searches `PATH` for `mpirun`. |
+| `MPI_EXEC_BIN` | `mlpstorage_py/utils.py` (MPI launcher resolution) | [not set] | Alternative override for `mpiexec`; consulted when `MPI_RUN_BIN` is also unset. |
+| `OMPI_COMM_WORLD_RANK` | `mlpstorage_py/cluster_collector.py` (rank detection) | [not set] | OpenMPI-injected rank index; read to identify rank-0 for sidecar writes. |
+| `PMI_RANK` | `mlpstorage_py/cluster_collector.py` (rank detection) | [not set] | PMI-injected rank index; fallback when `OMPI_COMM_WORLD_RANK` is absent (e.g. MPICH-derived launchers). |
+| `SLURM_JOB_ID` | `mlpstorage_py/validation_helpers.py` (`_launcher_bypasses_ssh`) | [not set] | Slurm-injected job id. When set and `--mpi-bin` is `srun`, the passwordless-SSH preflight is skipped because Slurm bootstraps ranks itself. |
+
+The same preflight bypass also fires for HPE/Cray PALS `mpiexec` when any `PALS_*` variable is present in the environment; those are detected by prefix and are not enumerated individually here.
+
+### AWS-borrowed
+
+| Env var | Read by | Default when unset | Notes |
+|---|---|---|---|
+| `AWS_ACCESS_KEY_ID` | boto3/s3dlio via storage backend init | [not set] | Read by boto3/s3dlio via storage backend init; consumed as-is. |
+| `AWS_SECRET_ACCESS_KEY` | boto3/s3dlio via storage backend init | [not set] | Read by boto3/s3dlio via storage backend init; consumed as-is. |
+| `AWS_REGION` | `mlpstorage_py/storage_config.py` | `'us-east-1'` | AWS region for S3 endpoint selection; defaults to `us-east-1` when unset. |
+| `AWS_CA_BUNDLE` | `mlpstorage_py/storage_config.py` | [not set] | Path to a custom CA bundle for TLS verification; unset uses the system default. |
+| `AWS_ENDPOINT_URL` | `mlpstorage_py/storage_config.py`; `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py:168` | [not set] | Custom S3-compatible endpoint URL. `[cross-ref → internal-write]` — also written at `s3dlio_writer.py:168` during multi-endpoint selection; see Internal-write cross-refs below. |
+| `AWS_SESSION_TOKEN` | boto3/s3dlio via storage backend init | [not set] | Temporary STS session token; consumed by boto3/s3dlio via storage backend init. |
+| `AWS_DEFAULT_REGION` | boto3/s3dlio via storage backend init | [not set] | Fallback region when `AWS_REGION` is unset; consumed by boto3/s3dlio. |
+| `AWS_S3_ADDRESSING_STYLE` | boto3/s3dlio via storage backend init | [not set] | Controls virtual-hosted vs. path-style S3 addressing; consumed by boto3/s3dlio. |
+
+### Storage-borrowed
+
+| Env var | Read by | Default when unset | Notes |
+|---|---|---|---|
+| `BUCKET` | `mlpstorage_py/storage_config.py` | [not set] | S3 bucket name for object-storage runs; required when `--storage object` is selected. |
+| `STORAGE_LIBRARY` | `mlpstorage_py/storage_config.py` | `'s3dlio'` | Storage client library selection; defaults to `s3dlio`. |
+| `STORAGE_URI_SCHEME` | `mlpstorage_py/storage_config.py` | `'s3'` | URI scheme for storage paths; defaults to `s3`. |
+| `S3_LOAD_BALANCE_STRATEGY` | `mlpstorage_py/storage_config.py` | `'round_robin'` | Load-balance strategy across S3 endpoints; defaults to `round_robin`. |
+| `S3_ENDPOINT_URIS` | `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py:44` | [not set] | Space-separated list of S3 endpoint URIs; part of the s3dlio endpoint fallback chain per D-08. |
+| `S3_ENDPOINT_TEMPLATE` | `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py` | [not set] | URI template for S3 endpoint construction; s3dlio endpoint fallback chain per D-08. |
+| `S3_ENDPOINT_FILE` | `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py` | [not set] | Path to a file containing S3 endpoint URIs; s3dlio endpoint fallback chain per D-08. |
+| `S3_ENDPOINT` | `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py` | [not set] | Single S3 endpoint URI; lowest-priority entry in the s3dlio endpoint fallback chain per D-08. |
+
+### Storage-backend
+
+The following table is anchored on s3dlio v0.9.112, the floor pinned in `pyproject.toml` (`S3DLIO_PINNED_VERSION` in `config.py` tracks it). The defaults for `S3DLIO_PUT_VERIFY` and `S3DLIO_MPU_PUT_VERIFY` changed from `true` to `false` in v0.9.106; behavior may differ on earlier versions. Defaults are quoted from s3dlio's own `docs/Environment_Variables.md` at that tag — re-verify them whenever the floor moves. For cloud-specific credential and endpoint env vars consumed by s3dlio for Azure or GCS backends, see s3dlio's [Environment_Variables.md](https://github.com/mlcommons/s3dlio/blob/main/docs/Environment_Variables.md).
+
+| Env var | Read by | Default when unset | Notes |
+|---|---|---|---|
+| `S3DLIO_SKIP_HEAD` | s3dlio Rust binary (not mlpstorage_py) | unset (the loader defaults the HEAD-skip latch to `true`) | Skips HEAD requests for object existence checks. [high-risk: alters measured benchmark behavior] Enabling this removes per-read existence verification; can significantly increase throughput by reducing API call overhead. |
+| `S3DLIO_ENABLE_RANGE_OPTIMIZATION` | s3dlio Rust binary (not mlpstorage_py) | `true` | Enables multi-range read coalescing. [high-risk: alters measured benchmark behavior] Can substantially change read throughput for workloads with many small reads. |
+| `S3DLIO_RANGE_THRESHOLD_MB` | s3dlio Rust binary (not mlpstorage_py) | `32` | Minimum size threshold (MB) for range-read coalescing. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_RANGE_CONCURRENCY` | s3dlio Rust binary (not mlpstorage_py) | auto-tuned | Number of concurrent range-read sub-requests. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_CHUNK_SIZE` | s3dlio Rust binary (not mlpstorage_py) | auto-calculated (1–8 MB by object size) | Read/write chunk size in bytes. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_H2C` | s3dlio Rust binary (not mlpstorage_py) | `0` (HTTP/1.1) | Enables HTTP/2 cleartext (H2C) transport. [high-risk: alters measured benchmark behavior] Switching transport protocol changes connection multiplexing and can alter throughput substantially. |
+| `S3DLIO_ENABLE_HTTP2` | s3dlio Rust binary (not mlpstorage_py) | `0` | Master switch (v0.9.108+) that opts in to HTTP/2 on both `http://` and `https://` endpoints. [high-risk: alters measured benchmark behavior] Same transport-protocol impact as `S3DLIO_H2C`. |
+| `S3DLIO_HTTPS_H2` | s3dlio Rust binary (not mlpstorage_py) | `0` (HTTP/1.1) | Enables HTTP/2 over TLS for `https://` endpoints (v0.9.108+; before that `https://` always negotiated HTTP/2 via ALPN). [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_H2_ADAPTIVE_WINDOW` | s3dlio Rust binary (not mlpstorage_py) | `1` (adaptive) | Enables HTTP/2 adaptive flow-control window. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_H2_STREAM_WINDOW_MB` | s3dlio Rust binary (not mlpstorage_py) | `4` | HTTP/2 per-stream flow-control window size (MB). [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_H2_CONN_WINDOW_MB` | s3dlio Rust binary (not mlpstorage_py) | `4×stream` | HTTP/2 per-connection flow-control window size (MB). [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_POOL_MAX_IDLE_PER_HOST` | s3dlio Rust binary (not mlpstorage_py) | unlimited | Maximum idle connections per host in the connection pool. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_POOL_IDLE_TIMEOUT_SECS` | s3dlio Rust binary (not mlpstorage_py) | `90` | Time (seconds) before idle connections are evicted. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_PUT_VERIFY` | s3dlio Rust binary (not mlpstorage_py) | `false` | Enables checksum verification on PUT operations. Changed from `true` to `false` in v0.9.106. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_MPU_PUT_VERIFY` | s3dlio Rust binary (not mlpstorage_py) | `false` | Enables checksum verification on multipart PUT operations. Changed from `true` to `false` in v0.9.106. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_MULTIPART_THRESHOLD_MB` | DLIO Python storage layer and s3dlio Rust binary (not mlpstorage_py) | `16` (DLIO `ObjStoreLibStorage`) / `32` (s3dlio Rust-side) | Object size threshold (MB) above which multipart upload is used. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_RT_THREADS` | s3dlio Rust binary (not mlpstorage_py) | `max(4, cores)`, scaled by the concurrency hint up to `cores * 4` | Number of Tokio runtime threads. [high-risk: alters measured benchmark behavior] |
+| `S3DLIO_MAX_RETRY_ATTEMPTS` | s3dlio Rust binary (not mlpstorage_py) | `3` | Maximum number of retry attempts on transient errors. [medium-risk: affects run stability, not throughput measurement] |
+| `S3DLIO_CONNECT_TIMEOUT_SECS` | s3dlio Rust binary (not mlpstorage_py) | `20` | TCP connection timeout in seconds. [medium-risk: affects run stability, not throughput measurement] |
+| `S3DLIO_OPERATION_TIMEOUT_SECS` | s3dlio Rust binary (not mlpstorage_py) | `60` | Per-operation timeout in seconds. [medium-risk: affects run stability, not throughput measurement] |
+| `S3DLIO_PUT_MAX_RETRIES` | s3dlio Rust binary (not mlpstorage_py) | `3` | Maximum retries for PUT operations. [medium-risk: affects run stability, not throughput measurement] |
+| `S3DLIO_PUT_RETRY_DELAY_MS` | s3dlio Rust binary (not mlpstorage_py) | `1000` | Delay (ms) between PUT retries. [medium-risk: affects run stability, not throughput measurement] |
+| `S3DLIO_MPU_MAX_RETRIES` | DLIO Python storage layer (not mlpstorage_py) | `3` | Maximum retries for multipart upload operations. [medium-risk: affects run stability, not throughput measurement] |
+| `S3DLIO_MPU_RETRY_DELAY_S` | DLIO Python storage layer (not mlpstorage_py) | `5` | Delay (seconds) between multipart upload retries. [medium-risk: affects run stability, not throughput measurement] |
+
+### Diagnostic
+
+No environment variables are diagnostic-only under the current inventory (2026-07-04). This tier header is preserved so future diagnostic env vars have a home; the sync test in `tests/unit/test_env_var_manpage_sync.py` allows this tier to be empty.
+
+### Internal-write
+
+| Env var | Read by | Default when unset | Notes |
+|---|---|---|---|
+| `DLIO_DROP_CACHES_TIMEOUT` | `mlpstorage_py/benchmarks/dlio.py:768` (write), `:735` (read via `in os.environ`) | [not set] | mlpstorage writes this var before invoking DLIO to communicate the drop-caches timeout; also read to detect whether it has already been set. |
+
+- **Cross-ref:** `AWS_ENDPOINT_URL` is documented as AWS-borrowed (primary tier); mlpstorage overwrites it at `s3dlio_writer.py:168` during multi-endpoint selection. Not a duplicate `MANPAGE_ENV_VAR_TIERS` entry per D-13.
+- **Cross-ref:** `MLPSTORAGE_CHECKPOINT_URI_SCHEME` is documented as Owned (primary tier); mlpstorage writes it at `mlpstorage_py/benchmarks/dlio.py` during checkpointing setup. Not a duplicate `MANPAGE_ENV_VAR_TIERS` entry per D-12/D-13.
+
+There is intentionally no `MLPSTORAGE_ORGNAME` fallback consulted by non-init commands — orgname is sourced exclusively from the `mlperf-results.yaml` sentinel written by `mlpstorage init`. The row in the Owned table above documents where `mlpstorage init` reads the flag, not a runtime fallback path.
 
 ## EXIT STATUS
 
