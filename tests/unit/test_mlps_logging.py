@@ -323,4 +323,4 @@ def test_custom_level_calls_are_attributed_to_the_caller(console_out, tmp_path):
     with ml.attach_run_log_files(str(tmp_path)):
         logger.status("attributed")
     assert re.search(r"STATUS:test_mlps_logging:\d+: attributed", (tmp_path / "mlpstorage.log").read_text())
-    assert "mlps_logging:" not in buf.getvalue()
+    assert ":mlps_logging:" not in buf.getvalue()

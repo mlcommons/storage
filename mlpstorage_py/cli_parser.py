@@ -6,6 +6,7 @@ using modular argument builders from the cli package.
 """
 
 import argparse
+import logging
 import os
 import re
 import shlex
@@ -424,7 +425,7 @@ def update_args(args):
         # We want to consistently use num_processes in code but the different options for the CLI
         for arg in ['num_processes', 'num_accelerators', 'max_accelerators']:
             if hasattr(args, arg) and type(getattr(args, arg)) is int:
-                print(f'Setting attr from {arg} to {getattr(args, arg)}')
+                logging.getLogger(__name__).debug(f'Setting num_processes from {arg}={getattr(args, arg)}')
                 setattr(args, 'num_processes', int(getattr(args, arg)))
                 break
 

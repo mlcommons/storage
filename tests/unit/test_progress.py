@@ -28,10 +28,10 @@ class TestIsInteractiveTerminal:
 
     def test_returns_true_when_console_is_terminal(self):
         """Should return True when Console.is_terminal is True."""
-        with patch("mlpstorage_py.progress.Console") as MockConsole:
+        with patch("mlpstorage_py.progress.get_console") as mock_get_console:
             mock_console = MagicMock()
             type(mock_console).is_terminal = PropertyMock(return_value=True)
-            MockConsole.return_value = mock_console
+            mock_get_console.return_value = mock_console
 
             result = is_interactive_terminal()
 
@@ -39,10 +39,10 @@ class TestIsInteractiveTerminal:
 
     def test_returns_false_when_console_is_not_terminal(self):
         """Should return False when Console.is_terminal is False."""
-        with patch("mlpstorage_py.progress.Console") as MockConsole:
+        with patch("mlpstorage_py.progress.get_console") as mock_get_console:
             mock_console = MagicMock()
             type(mock_console).is_terminal = PropertyMock(return_value=False)
-            MockConsole.return_value = mock_console
+            mock_get_console.return_value = mock_console
 
             result = is_interactive_terminal()
 

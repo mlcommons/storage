@@ -12,7 +12,7 @@ from __future__ import annotations
 from contextlib import contextmanager
 from typing import TYPE_CHECKING, Callable, Iterator, List, Optional, Tuple
 
-from rich.console import Console
+from mlpstorage_py.mlps_logging import get_console
 from rich.progress import (
     BarColumn,
     Progress,
@@ -38,8 +38,7 @@ def is_interactive_terminal() -> bool:
     Returns:
         True if output is to an interactive terminal, False otherwise.
     """
-    console = Console()
-    return console.is_terminal
+    return get_console().is_terminal
 
 
 @contextmanager
@@ -109,7 +108,7 @@ def progress_context(
             TimeRemainingColumn(),
         ]
 
-    progress = Progress(*columns, transient=transient)
+    progress = Progress(*columns, transient=transient, console=get_console())
     task_id: TaskID = TaskID(0)  # Will be set after add_task
 
     try:
@@ -202,7 +201,7 @@ def create_stage_progress(
         TimeElapsedColumn(),
     ]
 
-    progress = Progress(*columns, transient=transient)
+    progress = Progress(*columns, transient=transient, console=get_console())
     task_id: TaskID = TaskID(0)
     current_stage_idx = 0
 
