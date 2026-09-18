@@ -131,9 +131,9 @@ Common argument groups
 
 CORE_STD — Standard arguments, every benchmark command and most utilities
   --results-dir/-rd PATH        Benchmark results directory
-                                (default: MLPERF_RESULTS_DIR env var, else a tempdir)
+                                (default: MLPSTORAGE_RESULTS_DIR env var; no tempdir fallback)
   --systemname/-sn NAME         System-under-test name — folder under results/
-                                (default: MLPERF_SYSTEMNAME env var)
+                                (default: MLPSTORAGE_SYSTEMNAME env var)
   --config-file/-c PATH         YAML overrides file (applied after CLI args)
   --debug                       Enable debug output
   --verbose                     Enable verbose output
@@ -174,7 +174,7 @@ TR_DATASIZE_CLOSED
     --max-accelerators/-ma N
     --accelerator-type/-at {b200,mi355}
     --client-host-memory-in-gb/-cm N
-    --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
+    --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
   Optional:
     --data-dir/-dd PATH
     --num-client-hosts/-nc N        Derived from --hosts count if unset
@@ -198,7 +198,7 @@ TR_DATASIZE_WHATIF
 TR_DATAGEN_CLOSED
   Required:
     --num-processes/-np N
-    --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
+    --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
     --data-dir/-dd PATH             (required with file storage; object mode
                                      may supply data_dir via --config-file)
     [storage positional: file | object]
@@ -225,8 +225,8 @@ TR_RUN_CLOSED
     --num-accelerators/-na N
     --accelerator-type/-at {b200,mi355}
     --client-host-memory-in-gb/-cm N
-    --results-dir/-rd PATH          (or MLPERF_RESULTS_DIR)
-    --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
+    --results-dir/-rd PATH          (or MLPSTORAGE_RESULTS_DIR)
+    --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
     --data-dir/-dd PATH             (required with file storage; object mode
                                      may supply data_dir via --config-file)
     [storage positional: file | object]
@@ -258,8 +258,8 @@ TR_CONFIGVIEW_CLOSED
     --num-accelerators/-na N
     --accelerator-type/-at {b200,mi355}
     --client-host-memory-in-gb/-cm N
-    --results-dir/-rd PATH          (or MLPERF_RESULTS_DIR)
-    --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
+    --results-dir/-rd PATH          (or MLPSTORAGE_RESULTS_DIR)
+    --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
     [storage positional: file | object]
   Optional:
     --data-dir/-dd PATH
@@ -318,8 +318,8 @@ CK_RUN_CLOSED
     --accelerator-type/-at {b200,mi355}
     --checkpoint-folder/-cf PATH
     --client-host-memory-in-gb/-cm N
-    --results-dir/-rd PATH          (or MLPERF_RESULTS_DIR)
-    --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
+    --results-dir/-rd PATH          (or MLPSTORAGE_RESULTS_DIR)
+    --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
     [storage positional: file | object]
   Optional:
     --checkpoint-subset             (8B at 8 processes only; declares a Subset run)
@@ -361,8 +361,8 @@ CK_CONFIGVIEW_CLOSED
     --num-processes/-np N
     --accelerator-type/-at {b200,mi355}
     --client-host-memory-in-gb/-cm N
-    --results-dir/-rd PATH          (or MLPERF_RESULTS_DIR)
-    --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
+    --results-dir/-rd PATH          (or MLPSTORAGE_RESULTS_DIR)
+    --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
     [storage positional: file | object]
   Optional:
     --checkpoint-subset
@@ -413,8 +413,8 @@ VDB_DATASIZE_WHATIF
 
 VDB_DATAGEN_CLOSED
   Required:
-    --results-dir/-rd PATH          (or MLPERF_RESULTS_DIR)
-    --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
+    --results-dir/-rd PATH          (or MLPSTORAGE_RESULTS_DIR)
+    --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
     [storage positional: file | object]
   Optional:
     --vdb-engine {milvus}           (default: milvus)
@@ -472,8 +472,8 @@ VDB_DATAGEN_WHATIF
 
 VDB_RUN_CLOSED
   Required:
-    --results-dir/-rd PATH          (or MLPERF_RESULTS_DIR)
-    --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
+    --results-dir/-rd PATH          (or MLPSTORAGE_RESULTS_DIR)
+    --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
     [storage positional: file | object]
   Optional:
     --vdb-engine {milvus}           (default: milvus)
@@ -549,8 +549,8 @@ KV_DATASIZE_WHATIF
 KV_RUN_CLOSED
   (Fixed 3-phase sequence; model pair and load parameters are pinned)
   Required:
-    --results-dir/-rd PATH          (or MLPERF_RESULTS_DIR)
-    --systemname/-sn NAME           (or MLPERF_SYSTEMNAME)
+    --results-dir/-rd PATH          (or MLPSTORAGE_RESULTS_DIR)
+    --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
   Optional:
     --cache-dir PATH
     --kvcache-bin-path PATH
@@ -601,7 +601,7 @@ Placeholder definitions — UTILITY COMMANDS
 
 RP_REPORTGEN
   Required:
-    --results-dir/-rd PATH          (or MLPERF_RESULTS_DIR)
+    --results-dir/-rd PATH          (or MLPSTORAGE_RESULTS_DIR)
   + CORE_STD  (every standard argument is accepted)
 
 ──────────────────────────────────────────────────────────────────
@@ -625,7 +625,7 @@ LF_GENERATE
     --python-version VERSION
     --pyproject PATH                (default: pyproject.toml)
     --all                           Generate both requirements.txt and requirements-full.txt
-  + CORE_STD  (--results-dir required — or MLPERF_RESULTS_DIR)
+  + CORE_STD  (--results-dir required — or MLPSTORAGE_RESULTS_DIR)
 
 LF_VERIFY
   Optional:
@@ -633,7 +633,7 @@ LF_VERIFY
     --skip PKG                      Package to skip (repeatable)
     --allow-missing
     --strict
-  + CORE_STD  (--results-dir required — or MLPERF_RESULTS_DIR)
+  + CORE_STD  (--results-dir required — or MLPSTORAGE_RESULTS_DIR)
 
 ──────────────────────────────────────────────────────────────────
 

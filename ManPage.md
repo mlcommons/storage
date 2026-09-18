@@ -29,7 +29,7 @@ Where:
 - `<command>` is `datasize`, `datagen`, `run`, or `configview` (subset depending on benchmark)
 - `<storage>` is `file` or `object` — required by `datagen`, `run`, and `configview` for the benchmarks that touch storage
 - `<orgname>` is the submitter / organization name pinned to the results-dir by `mlpstorage init`; `[A-Za-z0-9._-]+`, case-sensitive
-- `<name>` (for `--systemname`) is the per-run system-under-test identifier; required on every emitting subcommand (`run`, `datagen`, `configview`, `reportgen`, `history`), and may be supplied via the `MLPSTORAGE_SYSTEMNAME` environment variable
+- `<name>` (for `--systemname`) is the per-run system-under-test identifier; required on every emitting subcommand (`run`, `datagen`, `configview`, `history rerun`; optional for `reportgen`), and may be supplied via the `MLPSTORAGE_SYSTEMNAME` environment variable
 
 Before any emitting subcommand can run, the `<results-dir>` must be initialized with `mlpstorage init`. The single bootstrap command `mlpstorage init <orgname> <path>` writes a `mlperf-results.yaml` sentinel that pins orgname to the directory; every later non-init command reads it as authoritative.
 
@@ -147,10 +147,10 @@ Run `mlpstorage init <orgname> <path>` first.
 
 ### Systemname resolution
 
-`--systemname <name>` / `-sn <name>` is required on every emitting subcommand (`run`, `datagen`, `configview`, `reportgen`, `history rerun`, etc.). Resolution priority is:
+`--systemname <name>` / `-sn <name>` is required on every emitting subcommand (`run`, `datagen`, `configview`, `history rerun`, etc.). Resolution priority is:
 
 1. The CLI flag if supplied.
-2. The `MLPERF_SYSTEMNAME` environment variable.
+2. The `MLPSTORAGE_SYSTEMNAME` environment variable.
 3. Otherwise empty string (which fails the required-on-emitting-commands check, surfacing as a parser error).
 
 Because systemname is per-run, the same results-dir can host runs from many different systems-under-test. The canonical results path includes both `<orgname>` (from sentinel) and `<systemname>` (from CLI/env) so cross-system results never collide.
@@ -470,7 +470,7 @@ The `init` subcommand takes no flags — universal flags such as `--results-dir`
   Root directory for all written artifacts. Required for any command that writes results. Defaults to `$MLPSTORAGE_RESULTS_DIR` if set. Must already be initialized with `mlpstorage init`; commands that consult the orgname-resolution gate refuse to run otherwise.
 
 - **`--systemname <name>`, `-sn <name>`**
-  System-under-test identifier for the current run. Required on every emitting subcommand (`run`, `datagen`, `configview`, `reportgen`, `history rerun`). Defaults to `$MLPERF_SYSTEMNAME`. Each mode (closed/open/whatif) owns its own `<systemname>.yaml` under the per-mode `systems/` directory, so the same name across modes is fine.
+  System-under-test identifier for the current run. Required on every emitting subcommand (`run`, `datagen`, `configview`, `history rerun`). Defaults to `$MLPSTORAGE_SYSTEMNAME`. Each mode (closed/open/whatif) owns its own `<systemname>.yaml` under the per-mode `systems/` directory, so the same name across modes is fine. See the Reports subsection for reportgen's optional-systemname multi-system-fallback behavior.
 
 - **`--config-file <path>`, `-c <path>`**
   YAML file of argument overrides merged in *after* CLI parsing. Useful for keeping repeatable closed-submission knob settings in one place.
@@ -847,7 +847,7 @@ mlpstorage reports reportgen --results-dir <path> --systemname <name>
   Results tree to summarize. Accepts either a flat benchmark-type root (legacy) or a canonical sentinel-bearing submission root; when the sentinel is detected, `reportgen` scopes to `<results-dir>/<mode>/<orgname>/results/<systemname>/` and walks only that slice, so a single results-dir hosting runs from multiple systems does not have its runs mashed into one report.
 
 - **`--systemname <name>`, `-sn <name>`** (required)
-  System-under-test identifier. Under the canonical tree this pins reportgen to a single `results/<systemname>/` slice; under a flat tree it tags the emitted report. Defaults to `$MLPERF_SYSTEMNAME` as everywhere else.
+  System-under-test identifier. Under the canonical tree this pins reportgen to a single `results/<systemname>/` slice; under a flat tree it tags the emitted report. Defaults to `$MLPSTORAGE_SYSTEMNAME` as everywhere else. When omitted, reportgen operates on the entire results-dir tree and derives systemname per row from the workload dir's path segment (open/<org>/results/<systemname>/... or checkpointing/training/vdb/kvcache analog).
 
 `--output-dir` was removed in PR #617. The rollup outputs must land inside the submission tree so submitters cannot accidentally exclude the summary from what MLCommons reviews.
 
@@ -928,12 +928,12 @@ Reports which Rules.md IDs are referenced by `@rule(rule_id=...)`-decorated chec
 
 ## ENVIRONMENT
 
-- **`MLPERF_RESULTS_DIR`** — default value for `--results-dir` when the flag is not supplied. The path must still have been initialized with `mlpstorage init`.
-- **`MLPERF_SYSTEMNAME`** — default value for `--systemname` / `-sn` when the flag is not supplied. Emitting subcommands require systemname to be set via flag or env; an empty value is rejected at parse time.
-- **`MLPERF_DATA_DIR`** — fallback value for `--data-dir` for some commands.
+- **`MLPSTORAGE_RESULTS_DIR`** — default value for `--results-dir` when the flag is not supplied. The path must still have been initialized with `mlpstorage init`.
+- **`MLPSTORAGE_SYSTEMNAME`** — default value for `--systemname` / `-sn` when the flag is not supplied. Emitting subcommands require systemname to be set via flag or env; an empty value is rejected at parse time.
+- **`MLPSTORAGE_DATA_DIR`** — fallback value for `--data-dir` for some commands.
 - **`MPI_RUN_BIN`** — overrides the path used when invoking `mpirun`.
 
-There is intentionally **no `MLPERF_ORGNAME` environment variable** and no `--orgname` flag on benchmark subcommands. Orgname is sourced exclusively from the `mlperf-results.yaml` sentinel written by `mlpstorage init`.
+There is intentionally **no `MLPSTORAGE_ORGNAME` environment variable** (nor a legacy `MLPERF_ORGNAME`) and no `--orgname` flag on benchmark subcommands. Orgname is sourced exclusively from the `mlperf-results.yaml` sentinel written by `mlpstorage init`.
 
 ## EXIT STATUS
 

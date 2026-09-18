@@ -246,7 +246,7 @@ def generate_output_location(
         <results-dir>/<mode>/<orgname>/results/<systemname>/checkpointing/<model>/<datetime>/
 
     This function is PURE with respect to args.{mode, orgname, systemname} —
-    it does NOT resolve orgname from the sentinel or read MLPERF_SYSTEMNAME
+    it does NOT resolve orgname from the sentinel or read MLPSTORAGE_SYSTEMNAME
     here. orgname resolution lives upstream in main._main_impl()'s
     orgname-resolution gate (reads `orgname.yaml` written by
     `mlpstorage init`); --systemname plumbing populates args.systemname.

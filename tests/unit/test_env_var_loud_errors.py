@@ -214,6 +214,7 @@ class TestCheckpointFolderLoudError:
             "mlpstorage", "closed", "checkpointing", "run",
             "-cm", "1024",
             "-m", "llama3-8b",
+            "-at", "b200",
             "-np", "8",
             "-rd", "/tmp",
             "-sn", "sys-v1",
