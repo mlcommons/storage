@@ -71,7 +71,7 @@ def _run_parse_and_update(argv, capsys):
     The typo check lives in ``update_args`` (next to the existing --params
     KEY=VALUE normalization), so both stages must run to reach it. We pass
     --systemname and --results-dir explicitly on the CLI rather than via
-    env-var monkeypatching because ``DEFAULT_SYSTEMNAME`` / ``DEFAULT_
+    env-var monkeypatching because ``ENV_FALLBACK_SYSTEMNAME`` / ``ENV_FALLBACK_
     RESULTS_DIR`` are resolved once at module import time (config.py), so
     late env-var changes don't reach the argparse defaults.
     """

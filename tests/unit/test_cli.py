@@ -125,15 +125,15 @@ class TestAddUniversalArguments:
         Post-CR-02 fix: the requirement is enforced at the
         ``validate_args`` (post-parse) layer rather than via argparse
         ``required=True``, so the env-var-sourced default can satisfy it.
-        With ``MLPERF_RESULTS_DIR`` unset AND ``DEFAULT_RESULTS_DIR`` also
-        emptied (to simulate the "no env var, no fallback" worst case),
+        With ``MLPSTORAGE_RESULTS_DIR`` unset AND ``ENV_FALLBACK_RESULTS_DIR``
+        also emptied (to simulate the "no env var, no fallback" worst case),
         the validator must error out via SystemExit.
         """
         from mlpstorage_py.cli_parser import _check_universal_required_present
-        # Force DEFAULT_RESULTS_DIR to '' so the resolved value is empty
+        # Force ENV_FALLBACK_RESULTS_DIR to '' so the resolved value is empty
         # even though argparse no longer demands the CLI flag.
         import mlpstorage_py.cli.common_args as common_args_mod
-        monkeypatch.setattr(common_args_mod, 'DEFAULT_RESULTS_DIR', '')
+        monkeypatch.setattr(common_args_mod, 'ENV_FALLBACK_RESULTS_DIR', '')
         add_universal_arguments(parser, req_results=True)
         args = parser.parse_args([])  # no error from argparse itself now
         assert getattr(args, '_mlps_req_results', False) is True, (
