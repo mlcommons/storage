@@ -231,20 +231,22 @@ _MANPAGE_SYNC_ALLOWLIST = frozenset({
 })
 
 MANPAGE_ENV_VAR_TIERS = {
-    # -- Owned (7) --
+    # -- Owned (8) --
     'MLPSTORAGE_RESULTS_DIR': 'owned',
     'MLPSTORAGE_SYSTEMNAME': 'owned',
     'MLPSTORAGE_ORGNAME': 'owned',
     'MLPSTORAGE_DATA_DIR': 'owned',
     'MLPSTORAGE_CHECKPOINT_FOLDER': 'owned',
+    'MLPS_CHECKPOINT_MP_START_METHOD': 'owned',       # streaming_checkpoint.py MP_START_METHOD_ENV; constructor arg wins.
     'MLPSTORAGE_CHECKPOINT_URI_SCHEME': 'owned',      # dual-role: primary Owned; internal-write sub-tag in ManPage prose per D-12/D-13.
     'KVCACHE_SELECTED_WORKLOADS': 'owned',            # functional shell-wrapper contract per D-09.
 
-    # -- MPI-borrowed (4) --
+    # -- MPI-borrowed (5) --
     'MPI_RUN_BIN': 'mpi-borrowed',
     'MPI_EXEC_BIN': 'mpi-borrowed',
     'OMPI_COMM_WORLD_RANK': 'mpi-borrowed',           # SC-4 tag requirement.
     'PMI_RANK': 'mpi-borrowed',                       # SC-4 tag requirement.
+    'SLURM_JOB_ID': 'mpi-borrowed',                   # validation_helpers._launcher_bypasses_ssh: srun under Slurm skips the SSH preflight.
 
     # -- AWS-borrowed (5) --
     'AWS_ACCESS_KEY_ID': 'aws-borrowed',
@@ -264,7 +266,7 @@ MANPAGE_ENV_VAR_TIERS = {
     'S3_ENDPOINT': 'storage-borrowed',
 
     # -- Internal-write (1 primary) --
-    'DLIO_DROP_CACHES_TIMEOUT': 'internal-write',     # write-only site at benchmarks/dlio.py:629; also read via `in os.environ` at dlio.py:602.
+    'DLIO_DROP_CACHES_TIMEOUT': 'internal-write',     # write site at benchmarks/dlio.py:768; also read via `in os.environ` at dlio.py:735.
 
     # Note: no 'diagnostic' primary entries in the current inventory.
     # The Diagnostic tier header exists in the ManPage (Plan C) but is
@@ -275,7 +277,7 @@ MANPAGE_ENV_VAR_TIERS = {
     'AWS_DEFAULT_REGION': 'aws-borrowed',      # D-09: fallback region when AWS_REGION is unset.
     'AWS_S3_ADDRESSING_STYLE': 'aws-borrowed', # D-09: virtual-hosted vs. path-style S3.
 
-    # -- Storage-backend (22) — consumed exclusively by s3dlio Rust binary --
+    # -- Storage-backend (24) — consumed by the s3dlio Rust binary or DLIO's Python storage layer --
     'S3DLIO_SKIP_HEAD': 'storage-backend',
     'S3DLIO_ENABLE_RANGE_OPTIMIZATION': 'storage-backend',
     'S3DLIO_RANGE_THRESHOLD_MB': 'storage-backend',
@@ -301,7 +303,7 @@ MANPAGE_ENV_VAR_TIERS = {
 }
 
 # Documentation anchor — the s3dlio release this table targets.
-S3DLIO_PINNED_VERSION = 'v0.9.106'
+S3DLIO_PINNED_VERSION = 'v0.9.112'  # keep in lockstep with the pyproject.toml s3dlio floor; ManPage Storage-backend defaults are quoted at this tag
 
 # Phase 7.5 D-03: vars that can swing measured throughput by >=10% or alter protocol.
 _S3DLIO_HIGH_RISK_ENV_VARS = frozenset({
@@ -314,6 +316,8 @@ _S3DLIO_HIGH_RISK_ENV_VARS = frozenset({
     'S3DLIO_H2_ADAPTIVE_WINDOW',
     'S3DLIO_H2_STREAM_WINDOW_MB',
     'S3DLIO_H2_CONN_WINDOW_MB',
+    'S3DLIO_ENABLE_HTTP2',    # v0.9.108+ master HTTP/2 switch
+    'S3DLIO_HTTPS_H2',        # v0.9.108+ HTTP/2 over TLS
     'S3DLIO_POOL_MAX_IDLE_PER_HOST',
     'S3DLIO_POOL_IDLE_TIMEOUT_SECS',
     'S3DLIO_PUT_VERIFY',
@@ -327,7 +331,7 @@ _S3DLIO_HIGH_RISK_ENV_VARS = frozenset({
 # backend init). The sync test subtracts this set from extra_in_docs so these
 # vars can be documented without triggering the symmetric-difference failure.
 MANPAGE_STORAGE_BACKEND_ENV_VARS = frozenset({
-    # 15 HIGH-risk S3DLIO_* vars (per D-03)
+    # 17 HIGH-risk S3DLIO_* vars (per D-03; +2 HTTP/2 switches added in s3dlio v0.9.108)
     'S3DLIO_SKIP_HEAD',
     'S3DLIO_ENABLE_RANGE_OPTIMIZATION',
     'S3DLIO_RANGE_THRESHOLD_MB',
@@ -337,6 +341,8 @@ MANPAGE_STORAGE_BACKEND_ENV_VARS = frozenset({
     'S3DLIO_H2_ADAPTIVE_WINDOW',
     'S3DLIO_H2_STREAM_WINDOW_MB',
     'S3DLIO_H2_CONN_WINDOW_MB',
+    'S3DLIO_ENABLE_HTTP2',    # v0.9.108+ master HTTP/2 switch
+    'S3DLIO_HTTPS_H2',        # v0.9.108+ HTTP/2 over TLS
     'S3DLIO_POOL_MAX_IDLE_PER_HOST',
     'S3DLIO_POOL_IDLE_TIMEOUT_SECS',
     'S3DLIO_PUT_VERIFY',
