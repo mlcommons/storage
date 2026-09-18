@@ -15,6 +15,7 @@ mlpstorage init <orgname> [<path>]
 mlpstorage <mode> <benchmark> [<model|index>] <command> [<storage>] --systemname <name> [OPTIONS]
 mlpstorage reports reportgen [OPTIONS]
 mlpstorage history (show|rerun) [OPTIONS]
+mlpstorage runs (list|show|rm|purge|gc) [OPTIONS]
 mlpstorage lockfile (generate|verify) [OPTIONS]
 mlpstorage validate <submission-dir> [OPTIONS]
 mlpstorage rules-coverage [OPTIONS]
@@ -114,6 +115,7 @@ mlpstorage
 │       └── run
 ├── reports reportgen
 ├── history (show | rerun)
+├── runs (list | show <id> | rm [<id>...] | purge | gc)
 ├── lockfile (generate | verify)
 ├── validate <submission-dir>
 ├── rules-coverage
@@ -285,7 +287,9 @@ The results directory accumulates every artifact produced by `mlpstorage` as eac
 <results-dir>/
 ├── mlperf-results.yaml                   sentinel written by `mlpstorage init` (LAY-02)
 ├── .mlps/
-│   └── history                           command history for this tree (`mlpstorage history`)
+│   ├── history                           command history for this tree (`mlpstorage history`)
+│   ├── runs.jsonl                        run ledger: stable IDs for every run leaf (`mlpstorage runs`)
+│   └── trash/<batch>/...                 leaves and pool images removed by `runs rm` / `runs gc`
 ├── <mode>/                               closed | open | whatif (one or more)
 │   └── <orgname>/                        from sentinel; same for every run
 │       ├── systems/
@@ -295,7 +299,7 @@ The results directory accumulates every artifact produced by `mlpstorage` as eac
 │               └── <benchmark-specific tail>
 ```
 
-Every `run` adds a timestamped directory under its benchmark-specific tail; unwanted results can simply be removed from the tree (history records remain in `.mlps/history`).
+Every `run` adds a timestamped directory under its benchmark-specific tail and receives a small stable ID in `.mlps/runs.jsonl`. `mlpstorage runs list` shows them with their status; `mlpstorage runs rm` moves unwanted ones into `.mlps/trash/` (restore by moving the leaf back), and `mlpstorage runs purge` deletes the trash. A leaf removed by hand simply disappears from the list; its ID is never reused. History records remain in `.mlps/history`.
 
 ### Training results
 
@@ -386,7 +390,7 @@ Checkpointing intentionally omits the `<command>` segment under `<systemname>/ch
 
 Every benchmark run writes:
 
-- **`*_metadata.json`** — run timestamp, benchmark type, model, full command line, all CLI argument values, cluster information (collected by `cluster_collector.py` over MPI), MPI configuration, environment variables (credentials redacted), final status.
+- **`*_metadata.json`** — run timestamp, benchmark type, model, full command line, all CLI argument values, cluster information (collected by `cluster_collector.py` over MPI), MPI configuration, environment variables (credentials redacted), and `exit_status` (0 when the run returned success; anything else, including a run that never returned, is a failure — `mlpstorage runs list` reads this).
 - **`*_timeseries.json`** — sampled host metrics (CPU, memory, disk I/O, network) collected at `--timeseries-interval` (default 10s) up to `--max-timeseries-samples` (default 3600). Single-host runs use a local collector; multi-host runs use SSH fan-out.
 - **`stdout.log` / `stderr.log`** — streamed subprocess output captured by `CommandExecutor`.
 - **`mlpstorage.log`** — every message `mlpstorage` itself logged during the invocation, at DEBUG level with `module:line`, uncoloured. Messages emitted before the run directory existed (argument parsing, environment validation, code-image capture) are buffered and written first, so the file is complete from process start.
@@ -903,6 +907,26 @@ mlpstorage history rerun <ID>
 - **`rerun`**
   - **`<rerun_id>`** (positional, required) — ID of the historical command to re-execute.
 - `history` takes no `--results-dir` (issue #721: `rerun` replays the stored command line verbatim). The tree whose `<results-dir>/.mlps/history` is consulted resolves from `MLPSTORAGE_RESULTS_DIR`, else the default recorded by `mlpstorage init`; with neither, the command fails with the same actionable error as every other command.
+
+### Runs
+
+```
+mlpstorage runs list  [--mode M] [--benchmark B] [--model NAME] [--systemname NAME] [--status S] [--json]
+mlpstorage runs show  <id>
+mlpstorage runs rm    [<id>...] [--status S] [--older-than AGE|DATE] [--keep-last N] [--yes]
+mlpstorage runs purge [--yes]
+mlpstorage runs gc    [--yes]
+```
+
+Every subcommand accepts `--results-dir/-rd <path>`, resolved like everywhere else (`--results-dir` > `MLPSTORAGE_RESULTS_DIR` > the default recorded by `mlpstorage init`); the tree must be initialized. `runs` invocations are not recorded in `.mlps/history`.
+
+- **`list`** — one row per run leaf: ID, status, mode, system, benchmark, model, command, start time, code image (`code-<hash8>` from the leaf's `.mlps-code-image`), size. Status is `complete` (metadata `exit_status` 0), `failed` (non-zero), or `incomplete` (no metadata file: still running, or killed before the metadata was written). Leaves written before `exit_status` existed are judged by the presence of DLIO's `summary.json` (training/checkpointing `datagen`/`datasize` never produce one and count as complete).
+  - **`--mode {closed,open,whatif}`**, **`--benchmark {training,checkpointing,vectordb,kvcache}`**, **`--model <name>`** (vectordb: `<engine>/<index>`), **`--systemname <name>`, `-sn`**, **`--status {complete,failed,incomplete}`** — narrow the list.
+  - **`--json`** — the same rows as a JSON array (fields `id`, `leaf`, `status`, `mode`, `orgname`, `systemname`, `benchmark`, `model`, `command`, `run_datetime`, `code_image`, `code_hash`, `size_bytes`, `registered_at`).
+- **`show <id>`** — identity, status, size, code-image pointer resolution (names the pool directory, or says it is missing), a metadata excerpt (`exit_status`, `executed_command`, `runtime`, ...) and every file in the leaf with its size.
+- **`rm`** — prints the selection and moves each leaf to `<results-dir>/.mlps/trash/<batch>/<original relative path>`, recording the move in `runs.jsonl`. Select explicitly by ID and/or narrow with **`--status`** and **`--older-than`** (`12h`, `7d`, `2w`, or a date such as `2026-09-01`); **`--keep-last N`** spares the N newest runs of the selection. Without `--yes` the command asks on a terminal and refuses otherwise. Rollup files (`results.json` / `results.csv`) above a removed leaf trigger a warning to rerun `reportgen`. The sentinel, `systems/` and the code-image pool are never touched.
+- **`purge`** — permanently deletes every batch under `.mlps/trash` (asks unless `--yes`).
+- **`gc`** — moves code-image pool directories that no run leaf points at (the CHECK-03 orphans `mlpstorage validate` reports) into the trash. Leaves sitting in the trash still count as references, so purge first, then gc.
 
 ### Lockfile
 

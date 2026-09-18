@@ -44,6 +44,7 @@ from mlpstorage_py.cli import (
     add_history_arguments,
     add_lockfile_arguments,
     add_init_arguments,
+    add_runs_arguments,
     add_version_arguments,
     add_validate_arguments,
     add_rules_coverage_arguments,
@@ -156,6 +157,11 @@ def build_parser():
     # Utility siblings — top-level, not nested under modes
     reports_parser = top.add_parser("reports", help="Generate a report from benchmark results")
     history_parser = top.add_parser("history", help="Display benchmark history")
+    runs_parser = top.add_parser(
+        "runs",
+        description="List, inspect and remove the runs recorded in a results-dir",
+        help="Manage the runs in a results-dir",
+    )
     lockfile_parser = top.add_parser("lockfile", help="Generate and verify package lockfiles")
     init_parser = top.add_parser(
         "init",
@@ -175,6 +181,7 @@ def build_parser():
     )
     add_reports_arguments(reports_parser)
     add_history_arguments(history_parser)
+    add_runs_arguments(runs_parser)
     add_lockfile_arguments(lockfile_parser)
     add_init_arguments(init_parser)
     add_version_arguments(version_parser)

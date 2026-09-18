@@ -269,8 +269,14 @@ def run_benchmark(args, run_datetime):
 
     ret_code = EXIT_CODE.SUCCESS
 
+    # Recorded into *_metadata.json by the ``finally`` below (the ledger's
+    # ``runs list`` derives complete/failed from it). Anything that escapes
+    # ``benchmark.run()`` — our exceptions, unexpected ones, SystemExit from
+    # the signal handler — leaves it at FAILURE.
+    benchmark.exit_status = int(EXIT_CODE.FAILURE)
     try:
         ret_code = benchmark.run()
+        benchmark.exit_status = int(ret_code)
     except MLPStorageException:
         # Re-raise our custom exceptions to be handled by main()
         raise
@@ -307,6 +313,23 @@ def _resolve_invocation_results_dir(args):
         return resolve_results_dir(None)
     path = getattr(args, "results_dir", None) or None
     return path, getattr(args, "results_dir_source", None)
+
+
+def _results_dir_required_error(what, results_dir):
+    """The error a tree-reading utility raises when no initialized
+    results-dir is available: nothing resolved, or the resolved path was
+    never ``mlpstorage init``-ed."""
+    if not results_dir:
+        return ConfigurationError(
+            f"{what}, but no results-dir resolved.",
+            suggestion=HOW_TO_SUPPLY[0].upper() + HOW_TO_SUPPLY[1:] + ".",
+            code=ErrorCode.CONFIG_MISSING_REQUIRED,
+        )
+    return ConfigurationError(
+        f"results-dir `{results_dir}` has not been initialized.",
+        suggestion=f"Run `mlpstorage init <orgname> {results_dir}` first.",
+        code=ErrorCode.CONFIG_MISSING_REQUIRED,
+    )
 
 
 def _apply_lay03_orgname_gate(args):
@@ -421,7 +444,7 @@ def _main_impl():
         logger.status(f"results-dir: {results_dir} (from {results_dir_source})")
         if os.path.isfile(os.path.join(results_dir, MLPERF_RESULTS_FILENAME)):
             hist = HistoryTracker(history_file=history_file_for(results_dir), logger=logger)
-            if args.mode != "history":
+            if args.mode not in ("history", "runs"):
                 hist.add_entry(sys.argv, datetime_str=datetime_str)
 
     # Bypass dispatch for utility modes that do NOT consume an orgname-pinned
@@ -449,19 +472,21 @@ def _main_impl():
     # the LAY-03 gate against the *historical* command's results-dir — that
     # is the dir the Benchmark will actually write to — and re-apply logging
     # options from the (now-swapped) args.
+    if args.mode == "runs":
+        # Management of the tree's run leaves. Needs an initialized tree
+        # (the LAY-03 gate above already refused an un-initialized path;
+        # this covers "no results-dir resolved at all").
+        if hist is None:
+            raise _results_dir_required_error(
+                "`mlpstorage runs` manages <results-dir>/.mlps/runs.jsonl", results_dir
+            )
+        from mlpstorage_py.runs.manage import run_runs_command
+        return run_runs_command(args, results_dir, logger)
+
     if args.mode == 'history':
         if hist is None:
-            if results_dir is None:
-                raise ConfigurationError(
-                    "`mlpstorage history` reads <results-dir>/.mlps/history, "
-                    "but no results-dir resolved.",
-                    suggestion=HOW_TO_SUPPLY[0].upper() + HOW_TO_SUPPLY[1:] + ".",
-                    code=ErrorCode.CONFIG_MISSING_REQUIRED,
-                )
-            raise ConfigurationError(
-                f"results-dir `{results_dir}` has not been initialized.",
-                suggestion=f"Run `mlpstorage init <orgname> {results_dir}` first.",
-                code=ErrorCode.CONFIG_MISSING_REQUIRED,
+            raise _results_dir_required_error(
+                "`mlpstorage history` reads <results-dir>/.mlps/history", results_dir
             )
         new_args = hist.handle_history_command(args)
 

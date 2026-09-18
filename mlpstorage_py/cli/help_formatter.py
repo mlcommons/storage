@@ -24,7 +24,7 @@ SYNOPSIS
   mlpstorage <closed|open|whatif> checkpointing <command> <file|object> [OPTIONS]
   mlpstorage <closed|open|whatif> vectordb <command> <file|object> [OPTIONS]
   mlpstorage <closed|open|whatif> kvcache <command> [OPTIONS]
-  mlpstorage (reports|history|lockfile|version) [subcommand] [OPTIONS]
+  mlpstorage (reports|history|runs|lockfile|version) [subcommand] [OPTIONS]
   mlpstorage init <orgname> [results-dir]
   mlpstorage validate <submission-dir> [OPTIONS]
   mlpstorage rules-coverage [--rules-md PATH]
@@ -114,6 +114,13 @@ mlpstorage
 ├── history
 │   ├── show                                     {HI_SHOW}
 │   └── rerun <id>                               {HI_RERUN}
+│
+├── runs                                  ← manage the run leaves of a results-dir
+│   ├── list                                     {RUNS_LIST}
+│   ├── show <id>                                {RUNS_SHOW}
+│   ├── rm [<id>...]                             {RUNS_RM}
+│   ├── purge                                    {RUNS_PURGE}
+│   └── gc                                       {RUNS_GC}
 │
 ├── lockfile
 │   ├── generate                                 {LF_GENERATE}
@@ -622,6 +629,57 @@ HI_RERUN
 
 ──────────────────────────────────────────────────────────────────
 
+RUNS_LIST
+  Optional:
+    --results-dir/-rd PATH          Tree to manage (resolved: flag > MLPSTORAGE_RESULTS_DIR
+                                    > the results-dir recorded by `mlpstorage init`)
+    --mode {closed,open,whatif}     Only runs from this submission mode
+    --benchmark {training,checkpointing,vectordb,kvcache}
+                                    Only runs of this benchmark
+    --model NAME                    Only runs of this model (vectordb: <engine>/<index>)
+    --systemname/-sn NAME           Only runs from this system-under-test
+    --status {complete,failed,incomplete}
+                                    Only runs in this state
+    --json                          JSON array instead of a table
+  Every canonical run leaf gets a small stable ID in <results-dir>/.mlps/runs.jsonl;
+  leaves removed by hand disappear from the list and their IDs are never reused.
+
+RUNS_SHOW
+  Required:
+    run_id  (positional)            Run ID from `mlpstorage runs list`
+  Optional:
+    --results-dir/-rd PATH          Tree to manage (resolved as for RUNS_LIST)
+  Prints identity, status, code-image pointer resolution, a metadata excerpt
+  and every file in the leaf.
+
+RUNS_RM
+  Optional:
+    run_ids  (positional, repeatable)
+                                    Run IDs to remove; omit to select by --status / --older-than
+    --results-dir/-rd PATH          Tree to manage (resolved as for RUNS_LIST)
+    --status {complete,failed,incomplete}
+                                    Remove runs in this state
+    --older-than AGE|DATE           Remove runs started before this (12h, 7d, 2w, 2026-09-01)
+    --keep-last N                   Keep the N newest runs of the selection
+    --yes/-y                        Skip the confirmation (required when stdin is not a terminal)
+  Moves leaves to <results-dir>/.mlps/trash/<batch>/<original path>; nothing is
+  deleted until `runs purge`. Never touches the sentinel, systems/ or the code-image pool.
+
+RUNS_PURGE
+  Optional:
+    --results-dir/-rd PATH          Tree to manage (resolved as for RUNS_LIST)
+    --yes/-y                        Skip the confirmation (required when stdin is not a terminal)
+  Permanently deletes everything under <results-dir>/.mlps/trash.
+
+RUNS_GC
+  Optional:
+    --results-dir/-rd PATH          Tree to manage (resolved as for RUNS_LIST)
+    --yes/-y                        Skip the confirmation (required when stdin is not a terminal)
+  Moves code-image pool directories that no run leaf (in the tree or its trash)
+  points at into the trash — the CHECK-03 orphans `mlpstorage validate` reports.
+
+──────────────────────────────────────────────────────────────────
+
 LF_GENERATE
   Optional:
     --output/-o PATH                (default: requirements.txt)
@@ -739,7 +797,7 @@ def get_context_help_tokens(argv: list) -> 'str | None':
 
     # Root — no tokens
     if n == 0:
-        return 'next: closed | open | whatif | init | reports | history | lockfile | version | validate | rules-coverage'
+        return 'next: closed | open | whatif | init | reports | history | runs | lockfile | version | validate | rules-coverage'
 
     t0 = argv[0]
 
@@ -752,6 +810,11 @@ def get_context_help_tokens(argv: list) -> 'str | None':
     if t0 == 'history':
         if n == 1:
             return 'next: show | rerun'
+        return None  # leaf
+
+    if t0 == 'runs':
+        if n == 1:
+            return 'next: list | show | rm | purge | gc'
         return None  # leaf
 
     if t0 == 'lockfile':

@@ -183,6 +183,13 @@ class Benchmark(BenchmarkInterface, abc.ABC):
 
         self.command_output_files = list()
         self.run_result_output = self._reserve_run_directory()
+        # Set by main.run_benchmark once run() returns (or fails); lands in
+        # the metadata file so `mlpstorage runs list` can tell complete from
+        # failed without guessing from DLIO's output files.
+        self.exit_status: Optional[int] = None
+        # Small stable ID from <results-dir>/.mlps/runs.jsonl; None when the
+        # leaf is not a canonical results-dir leaf (unit tests, odd layouts).
+        self.run_id: Optional[int] = self._register_run()
 
         # #725 Bug 2 safety net: write the .mlps-code-image pointer to the
         # ACTUAL reserved leaf. capture_or_verify_code_image already writes
@@ -216,7 +223,8 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         self.timeseries_filename = f"{self.BENCHMARK_TYPE.value}_{self.run_datetime}_timeseries.json"
         self.timeseries_file_path = os.path.join(self.run_result_output, self.timeseries_filename)
 
-        self.logger.status(f'Benchmark results directory: {self.run_result_output}')
+        run_tag = f" (run {self.run_id})" if self.run_id is not None else ""
+        self.logger.status(f'Benchmark results directory: {self.run_result_output}{run_tag}')
 
     # =========================================================================
     # BenchmarkInterface Implementation
@@ -463,6 +471,8 @@ class Benchmark(BenchmarkInterface, abc.ABC):
                 _invocation.INVOCATION_END
             ).isoformat()
         metadata['verification'] = self.verification.name if self.verification else None
+        # 0 = run() returned SUCCESS; anything else failed (or never returned).
+        metadata['exit_status'] = getattr(self, 'exit_status', None)
         metadata['executed_command'] = getattr(self, 'executed_command', None)
         metadata['command_output_files'] = self.command_output_files
 
@@ -902,6 +912,22 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         return generate_output_location(self, self.run_datetime)
 
     _COLLISION_BUMP_BUDGET = DEFAULT_COLLISION_BUMP_BUDGET
+
+    def _register_run(self) -> Optional[int]:
+        """Give the reserved leaf its ID in the results-dir's run ledger.
+
+        Never fatal: a ledger problem is logged and the run proceeds — the
+        next ``mlpstorage runs`` command adopts the leaf from the tree.
+        """
+        results_dir = getattr(self.args, 'results_dir', None)
+        if not results_dir:
+            return None
+        try:
+            from mlpstorage_py.runs.ledger import register_run
+            return register_run(results_dir, self.run_result_output)
+        except Exception as e:  # noqa: BLE001 — bookkeeping must not stop a run
+            self.logger.warning(f"Could not record this run in the run ledger: {e}")
+            return None
 
     def _reserve_run_directory(self) -> str:
         """Atomically reserve a unique run directory, updating run_datetime

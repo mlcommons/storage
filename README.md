@@ -272,7 +272,7 @@ mlpstorage <closed|open|whatif> <training|checkpointing|vectordb|kvcache>
 Top-level utility commands live as siblings of the modes:
 
 ```
-mlpstorage (reports|history|lockfile|version) [subcommand] [OPTIONS]
+mlpstorage (reports|history|runs|lockfile|version) [subcommand] [OPTIONS]
 mlpstorage validate <submission-dir> [OPTIONS]
 mlpstorage rules-coverage [--rules-md PATH]
 ```
@@ -293,8 +293,8 @@ Top-level overview:
 ```bash
 $ mlpstorage --help
 usage: mlpstorage [-h] [--version]
-                  {closed,open,whatif,reports,history,lockfile,version,
-                   validate,rules-coverage} ...
+                  {closed,open,whatif,reports,history,runs,lockfile,
+                   version,validate,rules-coverage} ...
 
 Script to launch the MLPerf Storage benchmark
 
@@ -304,6 +304,7 @@ positional arguments:
   whatif          Exploration mode — not submittable
   reports         Generate a report from benchmark results
   history         Display / replay benchmark history
+  runs            Manage the runs in a results-dir
   lockfile        Generate and verify package lockfiles
   version         Show installed package version and exit
   validate        Validate a submission package against Rules.md
@@ -404,6 +405,10 @@ These siblings of the benchmark modes are not gated by `closed`/`open`/`whatif`:
 | `mlpstorage reports reportgen ...` | Roll up results from a results directory into the submission-format report. |
 | `mlpstorage history show [--limit N \| --id ID]` | Show previously executed `mlpstorage` invocations from the history file. |
 | `mlpstorage history rerun <id>` | Re-run a recorded invocation by history ID — handy for repeating an exact run after iterating on the storage system. |
+| `mlpstorage runs list [--status failed ...]` | List every run in the results-dir with a stable ID, its status (`complete`/`failed`/`incomplete`), code image and size. |
+| `mlpstorage runs show <id>` | Inspect one run: identity, metadata excerpt, code-image pointer resolution, files. |
+| `mlpstorage runs rm <id>... \| --status failed \| --older-than 7d` | Move runs into `<results-dir>/.mlps/trash/` (restore by moving them back). |
+| `mlpstorage runs purge` / `mlpstorage runs gc` | Delete the trash for good / trash code-image pool directories no run points at. |
 | `mlpstorage lockfile generate` | Produce a reproducible Python dependency lockfile from `pyproject.toml`. Used by submitters who must publish the exact dependency set they tested with. |
 | `mlpstorage lockfile verify` | Verify the currently installed environment matches a lockfile. Benchmark `run` commands can also gate on this with `--verify-lockfile PATH`. |
 | `mlpstorage version` | Print the installed `mlpstorage` package version. |
@@ -556,8 +561,8 @@ the flag — the validation is opt-in per invocation.
 
 ### History and Replay Workflow
 
-Every `mlpstorage` invocation (except `history` itself) is recorded to the
-history file (`$HISTFILE`). This is intended for two workflows:
+Every `mlpstorage` invocation (except `history` and `runs` themselves) is
+recorded in `<results-dir>/.mlps/history`. This is intended for two workflows:
 
 1. **Audit trail** — list what was run during a submission cycle:
 

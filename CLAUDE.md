@@ -60,6 +60,7 @@ mlpstorage closed kvcache run ...          # KV cache (no file|object; model fix
 # Utilities (top-level, no mode positional)
 mlpstorage reports reportgen ...           # Generate submission reports
 mlpstorage history show/rerun ...          # Command history
+mlpstorage runs list/show/rm/purge/gc ...  # Manage the runs in a results-dir
 mlpstorage init <orgname> <results-dir>    # Pin orgname to a results-dir
 mlpstorage validate <submission-dir>       # Rules.md submission checker
 ```
