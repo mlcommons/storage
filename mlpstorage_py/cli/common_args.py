@@ -241,6 +241,21 @@ class _ResultsDirAction(argparse.Action):
         setattr(namespace, "_mlps_results_dir_from_cli", True)
 
 
+def add_results_dir_argument(target):
+    """Register ``--results-dir/-rd`` on ``target`` (a parser or an argument
+    group). The value is resolved after parsing by
+    ``cli_parser._apply_results_dir_resolution``: this flag >
+    ``MLPSTORAGE_RESULTS_DIR`` > the default recorded by ``mlpstorage init``.
+    """
+    target.add_argument(
+        '--results-dir', '-rd',
+        type=str,
+        action=_ResultsDirAction,
+        default=ENV_FALLBACK_RESULTS_DIR,
+        help=HELP_MESSAGES['results_dir']
+    )
+
+
 def add_universal_arguments(parser, req_results, req_systemname=False, req_checkpoint_folder=False):
     """Add arguments common to all benchmarks and commands.
 
@@ -281,13 +296,7 @@ def add_universal_arguments(parser, req_results, req_systemname=False, req_check
     # action) that ``check_universal_arguments_present`` consumes at the
     # post-parse validation layer to enforce non-emptiness. Env-var names:
     # MLPSTORAGE_RESULTS_DIR / MLPSTORAGE_SYSTEMNAME (see config.py D-10).
-    standard_args.add_argument(
-        '--results-dir', '-rd',
-        type=str,
-        action=_ResultsDirAction,
-        default=ENV_FALLBACK_RESULTS_DIR,
-        help=HELP_MESSAGES['results_dir']
-    )
+    add_results_dir_argument(standard_args)
     if req_results:
         # Stash a marker on the namespace — set_defaults does NOT register a
         # CLI flag; it just seeds the resulting Namespace attribute. The

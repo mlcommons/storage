@@ -47,6 +47,7 @@ from mlpstorage_py.cli.utility_args import (
 )
 from mlpstorage_py.cli.lockfile_args import add_lockfile_arguments
 from mlpstorage_py.cli.init_args import add_init_arguments
+from mlpstorage_py.cli.runs_args import add_runs_arguments
 from mlpstorage_py.cli.help_formatter import HELP_ALL_TEXT, get_context_help_tokens
 
 __all__ = [
@@ -75,6 +76,7 @@ __all__ = [
     'add_version_arguments',
     'add_lockfile_arguments',
     'add_init_arguments',
+    'add_runs_arguments',
     'add_validate_arguments',
     'add_rules_coverage_arguments',
     # Help text

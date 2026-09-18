@@ -99,9 +99,9 @@ class TestContextHelp:
 
     @pytest.mark.parametrize('argv, expected_fragment', [
         # ── Bare and top-level --help ──────────────────────────────────────────
-        (['mlpstorage'],           'next: closed | open | whatif | init | reports | history | lockfile | version'),
-        (['mlpstorage', '--help'], 'next: closed | open | whatif | init | reports | history | lockfile | version'),
-        (['mlpstorage', '-h'],     'next: closed | open | whatif | init | reports | history | lockfile | version'),
+        (['mlpstorage'],           'next: closed | open | whatif | init | reports | history | runs | lockfile | version'),
+        (['mlpstorage', '--help'], 'next: closed | open | whatif | init | reports | history | runs | lockfile | version'),
+        (['mlpstorage', '-h'],     'next: closed | open | whatif | init | reports | history | runs | lockfile | version'),
 
         # ── Mode-level --help ──────────────────────────────────────────────────
         (['mlpstorage', 'closed', '--help'],  'next: training | checkpointing | vectordb | kvcache'),
