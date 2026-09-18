@@ -272,7 +272,7 @@ def test_cli_color_flag_parses(value):
     from mlpstorage_py.cli_parser import build_parser
 
     args = build_parser().parse_args(
-        ["closed", "training", "unet3d", "run", "file", "--color", value]
+        ["closed", "training", "unet3d", "run", "file", "-cm", "64", "-na", "2", "-at", "b200", "--color", value]
     )
     assert args.color == value
 
@@ -280,7 +280,7 @@ def test_cli_color_flag_parses(value):
 def test_cli_color_flag_defaults_to_auto():
     from mlpstorage_py.cli_parser import build_parser
 
-    args = build_parser().parse_args(["closed", "training", "unet3d", "run", "file"])
+    args = build_parser().parse_args(["closed", "training", "unet3d", "run", "file", "-cm", "64", "-na", "2", "-at", "b200"])
     assert args.color == "auto"
 
 
@@ -289,5 +289,38 @@ def test_cli_color_flag_rejects_unknown_value():
 
     with pytest.raises(SystemExit):
         build_parser().parse_args(
-            ["closed", "training", "unet3d", "run", "file", "--color", "rainbow"]
+            ["closed", "training", "unet3d", "run", "file", "-cm", "64", "-na", "2", "-at", "b200", "--color", "rainbow"]
         )
+
+
+# --------------------------------------------------------------------------- #
+# Regressions found by the first dry-run smoke test                            #
+# --------------------------------------------------------------------------- #
+
+
+def test_result_level_is_not_treated_as_a_problem(console_out, tmp_path):
+    """RESULT (35) sits numerically above WARNING (30) but is a success line;
+    it belongs in mlpstorage.log, never in the errors log or the recap."""
+    logger, buf = console_out
+    with ml.attach_run_log_files(str(tmp_path)):
+        logger.result("Minimum file count is 1234")
+        logger.warning("real warning")
+    assert "Minimum file count" in (tmp_path / "mlpstorage.log").read_text()
+    assert "Minimum file count" not in (tmp_path / "mlpstorage.errors.log").read_text()
+    buf.truncate(0)
+    buf.seek(0)
+    assert ml.emit_recap() == 1
+    assert "Minimum file count" not in buf.getvalue()
+    assert "0 errors, 1 warning" in buf.getvalue()
+
+
+def test_custom_level_calls_are_attributed_to_the_caller(console_out, tmp_path):
+    """``logger.status()`` and friends are thin wrappers defined in
+    mlps_logging; the module:line recorded must be the caller's, not
+    ``mlps_logging:NN``."""
+    logger, buf = console_out
+    ml.apply_logging_options(logger, Namespace(debug=True))
+    with ml.attach_run_log_files(str(tmp_path)):
+        logger.status("attributed")
+    assert re.search(r"STATUS:test_mlps_logging:\d+: attributed", (tmp_path / "mlpstorage.log").read_text())
+    assert "mlps_logging:" not in buf.getvalue()
