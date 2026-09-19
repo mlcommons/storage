@@ -911,7 +911,7 @@ mlpstorage history show  [-n <N>] [-i <ID>]
 mlpstorage history rerun <ID>
 ```
 
-- **`show`** The block also prints the leaf's provenance stamp — rules edition, layout version, tool version and git SHA, DLIO version and commit, storage library, core-config hash and allowlist — read from `provenance.json`, or derived at read time (labelled `derived`) for a leaf written before stamping existed; a malformed stamp is labelled `MALFORMED` with the parse error.
+- **`show`**
   - **`--limit <N>`, `-n <N>`** — only the last N entries.
   - **`--id <N>`, `-i <N>`** — only the entry with this ID.
 - **`rerun`**
@@ -933,7 +933,7 @@ Every subcommand accepts `--results-dir/-rd <path>`, resolved like everywhere el
 - **`list`** — one row per run leaf: ID, status, mode, system, benchmark, model, command, start time, code image (`code-<hash8>` from the leaf's `.mlps-code-image`), size. Status is `complete` (metadata `exit_status` 0), `failed` (non-zero), or `incomplete` (no metadata file: still running, or killed before the metadata was written). Leaves written before `exit_status` existed are judged by the presence of DLIO's `summary.json` (training/checkpointing `datagen`/`datasize` never produce one and count as complete).
   - **`--mode {closed,open,whatif}`**, **`--benchmark {training,checkpointing,vectordb,kvcache}`**, **`--model <name>`** (vectordb: `<engine>/<index>`), **`--systemname <name>`, `-sn`**, **`--status {complete,failed,incomplete}`** — narrow the list.
   - **`--json`** — the same rows as a JSON array (fields `id`, `leaf`, `status`, `mode`, `orgname`, `systemname`, `benchmark`, `model`, `command`, `run_datetime`, `code_image`, `code_hash`, `size_bytes`, `registered_at`).
-- **`show <id>`** — identity, status, size, code-image pointer resolution (names the pool directory, or says it is missing), a metadata excerpt (`exit_status`, `executed_command`, `runtime`, ...) and every file in the leaf with its size.
+- **`show <id>`** — identity, status, size, code-image pointer resolution (names the pool directory, or says it is missing), the leaf's provenance stamp (rules edition, layout version, tool version and git SHA, DLIO version and commit, storage library, core-config hash and allowlist — read from `provenance.json`, or derived at read time and labelled `derived` for a leaf written before stamping existed; a malformed stamp is labelled `MALFORMED` with the parse error), a metadata excerpt (`exit_status`, `executed_command`, `runtime`, ...) and every file in the leaf with its size.
 - **`rm`** — prints the selection and moves each leaf to `<results-dir>/.mlps/trash/<batch>/<original relative path>`, recording the move in `runs.jsonl`. Select explicitly by ID and/or narrow with **`--status`** and **`--older-than`** (`12h`, `7d`, `2w`, or a date such as `2026-09-01`); **`--keep-last N`** spares the N newest runs of the selection. Without `--yes` the command asks on a terminal and refuses otherwise. Rollup files (`results.json` / `results.csv`) above a removed leaf trigger a warning to rerun `reportgen`. The sentinel, `systems/` and the code-image pool are never touched.
 - **`purge`** — permanently deletes every batch under `.mlps/trash` (asks unless `--yes`).
 - **`gc`** — moves code-image pool directories that no run leaf points at (the CHECK-03 orphans `mlpstorage validate` reports) into the trash. Leaves sitting in the trash still count as references, so purge first, then gc.
