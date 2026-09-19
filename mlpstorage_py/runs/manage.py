@@ -250,6 +250,30 @@ def _cmd_show(args, results_dir: str, logger) -> int:
     else:
         print("  code image:  none (no .mlps-code-image pointer in the leaf)")
 
+    from mlpstorage_py.provenance import (
+        PROVENANCE_FILENAME, ProvenanceError, UNKNOWN, read_leaf_provenance,
+    )
+    try:
+        stamp = read_leaf_provenance(leaf_path, results_dir)
+    except ProvenanceError as e:
+        print(f"  provenance:  MALFORMED — {e}")
+    else:
+        if os.path.isfile(os.path.join(leaf_path, PROVENANCE_FILENAME)):
+            print(f"  provenance:  {PROVENANCE_FILENAME}")
+        else:
+            print("  provenance:  derived (leaf predates provenance stamping; nothing written)")
+        sha = stamp.tool["git_sha"]
+        commit = stamp.dlio["commit"]
+        lib = stamp.storage_library
+        lib_text = lib["name"] if lib["name"] == "none" else f"{lib['name']} {lib.get('version', UNKNOWN)}"
+        print(f"    rules edition: {stamp.rules_edition}   layout: {stamp.layout_version}")
+        print(f"    tool:          mlpstorage {stamp.tool['version']} "
+              f"({sha if sha == UNKNOWN else sha[:8]})")
+        print(f"    dlio:          {stamp.dlio['version']} @ "
+              f"{commit if commit == UNKNOWN else commit[:8]}")
+        print(f"    storage lib:   {lib_text}")
+        print(f"    core config:   {stamp.core_config['hash']} ({stamp.core_config['allowlist']})")
+
     metadata = read_metadata(leaf_path)
     if metadata is None:
         print("  metadata:    none (no *_metadata.json — still running, or killed before it was written)")

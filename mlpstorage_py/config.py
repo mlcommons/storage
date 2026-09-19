@@ -303,6 +303,15 @@ MANPAGE_ENV_VAR_TIERS = {
 }
 
 # Documentation anchor — the s3dlio release this table targets.
+# Rules edition this tool implements. Stamped into every run leaf's
+# provenance.json and every submission.yaml (mlpstorage_py/provenance.py) and
+# used as the comparability key across rounds. It is NOT the package version:
+# 3.0.x patch releases all implement edition "3.0". Bump it only when Rules.md
+# changes what a workload's numbers mean or when a workload is added/retired —
+# checker strictness, container layout and CLI changes never move it. The WG
+# names the next edition; until then main keeps stamping "3.0".
+RULES_EDITION = "3.0"
+
 S3DLIO_PINNED_VERSION = 'v0.9.112'  # keep in lockstep with the pyproject.toml s3dlio floor; ManPage Storage-backend defaults are quoted at this tag
 
 # Phase 7.5 D-03: vars that can swing measured throughput by >=10% or alter protocol.

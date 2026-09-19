@@ -57,6 +57,7 @@ from mlpstorage_py.config import (
     EXEC_TYPE,
     _S3DLIO_HIGH_RISK_ENV_VARS,
 )
+from mlpstorage_py import provenance as _provenance
 from mlpstorage_py.errors import ConfigurationError, ErrorCode, FileSystemError
 from mlpstorage_py.run_directory import (
     DEFAULT_COLLISION_BUMP_BUDGET,
@@ -501,11 +502,42 @@ class Benchmark(BenchmarkInterface, abc.ABC):
         # framework-startup exclusion on the read side. See
         # mlcommons/storage#782.
         mark_invocation_end()
+        metadata = self.metadata
+        # The run declares its provenance.json sidecar (written right after
+        # the metadata below). PROV-01 treats "declared but absent" as an
+        # error and stays silent for leaves that never declared one.
+        metadata[_provenance.METADATA_PROVENANCE_KEY] = _provenance.PROVENANCE_FILENAME
         with open(self.metadata_file_path, 'w+') as fd:
-            json.dump(self.metadata, fd, indent=2, cls=MLPSJsonEncoder)
+            json.dump(metadata, fd, indent=2, cls=MLPSJsonEncoder)
 
         if self.args.verbose or self.args.debug or self.debug:
-            json.dump(self.metadata, sys.stdout, indent=2, cls=MLPSJsonEncoder)
+            json.dump(metadata, sys.stdout, indent=2, cls=MLPSJsonEncoder)
+
+        self._write_provenance(metadata)
+
+    def _write_provenance(self, metadata: Dict[str, Any]) -> None:
+        """Stamp ``<leaf>/provenance.json`` (rules edition, tool, DLIO,
+        storage library, core-config hash). Never fatal: this runs inside
+        main's ``finally`` and a stamping problem must not mask the run's
+        own outcome — it is logged, and PROV-01 reports the missing file
+        at validation time.
+        """
+        try:
+            leaf = Path(self.run_result_output)
+            code_hash = (_provenance.pointer_hash(leaf)
+                         or getattr(self.args, '_validated_pool_hash', None))
+            stamp = _provenance.collect_runtime_provenance(
+                family=self.BENCHMARK_TYPE.value,
+                parameters=metadata.get('parameters') or {},
+                code_image_hash=code_hash,
+                data_access_protocol=getattr(self.args, 'data_access_protocol', None),
+                log=self.logger,
+            )
+            _provenance.write_leaf_provenance(leaf, stamp, self.logger)
+        except Exception as e:  # noqa: BLE001 — see docstring
+            self.logger.warning(
+                f"Could not write {_provenance.PROVENANCE_FILENAME} in "
+                f"{self.run_result_output}: {e}")
 
     def write_cluster_info(self):
         """Write detailed cluster information to a separate JSON file."""

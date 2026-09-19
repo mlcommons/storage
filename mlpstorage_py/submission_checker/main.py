@@ -17,6 +17,7 @@ from .checks.checkpointing_checks import CheckpointingCheck
 from .checks.directory_checks import DirectoryCheck
 from .checks.kvcache_checks import KVCacheCheck
 from .checks.pool_structure_checks import PoolStructureCheck
+from .checks.provenance_checks import ProvenanceCheck
 from .checks.submission_structure_checks import SubmissionStructureCheck
 from .checks.system_yaml_schema_checks import SystemYamlSchemaCheck
 from .checks.training_checks import TrainingCheck
@@ -167,6 +168,13 @@ def run(args):
     # detection. Failures accumulated into errors but do NOT abort the loop.
     pool_check = PoolStructureCheck(log, config, args.input)
     if not pool_check():
+        errors.append(args.input)
+
+    # PROV-01/02: per-leaf provenance.json stamps and per-org submission.yaml
+    # manifests (results-dir hygiene PR5). Silent on trees that predate them,
+    # so the frozen v3.0 tree validates unchanged.
+    provenance_check = ProvenanceCheck(log, config, args.input)
+    if not provenance_check():
         errors.append(args.input)
 
     # Main loop over all the submissions

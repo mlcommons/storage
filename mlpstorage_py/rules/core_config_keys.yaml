@@ -1,0 +1,73 @@
+# Core-config allowlists for the ``core-config-v1`` hash stamped into every
+# run leaf's provenance.json (mlpstorage_py/provenance.py).
+#
+# The hash identifies the *workload* a run executed, so two runs with the same
+# hash are the same benchmark and can be compared. It is computed over the
+# resolved DLIO parameters recorded in the leaf's *_metadata.json, keeping only
+# the keys listed here. This is an allowlist, not a denylist: every parameter a
+# submitter may tune under Rules.md ("Tunable Parameters for CLOSED" tables),
+# every site path, and every knob that changes how the same bytes are read
+# (thread counts, listing behaviour, storage backend) is left OUT, so those
+# never split one workload into several classes. The v3.0 tree had ten
+# "variants" of unet3d that were all site tunables.
+#
+# Entries are dotted keys of the flattened parameter dict. ``prefix.*`` matches
+# every key below that prefix; ``exclude`` removes exact keys that a prefix
+# would otherwise pull in. Changing a list means a NEW ``@rev`` — leaves stamped
+# with an older rev stay reproducible because each stamp records the concrete
+# ``keys`` it hashed.
+schema: mlps-core-config-allowlist/1
+
+families:
+  training: training@1
+  checkpointing: checkpointing@1
+  # kv_cache and vector_database are not DLIO workloads and have no allowlist
+  # yet; their stamps carry hash "unknown" until one is defined.
+
+allowlists:
+  training@1:
+    include:
+      - framework
+      - metric.au
+      - model.*
+      - workflow.*
+      - dataset.format
+      - dataset.num_samples_per_file
+      - dataset.record_length_bytes
+      - dataset.record_length_bytes_stdev
+      - dataset.record_length_bytes_resize
+      # pre-v2.0 spellings, so imported rounds hash on the same fields
+      - dataset.record_length
+      - dataset.record_length_stdev
+      - dataset.record_length_resize
+      - reader.data_loader
+      - reader.batch_size
+      - reader.file_shuffle
+      - reader.sample_shuffle
+      - reader.shuffle_size
+      - train.epochs
+      - train.computation_time
+      - train.computation_time_stdev
+      - train.total_training_steps
+      - checkpoint.*
+    exclude:
+      - checkpoint.checkpoint_folder
+    # Deliberately absent (site tunables / scaling axes, Rules.md §3.6):
+    # dataset.num_files_train, dataset.num_subfolders_train, dataset.data_folder,
+    # dataset.listing_validation_interval, dataset.skip_listing,
+    # reader.read_threads, reader.computation_threads, reader.transfer_size,
+    # reader.prefetch_size, reader.odirect, reader.multiprocessing_context,
+    # storage.*, output.*, hydra.*, total_disk_bytes.
+
+  checkpointing@1:
+    include:
+      - framework
+      - model.*
+      - workflow.*
+      - checkpoint.*
+    exclude:
+      - checkpoint.checkpoint_folder
+      # Rules.md §4 Table 3: "10 or 0" phase selectors, not workload identity —
+      # a write-phase run and a read-phase run of one submission share a class.
+      - checkpoint.num_checkpoints_write
+      - checkpoint.num_checkpoints_read

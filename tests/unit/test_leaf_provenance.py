@@ -838,3 +838,32 @@ class TestRunsShow:
         out = capsys.readouterr().out
         assert "provenance:  derived" in out
         assert "rules edition: unknown" in out
+
+
+# ---------------------------------------------------------------------------
+# 2.1.5 requiredSubdirectories must accept submission.yaml at the submitter level
+# ---------------------------------------------------------------------------
+
+class TestSubmitterLevelManifestIsAllowed:
+    def _struct(self, root: Path):
+        from mlpstorage_py.submission_checker.checks.submission_structure_checks import (
+            SubmissionStructureCheck,
+        )
+        log = _Log()
+        return SubmissionStructureCheck(log=log, config=_make_config(), root_path=str(root)), log
+
+    def test_manifest_is_not_an_unexpected_entry(self, tmp_path):
+        org = _org(tmp_path)
+        (org / MANIFEST_FILENAME).write_text("schema: mlps-submission-manifest/1\n")
+        check, log = self._struct(tmp_path)
+        assert check.required_subdirectories_check() is True
+        assert not [e for e in log.errors if "2.1.5" in e]
+
+    def test_a_stray_directory_is_still_unexpected(self, tmp_path):
+        """2.1.5 governs directories; files such as submission.yaml (or a
+        README) at the submitter level are outside its scope."""
+        org = _org(tmp_path)
+        (org / "notes").mkdir()
+        check, log = self._struct(tmp_path)
+        assert check.required_subdirectories_check() is False
+        assert any("2.1.5" in e and "notes" in e for e in log.errors)
