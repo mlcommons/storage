@@ -24,6 +24,7 @@ from typing import List, Dict, Any, Optional, Set, Tuple
 from mlpstorage_py.mlps_logging import setup_logging, apply_logging_options
 from mlpstorage_py.config import MLPS_DEBUG, BENCHMARK_TYPES, EXIT_CODE, PARAM_VALIDATION, LLM_MODELS, LLM_ALLOWED_VALUES, MODELS, ACCELERATORS
 from mlpstorage_py.rules import get_runs_files, BenchmarkVerifier, BenchmarkRun, Issue, RunID
+from mlpstorage_py.provenance import write_manifests_if_results_dir
 from mlpstorage_py.rules.datagen_hierarchy import (
     validate_datagen_leaf,
     validate_supported_model,
@@ -334,6 +335,11 @@ class ReportGenerator:
             apply_logging_options(self.logger, args)
 
         self.results_dir = results_dir
+        # The root as requested, before any canonical-tree rebind below.
+        # generate_reports writes one submission.yaml per <mode>/<org>/ under
+        # it when it is a live results-dir (sentinel-bearing); a submissions
+        # or archive tree is never touched (mlpstorage_py/provenance.py).
+        self._requested_results_dir = results_dir
         # Per-org rollup targets for a multi-org tree (worklist A11
         # decision (a)): populated by _resolve_effective_results_dir when
         # the canonical probe finds >= 2 distinct orgs. Keyed by
@@ -686,6 +692,7 @@ class ReportGenerator:
             # Still walk on-disk model dirs so D-03 empty-model-dir
             # emission fires.
             self._emit_empty_model_dirs(rows_by_model)
+            self._write_submission_manifests()
             return EXIT_CODE.SUCCESS
 
         # (c) Bottom-up top-level assembly — concatenate every per-model
@@ -751,7 +758,22 @@ class ReportGenerator:
             self.write_json_file(org_rows, target_dir=target_dir)
             self.write_csv_file(org_rows, target_dir=target_dir)
 
+        # (h) Live results-dir only: <mode>/<org>/submission.yaml per org —
+        # the inventory + declared rules edition that travels with the
+        # submission (results-dir hygiene PR5). No-op on submissions trees.
+        self._write_submission_manifests()
+
         return EXIT_CODE.SUCCESS
+
+    def _write_submission_manifests(self) -> None:
+        try:
+            written = write_manifests_if_results_dir(
+                self._requested_results_dir, log=self.logger)
+        except Exception as e:  # noqa: BLE001 — the tables are already written
+            self.logger.warning("reportgen: could not write submission manifests: %s", e)
+            return
+        for path in written:
+            self.logger.status(f"Wrote submission manifest: {path}")
 
     @staticmethod
     def _is_auxiliary_only_group(workload_result: 'Result') -> bool:

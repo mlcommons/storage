@@ -72,9 +72,9 @@ For cloud-specific credential and endpoint env vars consumed by s3dlio for Azure
 
 2.1.5. **requiredSubdirectories** -- The required subdirectories at the submitter level differ between CLOSED and OPEN submissions:
 
-2.1.5.a. **requiredSubdirectoriesClosed** -- Within a CLOSED submitter directory, there must be exactly two directories: "results" and "systems".  These names are case-sensitive.  Code images are not stored at the submitter level; every run leaf inside `results/` names its image in the tree-level pool (§2.1.6).
+2.1.5.a. **requiredSubdirectoriesClosed** -- Within a CLOSED submitter directory, there must be exactly two directories: "results" and "systems".  These names are case-sensitive.  A "submission.yaml" manifest file (see "Provenance stamps and the submission manifest" below) sits beside them; this rule governs directories only.  Code images are not stored at the submitter level; every run leaf inside `results/` names its image in the tree-level pool (§2.1.6).
 
-2.1.5.b. **requiredSubdirectoriesOpen** -- Within an OPEN submitter directory, there must be exactly two directories: "results" and "systems".  These names are case-sensitive.  OPEN runs use the same tree-level pool and per-leaf pointer as CLOSED runs (§2.1.6); nothing distinguishes the two divisions below the submitter directory except the rules that apply to the results.
+2.1.5.b. **requiredSubdirectoriesOpen** -- Within an OPEN submitter directory, there must be exactly two directories: "results" and "systems".  These names are case-sensitive.  The same "submission.yaml" manifest sits beside them.  OPEN runs use the same tree-level pool and per-leaf pointer as CLOSED runs (§2.1.6); nothing distinguishes the two divisions below the submitter directory except the rules that apply to the results.
 
 See §2.1.6 and §2.1.27.
 
@@ -94,6 +94,28 @@ The ".code-hash.json" schema is:
 At submission-validation time, the *submission validator* performs a per-tree self-consistency check on every "code" directory it finds: it recomputes the captured tree's MD5 (using the same exclusion set above) and compares it against the recorded "hash" in ".code-hash.json".  Mismatch produces a violation under §2.1.6.
 
 For CLOSED submissions, an additional upstream-identity check is layered on top: the validator compares the captured tree's MD5 against a pinned digest from `REFERENCE_CHECKSUMS` (or a value supplied via `--reference-checksum`).  See §3.6.1.
+
+**Provenance stamps and the submission manifest** -- Every run leaf written by the `mlpstorage` CLI (every `datasize`, `datagen` and `run` leaf, in every division) carries a `provenance.json` sidecar, and `mlpstorage reports reportgen` writes one `submission.yaml` per organization at `<mode>/<submitter_org>/submission.yaml` when run against a live results-dir.  Together they make a submission self-describing across rounds: which rules edition, tool version and layout produced each leaf, which DLIO revision and client storage library ran, and which workload the leaf executed.
+
+Three independent "versions" appear in both files:
+- `rules_edition` (e.g. "3.0") -- the edition of this document a result was produced under.  It bumps only when a workload's numbers or validity change, or a workload is added or retired; it is the comparability key across rounds.  It is NOT the package version: every 3.0.x tool release implements edition "3.0".
+- The tool version (`tool.version`, PEP 440, e.g. "3.0.46") -- provenance only.
+- `layout_version` (an integer; 3 for trees with these files, 2 or 1 for earlier trees) -- the results-dir and leaf format; only readers key on it.
+
+The `provenance.json` schema (`"schema": "mlps-run-provenance/1"`) is:
+- "rules_edition", "layout_version" as above.
+- "tool": {"name", "version", "git_sha", "code_image"} -- `code_image` repeats the leaf's `.mlps-code-image` pointer so the stamp reads whole without the pool.
+- "dlio": {"version", "source", "commit"} -- the installed DLIO distribution; the git commit comes from the package's PEP 610 `direct_url.json`.
+- "storage_library": {"name", "version"} -- the client library for `object` runs (`s3dlio`); `{"name": "none"}` for `file` runs.
+- "core_config": {"algorithm": "core-config-v1", "allowlist", "hash", "keys"} -- a SHA-256 (first 16 hex digits) over the canonical JSON of the workload-defining DLIO parameters, keeping only the keys in the named allowlist (`mlpstorage_py/rules/core_config_keys.yaml`, e.g. "checkpointing@1").  Site tunables (the "Tunable Parameters for CLOSED" tables, paths, thread counts, listing and storage knobs) are excluded, so two runs of the same workload hash alike wherever they ran; "keys" lists exactly what was hashed so the value is reproducible from the leaf alone.  Families without an allowlist (kv_cache, vector_database) stamp "unknown".
+- "stamped_at", "stamped_by", and "provenance": one tag per stamp from the closed vocabulary `runtime`, `tool-constant`, `package-metadata`, `direct-url`, `code-hash-json`, `uv-lock`, `declared`, `inferred`, `n/a`, `unknown` saying how the value was obtained.
+A stamp that cannot be determined is the string "unknown" -- never null, never absent.
+
+The `submission.yaml` manifest (`schema: mlps-submission-manifest/1`) is an inventory, not a result: the organization and division, the declared `rules_edition` and `layout_version`, the generating tool, the distinct tool versions and DLIO commits seen, every `systems/` description (with its PDF), every run leaf with its benchmark, model, command, emulated accelerator, system, stamped rules edition, core-config hash, code image and the path of its stamp, and every code image referenced.  It carries no metrics and no Public IDs.
+
+Leaves written before these files existed are never rewritten.  The *submission validator* and `reportgen` derive an equivalent stamp for such a leaf at read time from the pointed-to image's `.code-hash.json` and `uv.lock` and from the leaf's own metadata (tagged `code-hash-json` / `uv-lock` / `inferred`, rules edition "unknown"), so the frozen v3.0 tree validates exactly as before.  The *submission validator* enforces:
+- PROV-01 (`leafProvenance`): a `provenance.json` that is present must parse and must name the same code image as the leaf's `.mlps-code-image` pointer; a leaf whose metadata declares the sidecar (`"provenance_file"`) but lacks it fails.  A leaf that never declared one draws no finding.
+- PROV-02 (`submissionManifest`): a `submission.yaml` that is present must parse, must list exactly the run leaves the tree holds (a stale manifest fails -- re-run `reportgen`), and its `rules_edition` must match every stamped leaf.  A tree without manifests draws no finding.
 
 2.1.7. **systemsDirectoryFiles** --  The "systems" directory must contain two files for each "system name", a .yaml file and a .pdf file, and nothing more, with two exceptions: Markdown files (any "*.md", e.g. "README.md", "NOTES.md") are permitted alongside the per-system files so submitters may include supplementary documentation, and dot-prefixed entries (such as ".DS_Store" or ".gitkeep") are ignored.  Each of the .yaml/.pdf files must be named with the "system name".
 Eg: for a system-under-test named "Big_and_Fast_4000_buffered", there must be a "Big_and_Fast_4000_buffered.yaml" and a "Big_and_Fast_4000_buffered.pdf" file.  These names are case-sensitive.
@@ -151,12 +173,14 @@ root_folder (or any name you prefer)
 │ 	└── ... (one directory per distinct captured source tree; see §2.1.6)
 ├── Closed
 │ 	└──<submitter_org>
+│	  	├── submission.yaml  (per-organization manifest; see "Provenance stamps and the submission manifest")
 │	  	├── results
 │	  	│	└──system-name-1
 │	  	│	 	├── training
 │	  	│	 	│	├── unet3d
 │	  	│		│	│	├── datagen
 │	  	│		│	│	│	└── YYYYMMDD_HHmmss
+│	  	│		│	│	│		├── provenance.json  (in every YYYYMMDD_HHmmss leaf below; omitted from the rest of this diagram)
 │	  	│		│	│	│		└── dlio_config
 │	  	│		│	│	└── run
 │	  	│		│	│		├──results.json

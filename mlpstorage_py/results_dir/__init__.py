@@ -21,7 +21,7 @@ that takes ``--results-dir`` once the gate lands in Slice 4):
     * ``NonEmptyDirError``
 - Constants:
     * ``MLPERF_RESULTS_FILENAME``  = ``"mlperf-results.yaml"``
-    * ``MLPERF_RESULTS_VERSION``  = ``2``
+    * ``MLPERF_RESULTS_VERSION``  = ``3``
 - Resolution (``user_config.py``):
     * ``resolve_results_dir(cli_value) -> (path, source)``
     * ``DEFAULT_RESULTS_DIR`` = ``"~/mlpstorage-results"``
@@ -45,10 +45,15 @@ Refs: 01-canonical-layout-and-init / 01-01-PLAN.md
 # ``sentinel.py`` (which depends on ``mlpstorage_py.VERSION`` resolution).
 
 MLPERF_RESULTS_FILENAME: str = "mlperf-results.yaml"
+# Version 3 (leaf provenance): every run leaf gains a ``provenance.json``
+# sidecar and ``reportgen`` writes ``<mode>/<org>/submission.yaml``; the
+# code-image pool is tree-wide at ``code-images/``.
 # Version 2 (results-dir resolver): the tree carries its own command history
 # under ``.mlps/`` and ``init`` records the path as the per-user default.
-# Version 1 trees (v3.0 tooling) are read identically.
-MLPERF_RESULTS_VERSION: int = 2
+# Version 1 trees (v3.0 tooling) are read identically. The sentinel is never
+# rewritten, so a tree's number says which release initialized it; a leaf's
+# own ``provenance.json`` says which layout wrote that leaf.
+MLPERF_RESULTS_VERSION: int = 3
 
 # --- Errors ----------------------------------------------------------------- #
 from mlpstorage_py.results_dir.errors import (  # noqa: E402

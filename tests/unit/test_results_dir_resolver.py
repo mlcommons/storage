@@ -267,15 +267,15 @@ class TestInitRecordsDefault:
 
 
 # --------------------------------------------------------------------------- #
-# Sentinel version 2                                                           #
+# Sentinel version 3                                                           #
 # --------------------------------------------------------------------------- #
 
 
-class TestSentinelVersionTwo:
-    def test_current_version_is_two(self):
+class TestSentinelVersionThree:
+    def test_current_version_is_three(self):
         from mlpstorage_py.results_dir import MLPERF_RESULTS_VERSION
 
-        assert MLPERF_RESULTS_VERSION == 2
+        assert MLPERF_RESULTS_VERSION == 3
 
     def test_version_one_trees_still_resolve(self, tmp_path):
         """v3.0-era trees carry version 1; they are read identically."""

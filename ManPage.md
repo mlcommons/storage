@@ -295,6 +295,7 @@ The results directory accumulates every artifact produced by `mlpstorage` as eac
 │   └── code-<hash8>/                     one captured source tree per distinct hash; run leaves point at it
 ├── <mode>/                               closed | open | whatif (one or more)
 │   └── <orgname>/                        from sentinel; same for every run
+│       ├── submission.yaml               per-org inventory + declared rules edition; written by `reportgen`
 │       ├── systems/
 │       │   └── <systemname>.yaml         auto-generated on first `run`; see SYSTEM DESCRIPTION
 │       └── results/
@@ -332,6 +333,7 @@ Every `run` adds a timestamped directory under its benchmark-specific tail and r
         ├── dlio.log
         ├── dlio_config/{config,hydra,overrides}.yaml
         ├── fs_separation.json            CAP-03 sidecar; see Common artifacts
+        ├── provenance.json               rules edition, tool, DLIO rev, core-config hash; see Common artifacts
         ├── training_<ts>_timeseries.json metrics; absent if --skip-timeseries
         └── training_<ts>_metadata.json   args, env, cluster info, status
 ```
@@ -401,6 +403,7 @@ Every benchmark run writes:
 - **`mlpstorage.log`** — every message `mlpstorage` itself logged during the invocation, at DEBUG level with `module:line`, uncoloured. Messages emitted before the run directory existed (argument parsing, environment validation, code-image capture) are buffered and written first, so the file is complete from process start.
 - **`mlpstorage.errors.log`** — the WARNING-and-above subset of `mlpstorage.log`. An empty file means the run logged no warnings or errors. Both files live inside the run's timestamp directory and are removed with it.
 - **`fs_separation.json`** — CAP-03 filesystem-separation sidecar written before workload launch. Rank-0 probes the data/checkpoint path against the results path with `os.link()` and records the `EXDEV`/same-fs result plus real-paths, ISO-8601 timestamp, and probing host. The submission checker's rules 3.4.2 / 4.4.2 / 5.4.2 read this file as their authoritative "different filesystems" input. Absent under `--skip-fs-separation-gate`.
+- **`provenance.json`** — provenance stamp written by every `datasize` / `datagen` / `run` leaf right after `*_metadata.json` (which declares it under `"provenance_file"`). Records the rules edition the tool implements (`RULES_EDITION`, e.g. `3.0`), the layout version, the tool version, git SHA and code image, the installed DLIO version/source/commit (from the package's PEP 610 `direct_url.json`), the client storage library for `object` runs (`s3dlio`), and the `core-config-v1` hash of the workload-defining DLIO parameters with the exact keys hashed (allowlists in `mlpstorage_py/rules/core_config_keys.yaml`; `kv_cache` / `vector_database` stamp `unknown`). Every value has a provenance tag saying how it was obtained; undeterminable values are the string `unknown`, never null. Leaves that predate the stamp are never rewritten — `validate`, `reportgen` and `runs show` derive an equivalent stamp from the pointed-to image's `.code-hash.json` and `uv.lock` at read time. Rules.md "Provenance stamps and the submission manifest" has the schema; `validate` rules PROV-01 / PROV-02 enforce it.
 - **`results.json`** — aggregated summary across all timestamped run directories, used by `reportgen`.
 - **Command history** is appended to `<results-dir>/.mlps/history` (consumed by `mlpstorage history`). Only invocations that resolved an initialized results-dir are recorded, so history never creates files inside a tree that `init` has not claimed.
 
@@ -893,6 +896,8 @@ mlpstorage reports reportgen --results-dir <path> --systemname <name>
 
 #### Rollup output layout
 
+When `--results-dir` is a live results-dir (it carries the `mlperf-results.yaml` sentinel), `reportgen` also writes `<mode>/<orgname>/submission.yaml` for every organization in the tree after the tables: an inventory of the systems, every run leaf with its provenance stamp (rules edition, core-config hash, code image), the code images referenced, and the rules edition this tool implements. The file is deterministic apart from `generated_at`, so re-running `reportgen` refreshes it in place; a submissions or archive tree (no sentinel) is never touched. `validate` rule PROV-02 fails a manifest that no longer matches the tree.
+
 `reportgen` emits one `results.json` and one `results.csv` per model folder, at the canonical `<benchmark>/<model>/` group boundary. Grouping is the parent of `<command>/` (or, for checkpointing which omits the `<command>` segment, the parent of `<ts>/` — which is `<model>/` itself). A single reportgen invocation therefore produces multiple sibling rollup files, one per benchmark model discovered under the results-dir slice.
 
 #### Warmup labeling and per-system collision scoping
@@ -928,7 +933,7 @@ Every subcommand accepts `--results-dir/-rd <path>`, resolved like everywhere el
 - **`list`** — one row per run leaf: ID, status, mode, system, benchmark, model, command, start time, code image (`code-<hash8>` from the leaf's `.mlps-code-image`), size. Status is `complete` (metadata `exit_status` 0), `failed` (non-zero), or `incomplete` (no metadata file: still running, or killed before the metadata was written). Leaves written before `exit_status` existed are judged by the presence of DLIO's `summary.json` (training/checkpointing `datagen`/`datasize` never produce one and count as complete).
   - **`--mode {closed,open,whatif}`**, **`--benchmark {training,checkpointing,vectordb,kvcache}`**, **`--model <name>`** (vectordb: `<engine>/<index>`), **`--systemname <name>`, `-sn`**, **`--status {complete,failed,incomplete}`** — narrow the list.
   - **`--json`** — the same rows as a JSON array (fields `id`, `leaf`, `status`, `mode`, `orgname`, `systemname`, `benchmark`, `model`, `command`, `run_datetime`, `code_image`, `code_hash`, `size_bytes`, `registered_at`).
-- **`show <id>`** — identity, status, size, code-image pointer resolution (names the pool directory, or says it is missing), a metadata excerpt (`exit_status`, `executed_command`, `runtime`, ...) and every file in the leaf with its size.
+- **`show <id>`** — identity, status, size, code-image pointer resolution (names the pool directory, or says it is missing), the leaf's provenance stamp (rules edition, layout version, tool version and git SHA, DLIO version and commit, storage library, core-config hash and allowlist — read from `provenance.json`, or derived at read time and labelled `derived` for a leaf written before stamping existed; a malformed stamp is labelled `MALFORMED` with the parse error), a metadata excerpt (`exit_status`, `executed_command`, `runtime`, ...) and every file in the leaf with its size.
 - **`rm`** — prints the selection and moves each leaf to `<results-dir>/.mlps/trash/<batch>/<original relative path>`, recording the move in `runs.jsonl`. Select explicitly by ID and/or narrow with **`--status`** and **`--older-than`** (`12h`, `7d`, `2w`, or a date such as `2026-09-01`); **`--keep-last N`** spares the N newest runs of the selection. Without `--yes` the command asks on a terminal and refuses otherwise. Rollup files (`results.json` / `results.csv`) above a removed leaf trigger a warning to rerun `reportgen`. The sentinel, `systems/` and the code-image pool are never touched.
 - **`purge`** — permanently deletes every batch under `.mlps/trash` (asks unless `--yes`).
 - **`gc`** — moves code-image pool directories that no run leaf points at (the CHECK-03 orphans `mlpstorage validate` reports) into the trash. Leaves sitting in the trash still count as references, so purge first, then gc.
@@ -1186,6 +1191,9 @@ mlpstorage validate /submissions/acme \
 - `<results-dir>/mlperf-results.yaml` — sentinel written by `mlpstorage init`; pins orgname to the results-dir.
 - `<results-dir>/<mode>/<orgname>/systems/<systemname>.yaml` — auto-generated partial system description; one per mode; see SYSTEM DESCRIPTION.
 - `<results-dir>/<mode>/<orgname>/results/<systemname>/...` — per-run output trees as documented under RESULTS DIRECTORY.
+- `<results-dir>/<mode>/<orgname>/results/<systemname>/.../<YYYYMMDD_HHMMSS>/provenance.json` — per-leaf provenance stamp (rules edition, tool, DLIO revision, storage library, core-config hash); see Common artifacts.
+- `<results-dir>/<mode>/<orgname>/submission.yaml` — per-organization manifest written by `reportgen`: systems, run leaves with their stamps, code images, declared rules edition. Travels with the submission; `validate` PROV-02 checks it against the tree.
+- `<repo>/mlpstorage_py/rules/core_config_keys.yaml` — allowlists of workload-defining DLIO keys behind the `core-config-v1` hash, one per family and revision.
 - `<results-dir>/.mlps/history` — command history consumed by `mlpstorage history`.
 - `<results-dir>/code-images/code-<hash8>/` — content-addressed code-image pool shared by every organization and division; `<results-dir>/<orgname>/code-<hash8>/` is the v3.0 per-organization layout, still read by `mlpstorage validate`.
 - `<submission-dir>/{code-images,<mode>/<submitter>/{systems,results}}/` — submission package layout consumed by `mlpstorage validate`.
