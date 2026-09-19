@@ -18,6 +18,7 @@ from .checks.directory_checks import DirectoryCheck
 from .checks.kvcache_checks import KVCacheCheck
 from .checks.pool_structure_checks import PoolStructureCheck
 from .checks.provenance_checks import ProvenanceCheck
+from .checks.edition_checks import EditionCheck
 from .checks.submission_structure_checks import SubmissionStructureCheck
 from .checks.system_yaml_schema_checks import SystemYamlSchemaCheck
 from .checks.training_checks import TrainingCheck
@@ -175,6 +176,12 @@ def run(args):
     # so the frozen v3.0 tree validates unchanged.
     provenance_check = ProvenanceCheck(log, config, args.input)
     if not provenance_check():
+        errors.append(args.input)
+
+    # EDN-01/02/03: declared rules editions and comparability classes against
+    # mlpstorage_py/rules/editions.yaml. Silent on derived (pre-stamp) leaves.
+    edition_check = EditionCheck(log, config, args.input)
+    if not edition_check():
         errors.append(args.input)
 
     # Main loop over all the submissions

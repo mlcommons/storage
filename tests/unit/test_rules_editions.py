@@ -236,9 +236,11 @@ class TestSeed:
             got = t.classify(family="training", model="cosmoflow", accelerator="h100",
                              core_config=h, edition=eid)
             assert got is c
-        # the v1.0 spelling is not declared for 2.0 and vice versa
+        # class-level editions: every listed spelling is valid in every listed edition
         assert t.classify(family="training", model="cosmoflow", accelerator="h100",
-                          core_config="54541a1d49e87763", edition="2.0") is None
+                          core_config="54541a1d49e87763", edition="2.0") is c
+        assert t.classify(family="training", model="cosmoflow", accelerator="h100",
+                          core_config="54541a1d49e87763", edition="3.0") is None
 
 
 # ---------------------------------------------------------------------------
@@ -283,6 +285,11 @@ def _check(root: Path):
     from mlpstorage_py.submission_checker.checks.edition_checks import EditionCheck
     log = _Log()
     return EditionCheck(log=log, config=_make_config(), root_path=str(root)), log
+
+
+def _rule_lines(lines):
+    """Only the locked-format findings; BaseCheck adds a 'Some ... checks failed' summary."""
+    return [l for l in lines if l.startswith("[EDN-")]
 
 
 def _root(tmp_path: Path) -> Path:
@@ -330,9 +337,10 @@ class TestEditionCheck:
               stamp=_training_stamp(rules_edition="9.9"), declare=True)
         check, log = _check(root)
         assert check() is False
-        assert len(log.errors) == 1
-        assert log.errors[0].startswith("[EDN-01 rulesEdition] ")
-        assert "9.9" in log.errors[0] and LEAF_CLOSED_RUN in log.errors[0]
+        errors = _rule_lines(log.errors)
+        assert len(errors) == 1
+        assert errors[0].startswith("[EDN-01 rulesEdition] ")
+        assert "9.9" in errors[0] and LEAF_CLOSED_RUN in errors[0]
         # EDN-02/03 do not pile on for an edition the table cannot look up
         assert not any("[EDN-02" in l or "[EDN-03" in l for l in log.lines)
 
@@ -353,8 +361,9 @@ class TestEditionCheck:
               stamp=_training_stamp(UNET3D_ZETTALANE_HASH), declare=True)
         check, log = _check(root)
         assert check() is False
-        assert len(log.errors) == 1
-        e = log.errors[0]
+        errors = _rule_lines(log.errors)
+        assert len(errors) == 1
+        e = errors[0]
         assert e.startswith("[EDN-02 comparabilityClass] ")
         assert LEAF_CLOSED_RUN in e and UNET3D_ZETTALANE_HASH in e and "3.0" in e
         assert "unet3d" in e and "b200" in e
@@ -409,7 +418,7 @@ class TestEditionCheck:
                   stamp=_training_stamp(UNET3D_ZETTALANE_HASH), declare=True)
         check, log = _check(root)
         assert check() is False
-        assert len([l for l in log.errors if l.startswith("[EDN-02")]) == 2
+        assert len(_rule_lines(log.errors)) == 2
 
 
 # ---------------------------------------------------------------------------

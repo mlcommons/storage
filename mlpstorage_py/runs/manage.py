@@ -273,6 +273,10 @@ def _cmd_show(args, results_dir: str, logger) -> int:
               f"{commit if commit == UNKNOWN else commit[:8]}")
         print(f"    storage lib:   {lib_text}")
         print(f"    core config:   {stamp.core_config['hash']} ({stamp.core_config['allowlist']})")
+        from mlpstorage_py.editions import describe_class
+        metadata = read_metadata(leaf_path) or {}
+        accelerator = metadata.get("accelerator")
+        print(f"    class:         {describe_class(stamp, family=row['benchmark'], model=row['model'], accelerator=accelerator if isinstance(accelerator, str) and accelerator else None)}")
 
     metadata = read_metadata(leaf_path)
     if metadata is None:
