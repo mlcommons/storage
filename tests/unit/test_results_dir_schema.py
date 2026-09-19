@@ -59,7 +59,7 @@ def test_filename_constant():
 
 
 def test_version_constant():
-    assert MLPERF_RESULTS_VERSION == 2
+    assert MLPERF_RESULTS_VERSION == 3
 
 
 def test_package_exports_smoke():
