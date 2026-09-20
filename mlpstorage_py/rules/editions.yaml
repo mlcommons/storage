@@ -1,0 +1,319 @@
+# Rules editions and declared comparability classes.
+#
+# This file is the machine-readable companion of Rules.md "Rules editions and
+# comparability classes". It is DATA, edited by the working group through a
+# pull request; the tool only reads it (mlpstorage_py/editions.py).
+#
+# editions:  one entry per rules edition (the `rules_edition` every run leaf's
+#            provenance.json and every submission.yaml declares). An edition
+#            bumps only when a workload's numbers or validity change, or a
+#            workload is added or retired -- never for a tool release.
+#            `current_edition` must equal config.RULES_EDITION (tested).
+#
+# classes:   the comparability classes. A class is the WG's assertion that runs
+#            of one (division, family, model, emulated accelerator) whose
+#            core-config-v1 hash is one of `core_configs` executed the same
+#            workload in every edition listed under `editions`. Rows in one
+#            class compare; nothing else does. Comparisons across divisions are
+#            never declared (WG decision 2026-09-19): a class belongs to exactly
+#            one division, and an OPEN run that happens to use a CLOSED
+#            configuration stays outside the CLOSED class. Several hashes in one class declare several spellings of
+#            one workload equivalent (v1.0 `dataset.record_length` vs v2.0
+#            `dataset.record_length_bytes`; a future allowlist `@rev` bump).
+#            `accelerator: any` matches every accelerator, including a leaf that
+#            carries none. It is used only for checkpointing classes of editions
+#            3.0 and earlier, whose checkpoint rows recorded no accelerator at
+#            all (v3.0 results.csv: Accelerator Type is empty for every
+#            checkpoint row). From edition 4.0 on, checkpoint classes are per
+#            accelerator: b200 and mi355 checkpoint rows do not compare.
+#            `reference` names the shipped workload template that hashes to the
+#            class today (regression-tested); it is documentation, not the key.
+#            Ids are labels (`<model>-<accelerator>-<letter>`), not ranks.
+#
+# DLIO revisions and client storage libraries are deliberately NOT part of the
+# class key for editions 3.0 and earlier: v3.0 alone ran ten DLIO commits and
+# three s3dlio releases across sanctioned CLOSED rows. They are recorded per
+# edition as accepted lists; `validate` rule EDN-03 warns about a run on a
+# revision the list does not carry. From edition 4.0 on the WG may bring the
+# DLIO revision into the class key (decision deferred 2026-09-19).
+#
+# Seeded 2026-09-19 from the frozen trees (design + survey:
+# .planning/rules-editions-and-comparability-classes.md).
+schema: mlps-rules-editions/1
+current_edition: "3.0"
+
+editions:
+  "0.5":
+    status: historical
+    results_repo: https://github.com/mlcommons/storage_results_v0.5
+    tool: none (per-benchmark scripts + DLIO copies)
+    layout_versions: []
+    workloads:
+      closed:
+        training:
+          unet3d: []
+          bert: []
+    dlio_revisions: []
+    storage_libraries: {}
+    notes: >-
+      No run leaf carries a DLIO config.yaml, so no class can be seeded; the
+      archive importer will re-derive rows from summary.json only.
+
+  "1.0":
+    status: historical
+    results_repo: https://github.com/mlcommons/storage_results_v1.0
+    tool: none (mlperf_storage v1.0 shell wrapper over DLIO 2.0.0)
+    layout_versions: []
+    workloads:
+      closed:
+        training:
+          unet3d: [a100, h100]
+          resnet50: [a100, h100]
+          cosmoflow: [a100, h100]
+    dlio_revisions: []
+    storage_libraries: {}
+    notes: >-
+      DLIO 2.0.0 copied into each submission (no git revision recorded).
+      Configs spell dataset.record_length / record_length_stdev /
+      record_length_resize and checkpoint.model_size; v2.0 renamed them (see
+      the two-hash classes below).
+
+  "2.0":
+    status: historical
+    results_repo: https://github.com/mlcommons/submissions_storage_v2.0
+    tool: mlpstorage 2.0.x (2.0.0b1)
+    layout_versions: [1]
+    workloads:
+      closed:
+        training:
+          unet3d: [a100, h100]
+          resnet50: [a100, h100]
+          cosmoflow: [a100, h100]
+        checkpointing:
+          llama3-8b: [a100, h100]
+          llama3-70b: [a100, h100]
+          llama3-405b: [a100, h100]
+          llama3-1t: [a100, h100]
+    dlio_revisions: []
+    storage_libraries: {}
+    notes: >-
+      DLIO pinned by tag mlperf_storage_v2.0 of the dlio_benchmark repository
+      (pyproject: dlio-benchmark @ git+...dlio_benchmark.git@mlperf_storage_v2.0);
+      the tag's commit is not recorded in any leaf, so no revision is listed.
+      CLOSED checkpointing ran checkpoint.mode=subset with model.parallelism.data
+      (8 for 70b, 2 for 405b/1t); OPEN ANL runs used the full configuration.
+
+  "3.0":
+    status: current
+    results_repo: https://github.com/mlcommons/submissions_storage_v3.0
+    tool: mlpstorage 3.0.x
+    layout_versions: [2, 3]
+    workloads:
+      closed:
+        training:
+          unet3d: [b200, mi355]
+          retinanet: [b200, mi355]
+        checkpointing:
+          llama3-8b: [b200, mi355]
+          llama3-70b: [b200, mi355]
+          llama3-405b: [b200, mi355]
+          llama3-1t: [b200, mi355]
+        vector_database:
+          milvus: []
+        kv_cache:
+          llama3.1-8b: []
+    # Every DLIO commit a sanctioned v3.0 CLOSED row ran on (walked from the
+    # frozen tree's code images; 13 leaves whose image was built from a local
+    # DLIO checkout record no commit and cannot be listed).
+    dlio_revisions:
+      - {commit: edaf4bb3d6343ef2fb6b9f6dbafa6102032ae8bf, source: https://github.com/mlcommons/DLIO_local_changes.git, version: "3.0.4"}
+      - {commit: 24b13d7630a12e3d08624e5db254694a09f71599, source: https://github.com/mlcommons/DLIO_local_changes.git, version: "3.0.2"}
+      - {commit: a7d56e73ed4630e47f89720436290a23c0f94b6c, source: https://github.com/mlcommons/DLIO_local_changes.git, version: "3.0.2"}
+      - {commit: f6796ed281e39ccc83a450e2b1f21b9c909d8fd0, source: https://github.com/mlcommons/DLIO_local_changes.git, version: "3.0.2"}
+      - {commit: 252a54b18d113541e1e8e24832921fac0a7f2b96, source: https://github.com/mlcommons/DLIO_local_changes.git, version: "3.0.2"}
+      - {commit: 86945a7a203912435774e0972f6350221446229e, source: https://github.com/mlcommons/DLIO_local_changes.git, version: "3.0.2"}
+      - {commit: c338e07412350df4d72279be985ff31b82407a80, source: https://github.com/mlcommons/DLIO_local_changes.git, version: "3.0.2"}
+      - {commit: 95c6a9d46a2a072b7f1455b65b3a5e22602b53e5, source: https://github.com/mlcommons/DLIO_local_changes.git, version: "3.0.2"}
+      - {commit: 17d982a3c7842355c25787c97f636a9f6a474caa, source: https://github.com/mlcommons/DLIO_local_changes.git, version: "3.0.2"}
+      - {commit: 21c0723de897add728158943d369abd4b333f7dc, source: https://github.com/russfellows/dlio_benchmark.git, version: "3.0.2"}
+    storage_libraries:
+      s3dlio: ["0.9.106", "0.9.110", "0.9.112"]
+    notes: >-
+      Results repository frozen at b50de9cf0 (storage tag v3.0 @ ce28a98).
+      Every 3.0.x tool release implements this edition.
+
+classes:
+  - id: cosmoflow-a100-A
+    division: closed
+    family: training
+    model: cosmoflow
+    accelerator: a100
+    allowlist: training@1
+    core_configs: [329a3541eb5c1a36, b49b896e947a408b]
+    editions: ["1.0", "2.0"]
+    reference: configs/dlio/workload/cosmoflow_a100.yaml
+    notes: first hash = v1.0 spelling, second = v2.0 spelling (same workload).
+  - id: cosmoflow-h100-A
+    division: closed
+    family: training
+    model: cosmoflow
+    accelerator: h100
+    allowlist: training@1
+    core_configs: [54541a1d49e87763, 4b7b36339a2a5b0d]
+    editions: ["1.0", "2.0"]
+    reference: configs/dlio/workload/cosmoflow_h100.yaml
+    notes: first hash = v1.0 spelling, second = v2.0 spelling (same workload).
+  - id: llama3-1t-A
+    division: closed
+    family: checkpointing
+    model: llama3-1t
+    accelerator: any
+    allowlist: checkpointing@1
+    core_configs: [45fd627ad9dc5f4c]
+    editions: ["3.0"]
+    reference: configs/dlio/workload/llama3_1t.yaml
+    notes: >-
+      full checkpoint. v2.0 OPEN (ANL) rows ran this exact configuration, but
+      cross-division comparisons are never declared; v2.0 CLOSED ran
+      llama3-1t-B (subset mode).
+  - id: llama3-1t-B
+    division: closed
+    family: checkpointing
+    model: llama3-1t
+    accelerator: any
+    allowlist: checkpointing@1
+    core_configs: [0918b2db633242db]
+    editions: ["2.0"]
+    notes: v2.0 CLOSED — checkpoint.mode=subset, model.parallelism.data=2.
+  - id: llama3-405b-A
+    division: closed
+    family: checkpointing
+    model: llama3-405b
+    accelerator: any
+    allowlist: checkpointing@1
+    core_configs: [7adcfa87a5c4c8e6]
+    editions: ["3.0"]
+    reference: configs/dlio/workload/llama3_405b.yaml
+    notes: >-
+      full checkpoint. v2.0 OPEN (ANL) rows ran this exact configuration, but
+      cross-division comparisons are never declared; v2.0 CLOSED ran
+      llama3-405b-B (subset mode).
+  - id: llama3-405b-B
+    division: closed
+    family: checkpointing
+    model: llama3-405b
+    accelerator: any
+    allowlist: checkpointing@1
+    core_configs: [7e9f853cebd52aa6]
+    editions: ["2.0"]
+    notes: v2.0 CLOSED — checkpoint.mode=subset, model.parallelism.data=2.
+  - id: llama3-70b-A
+    division: closed
+    family: checkpointing
+    model: llama3-70b
+    accelerator: any
+    allowlist: checkpointing@1
+    core_configs: [3c53fe70d64f91d4]
+    editions: ["3.0"]
+    reference: configs/dlio/workload/llama3_70b.yaml
+    notes: >-
+      full checkpoint. v2.0 OPEN (ANL) rows ran this exact configuration, but
+      cross-division comparisons are never declared; v2.0 CLOSED ran
+      llama3-70b-B (subset mode).
+  - id: llama3-70b-B
+    division: closed
+    family: checkpointing
+    model: llama3-70b
+    accelerator: any
+    allowlist: checkpointing@1
+    core_configs: [c48a92d225d70ce8]
+    editions: ["2.0"]
+    notes: v2.0 CLOSED — checkpoint.mode=subset, model.parallelism.data=8.
+  - id: llama3-8b-A
+    division: closed
+    family: checkpointing
+    model: llama3-8b
+    accelerator: any
+    allowlist: checkpointing@1
+    core_configs: [68df04b7240e3fb0]
+    editions: ["2.0", "3.0"]
+    reference: configs/dlio/workload/llama3_8b.yaml
+    notes: identical configuration in v2.0 (CLOSED and OPEN) and v3.0.
+  - id: resnet50-a100-A
+    division: closed
+    family: training
+    model: resnet50
+    accelerator: a100
+    allowlist: training@1
+    core_configs: [61ae77b994223584, 4a03838105aa5808]
+    editions: ["1.0", "2.0"]
+    reference: configs/dlio/workload/resnet50_a100.yaml
+    notes: first hash = v1.0 spelling, second = v2.0 spelling (same workload).
+  - id: resnet50-h100-A
+    division: closed
+    family: training
+    model: resnet50
+    accelerator: h100
+    allowlist: training@1
+    core_configs: [c8ec10780f4c9bd7, 03a7be3df904e1e7]
+    editions: ["1.0", "2.0"]
+    reference: configs/dlio/workload/resnet50_h100.yaml
+    notes: first hash = v1.0 spelling, second = v2.0 spelling (same workload).
+  - id: retinanet-b200-A
+    division: closed
+    family: training
+    model: retinanet
+    accelerator: b200
+    allowlist: training@1
+    core_configs: [20c73f53486caba0]
+    editions: ["3.0"]
+    reference: configs/dlio/workload/retinanet_b200.yaml
+  - id: retinanet-mi355-A
+    division: closed
+    family: training
+    model: retinanet
+    accelerator: mi355
+    allowlist: training@1
+    core_configs: [66c43604eb650987]
+    editions: ["3.0"]
+    reference: configs/dlio/workload/retinanet_mi355.yaml
+  - id: unet3d-a100-A
+    division: closed
+    family: training
+    model: unet3d
+    accelerator: a100
+    allowlist: training@1
+    core_configs: [4c86124e6f33db13, 691cea309c4f2f52]
+    editions: ["1.0", "2.0"]
+    notes: >-
+      first hash = v1.0 spelling, second = v2.0 spelling. Both ran with
+      workflow.checkpoint=true; the shipped unet3d_a100.yaml has since turned
+      checkpointing off and no longer hashes to this class.
+  - id: unet3d-b200-A
+    division: closed
+    family: training
+    model: unet3d
+    accelerator: b200
+    allowlist: training@1
+    core_configs: [0d3ad0dec188becd, f636f5a57473fca2]
+    editions: ["3.0"]
+    reference: configs/dlio/workload/unet3d_b200.yaml
+    notes: >-
+      first hash = workflow.checkpoint=false (the shipped template); second =
+      workflow.checkpoint='True' as run by twelve v3.0 CLOSED ZettaLane rows
+      (two GCP systems). Declared the same workload 2026-09-19: the only
+      checkpoint is written after the final epoch (checkpoint_after_epoch 5 of
+      epochs 5), and DLIO saves checkpoints between blocks, outside the
+      per-block AU / throughput window.
+  - id: unet3d-h100-A
+    division: closed
+    family: training
+    model: unet3d
+    accelerator: h100
+    allowlist: training@1
+    core_configs: [f4d46006aa421634, 0f3dd7a4bf6433a3]
+    editions: ["1.0", "2.0"]
+    notes: >-
+      first hash = v1.0 spelling, second = v2.0 spelling. Both ran with
+      workflow.checkpoint=true; the shipped unet3d_h100.yaml has since turned
+      checkpointing off and no longer hashes to this class.
