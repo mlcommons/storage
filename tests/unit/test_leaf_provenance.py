@@ -284,7 +284,8 @@ class TestConstants:
 class TestCoreConfig:
     def test_allowlists_load_with_family_bindings(self):
         table = load_allowlists()
-        assert table["families"] == {"training": "training@1", "checkpointing": "checkpointing@1"}
+        assert table["families"] == {"training": "training@1", "checkpointing": "checkpointing@1",
+                                     "kv_cache": "kv_cache@1", "vector_database": "vector_database@1"}
         ck = table["allowlists"]["checkpointing@1"]
         assert "checkpoint.checkpoint_folder" in ck["exclude"]
         assert "checkpoint.num_checkpoints_write" in ck["exclude"]
@@ -343,9 +344,12 @@ class TestCoreConfig:
         assert prov.core_config_hash({k: flat[k] for k in cc["keys"]}) == cc["hash"]
 
     @pytest.mark.parametrize("family", ["kv_cache", "vector_database"])
-    def test_non_dlio_families_stamp_unknown(self, family):
+    def test_non_dlio_placeholder_blocks_stamp_unknown(self, family):
+        """The flat CLI keys of a pre-allowlist kv_cache / vector_database leaf
+        describe no workload: allowlisted but unhashed (tests/unit/
+        test_kvcache_vdb_allowlists.py has the structured blocks)."""
         cc = compute_core_config({"model": "llama3.1-8b", "num_users": 10}, family)
-        assert cc == {"algorithm": CORE_CONFIG_ALGORITHM, "allowlist": UNKNOWN,
+        assert cc == {"algorithm": CORE_CONFIG_ALGORITHM, "allowlist": f"{family}@1",
                       "hash": UNKNOWN, "keys": []}
 
     def test_no_allowlisted_keys_present_is_unknown_not_empty_hash(self):

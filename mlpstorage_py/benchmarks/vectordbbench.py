@@ -139,7 +139,9 @@ class VectorDBBenchmark(Benchmark):
         # Surface the VDB reportgen identity keys into metadata['parameters']
         # (base.get_metadata sources that block from self.combined_params).
         # reportgen reads run.parameters for the final-table identity columns
-        # Vector Count / Vector Dimension / Index Type / Engine.
+        # Vector Count / Vector Dimension / Index Type / Engine. The resolved
+        # config sections that describe the workload for the core-config-v1
+        # hash join them in ``metadata`` (they read the run's recorded output).
         self.combined_params = self._reportgen_params()
 
         self.verify_benchmark()
@@ -164,6 +166,97 @@ class VectorDBBenchmark(Benchmark):
             "num_vectors": getattr(self.args, "num_vectors", None),
             "dimension": getattr(self.args, "dimension", None),
         }
+
+    def _recorded_run_identity(self) -> Dict[str, Any]:
+        """What the finished run recorded about the collection it queried: the
+        native query stats (``num_vectors`` / ``dimension`` / ``index_type`` /
+        ``database``, the same source ``summary.json`` is projected from) and the
+        ground-truth coverage in ``result_verdict.json`` (``flat_setup.total_vectors``
+        = the collection size). Empty before the bench has run."""
+        from mlpstorage_py.benchmarks.vdb_summary import build_vdb_summary
+
+        out_dir = getattr(self, "run_result_output", None)
+        try:
+            stats = build_vdb_summary(out_dir) or {}
+        except Exception:  # noqa: BLE001 -- identity is best-effort, never fatal
+            stats = {}
+        verdict: Dict[str, Any] = {}
+        try:
+            with open(os.path.join(out_dir, "result_verdict.json"), "r", encoding="utf-8") as fd:
+                loaded = json.load(fd)
+            verdict = loaded if isinstance(loaded, dict) else {}
+        except (OSError, ValueError, TypeError):
+            verdict = {}
+        flat_setup = verdict.get("flat_setup") if isinstance(verdict.get("flat_setup"), dict) else {}
+        database = stats.get("database") if isinstance(stats.get("database"), dict) else {}
+        return {
+            "database": database.get("database"),
+            "index_type": stats.get("index_type"),
+            "num_vectors": stats.get("num_vectors") if stats.get("num_vectors") is not None
+            else flat_setup.get("total_vectors"),
+            "dimension": stats.get("dimension"),
+        }
+
+    def _workload_parameters(self) -> Dict[str, Any]:
+        """The workload this invocation drove, as the sections of the VectorDB
+        config -- ``database`` / ``index`` / ``dataset``, plus ``benchmark`` for a
+        run -- taken from the loaded YAML with the CLI folded in (CLI wins) and,
+        for a run, what the run itself recorded about the collection it queried
+        on top (a run against a 10M collection with the 1M default config
+        records 10M). ``core-config-v1`` hashes the Rules.md-fixed subset
+        (backend, index family, scale, recall target; allowlist
+        ``vector_database@1``). ``None`` values are left out, so a bare ``run``
+        that names no scale records none rather than ``null``.
+        """
+        import copy
+
+        a = self.args
+        y = self.yaml_params if isinstance(self.yaml_params, dict) else {}
+        recorded = self._recorded_run_identity() if self.command == "run" else {}
+
+        def section(name: str) -> Dict[str, Any]:
+            v = y.get(name)
+            return copy.deepcopy(v) if isinstance(v, dict) else {}
+
+        def put(d: Dict[str, Any], key: str, *candidates: Any) -> None:
+            for c in candidates:
+                if c is not None:
+                    d[key] = c
+                    return
+
+        database = section("database")
+        put(database, "database", recorded.get("database"), getattr(a, "vdb_engine", None))
+
+        index = section("index")
+        if self.command in ("datasize", "datagen"):
+            put(index, "index_type", self._effective_index_type())
+        else:
+            put(index, "index_type", recorded.get("index_type"), getattr(a, "index_type", None),
+                getattr(a, "vdb_index", None))
+        put(index, "metric_type", getattr(a, "metric_type", None))
+
+        dataset = section("dataset")
+        put(dataset, "num_vectors", recorded.get("num_vectors"), getattr(a, "num_vectors", None))
+        put(dataset, "dimension", recorded.get("dimension"), getattr(a, "dimension", None),
+            getattr(a, "vector_dim", None))
+        for key in ("distribution", "num_shards", "vector_dtype", "chunk_size"):
+            put(dataset, key, getattr(a, key, None))
+        if self.command == "datagen":
+            put(dataset, "batch_size", getattr(a, "batch_size", None))
+
+        block: Dict[str, Dict[str, Any]] = {"database": database, "index": index, "dataset": dataset}
+        if self.command == "run":
+            benchmark = section("benchmark")
+            put(benchmark, "mode", getattr(a, "benchmark_mode", None))
+            for key in ("runtime", "queries", "batch_size", "report_count", "num_query_processes",
+                        "search_ef", "num_query_vectors"):
+                put(benchmark, key, getattr(a, key, None))
+            put(benchmark, "search_limit", getattr(a, "search_limit", None))
+            # the bench receives ``recall_k or search_limit`` (execute_run)
+            put(benchmark, "recall_k", getattr(a, "recall_k", None), getattr(a, "search_limit", None),
+                benchmark.get("search_limit"))
+            block["benchmark"] = benchmark
+        return {name: {k: v for k, v in sec.items() if v is not None} for name, sec in block.items()}
 
     def _resolve_storage_args(self):
         """Record the VDB storage location on ``self.args`` (storage#802).
@@ -1189,6 +1282,11 @@ class VectorDBBenchmark(Benchmark):
     def metadata(self) -> Dict[str, Any]:
         """Generate metadata for the VectorDB benchmark run."""
         base_metadata = super().metadata
+        # The workload sections next to the reportgen identity keys (allowlist
+        # vector_database@1); for a run they read the recorded output, so
+        # they are built here, at write time, not in __init__.
+        base_metadata["parameters"] = {**(base_metadata.get("parameters") or {}),
+                                       **self._workload_parameters()}
 
         is_dist = (
             self._is_distributed()

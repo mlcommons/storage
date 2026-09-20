@@ -219,7 +219,7 @@ class EditionCheck(BaseCheck):
                 continue
             core = (stamp.core_config or {}).get("hash", UNKNOWN)
             if not isinstance(core, str) or core == UNKNOWN:
-                continue  # no allowlist for this family (kv_cache, vector_database)
+                continue  # the leaf recorded no hashable workload (e.g. a pre-allowlist kv_cache / vector_database leaf)
             family, model = info.get("benchmark", UNKNOWN), info.get("model", UNKNOWN)
             accelerator = self._accelerator(metadata)
             division = info.get("mode", UNKNOWN)

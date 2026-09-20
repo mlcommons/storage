@@ -40,6 +40,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 from dataclasses import dataclass
 from importlib import metadata as _importlib_metadata
 from pathlib import Path
@@ -311,8 +312,9 @@ def _key_allowed(key: str, include: List[str], exclude: List[str]) -> bool:
 def compute_core_config(parameters: Any, family: str) -> Dict[str, Any]:
     """The ``core_config`` block for a run of ``family`` with these parameters.
 
-    ``family`` is a ``BENCHMARK_TYPES`` value. Families without an allowlist
-    (kv_cache, vector_database) get ``allowlist``/``hash`` = ``"unknown"``.
+    ``family`` is a ``BENCHMARK_TYPES`` value. A family without an allowlist
+    gets ``allowlist``/``hash`` = ``"unknown"``; a block with none of the
+    allowlisted keys hashes ``unknown`` under the named allowlist.
     """
     table = load_allowlists()
     list_id = table["families"].get(family)
@@ -333,6 +335,180 @@ def compute_core_config(parameters: Any, family: str) -> Dict[str, Any]:
                 "hash": UNKNOWN, "keys": []}
     return {"algorithm": CORE_CONFIG_ALGORITHM, "allowlist": list_id,
             "hash": core_config_hash({k: flat[k] for k in keys}), "keys": keys}
+
+
+# --- Workload blocks of the non-DLIO families --------------------------------
+#
+# kv_cache and vector_database have no DLIO config; what ``metadata['parameters']``
+# should hold for them is defined next to their allowlists in
+# ``rules/core_config_keys.yaml``. The runtime writes the block; a leaf written
+# before the block existed (every v3.0 leaf) is rebuilt here from what it did
+# record, so it hashes like a fresh run of the same workload. Nothing usable
+# recorded -> the flat placeholders stay and the hash is ``unknown``.
+
+KVCACHE_OPTION_KEYS = ("model", "num_users", "duration", "gpu_mem_gb", "cpu_mem_gb",
+                       "max_concurrent_allocs", "generation_mode")
+_KVCACHE_WRAPPER_OWN = ("rank_output_base", "rank_cache_base", "seed_base", "config")
+_KVCACHE_OPTION_RE = re.compile(r"option_(\d+)/trial_(\d+)")
+
+
+def kvcache_config_kind(path: Any) -> str:
+    """``default`` for the wrapper-adjacent ``kv_cache_benchmark/config.yaml``
+    (or no ``--config`` at all), ``custom`` for anything else."""
+    if path is None:
+        return "default"
+    p = Path(str(path))
+    return "default" if (p.name, p.parent.name) == ("config.yaml", "kv_cache_benchmark") else "custom"
+
+
+def _argv_pairs(tokens: List[str]) -> Dict[str, Any]:
+    """``--key value`` / ``--flag`` -> ``{key: value}`` / ``{flag: True}`` with
+    argparse-style underscored keys (values stay strings; ``_canon`` normalises)."""
+    out: Dict[str, Any] = {}
+    i = 0
+    while i < len(tokens):
+        tok = tokens[i]
+        if tok.startswith("--") and len(tok) > 2:
+            key = tok[2:].replace("-", "_")
+            if i + 1 < len(tokens) and not tokens[i + 1].startswith("--"):
+                out[key] = tokens[i + 1]
+                i += 2
+            else:
+                out[key] = True
+                i += 1
+        else:
+            i += 1
+    return out
+
+
+def _kvcache_block_from_commands(metadata: dict) -> Optional[dict]:
+    """The kv_cache workload block, rebuilt from the ``mlperf_wrapper.py`` command
+    lines a leaf recorded in ``command_output_files`` (one per Option x trial).
+    ``None`` unless all three Options are there, complete and self-consistent."""
+    recorded = metadata.get("command_output_files")
+    if not isinstance(recorded, list):
+        return None
+    options: Dict[str, dict] = {}
+    trials: Dict[str, int] = {}
+    seeds: set = set()
+    configs: set = set()
+    features: Optional[dict] = None
+    for entry in recorded:
+        cmd = entry.get("command") if isinstance(entry, dict) else None
+        if not isinstance(cmd, str) or "mlperf_wrapper.py" not in cmd:
+            continue
+        try:
+            tokens = shlex.split(cmd.split("mlperf_wrapper.py", 1)[1])
+        except ValueError:
+            continue
+        kv = _argv_pairs(tokens)
+        m = _KVCACHE_OPTION_RE.search(str(kv.get("rank_output_base", "")))
+        if not m:
+            continue
+        option, trial = m.group(1), int(m.group(2))
+        opt = {k: _canon(kv[k]) for k in KVCACHE_OPTION_KEYS if k in kv}
+        if len(opt) != len(KVCACHE_OPTION_KEYS):
+            return None
+        if options.setdefault(option, opt) != opt:
+            return None  # trials of one Option disagree: not one workload
+        trials[option] = max(trials.get(option, 0), trial + 1)
+        seeds.add(kv.get("seed_base"))
+        configs.add(kvcache_config_kind(kv.get("config")))
+        feats = {k: _canon(v) for k, v in kv.items()
+                 if k not in KVCACHE_OPTION_KEYS and k not in _KVCACHE_WRAPPER_OWN}
+        if features is None:
+            features = feats
+        elif features != feats:
+            return None
+    if set(options) != {"1", "2", "3"} or len(seeds) != 1 or None in seeds or len(configs) != 1:
+        return None
+    args = metadata.get("args") if isinstance(metadata.get("args"), dict) else {}
+    sequence: Dict[str, Any] = {"seed": _canon(next(iter(seeds))), "trials": max(trials.values())}
+    delay = args.get("inter_option_delay")
+    if delay is not None:
+        sequence["inter_option_delay_s"] = delay
+    sequence["config"] = next(iter(configs))
+    return {"options": {o: options[o] for o in ("1", "2", "3")}, "sequence": sequence,
+            "features": features or {}}
+
+
+def _read_json_file(path: Path) -> Optional[dict]:
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    return data if isinstance(data, dict) else None
+
+
+def _first(*values):
+    return next((v for v in values if v is not None), None)
+
+
+def _vdb_block_from_leaf(metadata: dict, leaf_dir) -> Optional[dict]:
+    """The vector_database workload block, rebuilt from a leaf's recorded
+    outputs -- ``summary.json`` (MPI runs), ``config.json`` + ``result_verdict.json``
+    (single-node runs), the bench argv in ``executed_command`` and the CLI
+    ``args`` -- recorded outputs first. ``None`` unless every key the command
+    records (load keys; plus the recall target for a run) was found."""
+    args = metadata.get("args") if isinstance(metadata.get("args"), dict) else {}
+    command = _first(args.get("command"), metadata.get("command"))
+    leaf = Path(leaf_dir) if leaf_dir is not None else None
+    summary = (_read_json_file(leaf / "summary.json") if leaf else None) or {}
+    config = (_read_json_file(leaf / "config.json") if leaf else None) or {}
+    verdict = (_read_json_file(leaf / "result_verdict.json") if leaf else None) or {}
+    argv: Dict[str, Any] = {}
+    executed = metadata.get("executed_command")
+    if isinstance(executed, str) and " -- " in executed:
+        try:
+            argv = _argv_pairs(shlex.split(executed.split(" -- ", 1)[1]))
+        except ValueError:
+            argv = {}
+    database = summary.get("database") if isinstance(summary.get("database"), dict) else {}
+    flat_setup = verdict.get("flat_setup") if isinstance(verdict.get("flat_setup"), dict) else {}
+    engine = _first(database.get("database"), args.get("vdb_engine"), metadata.get("vdb_engine"))
+    index_type = _first(summary.get("index_type"), config.get("index_type"), args.get("index_type"),
+                        args.get("vdb_index"), metadata.get("vdb_index"))
+    num_vectors = _first(summary.get("num_vectors"), flat_setup.get("total_vectors"), args.get("num_vectors"))
+    dimension = _first(summary.get("dimension"), config.get("vector_dim"), argv.get("vector_dim"),
+                       args.get("vector_dim"), args.get("dimension"))
+    block: Dict[str, Any] = {}
+    if engine is not None:
+        block["database"] = {"database": engine}
+    if index_type is not None:
+        block["index"] = {"index_type": index_type}
+    dataset = {k: _canon(v) for k, v in (("num_vectors", num_vectors), ("dimension", dimension)) if v is not None}
+    if len(dataset) == 2:
+        block["dataset"] = dataset
+    required = {"database", "index", "dataset"}
+    if command == "run":
+        search_limit = _first(config.get("search_limit"), argv.get("search_limit"), args.get("search_limit"))
+        recall_k = _first(config.get("recall_k"), argv.get("recall_k"), args.get("recall_k"), search_limit)
+        benchmark = {k: _canon(v) for k, v in (("recall_k", recall_k), ("search_limit", search_limit))
+                     if v is not None}
+        if len(benchmark) == 2:
+            block["benchmark"] = benchmark
+        required.add("benchmark")
+    return block if required <= set(block) else None
+
+
+def workload_parameters(family: str, metadata: Any, leaf_dir=None) -> dict:
+    """The parameter block ``core-config-v1`` hashes for a leaf: ``metadata['parameters']``
+    as recorded, with the family's workload block rebuilt from the leaf's other
+    records when the tool that wrote the leaf did not record it yet (kv_cache:
+    the wrapper command lines; vector_database: the result files, argv and CLI
+    args). DLIO families are returned as recorded."""
+    params = metadata.get("parameters") if isinstance(metadata, dict) else None
+    params = dict(params) if isinstance(params, dict) else {}
+    if family == "kv_cache" and not isinstance(params.get("options"), dict):
+        block = _kvcache_block_from_commands(metadata)
+        if block:
+            params.update(block)
+    elif family == "vector_database" and not isinstance(params.get("dataset"), dict):
+        block = _vdb_block_from_leaf(metadata, leaf_dir)
+        if block:
+            params.update(block)
+    return params
 
 
 # --- Runtime collection -----------------------------------------------------
@@ -630,7 +806,9 @@ def derive_leaf_provenance(leaf_dir, results_root=None, log=None) -> RunProvenan
 
     family = _family_of(leaf, metadata)
     params = (metadata or {}).get("parameters")
-    if family and isinstance(params, dict):
+    if family in ("kv_cache", "vector_database") and metadata is not None:
+        core_config = compute_core_config(workload_parameters(family, metadata, leaf), family)
+    elif family and isinstance(params, dict):
         core_config = compute_core_config(params, family)
     else:
         core_config = {"algorithm": CORE_CONFIG_ALGORITHM, "allowlist": UNKNOWN,

@@ -21,8 +21,10 @@ schema: mlps-core-config-allowlist/1
 families:
   training: training@1
   checkpointing: checkpointing@1
-  # kv_cache and vector_database are not DLIO workloads and have no allowlist
-  # yet; their stamps carry hash "unknown" until one is defined.
+  # kv_cache and vector_database are not DLIO workloads: their parameter
+  # block is the tool's own record of the workload it drove (see each list).
+  kv_cache: kv_cache@1
+  vector_database: vector_database@1
 
 allowlists:
   training@1:
@@ -71,3 +73,63 @@ allowlists:
       # a write-phase run and a read-phase run of one submission share a class.
       - checkpoint.num_checkpoints_write
       - checkpoint.num_checkpoints_read
+
+  # The KVCache benchmark (Rules.md 6): a run is the three Options of
+  # Table KVCache-1 driven through mlperf_wrapper.py. The runtime records, under
+  # metadata['parameters']:
+  #   options.<1|2|3>.{model,num_users,duration,gpu_mem_gb,cpu_mem_gb,
+  #                    max_concurrent_allocs,generation_mode}
+  #                        -- exactly the per-Option arguments emitted to
+  #                           kv-cache.py (CLOSED: WORKLOAD_PARAMS verbatim,
+  #                           6.3.1.1; OPEN: user flags supersede per key, 6.6.2)
+  #   sequence.{seed,trials,inter_option_delay_s,config}
+  #                        -- the 6.3.2.1 locks; config is "default" (the
+  #                           wrapper-adjacent kv_cache_benchmark/config.yaml,
+  #                           covered by the code image) or "custom"
+  #   features.*           -- the global kv-cache.py flags actually forwarded
+  #                           (RAG, autoscaling, multi-turn, prefix caching,
+  #                           latency tracing, performance profile); {} in CLOSED
+  # Leaves written before this block existed (every v3.0 leaf) are rebuilt at
+  # read time from the wrapper command lines the leaf recorded in
+  # command_output_files (mlpstorage_py/provenance.py workload_parameters).
+  kv_cache@1:
+    include:
+      - options.*
+      - sequence.seed
+      - sequence.config
+      - features.*
+    # Deliberately absent: sequence.trials and sequence.inter_option_delay_s
+    # (how often and how spaced the same workload is measured, not what each
+    # client does -- the 6.3.2.1 locks are enforced by the runtime and the
+    # validator, not by the class); cache_dir; the client topology hosts /
+    # npernode / num_processes (the 6.3.3 scaling axis a submitter chooses);
+    # and the flat model / num_users / duration / gpu_mem_gb / cpu_mem_gb /
+    # generation_mode / performance_profile keys next to the block, which are
+    # the CLI values the run checker reads (issue #537) and which never reach
+    # kv-cache.py in CLOSED.
+
+  # The VectorDB benchmark (Rules.md 5): metadata['parameters'] carries the
+  # sections of the resolved VectorDB config (configs/vectordbbench/*.yaml)
+  # with the CLI folded in -- database / index / dataset, plus benchmark for a
+  # run. Rules.md 5.6.4 fixes the backend (5.6.2), the index family (5.6.3)
+  # and the dataset scale (5.1.1: num_vectors x dimension); recall_k and
+  # search_limit define what "recall" means (5.3.2) and are not in the
+  # tunable table. Leaves written before this block existed are rebuilt at
+  # read time from summary.json, config.json and result_verdict.json.
+  vector_database@1:
+    include:
+      - database.database
+      - index.index_type
+      - dataset.num_vectors
+      - dataset.dimension
+      - benchmark.recall_k
+      - benchmark.search_limit
+    # Deliberately absent: everything in the 5.6.4 "Tunable Parameters for
+    # CLOSED" table -- index.metric_type and the per-index build / search
+    # parameters (max_degree, search_list_size, ef_construction, inline_pq,
+    # search_ef), benchmark.mode / runtime / queries / batch_size /
+    # report_count / num_query_processes, dataset.collection_name /
+    # num_shards / chunk_size / batch_size / vector_dtype, storage.*,
+    # database.host / port -- plus benchmark.num_query_vectors (the recall
+    # sample) and dataset.distribution (a load-time property a run leaf
+    # cannot see; 5.2 owns the load).

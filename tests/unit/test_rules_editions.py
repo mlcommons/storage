@@ -134,7 +134,7 @@ class TestTable:
         for c in t.classes:
             assert re.fullmatch(r"[a-z0-9.]+(-[a-z0-9]+)*-[A-Z]", c.id), c.id
             assert c.division in ("closed", "open", "whatif"), c.id
-            assert c.family in ("training", "checkpointing"), c.id
+            assert c.family in ("training", "checkpointing", "vector_database", "kv_cache"), c.id
             assert c.accelerator in ("b200", "mi355", "h100", "a100", "any"), c.id
             assert c.allowlist in allowlists, c.id
             assert c.editions and set(c.editions) <= set(t.editions), c.id
@@ -305,7 +305,8 @@ class TestClassify:
         t = _table()
         ids = {c.id for c in t.classes_for("3.0")}
         assert ids == {"unet3d-b200-A", "retinanet-b200-A", "retinanet-mi355-A",
-                       "llama3-8b-A", "llama3-70b-A", "llama3-405b-A", "llama3-1t-A"}
+                       "llama3-8b-A", "llama3-70b-A", "llama3-405b-A", "llama3-1t-A",
+                       "llama3.1-8b-A", "milvus-diskann-A", "milvus-diskann-B"}
         assert t.classes_for("0.5") == []
 
 

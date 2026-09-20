@@ -33,6 +33,7 @@ from mlpstorage_py.config import (
     KVCACHE_MODEL_DEFAULT,
 )
 from mlpstorage_py.editions import checker_parameters, current_edition
+from mlpstorage_py.provenance import KVCACHE_OPTION_KEYS, kvcache_config_kind
 from mlpstorage_py.interfaces import BenchmarkCommand
 from mlpstorage_py.utils import generate_mpi_prefix_cmd, MLPSJsonEncoder
 
@@ -278,10 +279,12 @@ class KVCacheBenchmark(Benchmark):
             self.logger.error("--config is not valid in a CLOSED submission")
             return 1
 
-        # Resolve effective values, applying mandated defaults
-        seed = seed_arg if seed_arg is not None else closed_seed
-        trials = trials_arg if trials_arg is not None else closed_trials
-        inter_option_delay = inter_option_delay_arg if inter_option_delay_arg is not None else closed_delay
+        # Resolve effective values, applying mandated defaults (the same
+        # resolution metadata['parameters']['sequence'] records).
+        sequence = self._resolve_sequence()
+        seed = sequence['seed']
+        trials = sequence['trials']
+        inter_option_delay = sequence['inter_option_delay_s']
         config = config_arg
 
         hosts = getattr(self.args, 'hosts', None) or ['localhost']
@@ -510,9 +513,19 @@ class KVCacheBenchmark(Benchmark):
     # ------------------------------------------------------------------
 
     def _build_option_kvcache_args(self, option: int, is_closed: bool) -> List[str]:
-        """Return the kv-cache.py CLI args for this option.
+        """Return the kv-cache.py CLI args for this option: ``--key value`` for
+        every entry of :meth:`_option_workload_params`, in table order."""
+        out = []
+        for key, value in self._option_workload_params(option, is_closed).items():
+            out.extend([f'--{key}', str(value)])
+        return out
 
-        CLOSED: emits WORKLOAD_PARAMS[option] verbatim — MLPerf-mandated, no
+    def _option_workload_params(self, option: int, is_closed: bool) -> Dict[str, Any]:
+        """The per-option parameters emitted to kv-cache.py, keyed as the flags
+        are spelled (``num-users``). One builder feeds both the wrapper argv and
+        ``metadata['parameters']['options']`` (core-config allowlist kv_cache@1).
+
+        CLOSED: WORKLOAD_PARAMS[option] verbatim — MLPerf-mandated, no
         user input can reach kv-cache.py through this path because the CLOSED
         CLI does not expose the corresponding flags.
 
@@ -555,16 +568,43 @@ class KVCacheBenchmark(Benchmark):
                     getattr(self.args, 'generation_mode', None) or defaults['generation-mode']
                 ),
             }
-        out = []
-        for key, value in params.items():
-            out.extend([f'--{key}', str(value)])
-        return out
+        return params
+
+    # Global kv-cache.py knobs, in forwarding order: store_true flags first
+    # (forwarded iff True), then value flags (forwarded iff not None).
+    _GLOBAL_TRUE_FLAGS = (
+        ('disable_multi_turn', '--disable-multi-turn'),
+        ('disable_prefix_caching', '--disable-prefix-caching'),
+        ('enable_rag', '--enable-rag'),
+        ('enable_autoscaling', '--enable-autoscaling'),
+        ('enable_latency_tracing', '--enable-latency-tracing'),
+    )
+    _GLOBAL_VALUE_FLAGS = (
+        ('rag_num_docs', '--rag-num-docs'),
+        ('autoscaler_mode', '--autoscaler-mode'),
+        ('performance_profile', '--performance-profile'),
+    )
 
     def _build_global_kvcache_args(self, is_closed: bool) -> List[str]:
-        """Return the global (non-per-option) kv-cache.py CLI args.
+        """Return the global (non-per-option) kv-cache.py CLI args: the flags of
+        :meth:`_global_workload_features`, in forwarding order."""
+        features = self._global_workload_features(is_closed)
+        out: List[str] = []
+        for attr, flag in self._GLOBAL_TRUE_FLAGS:
+            if attr in features:
+                out.append(flag)
+        for attr, flag in self._GLOBAL_VALUE_FLAGS:
+            if attr in features:
+                out.extend([flag, str(features[attr])])
+        return out
+
+    def _global_workload_features(self, is_closed: bool) -> Dict[str, Any]:
+        """The global (non-per-option) kv-cache.py knobs actually forwarded, as
+        ``{attr: value}`` (``True`` for a store_true flag). This is also
+        ``metadata['parameters']['features']`` (allowlist kv_cache@1).
 
         These are tuning knobs that apply across all three options. They are
-        forwarded only in OPEN/whatif; CLOSED returns an empty list to preserve
+        forwarded only in OPEN/whatif; CLOSED forwards nothing to preserve
         the MLPerf-mandated invocation shape (per-option WORKLOAD_PARAMS only).
 
         For `store_true` flags we emit the flag only when truthy. For value
@@ -573,31 +613,49 @@ class KVCacheBenchmark(Benchmark):
         any value the user set propagates faithfully.
         """
         if is_closed:
-            return []
-
-        out: List[str] = []
-        # store_true flags — forward iff True.
-        for attr, flag in (
-            ('disable_multi_turn', '--disable-multi-turn'),
-            ('disable_prefix_caching', '--disable-prefix-caching'),
-            ('enable_rag', '--enable-rag'),
-            ('enable_autoscaling', '--enable-autoscaling'),
-            ('enable_latency_tracing', '--enable-latency-tracing'),
-        ):
+            return {}
+        features: Dict[str, Any] = {}
+        for attr, _flag in self._GLOBAL_TRUE_FLAGS:
             if getattr(self.args, attr, False):
-                out.append(flag)
-
-        # Value flags — forward iff the user supplied a non-None value.
-        for attr, flag in (
-            ('rag_num_docs', '--rag-num-docs'),
-            ('autoscaler_mode', '--autoscaler-mode'),
-            ('performance_profile', '--performance-profile'),
-        ):
+                features[attr] = True
+        for attr, _flag in self._GLOBAL_VALUE_FLAGS:
             value = getattr(self.args, attr, None)
             if value is not None:
-                out.extend([flag, str(value)])
+                features[attr] = value
+        return features
 
-        return out
+    def _resolve_sequence(self) -> Dict[str, Any]:
+        """The 6.3.2.1 sequence values this run uses: the user's value when set,
+        else the current edition's CLOSED lock (``checker.kvcache_closed_sequence``);
+        ``config`` is ``default`` (wrapper-adjacent config.yaml) or ``custom``.
+        Recorded as ``metadata['parameters']['sequence']``."""
+        locks = checker_parameters().kvcache_closed_sequence
+        seed = getattr(self.args, 'seed', None)
+        trials = getattr(self.args, 'trials', None)
+        delay = getattr(self.args, 'inter_option_delay', None)
+        return {
+            'seed': seed if seed is not None else locks['seed'],
+            'trials': trials if trials is not None else locks['trials'],
+            'inter_option_delay_s': delay if delay is not None else locks['inter_option_delay_s'],
+            'config': kvcache_config_kind(getattr(self.args, 'config', None)),
+        }
+
+    def _workload_block(self) -> Dict[str, Any]:
+        """``options`` / ``sequence`` / ``features``: the workload this run
+        drives, as core-config allowlist kv_cache@1 reads it (the block a
+        pre-allowlist leaf gets rebuilt from its command lines; see
+        provenance.workload_parameters)."""
+        is_closed = (getattr(self.args, 'mode', None) == 'closed')
+        options = {}
+        for option in (1, 2, 3):
+            params = self._option_workload_params(option, is_closed)
+            options[str(option)] = {key.replace('-', '_'): params[key]
+                                    for key in (k.replace('_', '-') for k in KVCACHE_OPTION_KEYS)}
+        return {
+            'options': options,
+            'sequence': self._resolve_sequence(),
+            'features': self._global_workload_features(is_closed),
+        }
 
     def _resolve_rank_layout(self, hosts):
         """Resolve (npernode, total_ranks) from user-supplied --num-processes and
@@ -1020,6 +1078,12 @@ class KVCacheBenchmark(Benchmark):
             'generation_mode': self.generation_mode,
             'performance_profile': self.performance_profile,
         }
+        # The workload actually driven -- the three Options as emitted to
+        # kv-cache.py, the 6.3.2.1 sequence values and the global flags
+        # forwarded -- for the core-config-v1 hash (allowlist kv_cache@1).
+        # In CLOSED the flat keys above are CLI placeholders that never reach
+        # kv-cache.py; this block is what ran.
+        base_metadata['parameters'].update(self._workload_block())
 
         # Add execution info for distributed runs
         exec_type = getattr(self.args, 'exec_type', None)
