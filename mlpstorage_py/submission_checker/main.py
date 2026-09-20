@@ -27,6 +27,7 @@ from .checks.kvcache_checks import KVCacheCheck
 from .checks.pool_structure_checks import PoolStructureCheck
 from .checks.provenance_checks import ProvenanceCheck
 from .checks.edition_checks import EditionCheck
+from .checks.results_integrity_checks import ResultsIntegrityCheck
 from .checks.submission_structure_checks import SubmissionStructureCheck
 from .checks.system_yaml_schema_checks import SystemYamlSchemaCheck
 from .checks.training_checks import TrainingCheck
@@ -213,6 +214,13 @@ def run(args):
     # mlpstorage_py/rules/editions.yaml. Silent on derived (pre-stamp) leaves.
     edition_check = EditionCheck(log, config, args.input)
     if not edition_check():
+        errors.append(args.input)
+
+    # LEAF-01 / RPT-01: a kv_cache / vector_database run leaf without its
+    # *_metadata.json (reportgen would drop it, #835) and rollup tables that
+    # disagree with the workload-level tables beneath them (#836).
+    integrity_check = ResultsIntegrityCheck(log, config, args.input)
+    if not integrity_check():
         errors.append(args.input)
 
     # Main loop over all the submissions
