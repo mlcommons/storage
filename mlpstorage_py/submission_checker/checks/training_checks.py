@@ -7,6 +7,7 @@ from ..loader import SubmissionLogs
 from ..rule_registry import rule
 from .helpers import (
     _check_filesystem_separation,
+    division_of,
     _check_code_image_layered,
     read_fs_separation_sidecar,
 )
@@ -22,6 +23,13 @@ from mlpstorage_py.rules.run_checkers.training import (
 )
 from mlpstorage_py.rules.param_hints import format_typo_hint
 _TOOL_INJECTED_PARAMS = _TrainingRunRulesChecker.TOOL_INJECTED_PARAMS
+# The allow-lists themselves come from the same place (mlcommons/storage#842):
+# §3.6.2/§3.6.3 used to carry hand-copied sets that had drifted (missing
+# storage.storage_options.prefetch_window — #666, Rules.md §3.6.2 table — and
+# checkpoint.checkpoint_folder), which went unnoticed while the two rules were
+# dormant. A run the tool verified CLOSED at launch must validate CLOSED here.
+_CLOSED_ALLOWED_PARAMS = frozenset(_TrainingRunRulesChecker.CLOSED_ALLOWED_PARAMS)
+_OPEN_ALLOWED_PARAMS = frozenset(_TrainingRunRulesChecker.OPEN_ALLOWED_PARAMS)
 
 import math
 import os
@@ -878,19 +886,8 @@ class TrainingCheck(BaseCheck):
         if self.mode != "training":
             return valid
 
-        # Allowed parameters for CLOSED
-        allowed_params = {
-            "dataset.num_files_train",
-            "dataset.num_subfolders_train",
-            "dataset.data_folder",
-            "reader.read_threads",
-            "reader.computation_threads",
-            "reader.transfer_size",
-            "reader.prefetch_size",
-            "reader.odirect",
-            "storage.storage_root",
-            "storage.storage_type"
-        }
+        # Allowed parameters for CLOSED — the launch-time verifier's list.
+        allowed_params = _CLOSED_ALLOWED_PARAMS
 
         for summary, metadata, ts in self.submissions_logs.run_files:
             if metadata is None:
@@ -899,12 +896,17 @@ class TrainingCheck(BaseCheck):
                     self.path, ts,
                 )
                 continue
-            verification = metadata.get("verification", "open")
+            verification = division_of(metadata, "open")
 
             if verification == "closed":
                 params_dict = metadata.get("override_parameters", {})
 
                 for param_key in params_dict.keys():
+                    # workflow.* is not allow-list business: the run checker
+                    # skips it here and judges workflow.checkpoint separately
+                    # (True is the required CLOSED form for unet3d). (#842)
+                    if param_key.startswith("workflow."):
+                        continue
                     # Tool-injected params (skip_listing, data_folder derived
                     # from --data-dir, object-storage backend keys, …) are not
                     # user overrides and must not count against the CLOSED
@@ -937,29 +939,9 @@ class TrainingCheck(BaseCheck):
         if self.mode != "training":
             return valid
 
-        # Additional allowed parameters for OPEN (beyond CLOSED)
-        open_allowed_params = {
-            "framework",
-            "dataset.format",
-            "dataset.num_samples_per_file",
-            "reader.data_loader"
-        }
-
-        # All CLOSED params are also allowed in OPEN
-        closed_params = {
-            "dataset.num_files_train",
-            "dataset.num_subfolders_train",
-            "dataset.data_folder",
-            "reader.read_threads",
-            "reader.computation_threads",
-            "reader.transfer_size",
-            "reader.prefetch_size",
-            "reader.odirect",
-            "storage.storage_root",
-            "storage.storage_type"
-        }
-
-        allowed_params = closed_params | open_allowed_params
+        # All CLOSED params plus the OPEN-only additions — the launch-time
+        # verifier's lists.
+        allowed_params = _CLOSED_ALLOWED_PARAMS | _OPEN_ALLOWED_PARAMS
 
         for summary, metadata, ts in self.submissions_logs.run_files:
             if metadata is None:
@@ -968,12 +950,14 @@ class TrainingCheck(BaseCheck):
                     self.path, ts,
                 )
                 continue
-            verification = metadata.get("verification", "open")
+            verification = division_of(metadata, "open")
 
             if verification == "open":
                 params_dict = metadata.get("override_parameters", {})
 
                 for param_key in params_dict.keys():
+                    if param_key.startswith("workflow."):
+                        continue  # see 3.6.2 (#842)
                     # Tool-injected params (skip_listing, data_folder derived
                     # from --data-dir, object-storage backend keys, …) are not
                     # user overrides and must not count against the OPEN

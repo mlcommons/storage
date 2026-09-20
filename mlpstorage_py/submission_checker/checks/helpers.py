@@ -15,6 +15,7 @@ Exports:
                                   (Phase 4 CD-04; shared by §3.6.1 and §5.6.1)
   _pair_checkpoint_runs — write/read run pairing helper (D-D2)
   _parse_iso_gap        — ISO-timestamp gap helper (D-D2, CHKPT-03)
+  division_of           — lower-cased ``metadata['verification']`` (#842)
 
 References:
   - D-B1..B7 in Phase 2 CONTEXT.md (df parsing, longest-prefix mount match)
@@ -40,6 +41,31 @@ from ..tools.code_image import (
     MalformedHashFile,
 )
 
+
+
+# ---------------------------------------------------------------------------
+# Division (CLOSED / OPEN) as recorded in *_metadata.json (#842)
+# ---------------------------------------------------------------------------
+
+def division_of(metadata, default=None):
+    """Return the run's recorded division, lower-cased, or ``default``.
+
+    ``mlpstorage`` writes the field as ``PARAM_VALIDATION.name`` —
+    ``"CLOSED"`` / ``"OPEN"``, uppercase (``benchmarks/base.py``) — while
+    every rule compares against the enum's lowercase ``.value``. Six rules
+    (4.6.2, 4.6.3, 4.6.4, 4.7.1, 3.6.2, 3.6.3) compared without folding and
+    so never fired on a real tree (mlcommons/storage#842). All division
+    gates go through this one helper so the writer's form and the rules'
+    literals can only disagree in one place, which
+    ``test_issue842_verification_case.py`` pins.
+
+    ``whatif`` runs record ``"verification": null`` (#571 Q3); ``None`` and a
+    missing key both yield ``default``.
+    """
+    value = (metadata or {}).get("verification")
+    if value is None:
+        return default
+    return str(value).lower()
 
 # ---------------------------------------------------------------------------
 # CAP-03 FS-separation sidecar reader (#601)
