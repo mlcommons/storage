@@ -120,7 +120,7 @@ def _collect_check_method_coverage() -> dict:
         wins if two classes claim the same ID (impossible by D-A4 design;
         each ID is owned by exactly one check method).
     """
-    from .. rule_registry import discover_rules  # noqa: E211 (style: relative)
+    from .. rule_registry import discover_rules, gated_overlaps  # noqa: E211 (style: relative)
 
     coverage = {}
     # Each check class is imported individually so a single broken import
@@ -175,7 +175,18 @@ def _collect_check_method_coverage() -> dict:
     # Surface duplicate bindings (almost certainly a copy-paste regression)
     # with a non-fatal warning. Last-writer still wins so the coverage
     # report renders, but the duplicate is no longer silent.
+    # discover_rules() projects onto the current rules edition: a binding
+    # gated to another edition (@rule(..., since=/until=)) is not counted
+    # here, since Rules.md at HEAD is the current edition. Two gated bindings
+    # of one rule id whose ranges meet are the replace-a-rule mistake.
     for cls in check_classes:
+        for rule_id, first, second in gated_overlaps(cls):
+            log.warning(
+                "rule_id %s is bound on %s.%s (%s) and %s.%s (%s) for overlapping "
+                "rules editions — close the old binding before the new one opens.",
+                rule_id, cls.__name__, first.method_name, first.gate,
+                cls.__name__, second.method_name, second.gate,
+            )
         for rule_id, (_rule_name, method_name) in discover_rules(cls).items():
             source = "{}.{}".format(cls.__name__, method_name)
             if rule_id in coverage:

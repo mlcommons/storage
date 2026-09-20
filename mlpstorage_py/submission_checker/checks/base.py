@@ -1,5 +1,8 @@
 from abc import ABC, abstractmethod
 
+from mlpstorage_py.config import RULES_EDITION
+from mlpstorage_py.submission_checker.rule_registry import gate_of
+
 
 class BaseCheck(ABC):
     """
@@ -77,13 +80,40 @@ class BaseCheck(ABC):
         prefix = "[%s %s] %s: " % (rule_id, rule_name, path)
         self.log.info(prefix + msg, *args)
 
+    @property
+    def edition(self):
+        """The rules edition this check instance validates against: the
+        edition of ``self.config`` (built per submission from its
+        ``submission.yaml`` by ``main.config_for_submission``), or the
+        current edition when there is no config or it carries none."""
+        edition = getattr(getattr(self, "config", None), "edition", None)
+        return edition if isinstance(edition, str) else RULES_EDITION
+
+    def rule_applies(self, check):
+        """Whether a registered check's ``@rule`` edition gate admits
+        :attr:`edition`. Undecorated callables and two-argument ``@rule``
+        bindings apply to every edition."""
+        return gate_of(check).applies_to(self.edition)
+
     def run_checks(self):
         """
         Execute all registered checks. Returns True if all checks pass, False otherwise.
+
+        A check whose ``@rule`` edition gate excludes :attr:`edition` is
+        skipped (debug line) and neither passes nor fails: its rule is bound
+        to another method for this edition, or to none.
         """
         valid = True
         errors = []
         for check in self.checks:
+            if not self.rule_applies(check):
+                self.log.debug(
+                    "skipping [%s %s] %s in %s: rules edition %s is outside its gate (%s)",
+                    getattr(check, "__rule_id__", "?"), getattr(check, "__rule_name__", "?"),
+                    getattr(check, "__name__", repr(check)), self.__class__.__name__,
+                    self.edition, gate_of(check),
+                )
+                continue
             try:
                 v = self.execute(check)
                 valid &= v
