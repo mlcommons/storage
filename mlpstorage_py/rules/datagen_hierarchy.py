@@ -50,13 +50,9 @@ from urllib.parse import urlparse
 import s3dlio
 
 from mlpstorage_py import __version__ as _MLPSTORAGE_VERSION
-from mlpstorage_py.config import (
-    MODELS,
-    MODELS_CLOSED,
-    MODELS_OPEN,
-)
+from mlpstorage_py.config import MODELS
 from mlpstorage_py.errors import ConfigurationError, ErrorCode
-from mlpstorage_py.editions import checker_parameters
+from mlpstorage_py.editions import checker_parameters, current_edition
 
 
 DATAGEN_MANIFEST_FILENAME = ".mlps-datagen-manifest.json"
@@ -67,15 +63,19 @@ DATAGEN_MANIFEST_SCHEMA_VERSION = 1
 # defines them inline in the check rather than exporting a constant.
 _DLIO_CONFIG_REQUIRED_FILES = ("config.yaml", "hydra.yaml", "overrides.yaml")
 
-_MODEL_ALLOWLIST: Dict[str, List[str]] = {
-    "closed": MODELS_CLOSED,
-    "open": MODELS_OPEN,
-    # Whatif carries no submission-strict model check; the reportgen
-    # D-29 policy already skips whatif for INVALID gates, and this
-    # helper mirrors that so a whatif operator can iterate on any
-    # known model without fighting the validator.
-    "whatif": MODELS,
-}
+_SUBMISSION_MODES = ("closed", "open", "whatif")
+
+
+def _model_allowlist(mode: str) -> Optional[List[str]]:
+    """The training models ``mode`` accepts: closed / open from the current
+    rules edition (editions.yaml ``workloads:``); whatif carries no
+    submission-strict model check (the reportgen D-29 policy already skips
+    whatif for INVALID gates), so every model the tool can run is allowed."""
+    if mode == "whatif":
+        return list(MODELS)
+    if mode in _SUBMISSION_MODES:
+        return current_edition().models("training", mode)
+    return None
 
 
 # --------------------------------------------------------------------------- #
@@ -99,13 +99,13 @@ def validate_supported_model(model: str, mode: str) -> None:
     if mode == "whatif":
         return
 
-    allowed = _MODEL_ALLOWLIST.get(mode)
+    allowed = _model_allowlist(mode)
     if allowed is None:
         raise ConfigurationError(
             f"Unsupported submission mode {mode!r} — expected one of "
-            f"{sorted(_MODEL_ALLOWLIST)}.",
+            f"{sorted(_SUBMISSION_MODES)}.",
             parameter="mode",
-            expected=sorted(_MODEL_ALLOWLIST),
+            expected=sorted(_SUBMISSION_MODES),
             actual=mode,
             code=ErrorCode.CONFIG_INVALID_VALUE,
         )

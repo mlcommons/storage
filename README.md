@@ -108,7 +108,7 @@ only the rolled-up `summary.csv`.
 | `--skip-output-file` | off | Suppress the per-submission text output file. |
 | `--reference-checksum MD5` | bundled `REFERENCE_CHECKSUMS` table | Override the expected MD5 for the `code/` tree (use when validating against a code variant that legitimately differs from the reference). |
 
-There is no edition flag. Each submission declares the rules edition it was produced under in its `submission.yaml`, and `validate` checks it with that edition's parameters from `mlpstorage_py/rules/editions.yaml` (a submission without a manifest is checked under the current edition; one declaring an edition this tool cannot check fails EDN-04). A rule whose logic changed between editions is bound per edition in the checker source (`@rule(..., since=, until=)`), so only the checks bound to that edition run.
+There is no edition flag. Each submission declares the rules edition it was produced under in its `submission.yaml`, and `validate` checks it with that edition's parameters from `mlpstorage_py/rules/editions.yaml` -- its `checker` block: the required leaf contents, the AU minimums, the Table 2 process counts and checkpoint sizes, the Table 3 accelerator memory and the KVCache sequence locks (a submission without a manifest is checked under the current edition; one declaring an edition this tool cannot check fails EDN-04). A rule whose logic changed between editions is bound per edition in the checker source (`@rule(..., since=, until=)`), so only the checks bound to that edition run.
 
 #### Examples
 

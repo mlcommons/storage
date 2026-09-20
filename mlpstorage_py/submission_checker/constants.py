@@ -31,17 +31,11 @@ CHECKPOINT_FILE_MAP = {
     "llama3-405b": "llama3_405b.yaml",
 }
 
-# Rules.md Table 2 (§4.3.4 surface) — CLOSED total MPI processes per model (TP × PP × DP).
-# DP (data parallelism) is NOT in the DLIO workload YAMLs (configs/dlio/workload/llama3_*.yaml);
-# only tensor and pipeline are recorded there. This constant encodes the BENCHMARK CONTRACT
-# for CLOSED submissions (the runtime workload config and the contract are two distinct sources
-# of truth — see D-C4 of Phase 2 CONTEXT.md).
-CLOSED_MPI_PROCESSES: dict[str, int] = {
-    "8b": 8,
-    "70b": 64,
-    "405b": 512,
-    "1t": 1024,
-}
+# Rules.md Table 2 "Total Processes" (TP x PP x DP) per CLOSED checkpointing
+# model moved into the rules editions table (mlpstorage_py/rules/editions.yaml
+# `checker.closed_mpi_processes`), read through Config.get_closed_mpi_processes
+# for the submission's edition. DP is not in the DLIO workload YAMLs, so the
+# table is the benchmark contract, distinct from the runtime workload config.
 
 # Rules.md 2.1.6 / 3.6.1 codeDirectoryContents / trainingClosedSubmissionChecksum
 # Reference hex MD5 of the canonical code/ tree per version. None means

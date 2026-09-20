@@ -10,11 +10,16 @@
 #            workload is added or retired -- never for a tool release.
 #            `current_edition` must equal config.RULES_EDITION (tested).
 #            `checker:` carries the parameters `validate` needs to check a
-#            submission of that edition (the required files and folders of
-#            every datagen / run / checkpoint leaf). Only an edition THIS tool
+#            submission of that edition: the required files and folders of
+#            every datagen / run / checkpoint leaf, the Rules.md 3.3.2 AU
+#            minimum per training model, the Table 2 CLOSED process counts
+#            and checkpoint sizes, the Table 3 simulated-accelerator memory
+#            and the 6.3.2.1 KVCache sequence locks. Only an edition THIS tool
 #            can check carries one; an edition without it is checked by the
 #            tool its `tool:` line names, and a submission.yaml declaring it
-#            fails EDN-04. The current edition must carry one (tested).
+#            fails EDN-04. The current edition must carry one (tested). The
+#            `mlpstorage` runtime reads the current edition's block for the
+#            same values (CLI choices, pre-flight gates, CLOSED defaults).
 #
 # classes:   the comparability classes. A class is the WG's assertion that runs
 #            of one (division, family, model, emulated accelerator) whose
@@ -130,6 +135,23 @@ editions:
           milvus: []
         kv_cache:
           llama3.1-8b: []
+      # Rules.md 2.1.11 / 2.1.21 name the same workloads in every division;
+      # OPEN may vary parameters, not workloads. kv_cache / vector_database
+      # mirror closed: the OPEN `--model` alternatives of 6.6.2 are CLI
+      # allowances, not sanctioned workloads.
+      open:
+        training:
+          unet3d: [b200, mi355]
+          retinanet: [b200, mi355]
+        checkpointing:
+          llama3-8b: [b200, mi355]
+          llama3-70b: [b200, mi355]
+          llama3-405b: [b200, mi355]
+          llama3-1t: [b200, mi355]
+        vector_database:
+          milvus: []
+        kv_cache:
+          llama3.1-8b: []
     # What `validate` requires of every leaf of this edition. The regexes are
     # the former submission_checker/constants.py dicts, byte for byte (the
     # frozen v3.0 tree validates identically); the folders are the DLIO
@@ -161,6 +183,43 @@ editions:
         - '.*summary\.json'
         - 'dlio\.log'
       checkpoint_required_folders: [dlio_config]
+      # Rules.md 3.3.2: minimum mean AU per training model, as the fraction
+      # DLIO's `metric.au` carries (the shipped workload templates; the key is
+      # in the training@1 core-config allowlist, so a template that changes it
+      # also hashes outside every class). `validate` fails a run whose mean AU
+      # is below it even when DLIO's own verdict says success.
+      training_au_thresholds:
+        unet3d: 0.90
+        retinanet: 0.85
+      # Rules.md Table 2 "Total Processes" (TP x PP x DP) per model: the
+      # CLOSED count 4.6.1 requires (no subset form exists above 8B, 4.3.5).
+      closed_mpi_processes:
+        llama3-8b: 8
+        llama3-70b: 64
+        llama3-405b: 512
+        llama3-1t: 1024
+      # Rules.md Table 2 "Checkpoint size", GB — the runtime's 4.3.4 pre-flight
+      # gate (`validate` uses the checkpoint_size_GB DLIO actually measured).
+      # 1T is Table 2's 18 TB, kept for comparability with the rounds already
+      # gated on it (the measured size is 15,427 GiB).
+      checkpoint_size_gb:
+        llama3-8b: 105
+        llama3-70b: 912
+        llama3-405b: 5290
+        llama3-1t: 18000
+      # Rules.md Table 3 simulated accelerator memory, GB (4.3.4); h100 / a100
+      # are whatif-only in this edition but a leaf may still record them.
+      accelerator_memory_gb:
+        b200: 180
+        mi355: 288
+        h100: 80
+        a100: 80
+      # Rules.md 6.3.2.1 kvcacheClosedSequenceLocks: the values a CLOSED
+      # kv_cache run is pinned to (the runtime hard-fails any override).
+      kvcache_closed_sequence:
+        seed: 42
+        trials: 3
+        inter_option_delay_s: 90
     # Every DLIO commit a sanctioned v3.0 CLOSED row ran on (walked from the
     # frozen tree's code images; 13 leaves whose image was built from a local
     # DLIO checkout record no commit and cannot be listed).

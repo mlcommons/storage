@@ -8,8 +8,10 @@ from ..constants import *
 
 class Config:
     """Checker configuration: the tree-wide options plus the rules edition
-    whose parameters (``mlpstorage_py/rules/editions.yaml`` ``checker:``) the
-    checks read.
+    whose parameters (``mlpstorage_py/rules/editions.yaml`` ``checker:`` --
+    required leaf contents, AU minimums, Table 2 process counts, Table 3
+    accelerator memory) and sanctioned workloads (``workloads:``) the checks
+    read.
 
     ``edition=None`` is the current edition. ``main.run`` builds one Config
     tree-wide for the pre-loop checks and then, per submission, one for the
@@ -22,6 +24,7 @@ class Config:
         table = load_editions()
         self.edition = table.current_edition if edition is None else str(edition)
         self.checker = table.require_checkable(self.edition)
+        self.edition_entry = table.edition(self.edition)
         self.submitters = submitters
         self.skip_output_file = skip_output_file
         self._parallelism_cache: dict[str, tuple[int, int]] = {}  # lazy-load cache for get_model_parallelism
@@ -55,6 +58,20 @@ class Config:
 
     def get_checkpoint_required_folders(self):
         return self.checker.checkpoint_required_folders
+
+    def get_accelerator_memory_gb(self):
+        """Rules.md Table 3 for this edition: accelerator name -> memory in GB (4.3.4)."""
+        return self.checker.accelerator_memory_gb
+
+    def get_training_au_threshold(self, model):
+        """Rules.md 3.3.2 minimum mean AU for ``model`` in this edition, as a
+        fraction, or ``None`` when the edition lists no minimum for it."""
+        return self.checker.training_au_thresholds.get(model)
+
+    def models(self, family, division=None):
+        """The models this edition sanctions for ``family`` (in one division, or
+        any when ``None``), from the table's ``workloads:``."""
+        return self.edition_entry.models(family, division)
 
     # Issue #608: get_num_train_files / get_num_eval_files were deleted —
     # they only ever returned values from the NUM_DATASET_*_FILES placeholder
@@ -109,16 +126,21 @@ class Config:
     def get_closed_mpi_processes(self, model_size: str) -> int:
         """Return the required CLOSED total MPI process count for the given model.
 
-        Source of truth: CLOSED_MPI_PROCESSES constant (Rules.md Table 2).
-        DP is not in the DLIO workload YAMLs; this constant encodes TP*PP*DP.
+        Source of truth: this edition's ``checker.closed_mpi_processes`` in the
+        rules editions table (Rules.md Table 2 "Total Processes", TP*PP*DP; DP
+        is not in the DLIO workload YAMLs).
 
         Args:
-            model_size: Model size key (e.g., '8b', '70b', '405b', '1t').
+            model_size: Model size key (e.g., '8b', '70b', '405b', '1t'), or
+                the full model name (``llama3-70b``).
 
         Returns:
-            int — required total process count for CLOSED (8 / 64 / 512 / 1024).
+            int — required total process count for CLOSED (8 / 64 / 512 / 1024 in 3.0).
 
         Raises:
-            KeyError: if model_size is not one of the four recognized keys.
+            KeyError: if the edition lists no such model.
         """
-        return CLOSED_MPI_PROCESSES[model_size]
+        counts = self.checker.closed_mpi_processes
+        if model_size in counts:
+            return counts[model_size]
+        return counts[f"llama3-{model_size}"]

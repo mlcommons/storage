@@ -4,20 +4,21 @@ Config.get_model_parallelism lazy-loads configs/dlio/workload/llama3_{key}.yaml
 and returns (tensor_parallelism, pipeline_parallelism) as (tp, pp) tuples,
 caching per key so the YAML is read only once per model size.
 
-Config.get_closed_mpi_processes delegates to CLOSED_MPI_PROCESSES[model_size]
+Config.get_closed_mpi_processes reads the edition's checker.closed_mpi_processes
 (Rules.md Table 2 — total CLOSED processes per model: TP*PP*DP).
 
 References:
   - D-C1 (get_model_parallelism lazy-load + cache)
   - D-C2 (model keys lowercase: '8b', '70b', '405b', '1t')
-  - D-C4 (CLOSED_MPI_PROCESSES constant; get_closed_mpi_processes delegate)
+  - D-C4 (Table 2 process counts; get_closed_mpi_processes delegate — the
+    constant moved into editions.yaml, design D-16)
   - Rules.md Table 2 (§4.3.4 area) for CLOSED process counts
 """
 
 import pytest
 from unittest.mock import patch
 
-from mlpstorage_py.submission_checker.constants import CLOSED_MPI_PROCESSES
+from mlpstorage_py.editions import checker_parameters
 from mlpstorage_py.submission_checker.configuration.configuration import Config
 
 
@@ -28,26 +29,26 @@ def config():
 
 
 # ---------------------------------------------------------------------------
-# CLOSED_MPI_PROCESSES constant
+# Table 2 process counts (editions.yaml checker.closed_mpi_processes)
 # ---------------------------------------------------------------------------
 
 
-class TestClosedMpiProcessesConstant:
-    """Verify the constant shape and values match Rules.md Table 2."""
+class TestClosedMpiProcessesTable:
+    """Verify the current edition's block matches Rules.md Table 2."""
 
-    def test_constant_matches_rules_table2(self):
-        """CLOSED_MPI_PROCESSES must exactly match the four model keys and their values."""
-        assert CLOSED_MPI_PROCESSES == {"8b": 8, "70b": 64, "405b": 512, "1t": 1024}
+    def test_table_matches_rules_table2(self):
+        assert checker_parameters().closed_mpi_processes == {
+            "llama3-8b": 8, "llama3-70b": 64, "llama3-405b": 512, "llama3-1t": 1024,
+        }
 
-    def test_constant_keys_are_lowercase(self):
-        """Keys must be lowercase per D-C2."""
-        for key in CLOSED_MPI_PROCESSES:
-            assert key == key.lower(), f"Key {key!r} is not lowercase"
+    def test_constant_is_gone(self):
+        """The former constants.CLOSED_MPI_PROCESSES has no successor outside the table."""
+        import mlpstorage_py.submission_checker.constants as constants
+        assert not hasattr(constants, "CLOSED_MPI_PROCESSES")
 
-    def test_constant_values_are_ints(self):
-        """Values must be plain Python ints."""
-        for key, val in CLOSED_MPI_PROCESSES.items():
-            assert isinstance(val, int), f"CLOSED_MPI_PROCESSES[{key!r}] is not an int: {val!r}"
+    def test_values_are_ints(self):
+        for key, val in checker_parameters().closed_mpi_processes.items():
+            assert isinstance(val, int), f"closed_mpi_processes[{key!r}] is not an int: {val!r}"
 
 
 # ---------------------------------------------------------------------------

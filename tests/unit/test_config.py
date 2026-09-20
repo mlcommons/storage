@@ -373,38 +373,51 @@ class TestEnvFallbackSystemname:
 
 class TestAcceleratorMemoryTable:
     """Rules.md 4.3.4 needs the memory of the chosen accelerator, so every
-    accelerator the CLI accepts must have a per-accelerator memory entry."""
+    accelerator the CLI accepts must have an entry in the current edition's
+    Table 3 (editions.yaml ``checker.accelerator_memory_gb``)."""
+
+    @staticmethod
+    def _memory():
+        from mlpstorage_py.editions import checker_parameters
+        return checker_parameters().accelerator_memory_gb
 
     def test_every_accelerator_has_positive_memory(self):
-        from mlpstorage_py.config import ACCELERATORS, ACCELERATOR_MEMORY_GB
+        from mlpstorage_py.config import ACCELERATORS
+        memory = self._memory()
         for accel in ACCELERATORS:
-            assert accel in ACCELERATOR_MEMORY_GB, accel
-            assert ACCELERATOR_MEMORY_GB[accel] > 0, accel
+            assert accel in memory, accel
+            assert memory[accel] > 0, accel
 
     def test_table_has_no_unknown_accelerators(self):
-        from mlpstorage_py.config import ACCELERATORS, ACCELERATOR_MEMORY_GB
-        assert set(ACCELERATOR_MEMORY_GB) == set(ACCELERATORS)
+        from mlpstorage_py.config import ACCELERATORS
+        assert set(self._memory()) == set(ACCELERATORS)
 
     def test_h100_baseline_is_80_gb(self):
         """The value the validator assumed for every run before the table existed."""
-        from mlpstorage_py.config import ACCELERATOR_MEMORY_GB, H100
-        assert ACCELERATOR_MEMORY_GB[H100] == 80
+        from mlpstorage_py.config import H100
+        assert self._memory()[H100] == 80
 
 
 class TestLlmCheckpointSizeTable:
-    """Rules.md Table 2 checkpoint sizes, used by the pre-flight 4.3.4 gate."""
+    """Rules.md Table 2 checkpoint sizes (editions.yaml ``checker.checkpoint_size_gb``),
+    used by the pre-flight 4.3.4 gate."""
+
+    @staticmethod
+    def _sizes():
+        from mlpstorage_py.editions import checker_parameters
+        return checker_parameters().checkpoint_size_gb
 
     def test_every_llm_model_has_a_checkpoint_size(self):
-        from mlpstorage_py.config import LLM_MODELS, LLM_CHECKPOINT_SIZE_GB
+        from mlpstorage_py.config import LLM_MODELS
+        sizes = self._sizes()
         for model in LLM_MODELS:
-            assert model in LLM_CHECKPOINT_SIZE_GB, model
-            assert LLM_CHECKPOINT_SIZE_GB[model] > 0, model
+            assert model in sizes, model
+            assert sizes[model] > 0, model
 
     def test_table_2_values(self):
-        from mlpstorage_py.config import (
-            LLM_CHECKPOINT_SIZE_GB, LLAMA3_8B, LLAMA3_70B, LLAMA3_405B, LLAMA3_1T,
-        )
-        assert LLM_CHECKPOINT_SIZE_GB[LLAMA3_8B] == 105
-        assert LLM_CHECKPOINT_SIZE_GB[LLAMA3_70B] == 912
-        assert LLM_CHECKPOINT_SIZE_GB[LLAMA3_405B] == 5290
-        assert LLM_CHECKPOINT_SIZE_GB[LLAMA3_1T] == 18000
+        from mlpstorage_py.config import LLAMA3_8B, LLAMA3_70B, LLAMA3_405B, LLAMA3_1T
+        sizes = self._sizes()
+        assert sizes[LLAMA3_8B] == 105
+        assert sizes[LLAMA3_70B] == 912
+        assert sizes[LLAMA3_405B] == 5290
+        assert sizes[LLAMA3_1T] == 18000

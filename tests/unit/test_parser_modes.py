@@ -9,10 +9,7 @@ from unittest.mock import patch
 
 from mlpstorage_py.cli_parser import parse_arguments
 from mlpstorage_py.config import (
-    MODELS_CLOSED,
-    MODELS_OPEN,
     MODELS,
-    ACCELERATORS_CLOSED,
     ACCELERATORS,
     LLM_MODELS,
     KVCACHE_MODELS,
@@ -263,12 +260,13 @@ class TestModelAcceleratorRestrictions:
     """Verify model and accelerator allow-lists per mode."""
 
     # ------------------------------------------------------------------
-    # Training model allow-list — closed only accepts MODELS_CLOSED
+    # Training model allow-list — closed only accepts the current edition's
+    # sanctioned training models (editions.yaml workloads.closed.training)
     # ------------------------------------------------------------------
 
     @pytest.mark.parametrize('model', ['cosmoflow', 'resnet50', 'dlrm', 'flux'])
     def test_closed_training_rejects_open_only_models(self, model):
-        """closed training must reject models not in MODELS_CLOSED."""
+        """closed training must reject models the edition does not sanction."""
         argv = ['mlpstorage', 'closed', 'training', model,
                 'datasize', '-cm', '64', '-at', 'b200', '-ma', '4']
         with patch('sys.argv', argv):
@@ -278,7 +276,7 @@ class TestModelAcceleratorRestrictions:
 
     @pytest.mark.parametrize('model', ['unet3d', 'retinanet'])
     def test_closed_training_accepts_closed_models(self, model):
-        """closed training must accept all models in MODELS_CLOSED."""
+        """closed training must accept every model the edition sanctions."""
         argv = ['mlpstorage', 'closed', 'training', model,
                 'datasize', '-cm', '64', '-at', 'b200', '-ma', '4',
                 '-rd', '/tmp', '-sn', 'sys-v1']
@@ -287,7 +285,7 @@ class TestModelAcceleratorRestrictions:
         assert args.model == model
 
     def test_open_training_rejects_cosmoflow(self):
-        """open training must reject cosmoflow (MODELS_OPEN == MODELS_CLOSED)."""
+        """open training must reject cosmoflow (open sanctions the same models as closed in 3.0)."""
         argv = ['mlpstorage', 'open', 'training', 'cosmoflow',
                 'datasize', '-cm', '64', '-at', 'b200', '-ma', '4']
         with patch('sys.argv', argv):
@@ -306,12 +304,12 @@ class TestModelAcceleratorRestrictions:
         assert args.model == model
 
     # ------------------------------------------------------------------
-    # Accelerator allow-list — closed only accepts ACCELERATORS_CLOSED
+    # Accelerator allow-list — closed only accepts the edition's sanctioned accelerators
     # ------------------------------------------------------------------
 
     @pytest.mark.parametrize('accel', ['h100', 'a100'])
     def test_closed_training_rejects_open_accelerators(self, accel):
-        """closed training run must reject accelerators not in ACCELERATORS_CLOSED."""
+        """closed training run must reject accelerators the edition does not sanction."""
         argv = ['mlpstorage', 'closed', 'training', 'unet3d', 'run',
                 '-cm', '64', '-at', accel, '-na', '4', '-dd', '/tmp', '-rd', '/tmp', 'file']
         with patch('sys.argv', argv):
@@ -321,7 +319,7 @@ class TestModelAcceleratorRestrictions:
 
     @pytest.mark.parametrize('accel', ['b200', 'mi355'])
     def test_closed_training_accepts_closed_accelerators(self, accel):
-        """closed training run must accept all accelerators in ACCELERATORS_CLOSED."""
+        """closed training run must accept every accelerator the edition sanctions."""
         argv = ['mlpstorage', 'closed', 'training', 'unet3d', 'run',
                 '-cm', '64', '-at', accel, '-na', '4', '-rd', '/tmp',
                 '-sn', 'sys-v1', '-dd', '/tmp', 'file']

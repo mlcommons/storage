@@ -23,6 +23,8 @@ import os
 import re
 from pathlib import Path
 
+from mlpstorage_py.editions import load_editions
+
 from .base import BaseCheck
 from ..configuration.configuration import Config
 from ..dlio_summary_helpers import per_host_memory_gb
@@ -72,22 +74,18 @@ _REQUIRED_SUBMITTER_SUBDIRS_OPEN = frozenset({"results", "systems"})
 # Legacy alias for CLOSED — see _REQUIRED_SUBMITTER_SUBDIRS_CLOSED.
 _REQUIRED_SUBMITTER_SUBDIRS = _REQUIRED_SUBMITTER_SUBDIRS_CLOSED
 
-# Valid workload categories under results/<system>/. These are the on-disk
-# directory names produced by `BENCHMARK_TYPES.name` in
-# `mlpstorage_py/rules/utils.py::generate_output_location` — `vector_database`
-# and `kv_cache` carry underscores, NOT the `vectordb` / `kvcache` short forms
-# used elsewhere in the CLI. Pre-fix this set excluded both, so every vdb /
-# kvcache submission tripped a `[2.1.10 workloadCategories] unexpected
-# workload category` error (issue #612).
-_VALID_WORKLOAD_CATEGORIES = frozenset({
-    "training",
-    "checkpointing",
-    "vector_database",
-    "kv_cache",
-})
+# Valid workload categories under results/<system>/: the workload families of
+# every edition this tool can check (mlpstorage_py/rules/editions.yaml
+# `workloads:`, all divisions). These are the on-disk directory names produced
+# by `BENCHMARK_TYPES.name` in `mlpstorage_py/rules/utils.py::
+# generate_output_location` — `vector_database` and `kv_cache` carry
+# underscores, NOT the `vectordb` / `kvcache` short forms used elsewhere in the
+# CLI (issue #612). Tree-wide checks use the union across checkable editions;
+# today that is edition 3.0 alone.
+_VALID_WORKLOAD_CATEGORIES = load_editions().families()
 
-# Valid training workload names under training/
-_VALID_TRAINING_WORKLOADS = frozenset({"unet3d", "retinanet"})
+# Valid training workload names under training/ (same source, family training)
+_VALID_TRAINING_WORKLOADS = load_editions().vocabulary("training")
 
 # Valid training phase directories under training/<workload>/. All three are
 # required (Rules.md §2.1.12); a missing one is a hard structural error. (The
@@ -96,8 +94,8 @@ _VALID_TRAINING_WORKLOADS = frozenset({"unet3d", "retinanet"})
 # round closed.)
 _VALID_TRAINING_PHASES = frozenset({"datasize", "datagen", "run"})
 
-# Valid checkpointing workload names under checkpointing/
-_VALID_CHECKPOINTING_WORKLOADS = frozenset({"llama3-8b", "llama3-70b", "llama3-405b", "llama3-1t"})
+# Valid checkpointing workload names under checkpointing/ (same source)
+_VALID_CHECKPOINTING_WORKLOADS = load_editions().vocabulary("checkpointing")
 
 # Timestamp pattern per Rules.md 2.1.13
 _TIMESTAMP_RE = re.compile(r"^\d{8}_\d{6}$")
@@ -815,7 +813,8 @@ class SubmissionStructureCheck(BaseCheck):
 
     @rule("2.1.11", "trainingWorkloads")
     def training_workloads_check(self):
-        """STRUCT-11: training/ must contain only {unet3d, retinanet}."""
+        """STRUCT-11: training/ must contain only the training workloads the
+        checkable editions sanction (``_VALID_TRAINING_WORKLOADS``)."""
         valid = True
         for _division, _submitter, sub_path in self._iter_submitter_dirs():
             results_path = os.path.join(sub_path, "results")
@@ -833,8 +832,8 @@ class SubmissionStructureCheck(BaseCheck):
                             "2.1.11", "trainingWorkloads",
                             os.path.join(training_path, workload),
                             "unknown training workload %r "
-                            "(valid: unet3d, retinanet)",
-                            workload,
+                            "(valid: %s)",
+                            workload, ", ".join(sorted(_VALID_TRAINING_WORKLOADS)),
                         )
                         valid = False
 
@@ -961,8 +960,8 @@ class SubmissionStructureCheck(BaseCheck):
                             "2.1.21", "checkpointingWorkloads",
                             os.path.join(chkpt_path, workload),
                             "unknown checkpointing workload %r "
-                            "(valid: llama3-8b, llama3-70b, llama3-405b, llama3-1t)",
-                            workload,
+                            "(valid: %s)",
+                            workload, ", ".join(sorted(_VALID_CHECKPOINTING_WORKLOADS)),
                         )
                         valid = False
 

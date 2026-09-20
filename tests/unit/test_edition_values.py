@@ -69,8 +69,16 @@ def _table_with(tmp_path: Path, mutate):
     return load_editions(_write_table(tmp_path, mutate))
 
 
+def _blocks(tmp_path: Path, **blocks):
+    """A table whose 3.0 checker blocks are REPLACED by ``blocks``."""
+    def mutate(data):
+        data["editions"]["3.0"]["checker"].update(blocks)
+    return _table_with(tmp_path, mutate)
+
+
 def _values(tmp_path: Path, **changes):
-    """A table whose 3.0 checker block carries ``changes`` (deep-merged)."""
+    """A table whose 3.0 checker block carries ``changes`` (deep-merged into
+    the shipped values, so a partial mapping keeps the other keys)."""
     def mutate(data):
         checker = data["editions"]["3.0"]["checker"]
         for k, v in changes.items():
@@ -119,9 +127,9 @@ class TestTable:
     def test_au_thresholds_must_name_exactly_the_training_models(self, tmp_path):
         from mlpstorage_py.editions import EditionsError
         with pytest.raises(EditionsError, match="training_au_thresholds"):
-            _values(tmp_path, training_au_thresholds={"cosmoflow": 0.7})
+            _values(tmp_path, training_au_thresholds={"cosmoflow": 0.7})  # an extra model
         with pytest.raises(EditionsError, match="training_au_thresholds"):
-            _values(tmp_path, training_au_thresholds={"unet3d": 0.9})
+            _blocks(tmp_path, training_au_thresholds={"unet3d": 0.9})  # a missing model
 
     def test_au_threshold_is_a_fraction(self, tmp_path):
         from mlpstorage_py.editions import EditionsError
@@ -134,9 +142,9 @@ class TestTable:
     def test_checkpoint_blocks_must_name_exactly_the_checkpointing_models(self, tmp_path, name):
         from mlpstorage_py.editions import EditionsError
         with pytest.raises(EditionsError, match=name):
-            _values(tmp_path, **{name: {"llama3-8b": 8}})
+            _blocks(tmp_path, **{name: {"llama3-8b": 8}})  # missing models
         with pytest.raises(EditionsError, match=name):
-            _values(tmp_path, **{name: {**V30_VALUES[name], "llama4-1b": 1}})
+            _values(tmp_path, **{name: {"llama4-1b": 1}})  # an extra model
 
     def test_closed_mpi_processes_are_positive_integers(self, tmp_path):
         from mlpstorage_py.editions import EditionsError
@@ -165,18 +173,18 @@ class TestTable:
     def test_kvcache_sequence_has_exactly_three_keys(self, tmp_path):
         from mlpstorage_py.editions import EditionsError
         with pytest.raises(EditionsError, match="kvcache_closed_sequence"):
-            _values(tmp_path, kvcache_closed_sequence={"seed": 42, "trials": 3})
+            _blocks(tmp_path, kvcache_closed_sequence={"seed": 42, "trials": 3})  # missing key
         with pytest.raises(EditionsError, match="kvcache_closed_sequence"):
-            _values(tmp_path, kvcache_closed_sequence={**V30_VALUES["kvcache_closed_sequence"], "loops": 2})
+            _values(tmp_path, kvcache_closed_sequence={"loops": 2})  # extra key
         with pytest.raises(EditionsError, match="kvcache_closed_sequence"):
-            _values(tmp_path, kvcache_closed_sequence={**V30_VALUES["kvcache_closed_sequence"], "trials": 0})
+            _values(tmp_path, kvcache_closed_sequence={"trials": 0})
         with pytest.raises(EditionsError, match="kvcache_closed_sequence"):
-            _values(tmp_path, kvcache_closed_sequence={**V30_VALUES["kvcache_closed_sequence"], "seed": "x"})
+            _values(tmp_path, kvcache_closed_sequence={"seed": "x"})
 
     def test_a_value_block_must_be_a_mapping(self, tmp_path):
         from mlpstorage_py.editions import EditionsError
         with pytest.raises(EditionsError, match="accelerator_memory_gb"):
-            _values(tmp_path, accelerator_memory_gb=[180, 288])
+            _blocks(tmp_path, accelerator_memory_gb=[180, 288])
 
     def test_a_different_table_carries_different_values(self, tmp_path):
         t = _values(tmp_path, accelerator_memory_gb={"b200": 192}, closed_mpi_processes={"llama3-70b": 32})
@@ -543,10 +551,20 @@ class TestRuntimeKvcache:
     def test_closed_locks_come_from_the_current_edition(self, tmp_path):
         bm = self._bm(tmp_path, inter_option_delay=90, trials=3, seed=42)
         params = _params_with(tmp_path, kvcache_closed_sequence={"seed": 7, "trials": 2, "inter_option_delay_s": 45})
-        with patch("mlpstorage_py.benchmarks.kvcache.checker_parameters", return_value=params):
+        with patch("mlpstorage_py.benchmarks.kvcache.checker_parameters", return_value=params), \
+             patch.object(bm, "logger") as log:
             assert bm._execute_run() == 1
-        bm.logger.error.assert_called()
-        assert "45" in str(bm.logger.error.call_args_list[-1])
+        log.error.assert_called()
+        # The first lock checked is --seed: the run's 42 is now illegal (must be 7).
+        assert "must be 7, got 42" in str(log.error.call_args_list[-1])
+        # With the seed matching, the delay lock is what fires.
+        second = tmp_path / "second"
+        second.mkdir()
+        bm = self._bm(second, inter_option_delay=90, trials=2, seed=7)
+        with patch("mlpstorage_py.benchmarks.kvcache.checker_parameters", return_value=params), \
+             patch.object(bm, "logger") as log:
+            assert bm._execute_run() == 1
+        assert "must be 45, got 90" in str(log.error.call_args_list[-1])
 
     def test_closed_effective_values_come_from_the_current_edition(self, tmp_path):
         bm = self._bm(tmp_path, inter_option_delay=None, trials=None, seed=None)
@@ -583,7 +601,7 @@ class TestRuntimeKvcache:
         assert "42" in KVCACHE_HELP_MESSAGES["seed"]
         assert "3" in KVCACHE_HELP_MESSAGES["trials"]
         from mlpstorage_py.cli_parser import parse_arguments
-        argv = ["mlpstorage", "closed", "kvcache", "run", "-rd", "/tmp", "-sn", "sys-v1", "-cd", "/tmp/kv"]
+        argv = ["mlpstorage", "closed", "kvcache", "run", "-rd", "/tmp", "-sn", "sys-v1"]
         with patch("sys.argv", argv):
             args = parse_arguments()
         assert (args.seed, args.trials, args.inter_option_delay) == (42, 3, 90)
@@ -631,8 +649,8 @@ class TestRuntimeCli:
 
     def test_checkpointing_choices_come_from_the_current_edition(self):
         from mlpstorage_py.cli_parser import parse_arguments
-        argv = ["mlpstorage", "closed", "checkpointing", "run", "file", "--model", "llama3-8b", "-at", "h100",
-                "-np", "8", "-rd", "/tmp", "-sn", "sys-v1", "-cf", "/tmp"]
+        argv = ["mlpstorage", "closed", "checkpointing", "run", "-cm", "64", "-m", "llama3-8b", "-np", "8",
+                "-at", "h100", "-cf", "/tmp", "-rd", "/tmp", "-sn", "sys-v1", "file"]
         with patch("sys.argv", argv):
             with pytest.raises(SystemExit):
                 parse_arguments()
