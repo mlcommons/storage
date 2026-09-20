@@ -189,12 +189,16 @@ def _add_checkpointing_core_args(parser, command, accel_choices):
     # Rules.md 4.3.5: the explicit subset-run declaration. Valid only with
     # llama3-8b at 8 processes — a claim marker for local-NVMe architectures
     # asserting linear scale-out — enforced by check_subset_mode; see
-    # mlcommons/storage#841 for the inversion this corrects.
-    parser.add_argument(
-        '--checkpoint-subset',
-        action='store_true',
-        help=HELP_MESSAGES['checkpoint_subset']
-    )
+    # mlcommons/storage#841 for the inversion this corrects. It is recorded
+    # in run metadata and read back by the run checker and reportgen; it
+    # changes no DLIO parameter and no sizing math, so like
+    # --checkpoint-folder it is a `run`-only flag (storage#845 oddity 2).
+    if command == "run":
+        parser.add_argument(
+            '--checkpoint-subset',
+            action='store_true',
+            help=HELP_MESSAGES['checkpoint_subset']
+        )
 
     # num-checkpoints-read/write are available in all modes so closed submitters
     # can split write and read into two invocations (set =0 on one side) with a

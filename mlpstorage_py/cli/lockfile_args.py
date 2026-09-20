@@ -54,7 +54,11 @@ def add_lockfile_arguments(parser):
         dest="generate_all",
         help="Generate both requirements.txt and requirements-full.txt",
     )
-    add_universal_arguments(generate_parser, req_results=True)
+    # lockfile touches pyproject.toml and the installed environment only;
+    # main.py bypasses the results-dir / orgname gates for it, so the
+    # results-dir is accepted (CORE_STD) but never required (storage#845
+    # oddity 3).
+    add_universal_arguments(generate_parser, req_results=False)
 
     # Verify subcommand
     verify_parser = subparsers.add_parser(
@@ -83,6 +87,6 @@ def add_lockfile_arguments(parser):
         action="store_true",
         help="Fail on any difference (default: fail only on version mismatch)",
     )
-    add_universal_arguments(verify_parser, req_results=True)
+    add_universal_arguments(verify_parser, req_results=False)
 
     return parser

@@ -172,9 +172,9 @@ MPI_ARGS — MPI execution arguments
   --allow-run-as-root           Permit execution as root (OpenMPI flag)
   --mpi-params PARAM...         Additional raw MPI parameters (repeatable)
 
-TIMESERIES — Time-series host metrics, run commands only
-             (training and checkpointing: open and whatif modes;
-              vectordb and kvcache: all three modes)
+TIMESERIES — Time-series host metrics, open and whatif run commands only
+             (a closed run always collects at the defaults below and
+              cannot opt out)
   --timeseries-interval SECS    Sample interval in seconds (default: 10.0)
   --skip-timeseries             Disable time-series collection entirely
   --max-timeseries-samples N    Per-host sample cap (default: 3600)
@@ -305,7 +305,6 @@ CK_DATASIZE_CLOSED
     --dlio-bin-path/-dp PATH
     --num-checkpoints-read/-ncr N   (default: 10; closed allows 10 or 0)
     --num-checkpoints-write/-ncw N  (default: 10; closed allows 10 or 0)
-    --checkpoint-subset             (8B at 8 processes only; sizes a Subset run)
   + MPI_ARGS
   + CORE_STD  (--results-dir resolved: flag > MLPSTORAGE_RESULTS_DIR > init default; --systemname optional)
   Note: closed runs use 10/10 by default. Use 10/0 then 0/10 in two
@@ -377,7 +376,6 @@ CK_CONFIGVIEW_CLOSED
     --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
     [storage positional: file | object]
   Optional:
-    --checkpoint-subset
     --exec-type/-et {mpi,docker}    (default: mpi)
     --hosts/-s HOST...              (default: 127.0.0.1)
     --dlio-bin-path/-dp PATH
@@ -520,7 +518,6 @@ VDB_RUN_CLOSED
     --seed N                        (default: 42)
     --ready-timeout SECS            (default: 7200)
   + MPI_ARGS
-  + TIMESERIES
   + CORE_STD
 
 VDB_RUN_OPEN
@@ -528,6 +525,7 @@ VDB_RUN_OPEN
     --vdb-index {DISKANN,HNSW,AISAQ,IVF_FLAT,IVF_SQ8,FLAT}   (open widens choices)
     --params KEY=VALUE...
   + OPEN_STD
+  + TIMESERIES
 
 VDB_RUN_WHATIF
   = VDB_RUN_OPEN  (flags identical)
@@ -570,7 +568,6 @@ KV_RUN_CLOSED
     --num-processes/-np N
     --hosts/-s HOST...              (default: 127.0.0.1)
   + MPI_ARGS
-  + TIMESERIES
   + CORE_STD
   Note: the following are fixed in closed and not shown:
     gpu-mem-gb=16.0, cpu-mem-gb=32.0, duration=60s,
@@ -605,6 +602,7 @@ KV_RUN_OPEN
     --enable-latency-tracing        bpftrace block-layer device latency tracing
                                     (requires root)
   + OPEN_STD
+  + TIMESERIES
 
 KV_RUN_WHATIF
   = KV_RUN_OPEN  (flags identical)
@@ -688,7 +686,8 @@ LF_GENERATE
     --python-version VERSION
     --pyproject PATH                (default: pyproject.toml)
     --all                           Generate both requirements.txt and requirements-full.txt
-  + CORE_STD  (--results-dir resolved: flag > MLPSTORAGE_RESULTS_DIR > init default)
+  + CORE_STD  (--results-dir accepted but never required or used: lockfile
+               touches only pyproject.toml and the installed environment)
 
 LF_VERIFY
   Optional:
@@ -696,7 +695,7 @@ LF_VERIFY
     --skip PKG                      Package to skip (repeatable)
     --allow-missing
     --strict
-  + CORE_STD  (--results-dir resolved: flag > MLPSTORAGE_RESULTS_DIR > init default)
+  + CORE_STD  (--results-dir accepted but never required or used)
 
 ──────────────────────────────────────────────────────────────────
 

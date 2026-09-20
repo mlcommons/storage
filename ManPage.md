@@ -507,7 +507,7 @@ The `init` subcommand takes no flags — universal flags such as `--results-dir`
 ### Universal options (every non-init command)
 
 - **`--results-dir <path>`, `-rd <path>`**
-  Root directory for all written artifacts. Required for every benchmark command (`datasize` included) and for `reports`, `lockfile` and `history`. Resolved as this flag > `$MLPSTORAGE_RESULTS_DIR` > the default recorded by `mlpstorage init`, and the winner is printed on a `results-dir: <path> (from <source>)` status line. Must already be initialized with `mlpstorage init`; commands that consult the orgname-resolution gate refuse to run otherwise.
+  Root directory for all written artifacts. Required for every benchmark command (`datasize` included) and for `reports` and `history`; `lockfile` accepts it but never uses it. Resolved as this flag > `$MLPSTORAGE_RESULTS_DIR` > the default recorded by `mlpstorage init`, and the winner is printed on a `results-dir: <path> (from <source>)` status line. Must already be initialized with `mlpstorage init`; commands that consult the orgname-resolution gate refuse to run otherwise.
 
 - **`--systemname <name>`, `-sn <name>`**
   System-under-test identifier for the current run. Required on every emitting subcommand (`run`, `datagen`, `configview`, `history rerun`). Defaults to `$MLPSTORAGE_SYSTEMNAME`. Each mode (closed/open/whatif) owns its own `<systemname>.yaml` under the per-mode `systems/` directory, so the same name across modes is fine. See the Reports subsection for reportgen's optional-systemname multi-system-fallback behavior.
@@ -802,8 +802,8 @@ Open/whatif VectorDB extras:
 - **`--compact`** *(datagen)*
   Compact the collection after load.
 
-- **`--timeseries-interval`, `--skip-timeseries`, `--max-timeseries-samples`** *(run only)*
-  As for training.
+- **`--timeseries-interval`, `--skip-timeseries`, `--max-timeseries-samples`** *(open/whatif, run only)*
+  As for training: a closed run collects at the defaults and cannot opt out.
 
 ### KV-Cache options
 
@@ -877,8 +877,8 @@ Run (open/whatif only):
 - **`--enable-latency-tracing`**
   Enable `bpftrace` block-layer device latency tracing during the run. Requires `sudo` and `bpftrace` on every client host. Adds telemetry to the run's stdout / JSON / XLSX output without changing the benchmark result. Any client that cannot start `bpftrace` fails the run — the whole run, not per-host — so a partially-degraded fleet does not silently produce results with mixed telemetry.
 
-- **`--loops`, `--allow-invalid-params`, `--params`, `--timeseries-interval`, `--skip-timeseries`, `--max-timeseries-samples`**
-  As for training.
+- **`--loops`, `--allow-invalid-params`, `--params`, `--timeseries-interval`, `--skip-timeseries`, `--max-timeseries-samples`** *(open/whatif only)*
+  As for training: a closed run collects host metrics at the defaults and cannot opt out.
 
 ### Reports
 

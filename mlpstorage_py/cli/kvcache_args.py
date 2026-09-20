@@ -161,6 +161,12 @@ def add_kvcache_arguments(parser, mode):
     # Add distributed execution arguments to run command only
     _add_kvcache_distributed_arguments(run_benchmark)
 
+    # TIMESERIES flags are an open/whatif affordance on every benchmark:
+    # a CLOSED run collects host metrics at the defaults and cannot opt
+    # out (see add_timeseries_arguments; mlcommons/storage#845 oddity 1).
+    if mode in ("open", "whatif"):
+        add_timeseries_arguments(run_benchmark)
+
 
 def _add_kvcache_model_arguments(parser):
     """Add model configuration arguments (open/whatif only).
@@ -448,9 +454,6 @@ def _add_kvcache_distributed_arguments(parser):
 
     # Add MPI arguments from common_args
     add_mpi_arguments(parser)
-
-    # Add time-series arguments (open/whatif modes only)
-    add_timeseries_arguments(parser)
 
 
 def validate_kvcache_arguments(args):
