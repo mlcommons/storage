@@ -7,6 +7,7 @@ from ..loader import SubmissionLogs
 from ..rule_registry import rule
 from .helpers import (
     _check_filesystem_separation,
+    division_of,
     _latest_final_collection_timestamp,
     _pair_checkpoint_runs,
     _parse_iso_gap,
@@ -243,13 +244,9 @@ class CheckpointingCheck(BaseCheck):
             return valid
 
         for summary, metadata, _ in self._iter_valid_files():
-            # mlpstorage writes verification as "CLOSED"/"OPEN" (uppercase) —
-            # the pre-#841 lowercase-only comparison meant this check never
-            # fired on a real tree. Sibling checks (4.6.2 at :289, 4.6.3 at
-            # :451, 4.6.4 at :618) still carry the lowercase-only pattern;
-            # enabling them changes real-tree behavior beyond #841's scope,
-            # so they are left for their own gated fix.
-            verification = metadata.get("verification", "closed").lower()
+            # mlpstorage writes verification as "CLOSED"/"OPEN" (uppercase);
+            # division_of folds it (#841 here, #842 for the sibling rules).
+            verification = division_of(metadata, "closed")
 
             if verification == "closed":
                 checkpoint_mode = metadata.get("override_parameters", {}).get("checkpoint.mode", "").lower()
@@ -298,7 +295,7 @@ class CheckpointingCheck(BaseCheck):
             return valid
 
         for summary, metadata, _ in self._iter_valid_files():
-            verification = metadata.get("verification", "open")
+            verification = division_of(metadata, "open")
 
             if verification == "closed":
                 num_accelerators = summary.get("num_accelerators", 0)
@@ -486,7 +483,7 @@ class CheckpointingCheck(BaseCheck):
             "checkpoint.checkpoint_folder"
         }
         for summary, metadata, _ in self._iter_valid_files():
-            verification = metadata.get("verification", "open")
+            verification = division_of(metadata, "open")
             if verification == "closed":
                 yaml_params = metadata.get("yaml_params", {})
 
@@ -591,7 +588,7 @@ class CheckpointingCheck(BaseCheck):
         for summary, metadata, _ in self._iter_valid_files():
             # mlpstorage writes verification as "CLOSED"/"OPEN" (uppercase);
             # test fixtures historically use lowercase — compare folded.
-            if metadata.get("verification", "closed").lower() != "closed":
+            if division_of(metadata, "closed") != "closed":
                 continue
 
             params_dict = metadata.get("override_parameters", {})
@@ -653,7 +650,7 @@ class CheckpointingCheck(BaseCheck):
         if self.mode != "checkpointing":
             return valid
         for summary, metadata, _ in self._iter_valid_files():
-            verification = metadata.get("verification", "closed")
+            verification = division_of(metadata, "closed")
             if verification != "open":
                 continue
             model_name = metadata.get("args", {}).get("model", "").lower()
@@ -878,7 +875,7 @@ class CheckpointingCheck(BaseCheck):
         closed_runs = [
             (summary, metadata, ts)
             for summary, metadata, ts in self._iter_valid_files()
-            if (metadata or {}).get("verification") == "closed"
+            if division_of(metadata) == "closed"
         ]
         if not closed_runs:
             return valid
