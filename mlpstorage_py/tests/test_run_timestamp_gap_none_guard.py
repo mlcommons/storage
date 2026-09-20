@@ -21,7 +21,7 @@ from mlpstorage_py.submission_checker.loader import LoaderMetadata, SubmissionLo
 
 def _make_directory_check(tmp_path, run_files):
     log = MagicMock()
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
+    config = Config(submitters=["Acme"], skip_output_file=True)
     submissions_logs = SubmissionLogs(
         datagen_files=[],
         run_files=run_files,

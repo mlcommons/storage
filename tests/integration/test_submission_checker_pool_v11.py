@@ -204,11 +204,10 @@ def v11_tree_factory(tmp_path):
 # Shared run() invocation helper
 # ---------------------------------------------------------------------------
 
-def _run_args(root: Path, tmp_path: Path, version: str = "v3.0") -> argparse.Namespace:
+def _run_args(root: Path, tmp_path: Path) -> argparse.Namespace:
     """Build the argparse.Namespace that run() expects."""
     return argparse.Namespace(
         input=str(root),
-        version=version,
         submitters=None,
         csv=str(tmp_path / "out.csv"),
         skip_output_file=True,

@@ -18,6 +18,13 @@ edition the class lists. Rows in one class compare; nothing else does, and
 comparisons across divisions are never declared. Classification is
 a pure function of (stamp, table) and is never cached into evidence files.
 
+An edition's **checker parameters** (``checker:`` -- the required files and
+folders of every datagen / run / checkpoint leaf) are what ``validate`` needs
+to check a submission of that edition. Only an edition this tool can check
+carries them; ``Config`` is built from them, once tree-wide for the current
+edition and once per submission from the edition its ``submission.yaml``
+declares. There is no reviewer-side edition flag.
+
 Design and survey: .planning/rules-editions-and-comparability-classes.md.
 """
 
@@ -45,8 +52,31 @@ _HASH_RE = re.compile(r"[0-9a-f]{16}")
 _SHA_RE = re.compile(r"[0-9a-f]{40}")
 
 
+CHECKER_FIELDS = ("datagen_required_files", "datagen_required_folders",
+                  "run_required_files", "run_required_folders",
+                  "checkpoint_required_files", "checkpoint_required_folders")
+_CHECKER_REGEX_FIELDS = ("datagen_required_files", "run_required_files", "checkpoint_required_files")
+
+
 class EditionsError(ValueError):
     """The editions table is missing, unreadable or inconsistent."""
+
+
+class UncheckableEditionError(EditionsError):
+    """A rules edition this tool cannot check: unknown to the table, or listed
+    without ``checker:`` parameters (a historical edition checked by its own
+    tool)."""
+
+
+@dataclass(frozen=True)
+class CheckerParameters:
+    """What ``validate`` requires of every leaf of one edition."""
+    datagen_required_files: List[str]
+    datagen_required_folders: List[str]
+    run_required_files: List[str]
+    run_required_folders: List[str]
+    checkpoint_required_files: List[str]
+    checkpoint_required_folders: List[str]
 
 
 @dataclass(frozen=True)
@@ -60,6 +90,11 @@ class Edition:
     dlio_revisions: List[Dict[str, str]]
     storage_libraries: Dict[str, List[str]]
     notes: str = ""
+    checker: Optional[CheckerParameters] = None
+
+    @property
+    def checkable(self) -> bool:
+        return self.checker is not None
 
     @property
     def dlio_commits(self) -> frozenset:
@@ -105,6 +140,30 @@ class EditionsTable:
 
     def classes_for(self, edition_id: str) -> List[ComparabilityClass]:
         return [c for c in self.classes if edition_id in c.editions]
+
+    def is_checkable(self, edition_id: Any) -> bool:
+        e = self.edition(edition_id)
+        return e is not None and e.checkable
+
+    def checker_parameters(self, edition_id: Any = None) -> Optional[CheckerParameters]:
+        """The ``checker:`` block of an edition (the current one by default), or
+        ``None`` when the table does not know the edition or lists it without one."""
+        e = self.edition(self.current_edition if edition_id is None else edition_id)
+        return e.checker if e is not None else None
+
+    def require_checkable(self, edition_id: Any = None) -> CheckerParameters:
+        """``checker_parameters`` that raises :class:`UncheckableEditionError`
+        with the reason (unknown edition, or which tool checks it)."""
+        eid = self.current_edition if edition_id is None else str(edition_id)
+        e = self.edition(eid)
+        if e is None:
+            raise UncheckableEditionError(
+                f"rules edition {eid} is not in {self.path.name} (known: {', '.join(sorted(self.editions))})")
+        if e.checker is None:
+            raise UncheckableEditionError(
+                f"rules edition {eid} cannot be checked by this tool ({self.path.name} lists it "
+                f"without checker parameters; it is checked by its own tool: {e.tool})")
+        return e.checker
 
     def classify(self, *, division: str, family: str, model: str, accelerator: Optional[str],
                  core_config: Any, edition: Optional[str] = None) -> Optional[ComparabilityClass]:
@@ -179,6 +238,7 @@ def _parse_edition(eid: Any, raw: Any, where: str) -> Edition:
     libs = raw.get("storage_libraries") or {}
     _require(isinstance(libs, dict) and all(isinstance(v, list) for v in libs.values()),
              f"{where}: edition {eid}: storage_libraries must map name -> list of versions")
+    checker = _parse_checker(eid, raw.get("checker"), where)
     return Edition(
         id=eid, status=status, results_repo=raw["results_repo"], tool=str(raw.get("tool", UNKNOWN)),
         layout_versions=list(layout), workloads=workloads,
@@ -186,7 +246,30 @@ def _parse_edition(eid: Any, raw: Any, where: str) -> Edition:
                         for r in revs],
         storage_libraries={str(k): [str(v) for v in vs] for k, vs in libs.items()},
         notes=str(raw.get("notes", "") or ""),
+        checker=checker,
     )
+
+
+def _parse_checker(eid: str, raw: Any, where: str) -> Optional[CheckerParameters]:
+    if raw is None:
+        return None
+    _require(isinstance(raw, dict), f"{where}: edition {eid}: checker must be a mapping")
+    unknown = sorted(set(raw) - set(CHECKER_FIELDS))
+    _require(not unknown, f"{where}: edition {eid}: checker has unknown key(s) {unknown}")
+    values: Dict[str, List[str]] = {}
+    for name in CHECKER_FIELDS:
+        v = raw.get(name)
+        _require(isinstance(v, list) and v and all(isinstance(x, str) and x for x in v),
+                 f"{where}: edition {eid}: checker.{name} must be a non-empty list of strings")
+        if name in _CHECKER_REGEX_FIELDS:
+            for pattern in v:
+                try:
+                    re.compile(pattern)
+                except re.error as e:
+                    raise EditionsError(
+                        f"{where}: edition {eid}: checker.{name}: {pattern!r} is not a regex ({e})") from e
+        values[name] = list(v)
+    return CheckerParameters(**values)
 
 
 def _parse_class(raw: Any, editions: Dict[str, Edition], allowlists: Dict[str, Any],
@@ -241,6 +324,7 @@ def _load(path: Path) -> EditionsTable:
              f"{where}: current_edition {current!r} is not in the editions table")
     current = str(current)
     _require(editions[current].status == "current", f"{where}: current_edition {current} must have status current")
+    _require(editions[current].checkable, f"{where}: current_edition {current} must carry checker parameters")
     raw_classes = data.get("classes")
     _require(isinstance(raw_classes, list), f"{where}: classes must be a list")
     allowlists = load_allowlists().get("allowlists", {})
@@ -272,6 +356,11 @@ def load_editions(path=None) -> EditionsTable:
     if path is None:
         _CACHE[key] = table
     return table
+
+
+def checker_parameters(edition_id: Any = None) -> Optional[CheckerParameters]:
+    """The shipped table's ``checker:`` block for an edition (current by default)."""
+    return load_editions().checker_parameters(edition_id)
 
 
 def describe_class(stamp, *, division: str, family: str, model: str, accelerator: Optional[str]) -> str:

@@ -39,24 +39,20 @@ class Loader:
     The `Loader` class traverses the submission directory structure,
     identifies valid submissions, and parses their log files and metadata.
     It yields `SubmissionLogs` objects for each valid submission found,
-    handling version-specific path formats and optional artifacts.
+    handling optional artifacts.
     """
-    def __init__(self, root, version, config: Config) -> None:
+    def __init__(self, root, config: Config) -> None:
         """Initialize the submission loader.
-
-        Sets up path templates based on the MLPerf version and root
-        directory.
 
         Args:
             root (str): Root directory containing submissions.
-            version (str): MLPerf version for path resolution.
+            config (Config): tree-wide checker configuration (submitter
+                filter). The rules edition is per submission and is not the
+                loader's concern.
         """
         self.root = root
-        self.version = version
         self.logger = logging.getLogger("Loader")
-        self.system_log_path = os.path.join(
-            self.root, SYSTEM_PATH.get(
-                version, SYSTEM_PATH["default"]))
+        self.system_log_path = os.path.join(self.root, SYSTEM_PATH)
         self.parser_map = PARSER_MAP
         self.config = config
 

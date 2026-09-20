@@ -705,7 +705,6 @@ VALIDATE
     input  (positional)             Submission directory to check
   Optional:
     --submitters CSV                Comma-separated submitter allowlist (default: all)
-    --mlperf-version VERSION        Spec version (default: v3.0)
     --csv PATH                      Summary CSV path (default: summary.csv)
     --skip-output-file              Suppress per-submission output file
     --reference-checksum MD5        Override REFERENCE_CHECKSUMS for code/ MD5 check

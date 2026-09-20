@@ -112,21 +112,10 @@ def add_validate_arguments(parser):
         default=None,
         help="Comma-separated list of submitters to check (default: all submitters under the input dir)."
     )
-    # Lazy import — DEFAULT_SPEC_VERSION reads through to constants.py, which
-    # pulls in submission_checker module deps. Keeping the import inside the
-    # arg builder avoids paying that cost at top-level CLI parser construction
-    # time (matters for `mlpstorage --help_all` and similar fast paths).
-    from mlpstorage_py.submission_checker.constants import DEFAULT_SPEC_VERSION
-    parser.add_argument(
-        "--mlperf-version",
-        dest="version",
-        default=DEFAULT_SPEC_VERSION,
-        help=(
-            "MLPerf Storage spec version that the submission package claims "
-            "to conform to (default: %(default)s, derived from this "
-            "package's release version's major.minor)."
-        ),
-    )
+    # There is no edition flag: each submission declares its rules edition
+    # in <division>/<org>/submission.yaml and is checked with that edition's
+    # parameters (mlpstorage_py/rules/editions.yaml `checker:`); a tree
+    # without manifests is checked under the current edition.
     parser.add_argument(
         "--csv",
         default="summary.csv",

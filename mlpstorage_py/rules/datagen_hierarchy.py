@@ -16,12 +16,11 @@ Design notes
 
 Each DLIO leaf under
 ``<results-dir>/.../{training/<model>/{datagen,run},checkpointing/<model>}/<ts>/``
-carries a required-file set listed in
-``mlpstorage_py/submission_checker/constants.py``
-(DATAGEN_REQUIRED_FILES / RUN_REQUIRED_FILES / CHECKPOINT_REQUIRED_FILES and
-their _FOLDERS counterparts). We reuse those constants so the same file-set
-contract is enforced from every call site (submission checker, run-checker,
-reportgen) without drift.
+carries a required-file set listed in the rules editions table
+(``mlpstorage_py/rules/editions.yaml``, the current edition's ``checker:``
+block). We read the same table the submission checker's ``Config`` reads so
+the file-set contract is enforced from every call site (submission checker,
+run-checker, reportgen) without drift.
 
 The manifest at ``<data-dir>/<model>/.mlps-datagen-manifest.json`` is the
 self-describing record a future ``training run`` command will read to compare
@@ -57,14 +56,7 @@ from mlpstorage_py.config import (
     MODELS_OPEN,
 )
 from mlpstorage_py.errors import ConfigurationError, ErrorCode
-from mlpstorage_py.submission_checker.constants import (
-    CHECKPOINT_REQUIRED_FILES,
-    CHECKPOINT_REQUIRED_FOLDERS,
-    DATAGEN_REQUIRED_FILES,
-    DATAGEN_REQUIRED_FOLDERS,
-    RUN_REQUIRED_FILES,
-    RUN_REQUIRED_FOLDERS,
-)
+from mlpstorage_py.editions import checker_parameters
 
 
 DATAGEN_MANIFEST_FILENAME = ".mlps-datagen-manifest.json"
@@ -297,22 +289,22 @@ def _assert_object_hierarchy_absent(model_uri: str, model: str) -> None:
 # --------------------------------------------------------------------------- #
 
 
-def _select_regex_set(mapping: Dict[str, List[str]]) -> List[str]:
-    """Prefer v3.0 patterns; fall back to ``default`` if absent."""
-    return mapping.get("v3.0") or mapping.get("default") or []
+def _params():
+    """The current rules edition's ``checker:`` block (required leaf contents)."""
+    return checker_parameters()
 
 
 def _validate_leaf(
     leaf_path: str,
-    files_map: Dict[str, List[str]],
-    folders_map: Dict[str, List[str]],
+    files_map: List[str],
+    folders_map: List[str],
     leaf_kind: str,
 ) -> List[str]:
     """Stat-only presence check against a required-files / folders contract.
 
     Shared helper for the three DLIO leaf validators: datagen, run,
     and checkpointing. Each leaf carries a different required-file
-    regex set (see ``submission_checker/constants.py``) but the check
+    regex set (see ``rules/editions.yaml`` ``checker:``) but the check
     shape — presence of the regex-matched files plus presence of the
     ``dlio_config/`` folder with its three inner YAMLs — is identical.
 
@@ -325,11 +317,11 @@ def _validate_leaf(
     missing: List[str] = []
     entries = os.listdir(leaf_path)
 
-    for pattern in _select_regex_set(files_map):
+    for pattern in files_map:
         if not any(re.search(pattern, name) for name in entries):
             missing.append(_pretty_file_pattern(pattern))
 
-    for folder in _select_regex_set(folders_map):
+    for folder in folders_map:
         folder_path = os.path.join(leaf_path, folder)
         if not os.path.isdir(folder_path):
             missing.append(f"required folder missing: {folder}/")
@@ -348,7 +340,7 @@ def validate_datagen_leaf(leaf_path: str) -> List[str]:
     """Return a list of missing-item descriptions for a datagen leaf.
 
     The check is stat-only: presence of the four datagen-required
-    files (regex-matched against the DATAGEN_REQUIRED_FILES set) and
+    files (regex-matched against the edition's ``datagen_required_files``) and
     the dlio_config/ folder with its three inner YAMLs. Contents are
     not inspected — the caller is expected to fail fast on
     presence, then let downstream tooling (submission_checker, DLIO)
@@ -359,7 +351,7 @@ def validate_datagen_leaf(leaf_path: str) -> List[str]:
         means the leaf is complete. Never raises.
     """
     return _validate_leaf(
-        leaf_path, DATAGEN_REQUIRED_FILES, DATAGEN_REQUIRED_FOLDERS, "datagen"
+        leaf_path, _params().datagen_required_files, _params().datagen_required_folders, "datagen"
     )
 
 
@@ -367,7 +359,7 @@ def validate_run_leaf(leaf_path: str) -> List[str]:
     """Return a list of missing-item descriptions for a training-run leaf.
 
     Mirrors ``validate_datagen_leaf`` but against the run-side contract
-    (``RUN_REQUIRED_FILES`` / ``RUN_REQUIRED_FOLDERS``). Used by the
+    (the edition's ``run_required_files`` / ``run_required_folders``). Used by the
     training benchmark's post-run loud-fail hook so that a DLIO
     subprocess which exits non-zero — or exits zero but writes no
     outputs — surfaces as an ERROR at run time rather than a silent
@@ -375,7 +367,7 @@ def validate_run_leaf(leaf_path: str) -> List[str]:
     ``mlpstorage validate`` rejects the submission (storage#761).
     """
     return _validate_leaf(
-        leaf_path, RUN_REQUIRED_FILES, RUN_REQUIRED_FOLDERS, "run"
+        leaf_path, _params().run_required_files, _params().run_required_folders, "run"
     )
 
 
@@ -383,19 +375,19 @@ def validate_checkpoint_leaf(leaf_path: str) -> List[str]:
     """Return a list of missing-item descriptions for a checkpointing leaf.
 
     Same shape as ``validate_run_leaf`` but against
-    ``CHECKPOINT_REQUIRED_FILES`` / ``CHECKPOINT_REQUIRED_FOLDERS``.
+    the edition's ``checkpoint_required_files`` / ``checkpoint_required_folders``.
     Called from ``CheckpointingBenchmark._run`` to close the
     silent-success gap on the checkpointing subprocess (sibling of
     storage#761).
     """
     return _validate_leaf(
-        leaf_path, CHECKPOINT_REQUIRED_FILES, CHECKPOINT_REQUIRED_FOLDERS,
+        leaf_path, _params().checkpoint_required_files, _params().checkpoint_required_folders,
         "checkpoint",
     )
 
 
 def _pretty_file_pattern(pattern: str) -> str:
-    """Convert a DATAGEN_REQUIRED_FILES regex to a human-readable name.
+    """Convert a required-file regex to a human-readable name.
 
     The submission_checker patterns are anchored regexes like
     ``r"training_datagen\\.stdout\\.log$"``. Strip the trailing ``$``

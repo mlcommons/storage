@@ -65,7 +65,7 @@ def _make_check(tmp_path, mock_logger, datagen_files, run_files, datasize_files=
             (None, _datasize_meta(run_files[0][0]["num_files_train"]),
              "20250111_120000"),
         ]
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
+    config = Config(submitters=["Acme"], skip_output_file=True)
     lm = LoaderMetadata(
         division="closed",
         submitter="Acme",

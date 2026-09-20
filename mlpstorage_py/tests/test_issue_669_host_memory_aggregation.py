@@ -62,7 +62,7 @@ REPORTER_TRUE_MIN_FILES = 103_313
 
 def _make_training_check(tmp_path, run_files):
     log = MagicMock()
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
+    config = Config(submitters=["Acme"], skip_output_file=True)
     submissions_logs = SubmissionLogs(
         datagen_files=[],
         run_files=run_files,

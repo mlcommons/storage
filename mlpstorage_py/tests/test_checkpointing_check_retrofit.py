@@ -65,8 +65,8 @@ def _run_checkpointing_check(root_path, mock_logger):
     Raises:
         AssertionError: if no checkpointing mode was yielded by Loader.load().
     """
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
-    loader = Loader(config=config, root=str(root_path), version="v2.0")
+    config = Config(submitters=["Acme"], skip_output_file=True)
+    loader = Loader(config=config, root=str(root_path))
     for logs in loader.load():
         if logs.loader_metadata.mode == "checkpointing":
             return CheckpointingCheck(log=mock_logger, config=config, submissions_logs=logs)

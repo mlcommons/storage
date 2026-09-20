@@ -40,8 +40,8 @@ def test_bug_t1_training_missing_datagen_does_not_crash(tmp_path):
     _write_json(str(run_dir / "summary.json"), {"num_hosts": 1})
     _write_systems_yaml(tmp_path, "Acme", "sys-v1")
 
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
-    loader = Loader(root=str(tmp_path), version="v2.0", config=config)
+    config = Config(submitters=["Acme"], skip_output_file=True)
+    loader = Loader(root=str(tmp_path), config=config)
 
     # Must not raise. Must yield a training SubmissionLogs with empty datagen_files.
     training = [l for l in loader.load() if l.loader_metadata.mode == "training"]
@@ -58,8 +58,8 @@ def test_bug_t1_training_missing_run_does_not_crash(tmp_path):
     _write_json(str(dg_dir / "summary.json"), {"num_hosts": 1})
     _write_systems_yaml(tmp_path, "Acme", "sys-v1")
 
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
-    loader = Loader(root=str(tmp_path), version="v2.0", config=config)
+    config = Config(submitters=["Acme"], skip_output_file=True)
+    loader = Loader(root=str(tmp_path), config=config)
 
     training = [l for l in loader.load() if l.loader_metadata.mode == "training"]
     assert len(training) == 1
@@ -76,8 +76,8 @@ def test_bug_t1_checkpointing_missing_timestamp_dir_does_not_crash(tmp_path):
     base.mkdir(parents=True, exist_ok=True)
     _write_systems_yaml(tmp_path, "Acme", "sys-v1")
 
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
-    loader = Loader(root=str(tmp_path), version="v2.0", config=config)
+    config = Config(submitters=["Acme"], skip_output_file=True)
+    loader = Loader(root=str(tmp_path), config=config)
 
     checkpointing = [
         l for l in loader.load() if l.loader_metadata.mode == "checkpointing"
@@ -107,10 +107,9 @@ def test_bug_t1_traversal_continues_to_later_submitters(tmp_path):
     _write_json(str(run_b / "summary.json"), {"num_hosts": 1})
     _write_systems_yaml(tmp_path, "AcmeB", "sys-B")
 
-    config = Config(
-        version="v2.0", submitters=["AcmeA", "AcmeB"], skip_output_file=True
+    config = Config(submitters=["AcmeA", "AcmeB"], skip_output_file=True
     )
-    loader = Loader(root=str(tmp_path), version="v2.0", config=config)
+    loader = Loader(root=str(tmp_path), config=config)
 
     by_submitter = {}
     for logs in loader.load():
@@ -152,8 +151,8 @@ def test_issue_612_kvcache_layout_walks_command_then_timestamp(tmp_path):
     _write_json(str(run_dir / "summary.json"), {})
     _write_systems_yaml(tmp_path, "Acme", "sys-v1")
 
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
-    loader = Loader(root=str(tmp_path), version="v2.0", config=config)
+    config = Config(submitters=["Acme"], skip_output_file=True)
+    loader = Loader(root=str(tmp_path), config=config)
 
     kv = [l for l in loader.load() if l.loader_metadata.mode == "kv_cache"]
     assert len(kv) == 1, (
@@ -189,8 +188,8 @@ def test_issue_612_vector_database_yields_one_logs_per_engine_index(tmp_path):
         _write_json(str(run_dir / "summary.json"), {})
     _write_systems_yaml(tmp_path, "Acme", "sys-v1")
 
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
-    loader = Loader(root=str(tmp_path), version="v2.0", config=config)
+    config = Config(submitters=["Acme"], skip_output_file=True)
+    loader = Loader(root=str(tmp_path), config=config)
 
     vdb = [l for l in loader.load() if l.loader_metadata.mode == "vector_database"]
     assert len(vdb) == 2, (
@@ -219,8 +218,8 @@ def test_issue_612_vector_database_missing_index_dir_does_not_crash(tmp_path):
      / "vector_database" / "milvus").mkdir(parents=True, exist_ok=True)
     _write_systems_yaml(tmp_path, "Acme", "sys-v1")
 
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
-    loader = Loader(root=str(tmp_path), version="v2.0", config=config)
+    config = Config(submitters=["Acme"], skip_output_file=True)
+    loader = Loader(root=str(tmp_path), config=config)
 
     # Must not raise.
     list(loader.load())
@@ -233,8 +232,8 @@ def test_issue_612_kvcache_missing_command_dirs_does_not_crash(tmp_path):
      / "kv_cache" / "llama3.1-8b").mkdir(parents=True, exist_ok=True)
     _write_systems_yaml(tmp_path, "Acme", "sys-v1")
 
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
-    loader = Loader(root=str(tmp_path), version="v2.0", config=config)
+    config = Config(submitters=["Acme"], skip_output_file=True)
+    loader = Loader(root=str(tmp_path), config=config)
 
     kv = [l for l in loader.load() if l.loader_metadata.mode == "kv_cache"]
     assert len(kv) == 1
@@ -256,8 +255,8 @@ def test_issue_612_checkpointing_branch_preserved(tmp_path):
     _write_json(str(ts_dir / "summary.json"), {})
     _write_systems_yaml(tmp_path, "Acme", "sys-v1")
 
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
-    loader = Loader(root=str(tmp_path), version="v2.0", config=config)
+    config = Config(submitters=["Acme"], skip_output_file=True)
+    loader = Loader(root=str(tmp_path), config=config)
 
     chk = [
         l for l in loader.load() if l.loader_metadata.mode == "checkpointing"

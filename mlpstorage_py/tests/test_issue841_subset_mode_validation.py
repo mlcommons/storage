@@ -69,7 +69,7 @@ def _make_check(
         system_file={},
         loader_metadata=loader_metadata,
     )
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
+    config = Config(submitters=["Acme"], skip_output_file=True)
     check = CheckpointingCheck(log=mock_logger, config=config, submissions_logs=sub_logs)
     return check, mock_logger
 

@@ -34,7 +34,7 @@ F1B_GUARDED_METHODS = [
 
 def _make_training_check(tmp_path, run_files, datagen_files=None):
     log = MagicMock()
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
+    config = Config(submitters=["Acme"], skip_output_file=True)
     submissions_logs = SubmissionLogs(
         datagen_files=datagen_files or [],
         run_files=run_files,
