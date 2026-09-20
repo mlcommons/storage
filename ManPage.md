@@ -978,7 +978,7 @@ mlpstorage validate <submission-dir> [--submitters <list>]
 - **`--skip-output-file`** — do not emit per-submission log files alongside the CSV.
 - **`--reference-checksum <md5>`** — override the bundled `REFERENCE_CHECKSUMS` used for the `code/` tree MD5 check.
 
-There is no edition flag. Each submission is checked with the parameters of the rules edition its `submission.yaml` declares (`rules_edition`), read from the `checker:` block of that edition in `mlpstorage_py/rules/editions.yaml`; a submission without a manifest is checked under the current edition. A manifest declaring an edition the table lists without a `checker:` block (a historical round checked by its own tool) fails EDN-04 and that submission's workload checks are skipped.
+There is no edition flag. Each submission is checked with the parameters of the rules edition its `submission.yaml` declares (`rules_edition`), read from the `checker:` block of that edition in `mlpstorage_py/rules/editions.yaml`; a submission without a manifest is checked under the current edition. A manifest declaring an edition the table lists without a `checker:` block (a historical round checked by its own tool) fails EDN-04 and that submission's workload checks are skipped. A rule whose logic changed between editions is bound per edition in the checker source (`@rule(..., since=, until=)`, a half-open range), so only the checks bound to that edition run; the others are skipped at debug level.
 
 Exit status: `0` if all submissions pass, `1` if any rule violation is detected.
 
