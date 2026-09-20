@@ -157,11 +157,10 @@ def _run_rule(root: Path, caplog):
         TrainingCheck,
     )
     from mlpstorage_py.submission_checker.configuration.configuration import Config
-    from mlpstorage_py.submission_checker.constants import DEFAULT_SPEC_VERSION
     from mlpstorage_py.submission_checker.loader import Loader
 
-    config = Config(version=DEFAULT_SPEC_VERSION, submitters=None)
-    loader = Loader(root=str(root), version=DEFAULT_SPEC_VERSION, config=config)
+    config = Config(submitters=None)
+    loader = Loader(root=str(root), config=config)
     submissions = list(loader.load())
     assert len(submissions) == 1, (
         f"Expected exactly one submission yielded by Loader; got {len(submissions)}"

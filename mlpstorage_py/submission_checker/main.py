@@ -6,6 +6,14 @@ import sys
 # Constants
 from .constants import *
 
+from mlpstorage_py.editions import UncheckableEditionError, load_editions
+from mlpstorage_py.provenance import (
+    MANIFEST_FILENAME,
+    UNKNOWN,
+    ProvenanceError,
+    read_submission_manifest,
+)
+
 # Import config
 from .configuration.configuration import Config
 
@@ -79,16 +87,6 @@ def get_args():
     parser.add_argument("--input", required=True, help="submission directory")
     parser.add_argument("--submitters", help="Comma separated submitters to run the checker")
     parser.add_argument(
-        "--version",
-        default=DEFAULT_SPEC_VERSION,
-        choices=list(VERSIONS),
-        help=(
-            "MLPerf Storage spec version that the submission package claims "
-            "to conform to (default: %(default)s, derived from this "
-            "package's release version's major.minor)"
-        ),
-    )
-    parser.add_argument(
         "--csv",
         default="summary.csv",
         help="csv file with results")
@@ -100,6 +98,35 @@ def get_args():
     args = parser.parse_args()
     return args
 
+def config_for_submission(root, division, submitter, tree_config, cache):
+    """The Config a submission's workload checks run with.
+
+    The rules edition comes from ``<division>/<submitter>/submission.yaml``
+    (``rules_edition``). No manifest, an edition of ``unknown``, a manifest
+    PROV-02 cannot parse, or an edition EDN-01 does not know all fall back to
+    the tree-wide Config (the current edition) so those rules stay the single
+    report. A known edition this tool cannot check returns ``None`` (EDN-04
+    reported it pre-loop). Cached per (division, submitter).
+    """
+    key = (division, submitter)
+    if key in cache:
+        return cache[key]
+    result = tree_config
+    manifest_path = os.path.join(root, division, submitter, MANIFEST_FILENAME)
+    if os.path.isfile(manifest_path):
+        try:
+            declared = read_submission_manifest(manifest_path).get("rules_edition")
+        except ProvenanceError:
+            declared = None
+        if declared is not None and str(declared) != UNKNOWN:
+            try:
+                result = tree_config.for_edition(declared)
+            except UncheckableEditionError:
+                result = None if load_editions().edition(declared) is not None else tree_config
+    cache[key] = result
+    return result
+
+
 def run(args):
     """Run the MLPerf submission checker against a parsed argument namespace.
 
@@ -110,8 +137,10 @@ def run(args):
 
     Args:
         args: ``argparse.Namespace`` with attributes ``input``,
-            ``version``, ``submitters``, ``csv``, ``skip_output_file``,
-            and ``reference_checksum``.
+            ``submitters``, ``csv``, ``skip_output_file``, and
+            ``reference_checksum``. The rules edition is not an argument:
+            each submission declares its own in ``submission.yaml`` (see
+            ``config_for_submission``).
 
     Returns:
         int: 0 if all submissions pass checks, 1 if any errors found.
@@ -134,13 +163,15 @@ def run(args):
             submitters = None
     else:
         submitters = None
+    # Tree-wide Config: the current rules edition. The pre-loop structural
+    # checks and the exporter use it; each submission in the loop gets its own
+    # (config_for_submission) for the edition its manifest declares.
     config = Config(
-        version=args.version,
         submitters=submitters,
         skip_output_file=args.skip_output_file,
     )
 
-    loader = Loader(args.input, args.version, config)
+    loader = Loader(args.input, config)
     exporter = ResultExporter(args.csv, config)
 
 
@@ -185,8 +216,17 @@ def run(args):
         errors.append(args.input)
 
     # Main loop over all the submissions
+    sub_configs = {}
     for logs in loader.load():
-        mode = getattr(logs.loader_metadata, "mode", None)
+        md = logs.loader_metadata
+        sub_config = config_for_submission(args.input, md.division, md.submitter, config, sub_configs)
+        if sub_config is None:
+            # EditionCheck already reported EDN-04 for this manifest once.
+            log.debug("skipping workload checks for %s/%s: its submission.yaml declares a "
+                      "rules edition this tool cannot check", md.division, md.submitter)
+            errors.append(md.folder)
+            continue
+        mode = getattr(md, "mode", None)
         checkers = MODE_TO_CHECKERS.get(mode, None)
         # Per CR-01 iter-2 (review 2026-06-10): an unmapped mode is a §2.1.10
         # workloadCategories violation, NOT a silent pass. Pre-CR-02 every
@@ -208,7 +248,7 @@ def run(args):
             continue
         valid = True
         for checker in checkers:
-            valid &= checker(log, config, logs)()
+            valid &= checker(log, sub_config, logs)()
 
         # TODO: Add results to summary
         if valid:

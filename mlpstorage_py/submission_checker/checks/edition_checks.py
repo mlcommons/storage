@@ -1,4 +1,5 @@
-"""EditionCheck — EDN-01 rulesEdition, EDN-02 comparabilityClass, EDN-03 dlioRevision.
+"""EditionCheck — EDN-01 rulesEdition, EDN-02 comparabilityClass, EDN-03 dlioRevision,
+EDN-04 checkableEdition.
 
 Runs as a pre-loop check in ``main.py:run()`` after ``ProvenanceCheck``.
 All three rules read the leaf ``provenance.json`` stamps and the
@@ -64,6 +65,7 @@ class EditionCheck(BaseCheck):
     def init_checks(self):
         self.checks = [
             self.rules_edition_check,
+            self.checkable_edition_check,
             self.comparability_class_check,
             self.dlio_revision_check,
         ]
@@ -151,6 +153,50 @@ class EditionCheck(BaseCheck):
                     "EDN-01", "rulesEdition", str(manifest_path),
                     "%s declares rules edition %s, which %s does not know (known: %s).",
                     MANIFEST_FILENAME, declared, _RULE_FILE, ", ".join(sorted(table.editions)))
+                valid = False
+        return valid
+
+    # ------------------------------------------------------------------
+    # EDN-04 — checkableEdition
+    # ------------------------------------------------------------------
+
+    @rule("EDN-04", "checkableEdition")
+    def checkable_edition_check(self):
+        """A manifest declaring an edition the table knows but lists without
+        checker parameters: this tool cannot check the submission, so
+        ``main.run`` skips its workload checks (EDN-01 owns unknown editions)."""
+        valid = True
+        table = self._load_table()
+        if table is None:
+            return True  # EDN-01 reported the unloadable table
+        root = Path(self.root_path)
+        for mode in _MODES:
+            mode_dir = root / mode
+            if not mode_dir.is_dir():
+                continue
+            try:
+                orgs = sorted(p for p in os.listdir(mode_dir) if (mode_dir / p).is_dir())
+            except OSError:
+                continue
+            for org in orgs:
+                manifest_path = mode_dir / org / MANIFEST_FILENAME
+                if not manifest_path.is_file():
+                    continue
+                try:
+                    manifest = read_submission_manifest(manifest_path)
+                except ProvenanceError:
+                    continue  # PROV-02 owns the file
+                declared = manifest.get("rules_edition")
+                declared = str(declared) if declared is not None else UNKNOWN
+                edition = table.edition(declared)
+                if edition is None or edition.checkable:
+                    continue
+                self.log_violation(
+                    "EDN-04", "checkableEdition", str(manifest_path),
+                    "%s declares rules edition %s, which this tool cannot check (%s lists it "
+                    "without checker parameters; it is checked by its own tool: %s); the "
+                    "submission's workload checks are skipped.",
+                    MANIFEST_FILENAME, declared, _RULE_FILE, edition.tool)
                 valid = False
         return valid
 

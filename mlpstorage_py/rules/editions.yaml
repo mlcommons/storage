@@ -9,6 +9,12 @@
 #            bumps only when a workload's numbers or validity change, or a
 #            workload is added or retired -- never for a tool release.
 #            `current_edition` must equal config.RULES_EDITION (tested).
+#            `checker:` carries the parameters `validate` needs to check a
+#            submission of that edition (the required files and folders of
+#            every datagen / run / checkpoint leaf). Only an edition THIS tool
+#            can check carries one; an edition without it is checked by the
+#            tool its `tool:` line names, and a submission.yaml declaring it
+#            fails EDN-04. The current edition must carry one (tested).
 #
 # classes:   the comparability classes. A class is the WG's assertion that runs
 #            of one (division, family, model, emulated accelerator) whose
@@ -102,6 +108,8 @@ editions:
       the tag's commit is not recorded in any leaf, so no revision is listed.
       CLOSED checkpointing ran checkpoint.mode=subset with model.parallelism.data
       (8 for 70b, 2 for 405b/1t); OPEN ANL runs used the full configuration.
+      No checker block: the 3.0.x tool never read a v2.0 tree (its leaf layout
+      differs from every 3.0 layout), so it does not claim to check one.
 
   "3.0":
     status: current
@@ -122,6 +130,37 @@ editions:
           milvus: []
         kv_cache:
           llama3.1-8b: []
+    # What `validate` requires of every leaf of this edition. The regexes are
+    # the former submission_checker/constants.py dicts, byte for byte (the
+    # frozen v3.0 tree validates identically); the folders are the DLIO
+    # config directory (Rules.md 2.1.15 pins its three inner YAMLs).
+    checker:
+      # datagen runs DLIO with workflow.generate_data=True, workflow.train=False,
+      # so it never writes *output.json / *per_epoch_stats.json / *summary.json
+      # (issue #600); training_<ts>_metadata.json is the tool's own metadata.
+      datagen_required_files:
+        - 'training_datagen\.stdout\.log$'
+        - 'training_datagen\.stderr\.log$'
+        - 'dlio\.log$'
+        - 'training_.*_metadata\.json$'
+      datagen_required_folders: [dlio_config]
+      run_required_files:
+        - 'training_run\.stdout.log'
+        - 'training_run\.stderr.log'
+        - '.*output\.json'
+        - '.*per_epoch_stats\.json'
+        - '.*summary\.json'
+        - 'dlio\.log'
+      run_required_folders: [dlio_config]
+      # checkpointing_run.* prefixes, escaped dots (Rules.md 2.1.25; BUG-02).
+      checkpoint_required_files:
+        - 'checkpointing_run\.stdout\.log'
+        - 'checkpointing_run\.stderr\.log'
+        - '.*output\.json'
+        - '.*per_epoch_stats\.json'
+        - '.*summary\.json'
+        - 'dlio\.log'
+      checkpoint_required_folders: [dlio_config]
     # Every DLIO commit a sanctioned v3.0 CLOSED row ran on (walked from the
     # frozen tree's code images; 13 leaves whose image was built from a local
     # DLIO checkout record no commit and cannot be listed).

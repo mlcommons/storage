@@ -60,7 +60,7 @@ def _make_log():
 
 
 def _make_config():
-    return Config(version="1.0", submitters=None)
+    return Config(submitters=None)
 
 
 # ---------------------------------------------------------------------------

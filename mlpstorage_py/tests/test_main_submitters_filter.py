@@ -40,19 +40,19 @@ class TestConfigSubmittersNoneMatchesAll:
     """Pin Config(submitters=None).check_submitter -> True for any submitter."""
 
     def test_none_matches_real_submitter(self):
-        config = Config(version="v5.1", submitters=None)
+        config = Config(submitters=None)
         assert config.check_submitter("Acme") is True
 
     def test_none_matches_another_submitter(self):
-        config = Config(version="v5.1", submitters=None)
+        config = Config(submitters=None)
         assert config.check_submitter("BetaCo") is True
 
     def test_explicit_list_filters_out_non_member(self):
-        config = Config(version="v5.1", submitters=["Acme"])
+        config = Config(submitters=["Acme"])
         assert config.check_submitter("BetaCo") is False
 
     def test_explicit_list_admits_member(self):
-        config = Config(version="v5.1", submitters=["Acme"])
+        config = Config(submitters=["Acme"])
         assert config.check_submitter("Acme") is True
 
 
@@ -130,5 +130,5 @@ class TestMainSubmittersIntegration:
     )
     def test_arg_to_check_submitter(self, raw, candidate, expected):
         submitters = _parse_submitters_arg(raw)
-        config = Config(version="v5.1", submitters=submitters)
+        config = Config(submitters=submitters)
         assert config.check_submitter(candidate) is expected

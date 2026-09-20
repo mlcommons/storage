@@ -66,8 +66,8 @@ def _run_training_check(root_path, mock_logger):
     Raises:
         AssertionError: if no training mode was yielded by Loader.load().
     """
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
-    loader = Loader(config=config, root=str(root_path), version="v2.0")
+    config = Config(submitters=["Acme"], skip_output_file=True)
+    loader = Loader(config=config, root=str(root_path))
     for logs in loader.load():
         if logs.loader_metadata.mode == "training":
             return TrainingCheck(log=mock_logger, config=config, submissions_logs=logs)
@@ -322,7 +322,7 @@ def _make_training_check_with_runs(tmp_path, mock_logger, run_files):
     from mlpstorage_py.submission_checker.loader import (
         LoaderMetadata, SubmissionLogs,
     )
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
+    config = Config(submitters=["Acme"], skip_output_file=True)
     logs = SubmissionLogs(
         run_files=run_files,
         system_file=None,

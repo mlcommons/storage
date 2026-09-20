@@ -132,7 +132,7 @@ def _build_training_tree(tmp_path, *, write_sidecar, same_filesystem=False,
 
 def _training_check(leaf, run_files, mode="training"):
     log = MagicMock()
-    config = Config(version="v3.0", submitters=["Acme"], skip_output_file=True)
+    config = Config(submitters=["Acme"], skip_output_file=True)
     submissions_logs = SubmissionLogs(
         datagen_files=[],
         run_files=run_files,
@@ -175,7 +175,7 @@ def _build_checkpointing_tree(tmp_path, *, write_sidecar, same_filesystem=False,
 
 def _checkpointing_check(leaf, checkpoint_files, mode="checkpointing"):
     log = MagicMock()
-    config = Config(version="v3.0", submitters=["Acme"], skip_output_file=True)
+    config = Config(submitters=["Acme"], skip_output_file=True)
     submissions_logs = SubmissionLogs(
         datagen_files=[],
         run_files=[],
@@ -217,7 +217,7 @@ def _build_vdb_tree(tmp_path, *, write_sidecar, same_filesystem=False,
 
 def _vdb_check(leaf, run_files):
     log = MagicMock()
-    config = Config(version="v3.0", submitters=None, skip_output_file=True)
+    config = Config(submitters=None, skip_output_file=True)
     submissions_logs = SubmissionLogs(
         datagen_files=[],
         run_files=run_files,

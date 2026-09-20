@@ -1,110 +1,20 @@
-import re
-
-from mlpstorage_py import VERSION as _PACKAGE_VERSION
-
 from .parsers.json_parser import JSONParser
 from .parsers.yaml_parser import YamlParser
 
-VERSIONS = ["v2.0", "v3.0"]
 VALID_DIVISIONS = ["open", "closed"]
 
-
-def _derive_default_spec_version(package_version: str, supported: list) -> str:
-    """Return the spec-version string that pairs with this package release.
-
-    The MLPerf Storage spec ("Rules.md") evolves on round boundaries (v2.0,
-    v3.0, v4.0, ...). The Python package version evolves on release
-    boundaries (e.g. 3.0.0, 3.0.7, 3.0.8) — patch bumps for code fixes that
-    do not touch the spec. The package's major.minor therefore IS the
-    canonical spec round the code was built for; the patch level is the
-    code-only delta. Derive the default for ``--mlperf-version`` from the
-    package's major.minor so the two never drift.
-
-    If the derived string is not in ``supported`` (e.g. during a transition
-    when the new spec version hasn't been added to VERSIONS yet), fall back
-    to the most recently supported round and let the validator surface a
-    runtime mismatch via per-version dict lookups.
-
-    Args:
-        package_version: e.g. ``"3.0.8"``; falls back to ``"unknown"`` when
-            both PEP 621 metadata and pyproject.toml are unavailable.
-        supported: the ordered list of spec versions the per-version
-            constants dicts ship entries for.
-
-    Returns:
-        A spec-version string such as ``"v3.0"``.
-    """
-    m = re.match(r"^(\d+)\.(\d+)", package_version)
-    if m:
-        candidate = f"v{m.group(1)}.{m.group(2)}"
-        if candidate in supported:
-            return candidate
-    # Fallback: most recently supported round.
-    return supported[-1] if supported else "unknown"
-
-
-DEFAULT_SPEC_VERSION = _derive_default_spec_version(_PACKAGE_VERSION, VERSIONS)
-
-SYSTEM_PATH = {
-    "v2.0": "{division}/{submitter}/systems/{system}.yaml",
-    "v3.0": "{division}/{submitter}/systems/{system}.yaml",
-    "default": "{division}/{submitter}/systems/{system}.yaml",
-}
+# Where a submission's system description lives, relative to the tree root.
+# This is layout, not rules edition: every layout this tool reads puts it
+# here. (The former per-version dicts -- VERSIONS, DEFAULT_SPEC_VERSION,
+# *_REQUIRED_FILES / *_REQUIRED_FOLDERS -- moved into the rules editions
+# table, mlpstorage_py/rules/editions.yaml `checker:`, read through Config.)
+SYSTEM_PATH = "{division}/{submitter}/systems/{system}.yaml"
 
 PARSER_MAP = {
     "System": YamlParser,
     "Summary": JSONParser,
     "Metadata": JSONParser,
     "default": JSONParser
-}
-
-# Issue #600: prior versions copied this list from RUN_REQUIRED_FILES, which
-# wrongly demanded `*output.json` / `*per_epoch_stats.json` / `*summary.json`
-# in datagen directories — those are training-loop outputs, never written by
-# DLIO datagen (`workflow.generate_data=True, workflow.train=False` skips the
-# loop). `training_<ts>_metadata.json` is the mlpstorage-injected metadata
-# file written by `Benchmark.write_metadata` for every command.
-DATAGEN_REQUIRED_FILES = {
-    # DLIO datagen runs with workflow.generate_data=True, workflow.train=False, so it
-    # does NOT emit the *output.json / *per_epoch_stats.json / *summary.json files that
-    # the training loop produces. The required-files list reflects only what datagen
-    # actually writes plus the mlpstorage-injected per-datagen metadata.
-    "v2.0": [r"training_datagen\.stdout\.log$", r"training_datagen\.stderr\.log$", r"dlio\.log$", r"training_.*_metadata\.json$"],
-    "v3.0": [r"training_datagen\.stdout\.log$", r"training_datagen\.stderr\.log$", r"dlio\.log$", r"training_.*_metadata\.json$"],
-    "default": [r"training_datagen\.stdout\.log$", r"training_datagen\.stderr\.log$", r"dlio\.log$", r"training_.*_metadata\.json$"],
-}
-
-DATAGEN_REQUIRED_FOLDERS = {
-    "v2.0": ["dlio_config"],
-    "v3.0": ["dlio_config"],
-    "default": ["dlio_config"],
-}
-
-RUN_REQUIRED_FILES = {
-    "v2.0": [r"training_run\.stdout.log", r"training_run\.stderr.log", r".*output\.json", r".*per_epoch_stats\.json", r".*summary\.json", r"dlio\.log"],
-    "v3.0": [r"training_run\.stdout.log", r"training_run\.stderr.log", r".*output\.json", r".*per_epoch_stats\.json", r".*summary\.json", r"dlio\.log"],
-    "default": [r"training_run\.stdout.log", r"training_run\.stderr.log", r".*output\.json", r".*per_epoch_stats\.json", r".*summary\.json", r"dlio\.log"],
-}
-
-RUN_REQUIRED_FOLDERS = {
-    "v2.0": ["dlio_config"],
-    "v3.0": ["dlio_config"],
-    "default": ["dlio_config"],
-}
-
-# BUG-02 (D-E2): prior versions used training_run.* prefixes here — should be
-# checkpointing_run.* (Rules.md 2.1.25 checkpointingFiles). The dot before
-# "log" is also escaped (\.) to avoid latent over-matching.
-CHECKPOINT_REQUIRED_FILES = {
-    "v2.0": [r"checkpointing_run\.stdout\.log", r"checkpointing_run\.stderr\.log", r".*output\.json", r".*per_epoch_stats\.json", r".*summary\.json", r"dlio\.log"],
-    "v3.0": [r"checkpointing_run\.stdout\.log", r"checkpointing_run\.stderr\.log", r".*output\.json", r".*per_epoch_stats\.json", r".*summary\.json", r"dlio\.log"],
-    "default": [r"checkpointing_run\.stdout\.log", r"checkpointing_run\.stderr\.log", r".*output\.json", r".*per_epoch_stats\.json", r".*summary\.json", r"dlio\.log"],
-}
-
-CHECKPOINT_REQUIRED_FOLDERS = {
-    "v2.0": ["dlio_config"],
-    "v3.0": ["dlio_config"],
-    "default": ["dlio_config"],
 }
 
 # Issue #608: NUM_DATASET_TRAIN_FILES / NUM_DATASET_EVAL_FILES /

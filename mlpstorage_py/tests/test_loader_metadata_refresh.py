@@ -76,8 +76,8 @@ def test_bug01_run_metadata_not_datagen_carryover(tmp_path):
     systems_dir.mkdir(parents=True, exist_ok=True)
     (systems_dir / "sys-v1.yaml").write_text("system_under_test: {}", encoding="utf-8")
 
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
-    loader = Loader(root=str(tmp_path), version="v2.0", config=config)
+    config = Config(submitters=["Acme"], skip_output_file=True)
+    loader = Loader(root=str(tmp_path), config=config)
 
     training_logs = None
     for logs in loader.load():
@@ -132,8 +132,8 @@ def test_bug01_checkpointing_branch_unaffected(tmp_path):
     systems_dir.mkdir(parents=True, exist_ok=True)
     (systems_dir / "sys-v1.yaml").write_text("system_under_test: {}", encoding="utf-8")
 
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
-    loader = Loader(root=str(tmp_path), version="v2.0", config=config)
+    config = Config(submitters=["Acme"], skip_output_file=True)
+    loader = Loader(root=str(tmp_path), config=config)
 
     checkpoint_logs = None
     for logs in loader.load():

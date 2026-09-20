@@ -91,14 +91,14 @@ def _run_validator(root):
     """Invoke the validator CLI as a subprocess and return the CompletedProcess.
 
     Matches success criteria #3/#4 verbatim — uses ``-m
-    mlpstorage_py.submission_checker``, ``--input <root>``, ``--version v2.0``.
+    mlpstorage_py.submission_checker``, ``--input <root>`` (the rules edition is
+    per submission, declared in submission.yaml; there is no flag).
     """
     return subprocess.run(
         [
             sys.executable,
             "-m", "mlpstorage_py.submission_checker",
             "--input", str(root),
-            "--version", "v2.0",
         ],
         capture_output=True,
         text=True,

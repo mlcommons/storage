@@ -205,8 +205,8 @@ def _inject_summary_num_accelerators(root: Path, num_accelerators: int) -> None:
 
 
 def _run_checkpointing_check(root: Path, mock_logger):
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
-    loader = Loader(config=config, root=str(root), version="v2.0")
+    config = Config(submitters=["Acme"], skip_output_file=True)
+    loader = Loader(config=config, root=str(root))
     for logs in loader.load():
         if logs.loader_metadata.mode == "checkpointing":
             return CheckpointingCheck(

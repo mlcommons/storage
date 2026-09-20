@@ -21,9 +21,8 @@ from mlpstorage_py.submission_checker.rule_registry import discover_rules
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_config(version="v2.0"):
+def _make_config():
     return Config(
-        version=version,
         submitters=None,
         skip_output_file=False,
     )
@@ -35,8 +34,8 @@ def run_one_check(structure_check, method_name, mock_logger):
     return method()
 
 
-def _make_check(root_path, mock_logger, version="v2.0"):
-    config = _make_config(version=version)
+def _make_check(root_path, mock_logger):
+    config = _make_config()
     return SubmissionStructureCheck(mock_logger, config, str(root_path))
 
 

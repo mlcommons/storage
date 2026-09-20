@@ -1,39 +1,61 @@
 import os
 import yaml
 
+from mlpstorage_py.editions import load_editions
+
 from ..constants import *
 
 
 class Config:
-    def __init__(self, version, submitters, skip_output_file=False):
-        self.version = version
+    """Checker configuration: the tree-wide options plus the rules edition
+    whose parameters (``mlpstorage_py/rules/editions.yaml`` ``checker:``) the
+    checks read.
+
+    ``edition=None`` is the current edition. ``main.run`` builds one Config
+    tree-wide for the pre-loop checks and then, per submission, one for the
+    edition its ``submission.yaml`` declares (``for_edition``). Construction
+    is strict: an edition the table does not know, or lists without checker
+    parameters, raises ``UncheckableEditionError``.
+    """
+
+    def __init__(self, edition=None, submitters=None, skip_output_file=False):
+        table = load_editions()
+        self.edition = table.current_edition if edition is None else str(edition)
+        self.checker = table.require_checkable(self.edition)
         self.submitters = submitters
         self.skip_output_file = skip_output_file
         self._parallelism_cache: dict[str, tuple[int, int]] = {}  # lazy-load cache for get_model_parallelism
-        
+
+    def for_edition(self, edition):
+        """A Config for another rules edition with the same tree-wide options."""
+        if str(edition) == self.edition:
+            return self
+        return Config(edition=edition, submitters=self.submitters,
+                      skip_output_file=self.skip_output_file)
+
     def check_submitter(self, submitter):
         if self.submitters is None:
             return True
         return submitter in self.submitters
-    
+
     def get_datagen_required_files(self):
-        return DATAGEN_REQUIRED_FILES[self.version]
-    
+        return self.checker.datagen_required_files
+
     def get_run_required_files(self):
-        return RUN_REQUIRED_FILES[self.version]
-    
+        return self.checker.run_required_files
+
     def get_checkpoint_required_files(self):
-        return CHECKPOINT_REQUIRED_FILES[self.version]
-    
+        return self.checker.checkpoint_required_files
+
     def get_datagen_required_folders(self):
-        return DATAGEN_REQUIRED_FOLDERS[self.version]
-    
+        return self.checker.datagen_required_folders
+
     def get_run_required_folders(self):
-        return RUN_REQUIRED_FOLDERS[self.version]
-    
+        return self.checker.run_required_folders
+
     def get_checkpoint_required_folders(self):
-        return CHECKPOINT_REQUIRED_FOLDERS[self.version]
-    
+        return self.checker.checkpoint_required_folders
+
     # Issue #608: get_num_train_files / get_num_eval_files were deleted —
     # they only ever returned values from the NUM_DATASET_*_FILES placeholder
     # dicts (`# TODO: Ask for correct values`) that are also gone. Rule 3.3.1

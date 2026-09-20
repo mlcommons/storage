@@ -5,7 +5,7 @@ actually writes. DLIO datagen runs with
 ``workflow.generate_data=True, workflow.train=False`` and therefore does
 NOT emit the training-loop outputs (``*output.json``, ``*per_epoch_stats.json``,
 ``*summary.json``). Issue #600: prior to this fix, the required-files list
-was a copy of ``RUN_REQUIRED_FILES`` and every conforming datagen dir
+was a copy of the run leaf's required-file list and every conforming datagen dir
 failed 2.1.14 with three spurious violations.
 """
 from __future__ import annotations
@@ -45,7 +45,6 @@ def _build_datagen_check(workload_dir: Path, timestamp: str):
     from mlpstorage_py.submission_checker.configuration.configuration import (
         Config,
     )
-    from mlpstorage_py.submission_checker.constants import DEFAULT_SPEC_VERSION
     from mlpstorage_py.submission_checker.loader import (
         LoaderMetadata,
         SubmissionLogs,
@@ -71,7 +70,7 @@ def _build_datagen_check(workload_dir: Path, timestamp: str):
         system_file={},
         loader_metadata=loader_metadata,
     )
-    config = Config(version=DEFAULT_SPEC_VERSION, submitters=None)
+    config = Config(submitters=None)
     log = logging.getLogger("test_submission_checker_datagen_files")
     return DirectoryCheck(log=log, config=config, submissions_logs=logs)
 
@@ -108,18 +107,16 @@ class TestDatagenFilesCheck:
         emitted by the training loop only — datagen runs skip the loop.
         Also pins that the prior ``,*summary\\.json$`` typo is gone.
         """
-        from mlpstorage_py.submission_checker.constants import (
-            DATAGEN_REQUIRED_FILES,
-        )
+        from mlpstorage_py.editions import checker_parameters
 
-        v3 = DATAGEN_REQUIRED_FILES["v3.0"]
+        v3 = checker_parameters("3.0").datagen_required_files
         joined = " ".join(v3)
         assert "output" not in joined, (
-            "DATAGEN_REQUIRED_FILES[v3.0] must not require *output.json — "
+            "editions.yaml 3.0 checker.datagen_required_files must not require *output.json — "
             "DLIO datagen never writes it (issue #600 bug 1)."
         )
         assert "per_epoch_stats" not in joined, (
-            "DATAGEN_REQUIRED_FILES[v3.0] must not require *per_epoch_stats.json"
+            "editions.yaml 3.0 checker.datagen_required_files must not require *per_epoch_stats.json"
             " — DLIO datagen never writes it (issue #600 bug 1)."
         )
         assert ",*summary" not in joined, (
@@ -129,6 +126,6 @@ class TestDatagenFilesCheck:
         # `summary.json` is also a training-loop output; once bug 1 is
         # fixed, no `summary` pattern should remain at all.
         assert "summary" not in joined, (
-            "DATAGEN_REQUIRED_FILES[v3.0] must not require *summary.json — "
+            "editions.yaml 3.0 checker.datagen_required_files must not require *summary.json — "
             "DLIO datagen never writes it (issue #600 bug 1)."
         )

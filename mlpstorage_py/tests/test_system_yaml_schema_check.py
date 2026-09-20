@@ -40,7 +40,7 @@ from mlpstorage_py.tests.conftest import build_submission
 
 def _make_check(mock_logger, root_path: pathlib.Path) -> SystemYamlSchemaCheck:
     """Instantiate SystemYamlSchemaCheck wired to a mock_logger."""
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
+    config = Config(submitters=["Acme"], skip_output_file=True)
     return SystemYamlSchemaCheck(
         log=mock_logger,
         config=config,

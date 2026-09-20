@@ -53,8 +53,8 @@ def _build_training_tree(tmp_path, with_datagen_summary=False,
 
 
 def _load_all(tmp_path, caplog):
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
-    loader = Loader(root=str(tmp_path), version="v2.0", config=config)
+    config = Config(submitters=["Acme"], skip_output_file=True)
+    loader = Loader(root=str(tmp_path), config=config)
     with caplog.at_level(logging.DEBUG, logger="Loader"):
         return list(loader.load())
 

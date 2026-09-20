@@ -403,7 +403,7 @@ Every benchmark run writes:
 - **`mlpstorage.log`** — every message `mlpstorage` itself logged during the invocation, at DEBUG level with `module:line`, uncoloured. Messages emitted before the run directory existed (argument parsing, environment validation, code-image capture) are buffered and written first, so the file is complete from process start.
 - **`mlpstorage.errors.log`** — the WARNING-and-above subset of `mlpstorage.log`. An empty file means the run logged no warnings or errors. Both files live inside the run's timestamp directory and are removed with it.
 - **`fs_separation.json`** — CAP-03 filesystem-separation sidecar written before workload launch. Rank-0 probes the data/checkpoint path against the results path with `os.link()` and records the `EXDEV`/same-fs result plus real-paths, ISO-8601 timestamp, and probing host. The submission checker's rules 3.4.2 / 4.4.2 / 5.4.2 read this file as their authoritative "different filesystems" input. Absent under `--skip-fs-separation-gate`.
-- **`provenance.json`** — provenance stamp written by every `datasize` / `datagen` / `run` leaf right after `*_metadata.json` (which declares it under `"provenance_file"`). Records the rules edition the tool implements (`RULES_EDITION`, e.g. `3.0`), the layout version, the tool version, git SHA and code image, the installed DLIO version/source/commit (from the package's PEP 610 `direct_url.json`), the client storage library for `object` runs (`s3dlio`), and the `core-config-v1` hash of the workload-defining DLIO parameters with the exact keys hashed (allowlists in `mlpstorage_py/rules/core_config_keys.yaml`; `kv_cache` / `vector_database` stamp `unknown`). Every value has a provenance tag saying how it was obtained; undeterminable values are the string `unknown`, never null. Leaves that predate the stamp are never rewritten — `validate`, `reportgen` and `runs show` derive an equivalent stamp from the pointed-to image's `.code-hash.json` and `uv.lock` at read time. Rules.md "Provenance stamps and the submission manifest" has the schema; `validate` rules PROV-01 / PROV-02 enforce it. The stamp's rules edition, family, model, accelerator and core-config hash resolve to a **comparability class** in `mlpstorage_py/rules/editions.yaml` (Rules.md "Rules editions and comparability classes"); `validate` rules EDN-01 / EDN-02 / EDN-03 check the declared edition, the class and the DLIO revision, and `runs show` prints the class.
+- **`provenance.json`** — provenance stamp written by every `datasize` / `datagen` / `run` leaf right after `*_metadata.json` (which declares it under `"provenance_file"`). Records the rules edition the tool implements (`RULES_EDITION`, e.g. `3.0`), the layout version, the tool version, git SHA and code image, the installed DLIO version/source/commit (from the package's PEP 610 `direct_url.json`), the client storage library for `object` runs (`s3dlio`), and the `core-config-v1` hash of the workload-defining DLIO parameters with the exact keys hashed (allowlists in `mlpstorage_py/rules/core_config_keys.yaml`; `kv_cache` / `vector_database` stamp `unknown`). Every value has a provenance tag saying how it was obtained; undeterminable values are the string `unknown`, never null. Leaves that predate the stamp are never rewritten — `validate`, `reportgen` and `runs show` derive an equivalent stamp from the pointed-to image's `.code-hash.json` and `uv.lock` at read time. Rules.md "Provenance stamps and the submission manifest" has the schema; `validate` rules PROV-01 / PROV-02 enforce it. The stamp's rules edition, family, model, accelerator and core-config hash resolve to a **comparability class** in `mlpstorage_py/rules/editions.yaml` (Rules.md "Rules editions and comparability classes"); `validate` rules EDN-01 / EDN-02 / EDN-03 / EDN-04 check the declared edition, the class, the DLIO revision and whether this tool can check the edition at all, and `runs show` prints the class.
 - **`results.json`** — aggregated summary across all timestamped run directories, used by `reportgen`.
 - **Command history** is appended to `<results-dir>/.mlps/history` (consumed by `mlpstorage history`). Only invocations that resolved an initialized results-dir are recorded, so history never creates files inside a tree that `init` has not claimed.
 
@@ -474,7 +474,7 @@ The overall verdict for a parameter set is the most severe state encountered: an
 Explicit validation of a submission package:
 
 ```
-mlpstorage validate <submission-dir> [--submitters <names>] [--mlperf-version <ver>] \
+mlpstorage validate <submission-dir> [--submitters <names>] \
                                      [--csv <out.csv>] [--skip-output-file]
 ```
 
@@ -967,17 +967,18 @@ Verify options:
 ### Validate
 
 ```
-mlpstorage validate <submission-dir> [--submitters <list>] [--mlperf-version <ver>]
+mlpstorage validate <submission-dir> [--submitters <list>]
                                      [--csv <path>] [--skip-output-file]
                                      [--reference-checksum <md5>]
 ```
 
 - **`<submission-dir>`** (positional, required) — root of a submission package containing `closed/<submitter>` and/or `open/<submitter>` trees.
 - **`--submitters <list>`** — comma-separated subset of submitters to check; default is every submitter found under the input directory.
-- **`--mlperf-version <ver>`** — spec version the submission claims to conform to. Default is derived from this `mlpstorage` package's `major.minor`.
 - **`--csv <path>`** — destination for the aggregate summary CSV. Default `summary.csv` in the current directory.
 - **`--skip-output-file`** — do not emit per-submission log files alongside the CSV.
 - **`--reference-checksum <md5>`** — override the bundled `REFERENCE_CHECKSUMS` used for the `code/` tree MD5 check.
+
+There is no edition flag. Each submission is checked with the parameters of the rules edition its `submission.yaml` declares (`rules_edition`), read from the `checker:` block of that edition in `mlpstorage_py/rules/editions.yaml`; a submission without a manifest is checked under the current edition. A manifest declaring an edition the table lists without a `checker:` block (a historical round checked by its own tool) fails EDN-04 and that submission's workload checks are skipped.
 
 Exit status: `0` if all submissions pass, `1` if any rule violation is detected.
 
@@ -1194,7 +1195,7 @@ mlpstorage validate /submissions/acme \
 - `<results-dir>/<mode>/<orgname>/results/<systemname>/.../<YYYYMMDD_HHMMSS>/provenance.json` — per-leaf provenance stamp (rules edition, tool, DLIO revision, storage library, core-config hash); see Common artifacts.
 - `<results-dir>/<mode>/<orgname>/submission.yaml` — per-organization manifest written by `reportgen`: systems, run leaves with their stamps, code images, declared rules edition. Travels with the submission; `validate` PROV-02 checks it against the tree.
 - `<repo>/mlpstorage_py/rules/core_config_keys.yaml` — allowlists of workload-defining DLIO keys behind the `core-config-v1` hash, one per family and revision.
-- `<repo>/mlpstorage_py/rules/editions.yaml` — the rules editions table and the declared comparability classes (which (edition, division, family, model, accelerator, core-config hash) tuples are the same workload; never across divisions); WG-maintained data read by `validate` (EDN-01/02/03) and `runs show`.
+- `<repo>/mlpstorage_py/rules/editions.yaml` — the rules editions table (with each checkable edition's `checker:` parameters: the required files and folders of every leaf) and the declared comparability classes (which (edition, division, family, model, accelerator, core-config hash) tuples are the same workload; never across divisions); WG-maintained data read by `validate` (EDN-01/02/03/04, and every per-submission `Config`) and `runs show`.
 - `<results-dir>/.mlps/history` — command history consumed by `mlpstorage history`.
 - `<results-dir>/code-images/code-<hash8>/` — content-addressed code-image pool shared by every organization and division; `<results-dir>/<orgname>/code-<hash8>/` is the v3.0 per-organization layout, still read by `mlpstorage validate`.
 - `<submission-dir>/{code-images,<mode>/<submitter>/{systems,results}}/` — submission package layout consumed by `mlpstorage validate`.

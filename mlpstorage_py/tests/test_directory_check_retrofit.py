@@ -87,8 +87,8 @@ def _instantiate_directory_check(root_path, mode, mock_logger):
     Raises:
         AssertionError: if no SubmissionLogs for the requested mode was yielded.
     """
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
-    loader = Loader(config=config, root=str(root_path), version="v2.0")
+    config = Config(submitters=["Acme"], skip_output_file=True)
+    loader = Loader(config=config, root=str(root_path))
     for logs in loader.load():
         if logs.loader_metadata.mode == mode:
             return DirectoryCheck(log=mock_logger, config=config, submissions_logs=logs)

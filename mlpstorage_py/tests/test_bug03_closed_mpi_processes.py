@@ -88,7 +88,7 @@ def _make_check(
         loader_metadata=loader_metadata,
     )
 
-    config = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
+    config = Config(submitters=["Acme"], skip_output_file=True)
     return CheckpointingCheck(log=mock_logger, config=config, submissions_logs=sub_logs)
 
 

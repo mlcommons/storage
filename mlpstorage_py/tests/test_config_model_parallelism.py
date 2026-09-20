@@ -24,7 +24,7 @@ from mlpstorage_py.submission_checker.configuration.configuration import Config
 @pytest.fixture
 def config():
     """Return a Config instance suitable for parallelism / mpi-process tests."""
-    return Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
+    return Config(submitters=["Acme"], skip_output_file=True)
 
 
 # ---------------------------------------------------------------------------
@@ -149,11 +149,11 @@ class TestConfigBackwardsCompat:
 
     def test_default_construction_unchanged(self):
         """Config without new kwargs constructs successfully."""
-        c = Config(version="v2.0", submitters=["Acme"])
-        assert c.version == "v2.0"
+        c = Config(submitters=["Acme"])
+        assert c.edition == "3.0"
         assert c.submitters == ["Acme"]
 
     def test_parallelism_cache_starts_empty(self):
         """New _parallelism_cache starts empty — no pre-loaded values."""
-        c = Config(version="v2.0", submitters=["Acme"], skip_output_file=True)
+        c = Config(submitters=["Acme"], skip_output_file=True)
         assert c._parallelism_cache == {}

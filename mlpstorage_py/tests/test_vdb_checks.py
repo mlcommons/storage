@@ -183,7 +183,6 @@ def _make_vdb_check(
 ):
     """Instantiate VdbCheck against fake SubmissionLogs / LoaderMetadata."""
     config = Config(
-        version=version,
         submitters=None,
         skip_output_file=True,
     )
@@ -946,7 +945,7 @@ class Test_5_4_1_VdbPathArgs:
              "20260618_120100"),
         ]
         check = _make_vdb_check(
-            leaf, "closed", mock_logger, run_files=run_files, version="v4.0",
+            leaf, "closed", mock_logger, run_files=run_files,
         )
         assert check.vdb_path_args() is False
         assert any(
@@ -964,7 +963,7 @@ class Test_5_4_1_VdbPathArgs:
         ]
         check = _make_vdb_check(
             leaf, "closed", mock_logger, run_files=run_files,
-            system_file=_object_api_system_file(), version="v4.0",
+            system_file=_object_api_system_file(),
         )
         assert check.vdb_path_args() is True
         assert _violations(mock_logger, "5.4.1", "vdbPathArgs") == []

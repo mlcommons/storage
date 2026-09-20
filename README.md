@@ -104,10 +104,11 @@ only the rolled-up `summary.csv`.
 | Option | Default | Purpose |
 |---|---|---|
 | `--submitters Acme,BetaCo` | all submitters under the input dir | Comma-separated allowlist of submitter directory names. Empty/whitespace tokens are stripped. |
-| `--mlperf-version VERSION` | derived from package `major.minor` (currently `v3.0`) | Pin the spec version the submission claims to conform to. Supported: `v2.0`, `v3.0`. |
 | `--csv PATH` | `summary.csv` in CWD | Path to write the summary CSV. |
 | `--skip-output-file` | off | Suppress the per-submission text output file. |
 | `--reference-checksum MD5` | bundled `REFERENCE_CHECKSUMS` table | Override the expected MD5 for the `code/` tree (use when validating against a code variant that legitimately differs from the reference). |
+
+There is no edition flag. Each submission declares the rules edition it was produced under in its `submission.yaml`, and `validate` checks it with that edition's parameters from `mlpstorage_py/rules/editions.yaml` (a submission without a manifest is checked under the current edition; one declaring an edition this tool cannot check fails EDN-04).
 
 #### Examples
 
@@ -115,11 +116,10 @@ only the rolled-up `summary.csv`.
 # Validate everything under ./submissions/
 mlpstorage validate ./submissions
 
-# Validate only Acme's closed and open packages, pin spec to v3.0,
+# Validate only Acme's closed and open packages,
 # write CSV to a build dir, suppress per-submission text reports.
 mlpstorage validate ./submissions \
   --submitters Acme \
-  --mlperf-version v3.0 \
   --csv ./build/acme-summary.csv \
   --skip-output-file
 

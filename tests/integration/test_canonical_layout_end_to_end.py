@@ -402,8 +402,7 @@ class TestDirectoryCheckRegression:
             system_file={},
             loader_metadata=loader_metadata,
         )
-        from mlpstorage_py.submission_checker.constants import DEFAULT_SPEC_VERSION
-        config = Config(version=DEFAULT_SPEC_VERSION, submitters=None)
+        config = Config(submitters=None)
 
         log = logging.getLogger("test_canonical_layout_e2e")
         check = DirectoryCheck(log=log, config=config, submissions_logs=logs)
