@@ -1167,8 +1167,6 @@ class TestTrainingSubmissionRulesChecker:
 
     def test_supported_models_includes_training_models(self, mock_logger):
         """TrainingSubmissionRulesChecker has correct supported models."""
-        from mlpstorage_py.config import MODELS_CLOSED
-
         # Create empty checker to check class attribute
         checker = TrainingSubmissionRulesChecker([], logger=mock_logger)
 

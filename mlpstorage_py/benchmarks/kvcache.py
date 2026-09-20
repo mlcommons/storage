@@ -32,6 +32,7 @@ from mlpstorage_py.config import (
     KVCACHE_DEFAULT_DURATION,
     KVCACHE_MODEL_DEFAULT,
 )
+from mlpstorage_py.editions import checker_parameters, current_edition
 from mlpstorage_py.interfaces import BenchmarkCommand
 from mlpstorage_py.utils import generate_mpi_prefix_cmd, MLPSJsonEncoder
 
@@ -136,7 +137,8 @@ class KVCacheBenchmark(Benchmark):
         # workload-grouping key, so guarantee args.model is set with the
         # closed-mode default before the base class computes the output path.
         if getattr(args, "model", None) is None:
-            args.model = KVCACHE_MODEL_DEFAULT
+            closed_models = current_edition().models("kv_cache", "closed")
+            args.model = closed_models[0] if closed_models else KVCACHE_MODEL_DEFAULT
         super().__init__(args, logger, run_datetime, run_number,
                          cluster_collector, validator)
 
@@ -235,33 +237,39 @@ class KVCacheBenchmark(Benchmark):
         Each option runs `trials` times with `inter_option_delay` seconds between options.
 
         In CLOSED submissions, seed, trials, inter-option-delay, and --config are fixed
-        to their mandated values; the run hard-fails if the user attempts to override them.
+        to their mandated values (Rules.md 6.3.2.1, the current edition's
+        ``checker.kvcache_closed_sequence`` in editions.yaml); the run hard-fails
+        if the user attempts to override them.
 
         Returns:
             Exit code (0 for success, non-zero for failure).
         """
         is_closed = (getattr(self.args, 'mode', None) == 'closed')
+        locks = checker_parameters().kvcache_closed_sequence
+        closed_seed = locks['seed']
+        closed_trials = locks['trials']
+        closed_delay = locks['inter_option_delay_s']
 
         # Enforce CLOSED submission restrictions — hard fail on illegal overrides
         seed_arg = getattr(self.args, 'seed', None)
-        if is_closed and seed_arg is not None and seed_arg != 42:
+        if is_closed and seed_arg is not None and seed_arg != closed_seed:
             self.logger.error(
-                f"--seed cannot be changed in a CLOSED submission (must be 42, got {seed_arg})"
+                f"--seed cannot be changed in a CLOSED submission (must be {closed_seed}, got {seed_arg})"
             )
             return 1
 
         trials_arg = getattr(self.args, 'trials', None)
-        if is_closed and trials_arg is not None and trials_arg != 3:
+        if is_closed and trials_arg is not None and trials_arg != closed_trials:
             self.logger.error(
-                f"--trials cannot be changed in a CLOSED submission (must be 3, got {trials_arg})"
+                f"--trials cannot be changed in a CLOSED submission (must be {closed_trials}, got {trials_arg})"
             )
             return 1
 
         inter_option_delay_arg = getattr(self.args, 'inter_option_delay', None)
-        if is_closed and inter_option_delay_arg is not None and inter_option_delay_arg != 90:
+        if is_closed and inter_option_delay_arg is not None and inter_option_delay_arg != closed_delay:
             self.logger.error(
                 f"--inter-option-delay cannot be changed in a CLOSED submission "
-                f"(must be 90, got {inter_option_delay_arg})"
+                f"(must be {closed_delay}, got {inter_option_delay_arg})"
             )
             return 1
 
@@ -271,9 +279,9 @@ class KVCacheBenchmark(Benchmark):
             return 1
 
         # Resolve effective values, applying mandated defaults
-        seed = seed_arg if seed_arg is not None else 42
-        trials = trials_arg if trials_arg is not None else 3
-        inter_option_delay = inter_option_delay_arg if inter_option_delay_arg is not None else 90
+        seed = seed_arg if seed_arg is not None else closed_seed
+        trials = trials_arg if trials_arg is not None else closed_trials
+        inter_option_delay = inter_option_delay_arg if inter_option_delay_arg is not None else closed_delay
         config = config_arg
 
         hosts = getattr(self.args, 'hosts', None) or ['localhost']

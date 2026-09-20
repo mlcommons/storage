@@ -8,9 +8,10 @@ including datasize, run, and configview commands.
 import sys
 
 from mlpstorage_py.config import (
-    ACCELERATORS, ACCELERATORS_CLOSED, DEFAULT_HOSTS, EXEC_TYPE, LLM_MODELS,
-    LLM_MODELS_CLOSED, EXIT_CODE, ENV_FALLBACK_CHECKPOINT_FOLDER,
+    ACCELERATORS, DEFAULT_HOSTS, EXEC_TYPE, LLM_MODELS,
+    EXIT_CODE, ENV_FALLBACK_CHECKPOINT_FOLDER,
 )
+from mlpstorage_py.editions import current_edition
 from mlpstorage_py.cli.common_args import (
     HELP_MESSAGES,
     add_universal_arguments,
@@ -31,7 +32,11 @@ def add_checkpointing_arguments(parser, mode):
     """
     checkpointing_subparsers = parser.add_subparsers(dest="command", required=True)
     parser.required = True
-    accel_choices = ACCELERATORS if mode == "whatif" else ACCELERATORS_CLOSED
+    # closed / open: the emulated accelerators the current rules edition
+    # sanctions for checkpointing in that division (editions.yaml
+    # `workloads:`); whatif: everything the tool can emulate.
+    accel_choices = (ACCELERATORS if mode == "whatif"
+                     else current_edition().accelerators("checkpointing", mode))
 
     # Create subcommand parsers
     datasize = checkpointing_subparsers.add_parser(
@@ -61,8 +66,9 @@ def _add_checkpointing_core_args(parser, command, accel_choices):
         parser: The subcommand parser to add arguments to.
         command: The subcommand name ('datasize', 'run', 'configview').
         accel_choices: Accelerator types accepted by --accelerator-type in
-            this submission mode (closed/open: ACCELERATORS_CLOSED; whatif:
-            every ACCELERATORS entry).
+            this submission mode (closed/open: the current edition's
+            sanctioned checkpointing accelerators; whatif: every
+            ACCELERATORS entry).
     """
     # Set defaults for open-gated attrs so they always exist in the namespace
     parser.set_defaults(

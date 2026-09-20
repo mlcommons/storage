@@ -48,30 +48,20 @@ UNET = "unet3d"
 DLRM = "dlrm"
 RETINANET = "retinanet"
 FLUX = "flux"
+# Every training model the tool can run (whatif). The models the CLOSED and
+# OPEN divisions sanction come from the rules editions table
+# (mlpstorage_py/rules/editions.yaml `workloads:`, editions.current_edition()).
 MODELS = [COSMOFLOW, RESNET, UNET, DLRM, RETINANET, FLUX]
-MODELS_CLOSED = [UNET, RETINANET]
-MODELS_OPEN   = [UNET, RETINANET]
 
 H100 = "h100"
 A100 = "a100"
 B200 = "b200"
 MI355 = "mi355"
+# Every simulated accelerator the tool can emulate (whatif). The accelerators
+# the CLOSED and OPEN divisions sanction, and the memory of each (Rules.md
+# Table 3, for 4.3.4), come from the rules editions table
+# (`workloads:` and `checker.accelerator_memory_gb`).
 ACCELERATORS = [H100, A100, B200, MI355]
-ACCELERATORS_CLOSED = [B200, MI355]
-
-# Memory of each simulated accelerator, in GB, for Rules.md 4.3.4
-# (checkpointAggregateAcceleratorMemory): memory × accelerator count must
-# cover the model's checkpoint size. Values are the per-device HBM capacity
-# from the vendor datasheets — H100 SXM/PCIe 80 GB; A100 80 GB (the 40 GB
-# variant is not the MLPerf reference part); B200 180 GB (NVIDIA's HGX B200
-# datasheet figure; the 192 GB launch number was pre-production); MI355X
-# 288 GB. Keep in lockstep with ACCELERATORS.
-ACCELERATOR_MEMORY_GB = {
-    H100: 80,
-    A100: 80,
-    B200: 180,
-    MI355: 288,
-}
 
 OPEN = "open"
 CLOSED = "closed"
@@ -82,10 +72,13 @@ LLAMA3_70B = 'llama3-70b'
 LLAMA3_405B = 'llama3-405b'
 LLAMA3_1T = 'llama3-1t'
 LLM_MODELS = [LLAMA3_70B, LLAMA3_405B, LLAMA3_1T, LLAMA3_8B]
-LLM_MODELS_CLOSED = LLM_MODELS
 
 LLM_SUBSET_PROCS = 8
 # Defined as (MinProcs, ZeroLevel, GPU per Data Parallel Instance, Closed GPU Count)
+# The Closed GPU Count is Rules.md Table 2 "Total Processes"; the rules
+# editions table (`checker.closed_mpi_processes`) is the checker's source of
+# truth for it and a unit test keeps the two in lockstep. This tuple stays for
+# the runtime's subset-mode math (benchmarks/dlio.py) and the CLI help text.
 LLM_ALLOWED_VALUES = {
     LLAMA3_1T: (LLM_SUBSET_PROCS, 1, 8*64, 8*64*2),     # 8*64*2 = 1,024 processes
     LLAMA3_405B: (LLM_SUBSET_PROCS, 1, 8*32, 8*32*2),   # 8*32*2 = 512 processes
@@ -102,23 +95,17 @@ LLM_SIZE_BY_RANK = {
     LLAMA3_8B: (15, 90)
 }
 
-# Rules.md Table 2 "Checkpoint size" per model, in GB. Used by the pre-flight
-# Rules.md 4.3.4 gate (CheckpointingRunRulesChecker.check_accelerator_memory)
-# before DLIO launches; the submission validator uses the checkpoint_size_GB
-# that DLIO actually measured instead.
-LLM_CHECKPOINT_SIZE_GB = {
-    LLAMA3_8B: 105,
-    LLAMA3_70B: 912,
-    LLAMA3_405B: 5290,
-    LLAMA3_1T: 18000,
-}
+# Rules.md Table 2 "Checkpoint size" per model (the pre-flight 4.3.4 gate)
+# lives in the rules editions table: `checker.checkpoint_size_gb`.
 
 CHECKPOINT_RANKS_STRINGS = "\n    ".join(
     [f'{key}: CLOSED in [{value[0]} || {value[3]}], OPEN allows a multiple of {value[2]}' for key, value in LLM_ALLOWED_VALUES.items()])
 
 LLM_MODELS_STRINGS = "\n    ".join(LLM_MODELS)
 
-# KV Cache benchmark model configurations
+# KV Cache benchmark model configurations. The default is the one kv_cache
+# workload the current edition sanctions for CLOSED (editions.yaml
+# `workloads:`; a unit test keeps the two in lockstep).
 KVCACHE_MODEL_DEFAULT = 'llama3.1-8b'
 KVCACHE_MODELS = [
     'tiny-1b',

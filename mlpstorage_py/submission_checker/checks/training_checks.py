@@ -580,10 +580,19 @@ class TrainingCheck(BaseCheck):
         """
         Check that AU (Accelerator Utilization) meets minimum requirements.
         (Rules.md 3.3.2)
+
+        Two facets: DLIO's own verdict (``train_au_meet_expectation``, judged
+        against the ``metric.au`` of the workload template it ran) must be
+        ``success``, and the mean AU must reach the minimum the submission's
+        edition records for the model (``checker.training_au_thresholds`` in
+        editions.yaml), so a run cannot pass on a template whose threshold was
+        lowered. A model the edition lists no minimum for is judged by DLIO's
+        verdict alone.
         """
         valid = True
         if self.mode != "training":
             return valid
+        threshold = self.config.get_training_au_threshold(self.model)
         for summary, metadata, ts in self.submissions_logs.run_files:
             if summary is None:
                 self.log.debug(
@@ -601,6 +610,14 @@ class TrainingCheck(BaseCheck):
                     "AU check failed: expected 'success', got '%s' (AU: %.2f%%)",
                     au_expectation,
                     au_mean,
+                )
+                valid = False
+            elif threshold is not None and au_mean < threshold * 100:
+                self.log_violation(
+                    "3.3.2", "trainingAcceleratorUtilizationCheck", self.path,
+                    "run %s: mean AU %.2f%% is below the %s minimum of %g%% for "
+                    "rules edition %s (Rules.md 3.3.2)",
+                    ts, au_mean, self.model, threshold * 100, self.config.edition,
                 )
                 valid = False
 

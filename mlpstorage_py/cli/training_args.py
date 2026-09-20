@@ -10,9 +10,10 @@ import os
 import sys
 
 from mlpstorage_py.config import (
-    MODELS, MODELS_CLOSED, MODELS_OPEN, ACCELERATORS, ACCELERATORS_CLOSED,
+    MODELS, ACCELERATORS,
     DEFAULT_HOSTS, EXEC_TYPE, EXIT_CODE, ENV_FALLBACK_DATA_DIR
 )
+from mlpstorage_py.editions import current_edition
 
 from mlpstorage_py.cli.common_args import (
     HELP_MESSAGES,
@@ -48,12 +49,16 @@ def add_training_arguments(parser, mode):
         parser: Argparse subparser for the training benchmark.
         mode: Submission mode — one of 'closed', 'open', or 'whatif'.
     """
-    model_choices = {
-        "closed": MODELS_CLOSED,
-        "open":   MODELS_OPEN,
-        "whatif": MODELS,
-    }[mode]
-    accel_choices = ACCELERATORS if mode == "whatif" else ACCELERATORS_CLOSED
+    # closed / open: the training models and emulated accelerators the current
+    # rules edition sanctions for that division (editions.yaml `workloads:`);
+    # whatif: everything the tool can run.
+    if mode == "whatif":
+        model_choices = MODELS
+        accel_choices = ACCELERATORS
+    else:
+        edition = current_edition()
+        model_choices = edition.models("training", mode)
+        accel_choices = edition.accelerators("training", mode)
 
     # Model positional registered BEFORE subparsers — consumed before the command token
     parser.add_argument(

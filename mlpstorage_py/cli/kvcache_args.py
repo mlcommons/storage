@@ -16,6 +16,15 @@ from mlpstorage_py.config import (
     EXEC_TYPE,
     EXIT_CODE,
 )
+from mlpstorage_py.editions import checker_parameters
+
+# Rules.md 6.3.2.1 kvcacheClosedSequenceLocks for the edition this tool
+# implements: the CLOSED values of --seed / --trials / --inter-option-delay
+# (editions.yaml checker.kvcache_closed_sequence).
+_CLOSED_SEQUENCE = checker_parameters().kvcache_closed_sequence
+_CLOSED_SEED = _CLOSED_SEQUENCE['seed']
+_CLOSED_TRIALS = _CLOSED_SEQUENCE['trials']
+_CLOSED_DELAY = _CLOSED_SEQUENCE['inter_option_delay_s']
 from mlpstorage_py.cli.common_args import (
     HELP_MESSAGES,
     add_universal_arguments,
@@ -78,8 +87,8 @@ KVCACHE_HELP_MESSAGES = {
         "OPEN/whatif submissions only — disabled in CLOSED."
     ),
     'seed': (
-        "Base random seed (default 42). Effective seed per rank = base + rank. "
-        "OPEN submissions only — fixed at 42 in CLOSED."
+        f"Base random seed (default {_CLOSED_SEED}). Effective seed per rank = base + rank. "
+        f"OPEN submissions only — fixed at {_CLOSED_SEED} in CLOSED."
     ),
     'kvcache_bin_path': "Path to kv-cache.py script. Auto-detected if not specified.",
     'npernode': (
@@ -88,12 +97,12 @@ KVCACHE_HELP_MESSAGES = {
         "--num-processes; if both are set they must be consistent."
     ),
     'trials': (
-        "Number of trial runs per option (default 3). "
-        "OPEN submissions only — fixed at 3 in CLOSED."
+        f"Number of trial runs per option (default {_CLOSED_TRIALS}). "
+        f"OPEN submissions only — fixed at {_CLOSED_TRIALS} in CLOSED."
     ),
     'inter_option_delay': (
-        "Seconds to wait between options (default 20). "
-        "OPEN submissions only — fixed at 20 in CLOSED."
+        f"Seconds to wait between options (default {_CLOSED_DELAY}). "
+        f"OPEN submissions only — fixed at {_CLOSED_DELAY} in CLOSED."
     ),
     'config': (
         "Path to kv-cache config.yaml passed through to mlperf_wrapper.py. "
@@ -211,9 +220,9 @@ def _add_kvcache_cache_arguments(parser, mode):
             rag_num_docs=10,
             enable_autoscaling=True,
             autoscaler_mode='qos',
-            seed=42,
-            trials=3,
-            inter_option_delay=90,
+            seed=_CLOSED_SEED,
+            trials=_CLOSED_TRIALS,
+            inter_option_delay=_CLOSED_DELAY,
             allow_invalid_params=False,
             params='',
             max_concurrent_allocs=None,

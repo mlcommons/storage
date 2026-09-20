@@ -7,15 +7,14 @@ Validates checkpointing benchmark parameters for individual runs.
 from typing import Optional
 
 from mlpstorage_py.config import (
-    ACCELERATOR_MEMORY_GB,
     BENCHMARK_TYPES,
     LLAMA3_8B,
     LLM_ALLOWED_VALUES,
-    LLM_CHECKPOINT_SIZE_GB,
     LLM_MODELS,
     LLM_SUBSET_PROCS,
     PARAM_VALIDATION,
 )
+from mlpstorage_py.editions import checker_parameters
 from mlpstorage_py.rules.issues import Issue
 from mlpstorage_py.rules.run_checkers.base import RunRulesChecker
 
@@ -86,7 +85,11 @@ class CheckpointingRunRulesChecker(RunRulesChecker):
             return None
 
         num_processes = self.benchmark_run.num_processes
-        _min_procs, _zero_level, gpu_per_dp, closed_gpus = LLM_ALLOWED_VALUES[model]
+        _min_procs, _zero_level, gpu_per_dp, _closed = LLM_ALLOWED_VALUES[model]
+        # The CLOSED count is the current edition's Table 2 "Total Processes"
+        # (editions.yaml checker.closed_mpi_processes); LLM_ALLOWED_VALUES
+        # carries the same number for the runtime's subset math.
+        closed_gpus = checker_parameters().closed_mpi_processes.get(model, _closed)
 
         if num_processes == closed_gpus:
             return None
@@ -130,8 +133,9 @@ class CheckpointingRunRulesChecker(RunRulesChecker):
         """Pre-flight gate on Rules.md 4.3.4 (checkpointAggregateAcceleratorMemory).
 
         The memory of the accelerator declared with ``--accelerator-type``
-        times ``--num-processes`` must be at least the model's checkpoint
-        size (Rules.md Table 2, ``LLM_CHECKPOINT_SIZE_GB``). Every CLOSED
+        (Rules.md Table 3) times ``--num-processes`` must be at least the
+        model's checkpoint size (Rules.md Table 2); both tables are the
+        current edition's ``checker:`` block in editions.yaml. Every CLOSED
         process count clears the bar on every accelerator; the gate matters
         for OPEN runs that use fewer processes. Failing here saves the DLIO
         run time between a misconfigured launch and the eventual
@@ -145,26 +149,28 @@ class CheckpointingRunRulesChecker(RunRulesChecker):
         """
         model = self.benchmark_run.model
         accelerator = self.benchmark_run.accelerator
-        if accelerator is None or model not in LLM_CHECKPOINT_SIZE_GB:
+        params = checker_parameters()
+        if accelerator is None or model not in params.checkpoint_size_gb:
             return None
 
-        memory_per_accelerator = ACCELERATOR_MEMORY_GB.get(accelerator)
+        memory_table = params.accelerator_memory_gb
+        memory_per_accelerator = memory_table.get(accelerator)
         if memory_per_accelerator is None:
             return Issue(
                 validation=PARAM_VALIDATION.INVALID,
                 message=(
                     f"accelerator_type={accelerator!r} has no entry in the "
                     f"accelerator memory table (known: "
-                    f"{', '.join(sorted(ACCELERATOR_MEMORY_GB))}); cannot "
+                    f"{', '.join(sorted(memory_table))}); cannot "
                     f"verify Rules.md 4.3.4."
                 ),
                 parameter="accelerator_type",
-                expected=sorted(ACCELERATOR_MEMORY_GB),
+                expected=sorted(memory_table),
                 actual=accelerator,
             )
 
         num_processes = self.benchmark_run.num_processes
-        checkpoint_size_gb = LLM_CHECKPOINT_SIZE_GB[model]
+        checkpoint_size_gb = params.checkpoint_size_gb[model]
         aggregate_gb = num_processes * memory_per_accelerator
         if aggregate_gb >= checkpoint_size_gb:
             return None

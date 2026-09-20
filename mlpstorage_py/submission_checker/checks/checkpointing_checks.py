@@ -5,7 +5,6 @@ from ..configuration.configuration import Config
 from ..dlio_summary_helpers import per_host_memory_gb
 from ..loader import SubmissionLogs
 from ..rule_registry import rule
-from mlpstorage_py.config import ACCELERATOR_MEMORY_GB
 from .helpers import (
     _check_filesystem_separation,
     _latest_final_collection_timestamp,
@@ -201,7 +200,12 @@ class CheckpointingCheck(BaseCheck):
         if self.mode != "checkpointing":
             return valid
 
-        allowed_models = {"8b", "70b", "405b", "1t"}
+        # The edition's sanctioned checkpointing models (editions.yaml
+        # ``workloads:``), reduced to the size suffix the run recorded.
+        allowed_models = {
+            m.split("-", 1)[1] if "-" in m else m
+            for m in self.config.models("checkpointing")
+        }
 
         for summary, metadata, _ in self._iter_valid_files():
             model_name = metadata.get("args", {}).get("model", "").lower()
@@ -214,7 +218,7 @@ class CheckpointingCheck(BaseCheck):
                     "4.3.3", "checkpointModelConfigurationReq", self.path,
                     "invalid model '%s'. Must be one of: %s",
                     model_name,
-                    allowed_models,
+                    sorted(allowed_models),
                 )
                 valid = False
 
@@ -230,8 +234,9 @@ class CheckpointingCheck(BaseCheck):
         Uses self.log_violation (QUAL-02 retro-fit) instead of bare self.log.error.
 
         subset mode: requires exactly 8 processes for any model.
-        non-subset (combined/full) mode: requires CLOSED_MPI_PROCESSES[model_key]
-        total processes (Rules.md Table 2 — TP*PP*DP).
+        non-subset (combined/full) mode: requires the edition's Table 2 count
+        (editions.yaml checker.closed_mpi_processes[model]) total processes
+        (Rules.md Table 2 — TP*PP*DP).
         """
         valid = True
         if self.mode != "checkpointing":
@@ -318,7 +323,8 @@ class CheckpointingCheck(BaseCheck):
 
         The simulated accelerator is what ``--accelerator-type`` recorded
         under metadata ``accelerator`` (with ``args.accelerator_type`` as a
-        fallback); its memory comes from ``ACCELERATOR_MEMORY_GB``. A run
+        fallback); its memory comes from the submission's edition (Rules.md
+        Table 3, ``checker.accelerator_memory_gb`` in editions.yaml). A run
         that never recorded its accelerator, or names one the table does not
         know, cannot be verified and fails. (Before the flag existed this
         check assumed an 80 GiB H100 for every run.)
@@ -327,6 +333,7 @@ class CheckpointingCheck(BaseCheck):
         if self.mode != "checkpointing":
             return valid
 
+        memory_table = self.config.get_accelerator_memory_gb()
         for summary, metadata, ts in self._iter_valid_files():
             checkpoint_size_gb = summary.get("metric", {}).get("checkpoint_size_GB", 0)
             num_accelerators = summary.get("num_accelerators", 0)
@@ -347,13 +354,13 @@ class CheckpointingCheck(BaseCheck):
                 valid = False
                 continue
 
-            memory_per_accelerator = ACCELERATOR_MEMORY_GB.get(accelerator)
+            memory_per_accelerator = memory_table.get(accelerator)
             if memory_per_accelerator is None:
                 self.log_violation(
                     "4.3.4", "checkpointAggregateAcceleratorMemory", self.path,
                     "run %s: unknown accelerator type %r (known: %s); cannot "
                     "verify aggregate accelerator memory (Rules.md 4.3.4).",
-                    ts, accelerator, ", ".join(sorted(ACCELERATOR_MEMORY_GB)),
+                    ts, accelerator, ", ".join(sorted(memory_table)),
                 )
                 valid = False
                 continue

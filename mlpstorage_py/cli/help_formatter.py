@@ -754,8 +754,12 @@ HELP_ALL_TEXT = _HEADER_TEXT + "\n" + SYNOPSIS_TEXT + "\n\n" + _TREE_AND_BODY_TE
 _MODES = frozenset(('closed', 'open', 'whatif'))
 _BENCHMARKS = frozenset(('training', 'checkpointing', 'vectordb', 'kvcache'))
 
-# Training models per mode
-_TRAINING_MODELS_CLOSED_OPEN = frozenset(('unet3d', 'retinanet'))
+# Training models per mode: closed / open from the current rules edition
+# (editions.yaml `workloads:`), whatif = everything the tool can run.
+from mlpstorage_py.editions import current_edition as _current_edition  # noqa: E402
+
+_TRAINING_MODELS_CLOSED_OPEN = (frozenset(_current_edition().models('training', 'closed'))
+                                | frozenset(_current_edition().models('training', 'open')))
 _TRAINING_MODELS_WHATIF = frozenset(('cosmoflow', 'resnet50', 'unet3d', 'dlrm', 'retinanet', 'flux'))
 
 # Training commands that have a file|object storage positional

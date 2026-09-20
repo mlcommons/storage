@@ -18,12 +18,16 @@ edition the class lists. Rows in one class compare; nothing else does, and
 comparisons across divisions are never declared. Classification is
 a pure function of (stamp, table) and is never cached into evidence files.
 
-An edition's **checker parameters** (``checker:`` -- the required files and
-folders of every datagen / run / checkpoint leaf) are what ``validate`` needs
-to check a submission of that edition. Only an edition this tool can check
-carries them; ``Config`` is built from them, once tree-wide for the current
-edition and once per submission from the edition its ``submission.yaml``
-declares. There is no reviewer-side edition flag.
+An edition's **checker parameters** (``checker:``) are what ``validate`` needs
+to check a submission of that edition: the required files and folders of
+every datagen / run / checkpoint leaf, the Rules.md 3.3.2 AU minimum per
+training model, the Table 2 CLOSED process counts and checkpoint sizes, the
+Table 3 simulated-accelerator memory and the 6.3.2.1 KVCache sequence locks.
+Only an edition this tool can check carries them; ``Config`` is built from
+them, once tree-wide for the current edition and once per submission from
+the edition its ``submission.yaml`` declares. There is no reviewer-side
+edition flag. The runtime reads the current edition's block for the same
+values (:func:`current_edition`, :func:`checker_parameters`).
 
 Design and survey: .planning/rules-editions-and-comparability-classes.md.
 """
@@ -52,10 +56,16 @@ _HASH_RE = re.compile(r"[0-9a-f]{16}")
 _SHA_RE = re.compile(r"[0-9a-f]{40}")
 
 
-CHECKER_FIELDS = ("datagen_required_files", "datagen_required_folders",
-                  "run_required_files", "run_required_folders",
-                  "checkpoint_required_files", "checkpoint_required_folders")
+CHECKER_LIST_FIELDS = ("datagen_required_files", "datagen_required_folders",
+                       "run_required_files", "run_required_folders",
+                       "checkpoint_required_files", "checkpoint_required_folders")
 _CHECKER_REGEX_FIELDS = ("datagen_required_files", "run_required_files", "checkpoint_required_files")
+# The edition-varying values (design D-16): mappings keyed by model or
+# accelerator name exactly as ``workloads:`` spells them.
+CHECKER_VALUE_FIELDS = ("training_au_thresholds", "closed_mpi_processes", "checkpoint_size_gb",
+                        "accelerator_memory_gb", "kvcache_closed_sequence")
+CHECKER_FIELDS = CHECKER_LIST_FIELDS + CHECKER_VALUE_FIELDS
+KVCACHE_SEQUENCE_KEYS = ("seed", "trials", "inter_option_delay_s")
 
 
 class EditionsError(ValueError):
@@ -70,13 +80,24 @@ class UncheckableEditionError(EditionsError):
 
 @dataclass(frozen=True)
 class CheckerParameters:
-    """What ``validate`` requires of every leaf of one edition."""
+    """What ``validate`` requires of every leaf of one edition, and the
+    edition's values of the rules whose numbers may change between editions."""
     datagen_required_files: List[str]
     datagen_required_folders: List[str]
     run_required_files: List[str]
     run_required_folders: List[str]
     checkpoint_required_files: List[str]
     checkpoint_required_folders: List[str]
+    #: Rules.md 3.3.2 -- minimum mean AU per training model, as a fraction.
+    training_au_thresholds: Dict[str, float]
+    #: Rules.md Table 2 "Total Processes" per checkpointing model (4.6.1).
+    closed_mpi_processes: Dict[str, int]
+    #: Rules.md Table 2 "Checkpoint size" per checkpointing model, GB (4.3.4 pre-flight).
+    checkpoint_size_gb: Dict[str, float]
+    #: Rules.md Table 3 -- memory per simulated accelerator, GB (4.3.4).
+    accelerator_memory_gb: Dict[str, float]
+    #: Rules.md 6.3.2.1 -- ``seed`` / ``trials`` / ``inter_option_delay_s`` of a CLOSED kv_cache run.
+    kvcache_closed_sequence: Dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -99,6 +120,34 @@ class Edition:
     @property
     def dlio_commits(self) -> frozenset:
         return frozenset(r["commit"] for r in self.dlio_revisions)
+
+    def models(self, family: str, division: Optional[str] = None) -> List[str]:
+        """The models ``workloads:`` sanctions for ``family`` in ``division``
+        (every division when ``None``), in first-appearance order."""
+        out: List[str] = []
+        for div, families in self.workloads.items():
+            if division is not None and div != division:
+                continue
+            for model in (families.get(family) or {}):
+                if model not in out:
+                    out.append(model)
+        return out
+
+    def accelerators(self, family: Optional[str] = None, division: Optional[str] = None) -> List[str]:
+        """The emulated accelerators ``workloads:`` sanctions (for one family
+        and / or division when given), in first-appearance order."""
+        out: List[str] = []
+        for div, families in self.workloads.items():
+            if division is not None and div != division:
+                continue
+            for fam, models in families.items():
+                if family is not None and fam != family:
+                    continue
+                for accels in models.values():
+                    for a in accels:
+                        if a not in out:
+                            out.append(a)
+        return out
 
 
 @dataclass(frozen=True)
@@ -144,6 +193,23 @@ class EditionsTable:
     def is_checkable(self, edition_id: Any) -> bool:
         e = self.edition(edition_id)
         return e is not None and e.checkable
+
+    def checkable_editions(self) -> List[Edition]:
+        return [e for e in self.editions.values() if e.checkable]
+
+    def families(self) -> frozenset:
+        """The workload families (results/<system>/ directory names) of every
+        edition this tool can check, all divisions -- the tree-wide 2.1.10
+        vocabulary."""
+        return frozenset(fam for e in self.checkable_editions()
+                         for families in e.workloads.values() for fam in families)
+
+    def vocabulary(self, family: str) -> frozenset:
+        """The workload directory names of ``family`` across every edition this
+        tool can check, all divisions -- the tree-wide 2.1.11 / 2.1.21
+        vocabulary. Historical editions checked by their own tool do not widen
+        it."""
+        return frozenset(m for e in self.checkable_editions() for m in e.models(family))
 
     def checker_parameters(self, edition_id: Any = None) -> Optional[CheckerParameters]:
         """The ``checker:`` block of an edition (the current one by default), or
@@ -239,7 +305,7 @@ def _parse_edition(eid: Any, raw: Any, where: str) -> Edition:
     _require(isinstance(libs, dict) and all(isinstance(v, list) for v in libs.values()),
              f"{where}: edition {eid}: storage_libraries must map name -> list of versions")
     checker = _parse_checker(eid, raw.get("checker"), where)
-    return Edition(
+    edition = Edition(
         id=eid, status=status, results_repo=raw["results_repo"], tool=str(raw.get("tool", UNKNOWN)),
         layout_versions=list(layout), workloads=workloads,
         dlio_revisions=[{"commit": r["commit"], "source": r["source"], "version": str(r.get("version", UNKNOWN))}
@@ -248,6 +314,49 @@ def _parse_edition(eid: Any, raw: Any, where: str) -> Edition:
         notes=str(raw.get("notes", "") or ""),
         checker=checker,
     )
+    if checker is not None:
+        _check_values_against_workloads(edition, where)
+    return edition
+
+
+def _is_number(v: Any) -> bool:
+    return isinstance(v, (int, float)) and not isinstance(v, bool)
+
+
+def _parse_value_map(eid: str, name: str, raw: Any, where: str, *, integer: bool = False,
+                     fraction: bool = False) -> Dict[str, Any]:
+    """A ``checker:`` value block: a non-empty mapping of name -> positive
+    number (int when ``integer``; in (0, 1] when ``fraction``)."""
+    _require(isinstance(raw, dict) and raw, f"{where}: edition {eid}: checker.{name} must be a non-empty mapping")
+    out: Dict[str, Any] = {}
+    for k, v in raw.items():
+        _require(isinstance(k, str) and k, f"{where}: edition {eid}: checker.{name}: keys must be names")
+        if integer:
+            _require(isinstance(v, int) and not isinstance(v, bool) and v > 0,
+                     f"{where}: edition {eid}: checker.{name}.{k} must be a positive integer, got {v!r}")
+        elif fraction:
+            _require(_is_number(v) and 0 < v <= 1,
+                     f"{where}: edition {eid}: checker.{name}.{k} must be a fraction in (0, 1], got {v!r}")
+        else:
+            _require(_is_number(v) and v > 0,
+                     f"{where}: edition {eid}: checker.{name}.{k} must be a positive number, got {v!r}")
+        out[k] = v
+    return out
+
+
+def _parse_kvcache_sequence(eid: str, raw: Any, where: str) -> Dict[str, int]:
+    name = "kvcache_closed_sequence"
+    _require(isinstance(raw, dict), f"{where}: edition {eid}: checker.{name} must be a mapping")
+    _require(set(raw) == set(KVCACHE_SEQUENCE_KEYS),
+             f"{where}: edition {eid}: checker.{name} must carry exactly {list(KVCACHE_SEQUENCE_KEYS)}, "
+             f"got {sorted(raw)}")
+    for k, v in raw.items():
+        _require(isinstance(v, int) and not isinstance(v, bool),
+                 f"{where}: edition {eid}: checker.{name}.{k} must be an integer, got {v!r}")
+    _require(raw["trials"] > 0, f"{where}: edition {eid}: checker.{name}.trials must be positive")
+    _require(raw["inter_option_delay_s"] >= 0,
+             f"{where}: edition {eid}: checker.{name}.inter_option_delay_s must not be negative")
+    return {k: int(raw[k]) for k in KVCACHE_SEQUENCE_KEYS}
 
 
 def _parse_checker(eid: str, raw: Any, where: str) -> Optional[CheckerParameters]:
@@ -256,8 +365,10 @@ def _parse_checker(eid: str, raw: Any, where: str) -> Optional[CheckerParameters
     _require(isinstance(raw, dict), f"{where}: edition {eid}: checker must be a mapping")
     unknown = sorted(set(raw) - set(CHECKER_FIELDS))
     _require(not unknown, f"{where}: edition {eid}: checker has unknown key(s) {unknown}")
-    values: Dict[str, List[str]] = {}
-    for name in CHECKER_FIELDS:
+    missing = [n for n in CHECKER_FIELDS if n not in raw]
+    _require(not missing, f"{where}: edition {eid}: checker is missing {missing}")
+    values: Dict[str, Any] = {}
+    for name in CHECKER_LIST_FIELDS:
         v = raw.get(name)
         _require(isinstance(v, list) and v and all(isinstance(x, str) and x for x in v),
                  f"{where}: edition {eid}: checker.{name} must be a non-empty list of strings")
@@ -269,7 +380,36 @@ def _parse_checker(eid: str, raw: Any, where: str) -> Optional[CheckerParameters
                     raise EditionsError(
                         f"{where}: edition {eid}: checker.{name}: {pattern!r} is not a regex ({e})") from e
         values[name] = list(v)
+    values["training_au_thresholds"] = _parse_value_map(eid, "training_au_thresholds",
+                                                        raw["training_au_thresholds"], where, fraction=True)
+    values["closed_mpi_processes"] = _parse_value_map(eid, "closed_mpi_processes",
+                                                      raw["closed_mpi_processes"], where, integer=True)
+    values["checkpoint_size_gb"] = _parse_value_map(eid, "checkpoint_size_gb", raw["checkpoint_size_gb"], where)
+    values["accelerator_memory_gb"] = _parse_value_map(eid, "accelerator_memory_gb",
+                                                       raw["accelerator_memory_gb"], where)
+    values["kvcache_closed_sequence"] = _parse_kvcache_sequence(eid, raw["kvcache_closed_sequence"], where)
     return CheckerParameters(**values)
+
+
+def _check_values_against_workloads(edition: Edition, where: str) -> None:
+    """The value blocks are keyed by the edition's own vocabulary: AU minimums
+    name exactly its training models, the Table 2 blocks exactly its
+    checkpointing models, and every accelerator any workload lists has a
+    memory entry (extra accelerators, e.g. whatif-only ones, are allowed)."""
+    eid, c = edition.id, edition.checker
+    training = set(edition.models("training"))
+    checkpointing = set(edition.models("checkpointing"))
+    _require(set(c.training_au_thresholds) == training,
+             f"{where}: edition {eid}: checker.training_au_thresholds must name exactly the edition's training "
+             f"models {sorted(training)}, got {sorted(c.training_au_thresholds)}")
+    for name in ("closed_mpi_processes", "checkpoint_size_gb"):
+        keys = set(getattr(c, name))
+        _require(keys == checkpointing,
+                 f"{where}: edition {eid}: checker.{name} must name exactly the edition's checkpointing models "
+                 f"{sorted(checkpointing)}, got {sorted(keys)}")
+    missing = sorted(set(edition.accelerators()) - set(c.accelerator_memory_gb))
+    _require(not missing,
+             f"{where}: edition {eid}: checker.accelerator_memory_gb lacks the workload accelerator(s) {missing}")
 
 
 def _parse_class(raw: Any, editions: Dict[str, Edition], allowlists: Dict[str, Any],
@@ -361,6 +501,13 @@ def load_editions(path=None) -> EditionsTable:
 def checker_parameters(edition_id: Any = None) -> Optional[CheckerParameters]:
     """The shipped table's ``checker:`` block for an edition (current by default)."""
     return load_editions().checker_parameters(edition_id)
+
+
+def current_edition() -> Edition:
+    """The shipped table's entry for the edition this tool implements -- what
+    the runtime (CLI choices, pre-flight gates, CLOSED defaults) reads."""
+    table = load_editions()
+    return table.editions[table.current_edition]
 
 
 def describe_class(stamp, *, division: str, family: str, model: str, accelerator: Optional[str]) -> str:

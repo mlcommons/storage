@@ -21,6 +21,7 @@ from mlpstorage_py.config import (
     VDB_INDEX_DEFAULT,
     VECTORDB_DEFAULT_RUNTIME,
 )
+from mlpstorage_py.editions import checker_parameters
 from mlpstorage_py.mlps_logging import setup_logging
 from mlpstorage_py.storage_config import resolve_object_storage_config
 
@@ -453,10 +454,13 @@ def _print_kvcache_section(args, lines: List[str]) -> None:
     _append_args(lines, args, _KVCACHE_FIELDS_RUN)
 
     # MLPerf sequence — show effective seed/trials/inter_option_delay
-    # (the closed-mode mandate; open-mode default if user passed None).
-    lines.append(_row("seed (effective):",               _kvcache_effective(args, 'seed', 42)))
-    lines.append(_row("trials (effective):",             _kvcache_effective(args, 'trials', 3)))
-    lines.append(_row("inter_option_delay (effective):", _kvcache_effective(args, 'inter_option_delay', 90)))
+    # (the closed-mode mandate, Rules.md 6.3.2.1, from the current edition's
+    # checker.kvcache_closed_sequence; open-mode default if user passed None).
+    locks = checker_parameters().kvcache_closed_sequence
+    lines.append(_row("seed (effective):",               _kvcache_effective(args, 'seed', locks['seed'])))
+    lines.append(_row("trials (effective):",             _kvcache_effective(args, 'trials', locks['trials'])))
+    lines.append(_row("inter_option_delay (effective):",
+                      _kvcache_effective(args, 'inter_option_delay', locks['inter_option_delay_s'])))
 
     total_ranks = _kvcache_total_ranks(args)
     if total_ranks is not None:
