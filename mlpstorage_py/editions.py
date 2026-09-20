@@ -47,7 +47,7 @@ from mlpstorage_py.provenance import UNKNOWN, load_allowlists
 EDITIONS_FILE = Path(__file__).resolve().parent / "rules" / "editions.yaml"
 EDITIONS_SCHEMA = "mlps-rules-editions/1"
 ANY_ACCELERATOR = "any"
-CLASS_FAMILIES = ("training", "checkpointing")
+CLASS_FAMILIES = ("training", "checkpointing", "vector_database", "kv_cache")
 CLASS_DIVISIONS = ("closed", "open", "whatif")
 EDITION_STATUSES = ("historical", "current")
 _ACCELERATORS = ("b200", "mi355", "h100", "a100", ANY_ACCELERATOR)
@@ -518,7 +518,7 @@ def describe_class(stamp, *, division: str, family: str, model: str, accelerator
         return f"unavailable ({e})"
     core = (getattr(stamp, "core_config", None) or {}).get("hash", UNKNOWN)
     if not isinstance(core, str) or core == UNKNOWN:
-        return "n/a (no core-config hash for this family)"
+        return "n/a (the leaf recorded no hashable workload; core-config hash unknown)"
     edition = getattr(stamp, "rules_edition", UNKNOWN)
     if edition == UNKNOWN:
         c = table.classify(division=division, family=family, model=model, accelerator=accelerator,

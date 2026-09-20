@@ -35,7 +35,9 @@ Covered here:
   stability against the 5.6.4 tunables, hash change on scale / index / recall;
 - vector_database reconstruction from the two v3.0 leaf shapes (MPI leaves
   with ``summary.json``; single-node leaves with ``config.json`` +
-  ``result_verdict.json``), datagen leaves hash over the load keys only;
+  ``result_verdict.json``), datagen leaves hash over the load keys only; a
+  fresh run records the collection size it actually queried (NewFW ran 10M
+  with the 1M default config);
 - the seeded classes match the CLOSED runtime blocks and the shipped
   ``configs/vectordbbench/default.yaml``; EDN-02 fires on a CLOSED variant;
   ``runs show`` prints the class; Rules.md / ManPage.md name the allowlists.
@@ -94,6 +96,9 @@ VDB_RUN_PARAMETERS = {
     "benchmark": {"recall_k": 10, "search_limit": 10},
 }
 VDB_RUN_HASH = compute_core_config(VDB_RUN_PARAMETERS, "vector_database")["hash"]
+VDB_10M_PARAMETERS = copy.deepcopy(VDB_RUN_PARAMETERS)
+VDB_10M_PARAMETERS["dataset"]["num_vectors"] = 10000000
+VDB_10M_HASH = compute_core_config(VDB_10M_PARAMETERS, "vector_database")["hash"]
 VDB_DATAGEN_PARAMETERS = {k: v for k, v in VDB_RUN_PARAMETERS.items() if k != "benchmark"}
 VDB_DATAGEN_HASH = compute_core_config(VDB_DATAGEN_PARAMETERS, "vector_database")["hash"]
 
@@ -592,6 +597,24 @@ class TestVDBRuntimeBlock:
         assert params["dataset"]["dimension"] == 1536
         assert compute_core_config(params, "vector_database")["hash"] != VDB_RUN_HASH
 
+    def test_run_block_prefers_the_recorded_collection_size(self, tmp_path):
+        """NewFW's v3.0 invocation: default.yaml (1M) at run time against a
+        collection loaded with --num-vectors 10000000. The run's own
+        result_verdict.json says what it queried; the declared config does not."""
+        bm = _vdb_benchmark(_vdb_args(tmp_path, "run", vdb_index="DISKANN"), tmp_path, DEFAULT_YAML)
+        (Path(bm.run_result_output) / "result_verdict.json").write_text(json.dumps(SAMSUNG_VERDICT_10M))
+        params = bm.metadata["parameters"]
+        assert params["dataset"]["num_vectors"] == 10000000
+        assert compute_core_config(params, "vector_database")["hash"] == VDB_10M_HASH
+
+    def test_run_block_prefers_the_native_query_stats(self, tmp_path):
+        bm = _vdb_benchmark(_vdb_args(tmp_path, "run", vdb_index="DISKANN"), tmp_path, DEFAULT_YAML)
+        (Path(bm.run_result_output) / "statistics.json").write_text(
+            json.dumps(dict(TTA_SUMMARY, num_vectors=10000000, index_type="HNSW")))
+        params = bm.metadata["parameters"]
+        assert params["dataset"]["num_vectors"] == 10000000
+        assert params["index"]["index_type"] == "HNSW"
+
     def test_nulls_are_not_recorded(self, tmp_path):
         params = _vdb_benchmark(_vdb_args(tmp_path, "run", vdb_index="DISKANN"), tmp_path, {}).metadata["parameters"]
         for section in ("database", "index", "dataset", "benchmark"):
@@ -619,6 +642,8 @@ SAMSUNG_CONFIG = {"timestamp": "2026-07-21T10:29:53", "processes": 1, "batch_siz
 SAMSUNG_VERDICT = {"result": "valid", "valid": True, "num_queries_evaluated": 1000,
                    "flat_setup": {"ok": True, "coverage": 1.0, "total_vectors": 1000000, "copied_vectors": 1000000,
                                   "had_recoverable_error": False, "reason": "", "reused": True}}
+SAMSUNG_VERDICT_10M = copy.deepcopy(SAMSUNG_VERDICT)
+SAMSUNG_VERDICT_10M["flat_setup"].update({"total_vectors": 10000000, "copied_vectors": 10000000})
 
 
 class TestVDBReconstruction:
@@ -715,6 +740,26 @@ class TestClasses:
         assert t.classify(division="closed", family="vector_database", model="milvus/DISKANN", accelerator=None,
                           core_config=VDB_RUN_HASH, edition="3.0") is c
 
+    def test_vdb_10m_class(self):
+        """NewFW's five v3.0 CLOSED runs: the 10m.yaml scale, a different
+        storage load from the 1M default and so a different class."""
+        t = _table()
+        c = next(c for c in t.classes if c.id == "milvus-diskann-B")
+        assert (c.model, c.accelerator, c.allowlist, c.editions) == ("milvus/DISKANN", "any", "vector_database@1", ("3.0",))
+        assert c.core_configs == (VDB_10M_HASH,) and c.reference is None
+        assert t.classify(division="closed", family="vector_database", model="milvus/DISKANN", accelerator=None,
+                          core_config=VDB_10M_HASH, edition="3.0") is c
+
+    def test_newfw_shaped_leaf_lands_in_the_10m_class(self, tmp_path):
+        root = _root(tmp_path)
+        leaf = _vdb_leaf(root, LEAF_CLOSED_VDB, args={"batch_size": 1},
+                         files={"config.json": SAMSUNG_CONFIG, "result_verdict.json": SAMSUNG_VERDICT_10M})
+        stamp = derive_leaf_provenance(leaf, root)
+        assert stamp.core_config["hash"] == VDB_10M_HASH
+        c = _table().classify(division="closed", family="vector_database", model="milvus/DISKANN", accelerator=None,
+                              core_config=stamp.core_config["hash"])
+        assert c is not None and c.id == "milvus-diskann-B"
+
     def test_open_runs_have_no_class(self):
         t = _table()
         assert t.classify(division="open", family="kv_cache", model="llama3.1-8b", accelerator=None,
@@ -744,9 +789,10 @@ class TestEnforcement:
         _kv_leaf(root, LEAF_CLOSED_KV, parameters=KV_CLOSED_PARAMETERS, stamp=_kv_stamp("f" * 16), declare=True)
         check, log = _check(root)
         assert check() is False
-        assert len(log.errors) == 1
-        assert log.errors[0].startswith("[EDN-02 comparabilityClass] ")
-        assert "kv_cache/llama3.1-8b" in log.errors[0] and "kv_cache@1" in log.errors[0]
+        errors = _rule_lines(log.errors)
+        assert len(errors) == 1
+        assert errors[0].startswith("[EDN-02 comparabilityClass] ")
+        assert "kv_cache/llama3.1-8b" in errors[0] and "kv_cache@1" in errors[0]
 
     def test_closed_vdb_run_in_the_class_is_silent_and_a_variant_errors(self, tmp_path):
         root = _root(tmp_path)
@@ -756,7 +802,8 @@ class TestEnforcement:
         _vdb_leaf(root, LEAF_CLOSED_VDB, parameters=VDB_RUN_PARAMETERS, stamp=_vdb_stamp("e" * 16), declare=True)
         check, log = _check(root)
         assert check() is False
-        assert len(log.errors) == 1 and "vector_database/milvus/DISKANN" in log.errors[0]
+        errors = _rule_lines(log.errors)
+        assert len(errors) == 1 and "vector_database/milvus/DISKANN" in errors[0]
 
     def test_unknown_hash_is_still_skipped(self, tmp_path):
         root = _root(tmp_path)

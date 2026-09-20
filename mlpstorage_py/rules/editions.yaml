@@ -32,11 +32,16 @@
 #            one workload equivalent (v1.0 `dataset.record_length` vs v2.0
 #            `dataset.record_length_bytes`; a future allowlist `@rev` bump).
 #            `accelerator: any` matches every accelerator, including a leaf that
-#            carries none. It is used only for checkpointing classes of editions
+#            carries none. It is used for checkpointing classes of editions
 #            3.0 and earlier, whose checkpoint rows recorded no accelerator at
 #            all (v3.0 results.csv: Accelerator Type is empty for every
-#            checkpoint row). From edition 4.0 on, checkpoint classes are per
-#            accelerator: b200 and mi355 checkpoint rows do not compare.
+#            checkpoint row), and permanently for kv_cache / vector_database,
+#            which emulate no accelerator. From edition 4.0 on, checkpoint
+#            classes are per accelerator: b200 and mi355 checkpoint rows do
+#            not compare. A vector_database class's `model` is the two-level
+#            leaf token `<engine>/<INDEX>`; a kv_cache class's is the leaf
+#            directory token (the CLI --model default: the CLOSED sequence
+#            runs llama3.1-8b and llama3.1-70b-instruct alike).
 #            `reference` names the shipped workload template that hashes to the
 #            class today (regression-tested); it is documentation, not the key.
 #            Ids are labels (`<model>-<accelerator>-<letter>`), not ranks.
@@ -337,6 +342,53 @@ classes:
     editions: ["2.0", "3.0"]
     reference: configs/dlio/workload/llama3_8b.yaml
     notes: identical configuration in v2.0 (CLOSED and OPEN) and v3.0.
+  - id: llama3.1-8b-A
+    division: closed
+    family: kv_cache
+    model: llama3.1-8b
+    accelerator: any
+    allowlist: kv_cache@1
+    core_configs: [04b508c33b9e34c8]
+    editions: ["3.0"]
+    notes: >-
+      the three Rules.md Table KVCache-1 Options (6.3.1.1) with seed 42 and the
+      wrapper-adjacent config (6.3.2.1); no global flag forwarded. The table
+      lives in kvcache.py WORKLOAD_PARAMS (regression-tested against this
+      hash). All 22 v3.0 CLOSED run leaves rebuild to it from their recorded
+      command lines; the two OPEN FarmGPU runs (200 / 400 users, 60 s, 1 GiB
+      tiers, one option table for all three Options) stay unclassified.
+  - id: milvus-diskann-A
+    division: closed
+    family: vector_database
+    model: milvus/DISKANN
+    accelerator: any
+    allowlist: vector_database@1
+    core_configs: [ca2c35c3ac5e1435]
+    editions: ["3.0"]
+    reference: configs/vectordbbench/default.yaml
+    notes: >-
+      Milvus, DISKANN, 1,000,000 x 1536 vectors, recall@10 with search_limit
+      10 (Rules.md 5.6.2 / 5.6.3 / 5.1.1 / 5.3.2): the shipped default scale.
+      15 v3.0 CLOSED run leaves rebuild to it (TTA's MPI runs from
+      summary.json, SAMSUNG's single-node runs from config.json +
+      result_verdict.json). No HNSW / AISAQ class: no v3.0 run and no shipped
+      template exists for them.
+  - id: milvus-diskann-B
+    division: closed
+    family: vector_database
+    model: milvus/DISKANN
+    accelerator: any
+    allowlist: vector_database@1
+    core_configs: [dc1cbde618673c2f]
+    editions: ["3.0"]
+    notes: >-
+      Milvus, DISKANN, 10,000,000 x 1536 vectors, recall@10 with search_limit
+      10: the shipped configs/vectordbbench/10m.yaml scale (not a `reference`
+      because that template carries no benchmark section; the recall target
+      came from the CLI defaults). NewFW's 5 v3.0 CLOSED run leaves rebuild to
+      it from result_verdict.json (their datagen used the 1M default config
+      with --num-vectors 10000000). A and B are different workloads: the
+      collection size is the storage load (5.1.1).
   - id: resnet50-a100-A
     division: closed
     family: training
