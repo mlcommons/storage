@@ -12,9 +12,10 @@ run leaf's ``provenance.json`` (``config.RULES_EDITION``) and every
 ``submission.yaml``. It is not the tool version.
 
 A **comparability class** is the WG's assertion that runs of one
-(family, model, emulated accelerator) whose ``core-config-v1`` hash is one of
-the class's ``core_configs`` executed the same workload in every edition the
-class lists. Rows in one class compare; nothing else does. Classification is
+(division, family, model, emulated accelerator) whose ``core-config-v1`` hash
+is one of the class's ``core_configs`` executed the same workload in every
+edition the class lists. Rows in one class compare; nothing else does, and
+comparisons across divisions are never declared. Classification is
 a pure function of (stamp, table) and is never cached into evidence files.
 
 Design and survey: .planning/rules-editions-and-comparability-classes.md.
@@ -36,6 +37,7 @@ EDITIONS_FILE = Path(__file__).resolve().parent / "rules" / "editions.yaml"
 EDITIONS_SCHEMA = "mlps-rules-editions/1"
 ANY_ACCELERATOR = "any"
 CLASS_FAMILIES = ("training", "checkpointing")
+CLASS_DIVISIONS = ("closed", "open", "whatif")
 EDITION_STATUSES = ("historical", "current")
 _ACCELERATORS = ("b200", "mi355", "h100", "a100", ANY_ACCELERATOR)
 _CLASS_ID_RE = re.compile(r"[a-z0-9.]+(-[a-z0-9]+)*-[A-Z]")
@@ -67,6 +69,7 @@ class Edition:
 @dataclass(frozen=True)
 class ComparabilityClass:
     id: str
+    division: str
     family: str
     model: str
     accelerator: str
@@ -76,9 +79,9 @@ class ComparabilityClass:
     reference: Optional[str] = None
     notes: str = ""
 
-    def matches(self, *, family: str, model: str, accelerator: Optional[str],
+    def matches(self, *, division: str, family: str, model: str, accelerator: Optional[str],
                 core_config: str, edition: Optional[str] = None) -> bool:
-        if self.family != family or self.model != model:
+        if self.division != division or self.family != family or self.model != model:
             return False
         if self.accelerator != ANY_ACCELERATOR and self.accelerator != accelerator:
             return False
@@ -103,7 +106,7 @@ class EditionsTable:
     def classes_for(self, edition_id: str) -> List[ComparabilityClass]:
         return [c for c in self.classes if edition_id in c.editions]
 
-    def classify(self, *, family: str, model: str, accelerator: Optional[str],
+    def classify(self, *, division: str, family: str, model: str, accelerator: Optional[str],
                  core_config: Any, edition: Optional[str] = None) -> Optional[ComparabilityClass]:
         """The class a run belongs to, or ``None``.
 
@@ -116,18 +119,18 @@ class EditionsTable:
         if edition is not None and (edition == UNKNOWN or edition not in self.editions):
             return None
         for c in self.classes:
-            if c.matches(family=family, model=model, accelerator=accelerator,
+            if c.matches(division=division, family=family, model=model, accelerator=accelerator,
                          core_config=core_config, edition=edition):
                 return c
         return None
 
-    def classify_stamp(self, stamp, *, family: str, model: str,
+    def classify_stamp(self, stamp, *, division: str, family: str, model: str,
                        accelerator: Optional[str]) -> Optional[ComparabilityClass]:
         """Classify a ``RunProvenance`` under its own stamped edition."""
         edition = getattr(stamp, "rules_edition", UNKNOWN)
         if edition == UNKNOWN:
             return None
-        return self.classify(family=family, model=model, accelerator=accelerator,
+        return self.classify(division=division, family=family, model=model, accelerator=accelerator,
                              core_config=(stamp.core_config or {}).get("hash", UNKNOWN),
                              edition=edition)
 
@@ -192,6 +195,8 @@ def _parse_class(raw: Any, editions: Dict[str, Edition], allowlists: Dict[str, A
     cid = raw.get("id")
     _require(isinstance(cid, str) and _CLASS_ID_RE.fullmatch(cid),
              f"{where}: class id {cid!r} must look like <model>-<accelerator>-<Letter>")
+    _require(raw.get("division") in CLASS_DIVISIONS,
+             f"{where}: class {cid}: division must be one of {CLASS_DIVISIONS}")
     _require(raw.get("family") in CLASS_FAMILIES, f"{where}: class {cid}: family must be one of {CLASS_FAMILIES}")
     _require(isinstance(raw.get("model"), str) and raw["model"], f"{where}: class {cid}: model is required")
     _require(raw.get("accelerator") in _ACCELERATORS,
@@ -211,7 +216,8 @@ def _parse_class(raw: Any, editions: Dict[str, Edition], allowlists: Dict[str, A
     ref = raw.get("reference")
     _require(ref is None or (isinstance(ref, str) and ref), f"{where}: class {cid}: reference must be a path")
     return ComparabilityClass(
-        id=cid, family=raw["family"], model=raw["model"], accelerator=raw["accelerator"],
+        id=cid, division=raw["division"], family=raw["family"], model=raw["model"],
+        accelerator=raw["accelerator"],
         allowlist=raw["allowlist"], core_configs=tuple(hashes), editions=tuple(eds),
         reference=ref, notes=str(raw.get("notes", "") or ""),
     )
@@ -242,11 +248,11 @@ def _load(path: Path) -> EditionsTable:
     ids = [c.id for c in classes]
     _require(len(set(ids)) == len(ids), f"{where}: duplicate class id(s): {sorted({i for i in ids if ids.count(i) > 1})}")
     _require(ids == sorted(ids), f"{where}: classes must be sorted by id")
-    claimed: Dict[Tuple[str, str, str, str, str], str] = {}
+    claimed: Dict[Tuple[str, str, str, str, str, str], str] = {}
     for c in classes:
         for e in c.editions:
             for h in c.core_configs:
-                key = (c.family, c.model, c.accelerator, e, h)
+                key = (c.division, c.family, c.model, c.accelerator, e, h)
                 _require(key not in claimed, f"{where}: classes {claimed.get(key)} and {c.id} both claim {key}")
                 claimed[key] = c.id
     return EditionsTable(schema=EDITIONS_SCHEMA, current_edition=current, editions=editions,
@@ -268,7 +274,7 @@ def load_editions(path=None) -> EditionsTable:
     return table
 
 
-def describe_class(stamp, *, family: str, model: str, accelerator: Optional[str]) -> str:
+def describe_class(stamp, *, division: str, family: str, model: str, accelerator: Optional[str]) -> str:
     """One line for ``mlpstorage runs show``: the class id, or why there is none."""
     try:
         table = load_editions()
@@ -279,14 +285,17 @@ def describe_class(stamp, *, family: str, model: str, accelerator: Optional[str]
         return "n/a (no core-config hash for this family)"
     edition = getattr(stamp, "rules_edition", UNKNOWN)
     if edition == UNKNOWN:
-        c = table.classify(family=family, model=model, accelerator=accelerator, core_config=core)
+        c = table.classify(division=division, family=family, model=model, accelerator=accelerator,
+                           core_config=core)
         if c is None:
             return "unclassified (matched by hash across every edition; stamp has no edition)"
         return f"{c.id} (matched by hash across every edition; stamp has no edition)"
     if edition not in table.editions:
         return f"unclassified (rules edition {edition} is not in {EDITIONS_FILE.name})"
-    c = table.classify(family=family, model=model, accelerator=accelerator, core_config=core, edition=edition)
-    return c.id if c is not None else f"unclassified (no class for edition {edition} {family}/{model}/{accelerator or UNKNOWN} {core})"
+    c = table.classify(division=division, family=family, model=model, accelerator=accelerator,
+                       core_config=core, edition=edition)
+    return c.id if c is not None else (f"unclassified (no class for edition {edition} {division} "
+                                       f"{family}/{model}/{accelerator or UNKNOWN} {core})")
 
 
 def _self_check_current_edition() -> None:

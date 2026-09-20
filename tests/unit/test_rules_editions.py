@@ -13,7 +13,10 @@ Covered here:
 - the table loads, is internally consistent and pinned to ``RULES_EDITION``;
 - the seed: v3.0 classes equal the shipped workload templates, llama3-8b is
   one class across v2.0 and v3.0, v2.0 CLOSED subset-mode checkpoints are a
-  separate class, v1.0/v2.0 spelling drift is one class with two hashes;
+  separate class, cross-division comparisons are never declared (v2.0 OPEN
+  ANL rows stay out of the v3.0 CLOSED llama classes), v1.0/v2.0 spelling
+  drift is one class with two hashes, ZettaLane's checkpoint-on unet3d runs
+  are declared the same workload;
 - ``classify`` / ``classify_stamp`` / ``accepts_dlio``;
 - ``EditionCheck``: rule ids, wiring, silence on derived stamps, EDN-01
   unknown edition (leaf + manifest), EDN-02 unclassified closed run leaf is
@@ -71,6 +74,11 @@ UNET3D_ZETTALANE = copy.deepcopy(UNET3D_B200)
 UNET3D_ZETTALANE["workflow"]["checkpoint"] = "True"
 UNET3D_ZETTALANE_HASH = compute_core_config(UNET3D_ZETTALANE, "training")["hash"]
 
+# a genuinely different workload: batch size 8 instead of 7
+UNET3D_VARIANT = copy.deepcopy(UNET3D_B200)
+UNET3D_VARIANT["reader"]["batch_size"] = 8
+UNET3D_VARIANT_HASH = compute_core_config(UNET3D_VARIANT, "training")["hash"]
+
 LEAF_CLOSED_RUN = "closed/Acme/results/sys-1/training/unet3d/run/20260901_100000"
 LEAF_CLOSED_RUN_2 = "closed/Acme/results/sys-1/training/unet3d/run/20260902_100000"
 LEAF_CLOSED_DATAGEN = "closed/Acme/results/sys-1/training/unet3d/datagen/20260831_090000"
@@ -125,18 +133,19 @@ class TestTable:
         assert ids == sorted(ids) and len(ids) == len(set(ids)), "class ids sorted and unique"
         for c in t.classes:
             assert re.fullmatch(r"[a-z0-9.]+(-[a-z0-9]+)*-[A-Z]", c.id), c.id
+            assert c.division in ("closed", "open", "whatif"), c.id
             assert c.family in ("training", "checkpointing"), c.id
             assert c.accelerator in ("b200", "mi355", "h100", "a100", "any"), c.id
             assert c.allowlist in allowlists, c.id
             assert c.editions and set(c.editions) <= set(t.editions), c.id
             assert c.core_configs and all(re.fullmatch(r"[0-9a-f]{16}", h) for h in c.core_configs), c.id
             assert len(set(c.core_configs)) == len(c.core_configs), c.id
-        # a hash means one thing: no two classes of one (family, model, accelerator, edition) share it
+        # a hash means one thing: no two classes of one (division, family, model, accelerator, edition) share it
         seen = {}
         for c in t.classes:
             for e in c.editions:
                 for h in c.core_configs:
-                    key = (c.family, c.model, c.accelerator, e, h)
+                    key = (c.division, c.family, c.model, c.accelerator, e, h)
                     assert key not in seen, f"{c.id} and {seen[key]} both claim {key}"
                     seen[key] = c.id
 
@@ -194,15 +203,27 @@ class TestSeed:
         assert checked >= 8  # unet3d/retinanet x b200 (+mi355 retinanet), 4 llama, resnet50/cosmoflow x2
 
     def test_v30_unet3d_b200(self):
-        c = _table().classify(family="training", model="unet3d", accelerator="b200",
+        c = _table().classify(division="closed", family="training", model="unet3d", accelerator="b200",
                               core_config=UNET3D_HASH, edition="3.0")
         assert c is not None and c.id == "unet3d-b200-A"
         assert c.editions == ("3.0",)
 
-    def test_v30_zettalane_variant_is_unclassified(self):
-        """F-2: workflow.checkpoint='True' is not the sanctioned unet3d workload."""
-        assert _table().classify(family="training", model="unet3d", accelerator="b200",
-                                 core_config=UNET3D_ZETTALANE_HASH, edition="3.0") is None
+    def test_v30_zettalane_checkpoint_on_runs_are_the_same_workload(self):
+        """F-2 (decided 2026-09-19): workflow.checkpoint='True' only writes one
+        checkpoint after the final epoch, outside DLIO's per-block AU window."""
+        t = _table()
+        c = t.classify(division="closed", family="training", model="unet3d", accelerator="b200",
+                       core_config=UNET3D_ZETTALANE_HASH, edition="3.0")
+        assert c is not None and c.id == "unet3d-b200-A"
+        assert set(c.core_configs) == {UNET3D_HASH, UNET3D_ZETTALANE_HASH}
+
+    def test_a_real_variant_is_unclassified(self):
+        assert _table().classify(division="closed", family="training", model="unet3d", accelerator="b200",
+                                 core_config=UNET3D_VARIANT_HASH, edition="3.0") is None
+
+    def test_every_seeded_class_is_closed_division(self):
+        """Cross-division comparisons are never declared; no OPEN class is seeded."""
+        assert {c.division for c in _table().classes} == {"closed"}
 
     def test_llama3_8b_is_one_class_across_v20_and_v30(self):
         t = _table()
@@ -214,17 +235,26 @@ class TestSeed:
     def test_v20_closed_subset_checkpoints_are_a_separate_class(self):
         """F-1: v2.0 CLOSED 70b/405b/1t ran checkpoint.mode=subset; v3.0 did not."""
         t = _table()
-        a = t.classify(family="checkpointing", model="llama3-70b", accelerator="unknown",
+        a = t.classify(division="closed", family="checkpointing", model="llama3-70b", accelerator="unknown",
                        core_config=LLAMA70B_HASH, edition="3.0")
-        b = t.classify(family="checkpointing", model="llama3-70b", accelerator="any",
+        b = t.classify(division="closed", family="checkpointing", model="llama3-70b", accelerator="any",
                        core_config=LLAMA70B_SUBSET_HASH, edition="2.0")
-        assert a is not None and a.id == "llama3-70b-A"
+        assert a is not None and a.id == "llama3-70b-A" and a.editions == ("3.0",)
         assert b is not None and b.id == "llama3-70b-B" and b.editions == ("2.0",)
-        assert t.classify(family="checkpointing", model="llama3-70b", accelerator="b200",
+        assert t.classify(division="closed", family="checkpointing", model="llama3-70b", accelerator="b200",
                           core_config=LLAMA70B_SUBSET_HASH, edition="3.0") is None
-        # v2.0 OPEN (ANL) ran the full config: same class as v3.0
-        assert "2.0" in a.editions
+
+    def test_cross_division_comparisons_are_never_declared(self):
+        """v2.0 OPEN (ANL) llama3-70b ran the exact v3.0 configuration and still
+        belongs to no class: a class is one division."""
+        t = _table()
         assert compute_core_config(V2_LLAMA70B, "checkpointing")["hash"] == LLAMA70B_HASH
+        assert t.classify(division="open", family="checkpointing", model="llama3-70b", accelerator="unknown",
+                          core_config=LLAMA70B_HASH, edition="2.0") is None
+        assert t.classify(division="open", family="checkpointing", model="llama3-70b", accelerator="unknown",
+                          core_config=LLAMA70B_HASH) is None
+        assert t.classify(division="open", family="training", model="unet3d", accelerator="b200",
+                          core_config=UNET3D_HASH) is None
 
     def test_v10_and_v20_spelling_drift_is_one_class_with_two_hashes(self):
         """F-4: dataset.record_length -> record_length_bytes etc."""
@@ -233,13 +263,13 @@ class TestSeed:
         assert set(c.editions) == {"1.0", "2.0"}
         assert set(c.core_configs) == {"54541a1d49e87763", "4b7b36339a2a5b0d"}
         for eid, h in (("1.0", "54541a1d49e87763"), ("2.0", "4b7b36339a2a5b0d")):
-            got = t.classify(family="training", model="cosmoflow", accelerator="h100",
+            got = t.classify(division="closed", family="training", model="cosmoflow", accelerator="h100",
                              core_config=h, edition=eid)
             assert got is c
         # class-level editions: every listed spelling is valid in every listed edition
-        assert t.classify(family="training", model="cosmoflow", accelerator="h100",
+        assert t.classify(division="closed", family="training", model="cosmoflow", accelerator="h100",
                           core_config="54541a1d49e87763", edition="2.0") is c
-        assert t.classify(family="training", model="cosmoflow", accelerator="h100",
+        assert t.classify(division="closed", family="training", model="cosmoflow", accelerator="h100",
                           core_config="54541a1d49e87763", edition="3.0") is None
 
 
@@ -250,24 +280,26 @@ class TestSeed:
 class TestClassify:
     def test_edition_none_matches_any_edition(self):
         t = _table()
-        assert t.classify(family="training", model="unet3d", accelerator="b200",
+        assert t.classify(division="closed", family="training", model="unet3d", accelerator="b200",
                           core_config=UNET3D_HASH).id == "unet3d-b200-A"
 
     def test_unknown_hash_or_edition_never_classifies(self):
         t = _table()
-        assert t.classify(family="training", model="unet3d", accelerator="b200",
+        assert t.classify(division="closed", family="training", model="unet3d", accelerator="b200",
                           core_config=UNKNOWN, edition="3.0") is None
-        assert t.classify(family="training", model="unet3d", accelerator="b200",
+        assert t.classify(division="closed", family="training", model="unet3d", accelerator="b200",
                           core_config=UNET3D_HASH, edition=UNKNOWN) is None
-        assert t.classify(family="training", model="unet3d", accelerator="mi355",
+        assert t.classify(division="closed", family="training", model="unet3d", accelerator="mi355",
                           core_config=UNET3D_HASH, edition="3.0") is None
 
     def test_classify_stamp(self):
         t = _table()
         stamp = RunProvenance.from_dict(_training_stamp())
-        assert t.classify_stamp(stamp, family="training", model="unet3d", accelerator="b200").id == "unet3d-b200-A"
+        assert t.classify_stamp(stamp, division="closed", family="training", model="unet3d",
+                                accelerator="b200").id == "unet3d-b200-A"
         derived = RunProvenance.from_dict(_training_stamp(rules_edition=UNKNOWN))
-        assert t.classify_stamp(derived, family="training", model="unet3d", accelerator="b200") is None
+        assert t.classify_stamp(derived, division="closed", family="training", model="unet3d",
+                                accelerator="b200") is None
 
     def test_classes_for_edition(self):
         t = _table()
@@ -315,7 +347,7 @@ class TestEditionCheck:
 
     def test_pre_stamp_tree_is_silent(self, tmp_path):
         root = _root(tmp_path)
-        _leaf(root, LEAF_CLOSED_RUN, parameters=UNET3D_ZETTALANE)   # would be unclassified if stamped
+        _leaf(root, LEAF_CLOSED_RUN, parameters=UNET3D_VARIANT)   # would be unclassified if stamped
         _leaf(root, LEAF_CLOSED_CKPT, parameters=V3_LLAMA70B)
         check, log = _check(root)
         assert check() is True
@@ -357,23 +389,23 @@ class TestEditionCheck:
 
     def test_unclassified_closed_run_leaf_is_an_error(self, tmp_path):
         root = _root(tmp_path)
-        _leaf(root, LEAF_CLOSED_RUN, parameters=UNET3D_ZETTALANE,
-              stamp=_training_stamp(UNET3D_ZETTALANE_HASH), declare=True)
+        _leaf(root, LEAF_CLOSED_RUN, parameters=UNET3D_VARIANT,
+              stamp=_training_stamp(UNET3D_VARIANT_HASH), declare=True)
         check, log = _check(root)
         assert check() is False
         errors = _rule_lines(log.errors)
         assert len(errors) == 1
         e = errors[0]
         assert e.startswith("[EDN-02 comparabilityClass] ")
-        assert LEAF_CLOSED_RUN in e and UNET3D_ZETTALANE_HASH in e and "3.0" in e
-        assert "unet3d" in e and "b200" in e
+        assert LEAF_CLOSED_RUN in e and UNET3D_VARIANT_HASH in e and "3.0" in e
+        assert "closed" in e and "unet3d" in e and "b200" in e
         assert log.infos == [] and log.warnings == []
 
     def test_unclassified_open_run_leaf_is_info(self, tmp_path):
         root = _root(tmp_path)
         _org(root, mode="open")
-        _leaf(root, LEAF_OPEN_RUN, parameters=UNET3D_ZETTALANE,
-              stamp=_training_stamp(UNET3D_ZETTALANE_HASH), declare=True)
+        _leaf(root, LEAF_OPEN_RUN, parameters=UNET3D_VARIANT,
+              stamp=_training_stamp(UNET3D_VARIANT_HASH), declare=True)
         check, log = _check(root)
         assert check() is True
         assert log.errors == []
@@ -381,8 +413,8 @@ class TestEditionCheck:
 
     def test_non_run_leaves_and_non_dlio_families_are_skipped(self, tmp_path):
         root = _root(tmp_path)
-        _leaf(root, LEAF_CLOSED_DATAGEN, parameters=UNET3D_ZETTALANE,
-              stamp=_training_stamp(UNET3D_ZETTALANE_HASH), declare=True)
+        _leaf(root, LEAF_CLOSED_DATAGEN, parameters=UNET3D_VARIANT,
+              stamp=_training_stamp(UNET3D_VARIANT_HASH), declare=True)
         kv = _stamp(core_config={"algorithm": "core-config-v1", "allowlist": UNKNOWN,
                                  "hash": UNKNOWN, "keys": []})
         _leaf(root, LEAF_CLOSED_KV, parameters={}, stamp=kv, declare=True)
@@ -390,17 +422,17 @@ class TestEditionCheck:
         assert check() is True
         assert log.lines == []
 
-    def test_unaccepted_dlio_revision_is_info(self, tmp_path):
+    def test_unaccepted_dlio_revision_is_a_warning(self, tmp_path):
         root = _root(tmp_path)
         stamp = _training_stamp()
         stamp["dlio"] = dict(stamp["dlio"], commit="f" * 40)
         _leaf(root, LEAF_CLOSED_RUN, parameters=UNET3D_B200, stamp=stamp, declare=True)
         check, log = _check(root)
         assert check() is True
-        assert log.errors == [] and log.warnings == []
-        assert len(log.infos) == 1
-        i = log.infos[0]
-        assert i.startswith("[EDN-03 dlioRevision] ") and "ffffffff" in i and "3.0" in i
+        assert log.errors == [] and log.infos == []
+        assert len(log.warnings) == 1
+        w = log.warnings[0]
+        assert w.startswith("[EDN-03 dlioRevision] ") and "ffffffff" in w and "3.0" in w
 
     def test_unknown_dlio_revision_is_silent(self, tmp_path):
         root = _root(tmp_path)
@@ -414,8 +446,8 @@ class TestEditionCheck:
     def test_accumulates_every_leaf(self, tmp_path):
         root = _root(tmp_path)
         for rel in (LEAF_CLOSED_RUN, LEAF_CLOSED_RUN_2):
-            _leaf(root, rel, parameters=UNET3D_ZETTALANE,
-                  stamp=_training_stamp(UNET3D_ZETTALANE_HASH), declare=True)
+            _leaf(root, rel, parameters=UNET3D_VARIANT,
+                  stamp=_training_stamp(UNET3D_VARIANT_HASH), declare=True)
         check, log = _check(root)
         assert check() is False
         assert len(_rule_lines(log.errors)) == 2
@@ -434,7 +466,7 @@ class TestRunsShow:
 
     def test_show_says_unclassified(self, tree, capsys):
         write_leaf_provenance(Path(tree) / LEAF_TRAIN_RUN,
-                              RunProvenance.from_dict(_training_stamp(UNET3D_ZETTALANE_HASH)))
+                              RunProvenance.from_dict(_training_stamp(UNET3D_VARIANT_HASH)))
         assert _main(["runs", "show", "2"]) == EXIT_CODE.SUCCESS
         out = capsys.readouterr().out
         assert re.search(r"class:\s+unclassified", out)

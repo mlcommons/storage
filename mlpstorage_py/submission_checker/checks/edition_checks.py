@@ -8,12 +8,12 @@ All three rules read the leaf ``provenance.json`` stamps and the
 - EDN-01: a stamped leaf, or a manifest, declaring a rules edition the table
   does not know is an ERROR.
 - EDN-02: a stamped ``run`` leaf with a known edition and a core-config hash
-  that resolves to no comparability class for its (edition, family, model,
-  emulated accelerator) is an ERROR under ``closed/`` and INFO elsewhere.
+  that resolves to no comparability class for its (edition, division, family,
+  model, emulated accelerator) is an ERROR under ``closed/`` and INFO elsewhere.
   datasize/datagen leaves and families without an allowlist (hash
   ``unknown``) are skipped.
 - EDN-03: a stamped ``run`` leaf whose DLIO commit is not in its edition's
-  accepted list is INFO (an inventory aid; ``unknown`` commits are skipped).
+  accepted list is a WARNING (``unknown`` commits are skipped).
 
 Leaves without a stamp (derived provenance, rules edition ``unknown``) draw
 no line at all, so the frozen v3.0 tree validates byte-identically.
@@ -176,13 +176,14 @@ class EditionCheck(BaseCheck):
                 continue  # no allowlist for this family (kv_cache, vector_database)
             family, model = info.get("benchmark", UNKNOWN), info.get("model", UNKNOWN)
             accelerator = self._accelerator(metadata)
-            if table.classify(family=family, model=model, accelerator=accelerator,
+            division = info.get("mode", UNKNOWN)
+            if table.classify(division=division, family=family, model=model, accelerator=accelerator,
                               core_config=core, edition=edition) is not None:
                 continue
             msg = ("run leaf %s: no comparability class in %s for rules edition %s, "
-                   "%s/%s on %s with core-config %s (allowlist %s); the run is not the "
+                   "%s %s/%s on %s with core-config %s (allowlist %s); the run is not the "
                    "sanctioned workload, or the table needs a new class.")
-            args = (rel, _RULE_FILE, edition, family, model, accelerator, core,
+            args = (rel, _RULE_FILE, edition, division, family, model, accelerator, core,
                     (stamp.core_config or {}).get("allowlist", UNKNOWN))
             if info.get("mode") == "closed":
                 self.log_violation("EDN-02", "comparabilityClass", str(root / rel), msg, *args)
@@ -212,7 +213,7 @@ class EditionCheck(BaseCheck):
                 continue
             if table.accepts_dlio(edition, commit):
                 continue
-            self.info_violation(
+            self.warn_violation(
                 "EDN-03", "dlioRevision", str(root / rel),
                 "run leaf %s ran DLIO commit %s (%s), which rules edition %s has not "
                 "listed as an accepted revision in %s.",

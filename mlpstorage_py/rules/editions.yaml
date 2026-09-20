@@ -11,22 +11,31 @@
 #            `current_edition` must equal config.RULES_EDITION (tested).
 #
 # classes:   the comparability classes. A class is the WG's assertion that runs
-#            of one (family, model, emulated accelerator) whose core-config-v1
-#            hash is one of `core_configs` executed the same workload in every
-#            edition listed under `editions`. Rows in one class compare; nothing
-#            else does. Several hashes in one class declare several spellings of
+#            of one (division, family, model, emulated accelerator) whose
+#            core-config-v1 hash is one of `core_configs` executed the same
+#            workload in every edition listed under `editions`. Rows in one
+#            class compare; nothing else does. Comparisons across divisions are
+#            never declared (WG decision 2026-09-19): a class belongs to exactly
+#            one division, and an OPEN run that happens to use a CLOSED
+#            configuration stays outside the CLOSED class. Several hashes in one class declare several spellings of
 #            one workload equivalent (v1.0 `dataset.record_length` vs v2.0
 #            `dataset.record_length_bytes`; a future allowlist `@rev` bump).
 #            `accelerator: any` matches every accelerator, including a leaf that
-#            carries none (checkpointing before --accelerator-type existed).
+#            carries none. It is used only for checkpointing classes of editions
+#            3.0 and earlier, whose checkpoint rows recorded no accelerator at
+#            all (v3.0 results.csv: Accelerator Type is empty for every
+#            checkpoint row). From edition 4.0 on, checkpoint classes are per
+#            accelerator: b200 and mi355 checkpoint rows do not compare.
 #            `reference` names the shipped workload template that hashes to the
 #            class today (regression-tested); it is documentation, not the key.
 #            Ids are labels (`<model>-<accelerator>-<letter>`), not ranks.
 #
 # DLIO revisions and client storage libraries are deliberately NOT part of the
-# class key: v3.0 alone ran ten DLIO commits and three s3dlio releases across
-# sanctioned CLOSED rows. They are recorded per edition as accepted lists;
-# `validate` rule EDN-03 reports a run on a revision the list does not carry.
+# class key for editions 3.0 and earlier: v3.0 alone ran ten DLIO commits and
+# three s3dlio releases across sanctioned CLOSED rows. They are recorded per
+# edition as accepted lists; `validate` rule EDN-03 warns about a run on a
+# revision the list does not carry. From edition 4.0 on the WG may bring the
+# DLIO revision into the class key (decision deferred 2026-09-19).
 #
 # Seeded 2026-09-19 from the frozen trees (design + survey:
 # .planning/rules-editions-and-comparability-classes.md).
@@ -135,6 +144,7 @@ editions:
 
 classes:
   - id: cosmoflow-a100-A
+    division: closed
     family: training
     model: cosmoflow
     accelerator: a100
@@ -144,6 +154,7 @@ classes:
     reference: configs/dlio/workload/cosmoflow_a100.yaml
     notes: first hash = v1.0 spelling, second = v2.0 spelling (same workload).
   - id: cosmoflow-h100-A
+    division: closed
     family: training
     model: cosmoflow
     accelerator: h100
@@ -153,15 +164,20 @@ classes:
     reference: configs/dlio/workload/cosmoflow_h100.yaml
     notes: first hash = v1.0 spelling, second = v2.0 spelling (same workload).
   - id: llama3-1t-A
+    division: closed
     family: checkpointing
     model: llama3-1t
     accelerator: any
     allowlist: checkpointing@1
     core_configs: [45fd627ad9dc5f4c]
-    editions: ["2.0", "3.0"]
+    editions: ["3.0"]
     reference: configs/dlio/workload/llama3_1t.yaml
-    notes: full checkpoint; in 2.0 only OPEN (ANL) rows ran it, CLOSED ran llama3-1t-B.
+    notes: >-
+      full checkpoint. v2.0 OPEN (ANL) rows ran this exact configuration, but
+      cross-division comparisons are never declared; v2.0 CLOSED ran
+      llama3-1t-B (subset mode).
   - id: llama3-1t-B
+    division: closed
     family: checkpointing
     model: llama3-1t
     accelerator: any
@@ -170,15 +186,20 @@ classes:
     editions: ["2.0"]
     notes: v2.0 CLOSED — checkpoint.mode=subset, model.parallelism.data=2.
   - id: llama3-405b-A
+    division: closed
     family: checkpointing
     model: llama3-405b
     accelerator: any
     allowlist: checkpointing@1
     core_configs: [7adcfa87a5c4c8e6]
-    editions: ["2.0", "3.0"]
+    editions: ["3.0"]
     reference: configs/dlio/workload/llama3_405b.yaml
-    notes: full checkpoint; in 2.0 only OPEN (ANL) rows ran it, CLOSED ran llama3-405b-B.
+    notes: >-
+      full checkpoint. v2.0 OPEN (ANL) rows ran this exact configuration, but
+      cross-division comparisons are never declared; v2.0 CLOSED ran
+      llama3-405b-B (subset mode).
   - id: llama3-405b-B
+    division: closed
     family: checkpointing
     model: llama3-405b
     accelerator: any
@@ -187,15 +208,20 @@ classes:
     editions: ["2.0"]
     notes: v2.0 CLOSED — checkpoint.mode=subset, model.parallelism.data=2.
   - id: llama3-70b-A
+    division: closed
     family: checkpointing
     model: llama3-70b
     accelerator: any
     allowlist: checkpointing@1
     core_configs: [3c53fe70d64f91d4]
-    editions: ["2.0", "3.0"]
+    editions: ["3.0"]
     reference: configs/dlio/workload/llama3_70b.yaml
-    notes: full checkpoint; in 2.0 only OPEN (ANL) rows ran it, CLOSED ran llama3-70b-B.
+    notes: >-
+      full checkpoint. v2.0 OPEN (ANL) rows ran this exact configuration, but
+      cross-division comparisons are never declared; v2.0 CLOSED ran
+      llama3-70b-B (subset mode).
   - id: llama3-70b-B
+    division: closed
     family: checkpointing
     model: llama3-70b
     accelerator: any
@@ -204,6 +230,7 @@ classes:
     editions: ["2.0"]
     notes: v2.0 CLOSED — checkpoint.mode=subset, model.parallelism.data=8.
   - id: llama3-8b-A
+    division: closed
     family: checkpointing
     model: llama3-8b
     accelerator: any
@@ -213,6 +240,7 @@ classes:
     reference: configs/dlio/workload/llama3_8b.yaml
     notes: identical configuration in v2.0 (CLOSED and OPEN) and v3.0.
   - id: resnet50-a100-A
+    division: closed
     family: training
     model: resnet50
     accelerator: a100
@@ -222,6 +250,7 @@ classes:
     reference: configs/dlio/workload/resnet50_a100.yaml
     notes: first hash = v1.0 spelling, second = v2.0 spelling (same workload).
   - id: resnet50-h100-A
+    division: closed
     family: training
     model: resnet50
     accelerator: h100
@@ -231,6 +260,7 @@ classes:
     reference: configs/dlio/workload/resnet50_h100.yaml
     notes: first hash = v1.0 spelling, second = v2.0 spelling (same workload).
   - id: retinanet-b200-A
+    division: closed
     family: training
     model: retinanet
     accelerator: b200
@@ -239,6 +269,7 @@ classes:
     editions: ["3.0"]
     reference: configs/dlio/workload/retinanet_b200.yaml
   - id: retinanet-mi355-A
+    division: closed
     family: training
     model: retinanet
     accelerator: mi355
@@ -247,6 +278,7 @@ classes:
     editions: ["3.0"]
     reference: configs/dlio/workload/retinanet_mi355.yaml
   - id: unet3d-a100-A
+    division: closed
     family: training
     model: unet3d
     accelerator: a100
@@ -258,18 +290,23 @@ classes:
       workflow.checkpoint=true; the shipped unet3d_a100.yaml has since turned
       checkpointing off and no longer hashes to this class.
   - id: unet3d-b200-A
+    division: closed
     family: training
     model: unet3d
     accelerator: b200
     allowlist: training@1
-    core_configs: [0d3ad0dec188becd]
+    core_configs: [0d3ad0dec188becd, f636f5a57473fca2]
     editions: ["3.0"]
     reference: configs/dlio/workload/unet3d_b200.yaml
     notes: >-
-      workflow.checkpoint=false. Twelve v3.0 CLOSED runs (ZettaLane, two GCP
-      systems) ran with workflow.checkpoint='True' and hash f636f5a57473fca2;
-      they are deliberately unclassified pending a WG decision.
+      first hash = workflow.checkpoint=false (the shipped template); second =
+      workflow.checkpoint='True' as run by twelve v3.0 CLOSED ZettaLane rows
+      (two GCP systems). Declared the same workload 2026-09-19: the only
+      checkpoint is written after the final epoch (checkpoint_after_epoch 5 of
+      epochs 5), and DLIO saves checkpoints between blocks, outside the
+      per-block AU / throughput window.
   - id: unet3d-h100-A
+    division: closed
     family: training
     model: unet3d
     accelerator: h100

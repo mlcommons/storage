@@ -276,7 +276,7 @@ def _cmd_show(args, results_dir: str, logger) -> int:
         from mlpstorage_py.editions import describe_class
         metadata = read_metadata(leaf_path) or {}
         accelerator = metadata.get("accelerator")
-        print(f"    class:         {describe_class(stamp, family=row['benchmark'], model=row['model'], accelerator=accelerator if isinstance(accelerator, str) and accelerator else None)}")
+        print(f"    class:         {describe_class(stamp, division=row['mode'], family=row['benchmark'], model=row['model'], accelerator=accelerator if isinstance(accelerator, str) and accelerator else None)}")
 
     metadata = read_metadata(leaf_path)
     if metadata is None:

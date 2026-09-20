@@ -1194,7 +1194,7 @@ mlpstorage validate /submissions/acme \
 - `<results-dir>/<mode>/<orgname>/results/<systemname>/.../<YYYYMMDD_HHMMSS>/provenance.json` — per-leaf provenance stamp (rules edition, tool, DLIO revision, storage library, core-config hash); see Common artifacts.
 - `<results-dir>/<mode>/<orgname>/submission.yaml` — per-organization manifest written by `reportgen`: systems, run leaves with their stamps, code images, declared rules edition. Travels with the submission; `validate` PROV-02 checks it against the tree.
 - `<repo>/mlpstorage_py/rules/core_config_keys.yaml` — allowlists of workload-defining DLIO keys behind the `core-config-v1` hash, one per family and revision.
-- `<repo>/mlpstorage_py/rules/editions.yaml` — the rules editions table and the declared comparability classes (which (edition, family, model, accelerator, core-config hash) tuples are the same workload); WG-maintained data read by `validate` (EDN-01/02/03) and `runs show`.
+- `<repo>/mlpstorage_py/rules/editions.yaml` — the rules editions table and the declared comparability classes (which (edition, division, family, model, accelerator, core-config hash) tuples are the same workload; never across divisions); WG-maintained data read by `validate` (EDN-01/02/03) and `runs show`.
 - `<results-dir>/.mlps/history` — command history consumed by `mlpstorage history`.
 - `<results-dir>/code-images/code-<hash8>/` — content-addressed code-image pool shared by every organization and division; `<results-dir>/<orgname>/code-<hash8>/` is the v3.0 per-organization layout, still read by `mlpstorage validate`.
 - `<submission-dir>/{code-images,<mode>/<submitter>/{systems,results}}/` — submission package layout consumed by `mlpstorage validate`.
