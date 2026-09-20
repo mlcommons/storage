@@ -11,29 +11,14 @@
   ],
   "workload": "llama3_8b",
   "metric": {
-    "checkpoint_read_throughput_GB_per_second": [
-      52.1,
-      51.8,
-      52.0,
-      51.9,
-      52.2,
-      52.0,
-      51.7,
-      52.1,
-      51.9,
-      52.0
-    ],
-    "checkpoint_write_throughput_GB_per_second": [
-      45.2,
-      44.8,
-      45.0,
-      45.1,
-      44.9,
-      45.0,
-      45.3,
-      44.8,
-      45.0,
-      45.1
-    ]
+    "save_checkpoint_io_mean_GB_per_second": 45.019999999999996,
+    "save_checkpoint_io_stdev_GB_per_second": 0.16193277068654918,
+    "save_checkpoint_duration_mean_seconds": 2.325760544766,
+    "save_checkpoint_duration_stdev_seconds": 0.008361181657288571,
+    "load_checkpoint_io_mean_GB_per_second": 51.970000000000006,
+    "load_checkpoint_io_stdev_GB_per_second": 0.14944341180973333,
+    "load_checkpoint_duration_mean_seconds": 2.0147258235563195,
+    "load_checkpoint_duration_stdev_seconds": 0.0057983651906649974,
+    "checkpoint_size_GB": 104.70452117919922
   }
 }

@@ -3,11 +3,22 @@
   "end": "2025-01-11 15:05:30",
   "num_accelerators": 8,
   "num_hosts": 1,
-  "host_memory_GB": [512],
-  "host_cpu_count": [64],
+  "host_memory_GB": [
+    512
+  ],
+  "host_cpu_count": [
+    64
+  ],
   "workload": "llama3_8b",
   "metric": {
-    "checkpoint_write_throughput_GB_per_second": [45.2, 44.8, 45.0],
-    "checkpoint_read_throughput_GB_per_second": [52.1, 51.8, 52.0]
+    "save_checkpoint_io_mean_GB_per_second": 45.0,
+    "save_checkpoint_io_stdev_GB_per_second": 0.20000000000000284,
+    "save_checkpoint_duration_mean_seconds": 2.3267977784756906,
+    "save_checkpoint_duration_stdev_seconds": 0.010341425597036507,
+    "load_checkpoint_io_mean_GB_per_second": 51.96666666666667,
+    "load_checkpoint_io_stdev_GB_per_second": 0.15275252316519683,
+    "load_checkpoint_duration_mean_seconds": 2.014851664918908,
+    "load_checkpoint_duration_stdev_seconds": 0.005927971161638511,
+    "checkpoint_size_GB": 104.70452117919922
   }
 }
