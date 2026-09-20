@@ -18,15 +18,17 @@
       94.9,
       95.0
     ],
+    "train_au_mean_percentage": 95.0,
+    "train_au_meet_expectation": "success",
+    "train_au_stdev_percentage": 0.09999999999999432,
     "train_throughput_samples_per_second": [
       1252.0,
       1249.0,
       1251.0
     ],
-    "train_io_throughput_MB_per_second": [
-      4510.0,
-      4490.0,
-      4500.0
-    ]
+    "train_throughput_mean_samples_per_second": 1250.6666666666667,
+    "train_throughput_stdev_samples_per_second": 1.5275252316519468,
+    "train_io_mean_MB_per_second": 4500.0,
+    "train_io_stdev_MB_per_second": 10.0
   }
 }

@@ -452,9 +452,18 @@ def temp_checkpointing_result_dir(tmp_path, sample_checkpointing_parameters):
         "host_memory_GB": [512],
         "host_cpu_count": [64],
         "workload": "llama3_8b",
+        # Real DLIO checkpointing shape (statscounter.py): scalar means /
+        # stdevs / durations, no per-op lists (mlcommons/storage#830).
         "metric": {
-            "checkpoint_write_throughput_GB_per_second": [45.2, 44.8],
-            "checkpoint_read_throughput_GB_per_second": [52.1, 51.8],
+            "save_checkpoint_io_mean_GB_per_second": 45.0,
+            "save_checkpoint_io_stdev_GB_per_second": 0.2,
+            "save_checkpoint_duration_mean_seconds": 2.33,
+            "save_checkpoint_duration_stdev_seconds": 0.01,
+            "load_checkpoint_io_mean_GB_per_second": 51.95,
+            "load_checkpoint_io_stdev_GB_per_second": 0.15,
+            "load_checkpoint_duration_mean_seconds": 2.02,
+            "load_checkpoint_duration_stdev_seconds": 0.01,
+            "checkpoint_size_GB": 104.70452117919922,
         }
     }
     with open(result_dir / "summary.json", "w") as f:

@@ -239,9 +239,13 @@ class TestDLIOResultParser:
             "host_memory_GB": [512],
             "host_cpu_count": [64],
             "workload": "llama3_8b",
+            # Real DLIO checkpointing shape: scalars only (#830).
             "metric": {
-                "checkpoint_write_throughput_GB_per_second": [45.2, 44.8, 45.0],
-                "checkpoint_read_throughput_GB_per_second": [52.1, 51.8, 52.0]
+                "save_checkpoint_io_mean_GB_per_second": 45.0,
+                "save_checkpoint_duration_mean_seconds": 2.33,
+                "load_checkpoint_io_mean_GB_per_second": 51.97,
+                "load_checkpoint_duration_mean_seconds": 2.01,
+                "checkpoint_size_GB": 104.70452117919922
             }
         }
         with open(result_dir / "summary.json", 'w') as f:
@@ -300,7 +304,11 @@ class TestDLIOResultParser:
         assert result.benchmark_type == BENCHMARK_TYPES.checkpointing
         assert result.model == "llama3-8b"  # Note: normalized name
         assert result.command == "run"
-        assert result.metrics is not None
+        # Real DLIO checkpointing output is scalars only; the list-only
+        # metric filter (rules/models.py) leaves nothing, so ``metrics`` is
+        # None — reportgen reads the save_/load_ scalars straight from
+        # summary.json for the final-table columns (#830).
+        assert result.metrics is None
 
     def test_parse_extracts_override_params(self, mock_logger, training_result_dir):
         """DLIOResultParser extracts override parameters from Hydra overrides."""

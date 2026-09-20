@@ -17,10 +17,9 @@
       1248.0,
       1252.0
     ],
-    "train_io_throughput_MB_per_second": [
-      4500.0,
-      4480.0,
-      4520.0
-    ]
+    "train_throughput_mean_samples_per_second": 1250.0,
+    "train_throughput_stdev_samples_per_second": 2.0,
+    "train_io_mean_MB_per_second": 4500.0,
+    "train_io_stdev_MB_per_second": 20.0
   }
 }

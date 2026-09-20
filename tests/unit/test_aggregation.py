@@ -113,6 +113,15 @@ def _load_summary(path: pathlib.Path) -> Dict[str, Any]:
         return json.load(f)
 
 
+def _list_metrics(summary: Dict[str, Any]) -> Dict[str, Any]:
+    """The ``metric`` block as the extractor hands it to reportgen: list-valued
+    keys only (``rules/models.py`` drops DLIO's scalar means / stdevs /
+    durations before aggregation). The fixtures carry the real DLIO shape
+    since mlcommons/storage#830, so a fixture-fed ``BenchmarkRun`` must apply
+    the same filter or ``fmean`` would be handed a float."""
+    return {k: v for k, v in (summary.get("metric") or {}).items() if isinstance(v, list)}
+
+
 def _make_run(
     *,
     benchmark_type: BENCHMARK_TYPES,
@@ -179,7 +188,7 @@ def _training_runs_from_unet3d_fixture(
                 benchmark_type=BENCHMARK_TYPES.training,
                 model="unet3d",
                 result_dir=str(dest_dir),
-                metrics=summary.get("metric") or {},
+                metrics=_list_metrics(summary),
                 accelerator="h100",
                 run_datetime=ts,
             )
@@ -204,7 +213,7 @@ def _resnet50_partial_runs(dest_root: pathlib.Path) -> List[BenchmarkRun]:
                 benchmark_type=BENCHMARK_TYPES.training,
                 model="resnet50",
                 result_dir=str(dest_dir),
-                metrics=summary.get("metric") or {},
+                metrics=_list_metrics(summary),
                 accelerator="h100",
                 run_datetime=ts,
             )
@@ -223,7 +232,7 @@ def _checkpointing_run(dest_root: pathlib.Path, ts: str) -> BenchmarkRun:
         benchmark_type=BENCHMARK_TYPES.checkpointing,
         model="llama3-8b",
         result_dir=str(dest_dir),
-        metrics=summary.get("metric") or {},
+        metrics=_list_metrics(summary),
         accelerator=None,
         run_datetime=ts,
     )
@@ -285,7 +294,7 @@ def _whatif_runs(dest_root: pathlib.Path) -> List[BenchmarkRun]:
                 benchmark_type=BENCHMARK_TYPES.training,
                 model="unet3d",
                 result_dir=str(dest_dir),
-                metrics=summary.get("metric") or {},
+                metrics=_list_metrics(summary),
                 accelerator="h100",
                 run_datetime=ts,
             )
@@ -315,7 +324,7 @@ def _empty_metric_runs(dest_root: pathlib.Path) -> List[BenchmarkRun]:
                 benchmark_type=BENCHMARK_TYPES.training,
                 model="unet3d",
                 result_dir=str(dest_dir),
-                metrics=summary.get("metric") or {},
+                metrics=_list_metrics(summary),
                 accelerator="h100",
                 run_datetime=ts,
             )
@@ -424,10 +433,12 @@ class TestTrainingAggregation:
         """Metric-mean keys carry ``train_mean_of_``; all keys carry ``train_`` (D-13/D-14).
 
         D-13 rule: ``<group>_<mean_of_>?<basename>``. Training source
-        metric keys are ``train_au_percentage``,
-        ``train_throughput_samples_per_second``,
-        ``train_io_throughput_MB_per_second``; the emitted output keys
-        strip the redundant ``train_`` and insert ``mean_of_``.
+        metric keys (the per-epoch lists real DLIO emits) are
+        ``train_au_percentage`` and ``train_throughput_samples_per_second``;
+        the emitted output keys strip the redundant ``train_`` and insert
+        ``mean_of_``. DLIO's I/O figure is the scalar
+        ``train_io_mean_MB_per_second`` — it never aggregates through this
+        path and surfaces as ``train_read_bw_gibps`` instead (#830).
 
         Slice-Training additionally emits v3.0 final-table columns
         (``train_num_client_nodes``, ``train_num_simulated_accelerators``,
@@ -446,10 +457,12 @@ class TestTrainingAggregation:
         expected_keys = {
             "train_mean_of_au_percentage",
             "train_mean_of_throughput_samples_per_second",
-            "train_mean_of_io_throughput_MB_per_second",
         }
         assert expected_keys <= set(result), (
             f"Expected {expected_keys} <= keys, got {set(result)}"
+        )
+        assert "train_mean_of_io_throughput_MB_per_second" not in result, (
+            "no such DLIO key; the I/O figure is a scalar (#830)"
         )
         # Slice-Training final-table columns are new non-mean training cols.
         final_table_cols = {
@@ -861,39 +874,39 @@ class TestCheckpointingAggregation:
     tested in ``TestInvalidRulesStrict``.
     """
 
-    def test_checkpointing_10op_intra_list_mean(self, tmp_path):
-        """The 10-op happy-path fixture emits intra-list ``fmean`` per metric.
+    def test_checkpointing_real_shape_emits_no_list_means(self, tmp_path):
+        """Real DLIO checkpointing output carries no per-op lists (#830).
 
-        Fixture: 10-op ``20260703_100000`` checkpointing run. Assertion
-        pins ``fmean`` of the fixture's 10-element list for both
-        ``checkpoint_read_throughput_GB_per_second`` and
-        ``checkpoint_write_throughput_GB_per_second``.
+        The fixture mirrors ``statscounter.py``: ``save_``/``load_`` scalar
+        means, stdevs and durations. The list-only filter leaves nothing for
+        the ``checkpoint_mean_of_*`` path to aggregate — so it must emit no
+        such column — while the v3.0 final-table columns are read straight
+        from the scalars in ``summary.json``.
         """
         gen = _make_bare_generator(tmp_path)
         runs_root = tmp_path / "workload"
         runs_root.mkdir()
         run = _checkpointing_run(runs_root, "20260703_100000")
+        assert run.metrics == {}, "real-shape fixture has no list metrics"
 
         result = gen._aggregate_workload_metrics([run], warmup_set=set())
 
         summary = _load_summary(runs_root / "20260703_100000" / "summary.json")
-        read_list = summary["metric"]["checkpoint_read_throughput_GB_per_second"]
-        write_list = summary["metric"]["checkpoint_write_throughput_GB_per_second"]
-        assert len(read_list) == 10 and len(write_list) == 10, (
-            "Fixture invariant: 10-op checkpointing lists"
+        metric = summary["metric"]
+        assert not [k for k in result if k.startswith("checkpoint_mean_of_")], (
+            f"no list metric exists to take a mean of; got {sorted(result)}"
         )
-
-        assert "checkpoint_mean_of_read_throughput_GB_per_second" in result
-        assert "checkpoint_mean_of_write_throughput_GB_per_second" in result
-        assert math.isclose(
-            result["checkpoint_mean_of_read_throughput_GB_per_second"],
-            statistics.fmean(read_list),
-            rel_tol=1e-9,
+        assert result["checkpoint_write_bw_gibps"] == pytest.approx(
+            metric["save_checkpoint_io_mean_GB_per_second"]
         )
-        assert math.isclose(
-            result["checkpoint_mean_of_write_throughput_GB_per_second"],
-            statistics.fmean(write_list),
-            rel_tol=1e-9,
+        assert result["checkpoint_read_bw_gibps"] == pytest.approx(
+            metric["load_checkpoint_io_mean_GB_per_second"]
+        )
+        assert result["checkpoint_write_duration_secs"] == pytest.approx(
+            metric["save_checkpoint_duration_mean_seconds"]
+        )
+        assert result["checkpoint_read_duration_secs"] == pytest.approx(
+            metric["load_checkpoint_duration_mean_seconds"]
         )
 
     def test_checkpointing_ignores_warmup_set(self, tmp_path):
@@ -2142,10 +2155,15 @@ class TestInvalidRulesStrict:
         assert preset_warmup in gen.warmup_result_dirs
 
     def test_checkpointing_op_count_mismatch_downgrades_to_invalid(self, tmp_path):
-        """D-24 template c: checkpointing metric list len != 10 → INVALID.
+        """D-24 template c: a checkpointing metric list of len != 10 → INVALID.
 
-        Uses the 7-op partial checkpointing fixture. Verifies the
-        emitted verbatim substring
+        The gate counts entries of any list-valued metric. Real DLIO
+        checkpointing output carries no per-op lists (#830), so on a real
+        tree this gate never has anything to count; the checkpoint-count
+        rule that does fire in production is the validator's §4.7.1
+        (``--num-checkpoints-write/read``). The list is synthesized here so
+        the gate's own logic stays covered without a fixture pretending
+        DLIO writes one. Verifies the verbatim substring
         ``"expected 10 checkpoint operations per Rules.md §2.1.23;
         found 7"``.
         """
@@ -2153,8 +2171,14 @@ class TestInvalidRulesStrict:
         runs_root = tmp_path / "closed" / "acme" / "results" / "sys-a" / "checkpointing" / "llama3-8b" / "run"
         runs_root.mkdir(parents=True)
         run = _checkpointing_run(runs_root, "20260703_120000")
-        # Fixture invariant: 7-element metric lists.
-        assert len(run.metrics["checkpoint_read_throughput_GB_per_second"]) == 7
+        run = _make_run(
+            benchmark_type=BENCHMARK_TYPES.checkpointing,
+            model="llama3-8b",
+            result_dir=run.result_dir,
+            metrics={"synthetic_per_op_list": [1.0] * 7},
+            accelerator=None,
+            run_datetime="20260703_120000",
+        )
 
         _run_process_workload_groups(gen, [run])
 
