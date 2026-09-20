@@ -39,16 +39,19 @@ from mlpstorage_py.report_generator import ReportGenerator, Hyperlink
 
 # --------------------------------------------------------------------------- #
 # The authoritative fixed schema (Results Table Structure.xlsx, v3.0 +        #
-# agreed Division/Benchmark Type/Model discriminators). 55 columns.           #
+# agreed Division/Benchmark Type/Model discriminators + the archive's Rules   #
+# Edition / Comparability Class pair). 57 columns.                            #
 # --------------------------------------------------------------------------- #
 
 FINAL_SCHEMA: List[str] = [
-    # Left edge + shared SUT block (14)
+    # Left edge + shared SUT block (16)
     "Public ID",
     "Organization",
     "Division",
     "Benchmark Type",
     "Model",
+    "Rules Edition",
+    "Comparability Class",
     "Name",
     "Description",
     "Type",

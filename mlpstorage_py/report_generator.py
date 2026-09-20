@@ -111,9 +111,12 @@ class Hyperlink:
 # columns for all 8 tables (2 training + 4 checkpointing + 1 kvcache + 1 vdb)  #
 # sharing a System-Under-Test block, plus 3 agreed discriminator columns       #
 # (Division / Benchmark Type / Model) so a single flat file can carry every    #
-# table's rows. A MLCommons staff member opens results.csv in Excel and         #
-# reduces it to any one table by deleting the workload blocks + discriminators  #
-# that don't apply.                                                            #
+# table's rows, plus the two columns the unified results archive keys on       #
+# (Rules Edition / Comparability Class -- looked up at report time from each   #
+# run leaf's provenance stamp and rules/editions.yaml, never stored in a       #
+# leaf). A MLCommons staff member opens results.csv in Excel and reduces it    #
+# to any one table by deleting the workload blocks + discriminators that       #
+# don't apply.                                                                 #
 #                                                                              #
 # The schema is FIXED — never data-driven. reportgen cherry-picks each column  #
 # from the in-memory row (``_final_row``); a run that lacks a metric leaves    #
@@ -153,15 +156,18 @@ _MODEL_DISPLAY_LABELS = {
 # (final_column_name, internal_row_key_or_None). ``None`` => manual /
 # present-but-blank placeholder; no cell in this block is manual any more.
 # Division / Benchmark Type / Model are computed in ``_final_row``. Public ID
-# is generated in ``_assign_public_ids``; Type / Access Protocol /
-# Availability / Integrated Client Storage / Usable Capacity are derived from
-# the system-description YAML in ``_sut_columns``.
+# is generated in ``_assign_public_ids``; Rules Edition / Comparability Class
+# come from the row's run leaves in ``_edition_columns``; Type / Access
+# Protocol / Availability / Integrated Client Storage / Usable Capacity are
+# derived from the system-description YAML in ``_sut_columns``.
 _SUT_FINAL_COLUMNS = [
     ("Public ID", "sut_public_id"),
     ("Organization", "orgname"),
     ("Division", "__division__"),
     ("Benchmark Type", "__benchmark_type__"),
     ("Model", "__model__"),
+    ("Rules Edition", "rules_edition"),
+    ("Comparability Class", "comparability_class"),
     ("Name", "sut_name"),
     ("Description", "sut_description"),
     ("Type", "sut_type"),
@@ -335,6 +341,11 @@ class ReportGenerator:
             apply_logging_options(self.logger, args)
 
         self.results_dir = results_dir
+        # Rules Edition / Comparability Class lookups (``_edition_columns``):
+        # the editions table loaded once (False = load failed, reported
+        # once), and each submission manifest's declared edition by path.
+        self._editions_table_cache = None
+        self._manifest_edition_cache: Dict[str, Optional[str]] = {}
         # The root as requested, before any canonical-tree rebind below.
         # generate_reports writes one submission.yaml per <mode>/<org>/ under
         # it when it is a live results-dir (sentinel-bearing); a submissions
@@ -981,6 +992,12 @@ class ReportGenerator:
         # prefix stays first / issues stays last.
         row.update(self._sut_columns(
             category_val, orgname_key, systemname_key, first_run))
+        # Archive columns: the rules edition + comparability class shared by
+        # every ``run`` leaf that feeds this row (blank when they disagree).
+        all_runs = (workload_result.benchmark_run
+                    if isinstance(workload_result.benchmark_run, list)
+                    else [workload_result.benchmark_run])
+        row.update(self._edition_columns(category_val, all_runs))
         # Aggregated metric columns (D-11 grouped body).
         for metric_key, metric_val in (workload_result.metrics or {}).items():
             row[metric_key] = metric_val
@@ -1080,6 +1097,158 @@ class ReportGenerator:
                 cols['sut_code'] = Hyperlink("code", code_href)
                 cols['sut_logs'] = Hyperlink("logs", code_href)
         return cols
+
+    # ------------------------------------------------------------------
+    # Rules Edition / Comparability Class (unified-archive columns)
+    # ------------------------------------------------------------------
+
+    def _editions_table(self):
+        """The shipped rules editions table, loaded once. ``None`` when it
+        cannot be loaded (reported once; both archive columns stay blank)."""
+        if self._editions_table_cache is None:
+            from mlpstorage_py.editions import EditionsError, load_editions
+            try:
+                self._editions_table_cache = load_editions()
+            except EditionsError as e:
+                self.logger.error(
+                    "reportgen: cannot load the rules editions table (%s); "
+                    "Rules Edition / Comparability Class stay blank.", e)
+                self._editions_table_cache = False
+        return self._editions_table_cache or None
+
+    @staticmethod
+    def _leaf_identity(leaf) -> Tuple[Optional[dict], Optional[Any]]:
+        """``(parse_leaf info, <mode>/<org> directory)`` for a canonical run
+        leaf (``<mode>/<org>/results/<system>/...``), else ``(None, None)``.
+
+        The info's ``model`` is the leaf's path token -- ``<engine>/<index>``
+        for vector_database -- which is how the class table, the validator
+        (EDN-02) and ``runs show`` all spell it.
+        """
+        from pathlib import Path
+        from mlpstorage_py.runs.ledger import MODES, parse_leaf
+        parts = Path(leaf).resolve().parts
+        for i in range(2, len(parts)):
+            if parts[i] == "results" and parts[i - 2] in MODES:
+                info = parse_leaf("/".join(parts[i - 2:]))
+                if info is not None:
+                    return info, Path(*parts[:i])
+        return None, None
+
+    def _manifest_edition(self, org_dir) -> str:
+        """The rules edition declared by ``<mode>/<org>/submission.yaml``, or
+        ``unknown`` when there is no (readable) manifest. Cached per path."""
+        from mlpstorage_py.provenance import (
+            MANIFEST_FILENAME, ProvenanceError, UNKNOWN, read_submission_manifest,
+        )
+        path = os.path.join(str(org_dir), MANIFEST_FILENAME)
+        cached = self._manifest_edition_cache.get(path)
+        if cached is not None:
+            return cached
+        value = UNKNOWN
+        if os.path.isfile(path):
+            try:
+                declared = read_submission_manifest(path).get("rules_edition")
+            except ProvenanceError as e:
+                self.logger.warning(
+                    "reportgen: %s is unreadable (%s); it lends no rules "
+                    "edition to unstamped leaves.", path, e)
+                declared = None
+            if declared is not None:
+                value = str(declared)
+        self._manifest_edition_cache[path] = value
+        return value
+
+    def _edition_columns(self, category: str, runs) -> Dict[str, str]:
+        """The ``rules_edition`` / ``comparability_class`` cells for one row.
+
+        Each contributing ``run`` leaf is read through its provenance stamp
+        (``provenance.json``, or the stamp derived from its code image and
+        metadata when it predates stamping). Its edition is the stamp's,
+        falling back to the submission manifest's (PROV-02 forces the two to
+        agree); its class is the editions-table lookup under that edition,
+        or across every edition when none is known (a hash-only match, as
+        ``runs show`` prints it). The row shows a value only when every leaf
+        agrees: leaves in different classes, or only some of them classified,
+        leave the cell blank with a warning -- such a row is not comparable.
+        Blank silently when nothing is known (no stamp, no manifest, no
+        class). datagen / datasize leaves never contribute.
+        """
+        from pathlib import Path
+        from mlpstorage_py.provenance import (
+            ProvenanceError, UNKNOWN, read_leaf_provenance,
+        )
+        blank = {"rules_edition": "", "comparability_class": ""}
+        table = self._editions_table()
+        if table is None:
+            return blank
+        try:
+            root = Path(self.results_dir).resolve()
+        except (OSError, TypeError):
+            root = None
+        editions: List[str] = []
+        classes: List[Optional[str]] = []
+        leaf_names: List[str] = []
+        group = ""
+        for run in runs or []:
+            if getattr(run, "command", None) != "run":
+                continue
+            result_dir = getattr(run, "result_dir", None)
+            if not result_dir or not os.path.isdir(result_dir):
+                continue
+            leaf = Path(result_dir)
+            try:
+                stamp = read_leaf_provenance(
+                    leaf, root if root is not None and root in leaf.resolve().parents else None)
+            except ProvenanceError as e:
+                self.logger.warning(
+                    "reportgen: %s: malformed provenance stamp (%s); the leaf "
+                    "lends no rules edition or comparability class.", leaf, e)
+                continue
+            info, org_dir = self._leaf_identity(leaf)
+            edition = str(stamp.rules_edition or UNKNOWN)
+            if edition == UNKNOWN and org_dir is not None:
+                edition = self._manifest_edition(org_dir)
+            bt = getattr(run, "benchmark_type", None)
+            family = str(getattr(bt, "value", bt) or UNKNOWN)
+            if info is not None:
+                model = info["model"]
+            elif family == BENCHMARK_TYPES.vector_database.value:
+                params = getattr(run, "parameters", None) or {}
+                model = f"{params.get('engine', '')}/{params.get('index_type', '')}"
+            else:
+                model = str(getattr(run, "model", "") or "")
+            accelerator = getattr(run, "accelerator", None)
+            accelerator = accelerator if isinstance(accelerator, str) and accelerator else None
+            cls = table.classify(
+                division=category, family=family, model=model, accelerator=accelerator,
+                core_config=(stamp.core_config or {}).get("hash", UNKNOWN),
+                edition=None if edition == UNKNOWN else edition)
+            editions.append(edition)
+            classes.append(cls.id if cls is not None else None)
+            leaf_names.append(leaf.name)
+            group = str(leaf.parent)
+        if not classes:
+            return blank
+
+        out = dict(blank)
+        if len(set(editions)) == 1:
+            if editions[0] != UNKNOWN:
+                out["rules_edition"] = editions[0]
+        else:
+            self.logger.warning(
+                "reportgen: %s: its run leaves resolve to different rules editions (%s); "
+                "Rules Edition left blank.", group,
+                ", ".join(f"{n}={e}" for n, e in zip(leaf_names, editions)))
+        if len(set(classes)) == 1:
+            if classes[0] is not None:
+                out["comparability_class"] = classes[0]
+        else:
+            self.logger.warning(
+                "reportgen: %s: its run leaves fall into different comparability classes "
+                "(%s); Comparability Class left blank -- the row is not comparable.", group,
+                ", ".join(f"{n}={c or 'unclassified'}" for n, c in zip(leaf_names, classes)))
+        return out
 
     def _code_image_href(
         self, category: str, orgname: str, first_run: Any,
