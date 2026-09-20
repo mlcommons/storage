@@ -48,13 +48,23 @@ The benchmark execution process requires two steps:
 
 ```bash
 [root@localhost ]# ./mlpstorage closed kvcache run --help
-usage: mlpstorage closed kvcache run --results-dir RESULTS_DIR [--allow-run-as-root] [--cache-dir CACHE_DIR]
-                                     [--config-file CONFIG_FILE] [--debug] [--dry-run] [--exec-type {mpi,docker}] [-h]
-                                     [--hosts HOSTS [HOSTS ...]] [--kvcache-bin-path KVCACHE_BIN_PATH]
-                                     [--max-timeseries-samples MAX_TIMESERIES_SAMPLES] [--mpi-bin {mpirun,mpiexec}]
-                                     [--mpi-btl {auto,vader,tcp}] [--mpi-params MPI_PARAMS] [--num-processes NUM_PROCESSES]
-                                     [--oversubscribe] [--quiet] [--skip-timeseries] [--skip-validation]
-                                     [--stream-log-level STREAM_LOG_LEVEL] [--timeseries-interval TIMESERIES_INTERVAL] [--verbose]
+usage: mlpstorage closed kvcache run [--allow-run-as-root]
+                                     [--cache-dir CACHE_DIR]
+                                     [--color {auto,always,never}]
+                                     [--config-file CONFIG_FILE] [--debug]
+                                     [--dry-run] [--exec-type {mpi,docker}]
+                                     [-h] [--hosts HOSTS [HOSTS ...]]
+                                     [--kvcache-bin-path KVCACHE_BIN_PATH]
+                                     [--mpi-bin {mpirun,mpiexec}]
+                                     [--mpi-btl {auto,vader,tcp}]
+                                     [--mpi-params MPI_PARAMS]
+                                     [--num-processes NUM_PROCESSES]
+                                     [--oversubscribe] [--quiet]
+                                     [--results-dir RESULTS_DIR]
+                                     [--skip-fs-separation-gate]
+                                     [--skip-ssh-check] [--skip-validation]
+                                     [--stream-log-level STREAM_LOG_LEVEL]
+                                     [--systemname SYSTEMNAME] [--verbose]
                                      [--verify-lockfile PATH]
 ```
 

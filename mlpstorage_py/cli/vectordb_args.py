@@ -199,6 +199,11 @@ def add_vectordb_arguments(parser, mode):
             _add_vectordb_open_args(cmd_parser, cmd_name)
         if cmd_name in ("datagen", "run"):
             _add_vectordb_distributed_arguments(cmd_parser)
+        # TIMESERIES flags are an open/whatif affordance on every benchmark:
+        # a CLOSED run collects host metrics at the defaults and cannot opt
+        # out (see add_timeseries_arguments; mlcommons/storage#845 oddity 1).
+        if cmd_name == "run" and mode in ("open", "whatif"):
+            add_timeseries_arguments(cmd_parser)
 
 
 def _add_vectordb_core_args(parser, command, index_choices):
@@ -490,9 +495,6 @@ def _add_vectordb_core_args(parser, command, index_choices):
                 "storage.storage_type."
             ),
         )
-
-    if command == "run":
-        add_timeseries_arguments(parser)
 
 
 def _add_vectordb_open_args(parser, command):
