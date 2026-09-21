@@ -132,6 +132,13 @@ torchaudio = [{ index = "pytorch-cpu" }]
 # Pinned to a specific commit for reproducibility; bump by updating `rev` and
 # re-running `uv lock --upgrade-package dlio-benchmark`.
 # Commit history (most recent first):
+#   - DLIO PR #51 v3.0.5: dataset.num_files_generated — under skip_listing
+#     the "_of_{total}" name suffix (and its zero-pad width) comes from the
+#     GENERATED count while num_files_train stays the read count, so a run
+#     can read the first N files of a larger generated set (storage #571
+#     Q4 / #795 follow-up). mlpstorage fills it from the datagen manifest.
+#     Also aligns two generator conventions in the reconstruction
+#     (subfolder pad width for power-of-ten counts; num_subfolders==1 flat).
 #   - DLIO PR #50 v3.0.4: three fixes (storage #780, #756, #755) plus
 #     s3dlio pin bump to >=0.9.112.
 #   - DLIO PR #49 fix for storage #754: race-tolerant Hydra job-dir
@@ -186,7 +193,7 @@ torchaudio = [{ index = "pytorch-cpu" }]
 #   - DLIO PR #23 fix for storage #391 part 2 (sudo -n + warn-once for drop_caches)
 #   - DLIO PR #22 fix for storage #415 (mpi4py auto-init in spawn workers)
 #   - DLIO PR #21 fix for storage #391 part 1 (TorchIterableDatasetSimple gating)
-dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "edaf4bb3d6343ef2fb6b9f6dbafa6102032ae8bf" }
+dlio-benchmark = { git = "https://github.com/mlcommons/DLIO_local_changes.git", rev = "dfaa17c11a0a2f229997a3a5041b621b1fd2f8c5" }
 
 [dependency-groups]
 dev = [
