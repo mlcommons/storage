@@ -542,6 +542,118 @@ same tool computes it:
 
 ---
 
+## 4.3.1 checkpointDataSizeRatio
+
+### Why
+
+The read phase must be served by the storage system under test, not by the
+client hosts' page cache.  When each host writes more than three times its
+own memory during the write phase, the cache cannot hold the checkpoints and
+the read phase necessarily reaches storage.  Below that ratio the read phase
+may still be honest -- the submitter clears the cache in the failover callout
+(4.7.1) -- so the rule is advisory: the validator draws the reviewer's
+attention to the ratio without failing the run.  The 3x figure is the value
+the advisory check was written with; the working group has not set it by
+rule.
+
+### How the value is produced
+
+`metric.checkpoint_size_GB` is the checkpoint size summed across all ranks
+(see §4.3.6, "How the value is produced"), so dividing by `num_hosts` gives
+the bytes each host wrote.  `host_memory_GB` in the summary is DLIO's
+per-host list; on clusters with several ranks per host the list is
+positionally malformed, so only its sum divided by `num_hosts` is used.
+
+### Implementation
+
+- `mlpstorage_py/submission_checker/checks/checkpointing_checks.py` --
+  `checkpoint_data_size_ratio` (warning; one per distinct size / memory /
+  host-count condition, so a split write-read pair warns once).
+- `mlpstorage_py/submission_checker/checks/helpers.py` --
+  `per_host_memory_gb`.
+
+---
+
+## 4.3.4 checkpointAggregateAcceleratorMemory
+
+### Why
+
+The benchmark checkpoints a model that is sharded across the simulated
+accelerators; the shards must fit in their memory or the run does not model
+a real checkpoint of that model.  The rule is checked against the checkpoint
+size the run actually wrote, so a run of the right model at too few
+accelerators fails on its own evidence.
+
+The Table 2 "Checkpoint size" row is in binary units although labeled
+GB/TB, and its values are the ones the v3.0 round validated against.  They
+are deliberately retained for later editions so results remain comparable
+with v3.0; the 1T figure in particular is known to be a rounded, slightly
+high value.
+
+### How the value is produced
+
+The accelerator is declared with `--accelerator-type` on `checkpointing run`
+(ManPage.md → Checkpointing options) and recorded in the run's metadata as
+`accelerator`, with `args.accelerator_type` as the older location.  Each
+accelerator's memory, and each model's checkpoint size, is a per-edition
+value in the `checker` block of `mlpstorage_py/rules/editions.yaml`; the
+tool applies the same product test before launching a run, against the
+Table 2 size, so a misconfigured run fails before DLIO starts.  Leaves
+written before the flag existed carry no accelerator and cannot be verified;
+the validator fails them rather than assuming one.
+
+### Implementation
+
+- `mlpstorage_py/submission_checker/checks/checkpointing_checks.py` --
+  `aggregate_accelerator_memory`.
+- `mlpstorage_py/rules/run_checkers/checkpointing.py` --
+  `check_accelerator_memory` (the pre-launch gate).
+- `mlpstorage_py/rules/editions.yaml` -- `checker.accelerator_memory_gb`,
+  `checker.checkpoint_size_gb`.
+- Tests: `tests/unit/test_rules_checkers.py`, `tests/unit/test_cli_parser.py`,
+  `tests/unit/test_edition_values.py`.
+
+---
+
+## 4.3.5 checkpointSubsetRunValidation
+
+### Why
+
+Subset mode exists for storage architectures that centrally manage storage
+local to the client nodes, whose aggregate checkpoint bandwidth therefore
+scales linearly with node count.  One 8-GPU node running the 8B workload
+demonstrates such an architecture's per-node bandwidth; the larger models
+measure storage where checkpoint data must reach a shared central store, so
+no subset form is defined for them.  An earlier wording of the rule omitted
+the word "not" and read as permitting subset runs of the large models; the
+rule now states the only legal form directly.
+
+### How the value is produced
+
+A submitter declares the claim with `--checkpoint-subset` on `checkpointing
+run` (ManPage.md → Checkpointing options); the tool refuses the flag with any
+other model or process count, and records it in the run's metadata under
+`args.checkpoint_subset`.  Independently, the tool sets DLIO's
+`checkpoint.mode` to "subset" for any run whose process count is below the
+model's full count (Table 2), which engages DLIO's partial-checkpoint
+mechanics; that override lands in `override_parameters`.  Either signal makes
+a CLOSED run a subset run under this rule, because the 8B claim run is
+execution-identical to a full 8B run and the flag is its only trace, while a
+downscaled run of a larger model carries the override and no flag.
+
+### Implementation
+
+- `mlpstorage_py/submission_checker/checks/checkpointing_checks.py` --
+  `subset_run_validation` (CLOSED only; an OPEN run below the full count is
+  governed by 4.6.4).
+- `mlpstorage_py/rules/run_checkers/checkpointing.py` --
+  `check_subset_mode` (the pre-launch gate on the flag).
+- `mlpstorage_py/benchmarks/dlio.py` -- `add_checkpoint_params` (the
+  `checkpoint.mode` override).
+- Tests: `tests/unit/test_checkpoint_capacity_gate_subset.py`.
+
+---
+
 ## 4.3.6 checkpointResultAggregation
 
 ### Why
@@ -598,3 +710,116 @@ trees.
 - Upstream: `dlio_benchmark/utils/statscounter.py` (`end_run`,
   `end_save_ckpt`, `end_load_ckpt`),
   `dlio_benchmark/checkpointing/base_checkpointing.py` (`checkpoint_size`).
+
+---
+
+## 4.4.2 checkpointFilesystemCheck
+
+### Why
+
+The same rule as 3.4.2 for checkpointing: output logfiles written onto the
+storage system under test would add I/O to the measurement and skew the
+result.  See §3.4.2 for the reasoning and the probe.
+
+### How the value is produced
+
+As for 3.4.2, with the checkpoint directory (`args.checkpoint_folder`) in
+the role of the data directory and `checkpointing_run.stdout.log` carrying
+the pre-sidecar `df` listing.
+
+### Implementation
+
+- `mlpstorage_py/submission_checker/checks/checkpointing_checks.py` --
+  `checkpoint_filesystem_check`; `checks/helpers.py` --
+  `read_fs_separation_sidecar`, `_check_filesystem_separation`.
+- Tests: `mlpstorage_py/tests/test_issue601_validator_reads_sidecar.py`.
+
+---
+
+## 4.7.1 checkpointCacheFlushValidation
+
+### Why
+
+Checkpointing models the failure of a client node followed by another client
+picking up the last checkpoint file written by the failed node for the read
+phase.  When the storage system supports the client-to-client handoff
+transparently -- the read phase can proceed immediately after the write phase
+without external orchestration -- the two phases may run as a single combined
+invocation, and no gap applies.  Storage architectures that need an external
+callout (a submitter-provided script, say) to complete the failover between
+the writing and reading clients run the phases as two invocations with the
+callout between them.  A common in-callout activity is clearing a client-side
+filesystem cache when the checkpoint data written per host is less than three
+times the host's memory (4.3.1); the callout is not limited to that.
+
+The 30-second bound keeps the callout a lightweight programmatic step rather
+than a long-running manual procedure, without charging the submitter for
+per-invocation framework overhead they cannot avoid: the gap is measured
+between the moment the write invocation released its nodes and the moment
+the read invocation's process started, not between the two timed sections.
+A negative gap cannot be a real ordering violation (the structural part of
+the rule already requires the read phase to start after the write phase
+ends); it means the two invocations' hosts disagree about the time, which a
+reviewer should see but which does not invalidate the run.
+
+The structural part of the rule (one combined or exactly two split
+invocations, 10 and 10) is what makes the published write and read figures
+(4.3.6) comparable across submissions.  OPEN submissions may vary the counts
+(Table 4), so only the gap applies to them.
+
+### How the value is produced
+
+`invocation_start_time` is captured at the first import of `mlpstorage`'s
+entry module, before Python imports, MPI spawn and the pre-execution gates,
+and written to the metadata of every run.  `invocation_end_time` is captured
+at the top of the metadata write, after the post-benchmark cluster collection
+has returned -- the latest point at which the value can still land in the
+file and the closest to the moment the write nodes are released.  Leaves
+written before either field existed fall back as the rule states: the latest
+post-benchmark `collection_timestamp` is the moment the last node finished
+the final cluster collection, a close proxy for node release; the summary
+`end_time` and `start_time` bound the timed section and charge framework
+startup or teardown to the gap.  The validator logs every pair's gap and
+which origins it used, whatever the verdict.
+
+### Implementation
+
+- `mlpstorage_py/_invocation.py` -- the two bookends.
+- `mlpstorage_py/benchmarks/base.py` -- `write_metadata` (records both
+  fields).
+- `mlpstorage_py/submission_checker/checks/checkpointing_checks.py` --
+  `cache_flush_validation` (the gap) and `checkpoint_invocation_structure`
+  (the one-or-two-invocation shape, CLOSED only); `checks/helpers.py` --
+  `_pair_checkpoint_runs`, `_latest_final_collection_timestamp`.
+- Tests: `tests/unit/test_aggregation.py` (`§4.7.1` cases),
+  `mlpstorage_py/tests/test_checkpointing_check_phase2.py`.
+
+---
+
+## 4.7.3 checkpointRemappingTimeReporting
+
+### Why
+
+A solution that cannot serve a checkpoint to a second host the moment the
+first host finishes writing it has a remapping delay, and that delay is part
+of the recovery time the benchmark models (4.7.2).  The rule asks for the
+figure in the system description and checks it two ways: for consistency
+with the simultaneous-access declarations (a solution supporting
+simultaneous reads and writes by multiple hosts has nothing to remap), and
+against the interval the submission actually shows between the write and
+read invocations, which cannot honestly be much shorter than the declared
+delay.  The one-half tolerance is the value the check was written with; the
+working group has not set it by rule.
+
+### How the value is produced
+
+The consistency test is part of the system-description schema, so it is
+reported when the description is loaded; the interval test uses the same
+write-end / read-start summary timestamps as 4.7.2.
+
+### Implementation
+
+- `mlpstorage_py/submission_checker/checks/system_yaml_schema_checks.py` --
+  the `capabilities` cross-field validator (consistency).
+- `mlpstorage_py/submission_checker/checks/checkpointing_checks.py` --
+  `remapping_time_reporting` (the interval test).

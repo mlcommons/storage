@@ -474,13 +474,13 @@ root_folder (or any name you prefer)
 
 ## 4.3. Checkpointing Run Options
 
-4.3.1. **checkpointDataSizeRatio** -- The checkpoint data written per client node must be more than 3x the client node's memory capacity, otherwise the filesystem cache needs to be cleared between the write and read phases.
+4.3.1. **checkpointDataSizeRatio** -- The checkpoint data written per client host in a run, its ``*summary.json`` `metric.checkpoint_size_GB` divided by `num_hosts`, must be more than 3 times the memory of one client host (the run's `host_memory_GB` summed over its hosts and divided by `num_hosts`).  A run below that ratio draws a warning; it is not thereby INVALID.  (Commentary: `RulesCommentary.md` §4.3.1.)
 
-4.3.2. **checkpointFsyncVerification** -- We must verify that all the benchmark workload configuration files have been set to do an fsync call at the end of each of the 10 checkpoint writes.
+4.3.2. **checkpointFsyncVerification** -- Every run's recorded workload configuration (`parameters` in its ``*_metadata.json``) must have `checkpoint.fsync` set to true: each of the 10 checkpoint writes ends with an fsync call.  A run without it is INVALID.
 
-4.3.3. **checkpointModelConfigurationReq** -- The benchmark must be run with one of the four model configuration detailed below.
+4.3.3. **checkpointModelConfigurationReq** -- Every run must use one of the four model configurations in Table 2: the model recorded in its ``*_metadata.json`` (`args.model`) must name one of the sizes 8B, 70B, 405B or 1T that the submission's rules edition lists for checkpointing.  A run naming any other model is INVALID.
 
-4.3.4. **checkpointAggregateAcceleratorMemory** -- The aggregate simulated accelerator memory across all nodes must be sufficient to accommodate the model’s checkpoint size.  That is, the GB of memory associated with the chosen accelerator times the accelerator count must be equal to or greater than the total checkpoint size for that scale of checkpoint.  (see table 2)  The chosen accelerator is declared with `--accelerator-type` on `checkpointing run` and recorded in the run's metadata; the *submission validator* multiplies the accelerator's memory from Table 3 by the run's accelerator count and fails a run whose product is below the checkpoint size it wrote, whose metadata records no accelerator, or whose accelerator is not in Table 3.  The `mlpstorage` command applies the same check against the Table 2 checkpoint size before launching a run.
+4.3.4. **checkpointAggregateAcceleratorMemory** -- The aggregate simulated accelerator memory of a run must be at least the checkpoint size it wrote: the memory of the run's accelerator (Table 3; the value recorded for the submission's rules edition in the `checker` block of `mlpstorage_py/rules/editions.yaml`) times the run's accelerator count (`num_accelerators` in its ``*summary.json``) must be equal to or greater than the run's `metric.checkpoint_size_GB`.  The run's accelerator is the `accelerator` recorded in its ``*_metadata.json``.  A run whose product is below its checkpoint size, whose metadata records no accelerator, or whose accelerator is not in Table 3 is INVALID.  (Commentary: `RulesCommentary.md` §4.3.4.)
 
 **Table 3 Simulated accelerator memory**
 
@@ -508,20 +508,18 @@ root_folder (or any name you prefer)
 
 *The "Invalid" entries are deliberate: subset mode is defined only for the 8B model (see rule 4.3.5).*
 
-*Units: the "Checkpoint size" row is in binary units (GiB and TiB, 1024-based) as reported by the benchmark's `checkpoint_size_GB`, even though it is labeled GB/TB. The values are the ones the v3.0 round validated against and are kept as-is so v4.0 results remain comparable with v3.0.*
+*Units: the "Checkpoint size" row is in binary units (GiB and TiB, 1024-based), the units of the benchmark's `checkpoint_size_GB`, although it is labeled GB/TB.  The values are those of rules edition 3.0 (Commentary: `RulesCommentary.md` §4.3.4).*
 
-4.3.5. **checkpointSubsetRunValidation** --  The `mlpstorage` command must accept a parameter declaring the run a *subset* run and must record that declaration in the run's output log file. A *subset* run must use the "8B" model and a total of exactly 8 accelerators. The *submission validator* must flag an error for any *subset* run that uses any other model or any other accelerator count.
-
-*Aside (not part of the rule): subset mode exists for storage architectures that centrally manage storage local to the client nodes, whose aggregate checkpoint bandwidth therefore scales linearly with node count. One 8-GPU node running the 8B workload demonstrates such an architecture's per-node bandwidth; the larger models measure storage where checkpoint data must reach a shared central store, so no subset form is defined for them.*
+4.3.5. **checkpointSubsetRunValidation** -- A run in a CLOSED submission is a *subset* run when its ``*_metadata.json`` records the subset declaration: `args.checkpoint_subset` true, or `checkpoint.mode` equal to "subset" among its `override_parameters`.  A *subset* run must use the "8B" model (`args.model`) and a total of exactly 8 accelerators (`num_accelerators` in its ``*summary.json``).  A *subset* run of any other model or any other accelerator count is INVALID.  (Commentary: `RulesCommentary.md` §4.3.5.)
 
 4.3.6. **checkpointResultAggregation** -- The checkpointing figures published for a *workload directory* are functions of its one or two *timestamp directories* (§2.1.23); none is excluded.  A *timestamp directory* whose recorded `checkpoint.num_checkpoints_write` is greater than 0 is a *write-phase directory*, and one whose recorded `checkpoint.num_checkpoints_read` is greater than 0 is a *read-phase directory*; a combined invocation is both.  In `results.csv`, `Write B/W (GiB/s)` and `Write Duration (secs)` are the arithmetic means, over the *write-phase directories*, of each directory's `*summary.json` fields `metric.save_checkpoint_io_mean_GB_per_second` and `metric.save_checkpoint_duration_mean_seconds`; `Read B/W (GiB/s)` and `Read Duration (secs)` are the arithmetic means, over the *read-phase directories*, of `metric.load_checkpoint_io_mean_GB_per_second` and `metric.load_checkpoint_duration_mean_seconds`.  The bandwidth fields are in binary GiB/s (see the units note under Table 2).  A column is blank when any directory of its phase lacks the field it is taken from.  (Commentary: `RulesCommentary.md` §4.3.6.)
 
 
 ## 4.4. Checkpointing Access Via POSIX API Options
 
-4.4.1. **checkpointPathArgs** --  The arguments to `mlpstorage` that set the directory pathname where the checkpoints are written and read and the directory where the output logfiles are stored must both be set and must be set to different values.
+4.4.1. **checkpointPathArgs** --  Every run's ``*_metadata.json`` must record both the directory where the checkpoints were written and read (`args.checkpoint_folder`) and the results directory where its output logfiles were stored (`args.results_dir`), and the two values must differ.  A run missing either value, or recording the same value for both, is INVALID.
 
-4.4.2. **checkpointFilesystemCheck** --  The `mlpstorage` command should do a "df" command on the directory pathname where the checkpoints are written and read and another one on the directory pathname where the output logfiles are stored and record those values in the logfile.  The *submission validator* should find those entries in the run's logfile and verify that they are different filesystems.  We don't want the submitter to, by acccident, place the logfiles onto the storage system under test since that would skew the results.
+4.4.2. **checkpointFilesystemCheck** --  The checkpoint directory and the results directory of every run must be on different filesystems, and each *timestamp directory* must carry the evidence: a `fs_separation.json` file whose `same_filesystem` is false, or, in a leaf without that file, a `df` listing in `checkpointing_run.stdout.log` covering both directories and showing them on different mounts.  A run whose evidence shows one filesystem, or a run carrying neither form of evidence, is INVALID.  Runs of a system whose description declares the object API are exempt.  (Commentary: `RulesCommentary.md` §4.4.2.)
 
 ## 4.5. Checkpointing Access Via Object API Options
 
@@ -531,7 +529,7 @@ root_folder (or any name you prefer)
 
 4.6.2. **checkpointClosedAcceleratorsPerHost** -- For CLOSED submissions, submitters may adjust the number of simulated accelerators **per host**, as long as each host uses more than 4 simulated accelerators and the total number of simulated accelerators (the total number of processes) matches the requirement.  (see table 2)
 
-4.6.3. **checkpointClosedCheckpointParameters** -- For CLOSED submissions of this benchmark, only a small number of parameters can be modified, and those parameters are listed in the table below.  Any other parameters being modified must generate a message and fail the validation.
+4.6.3. **checkpointClosedCheckpointParameters** -- For CLOSED submissions of this benchmark, only a small number of parameters can be modified, and those parameters are listed in the table below.  A CLOSED run whose recorded workload configuration (`yaml_params` in its ``*_metadata.json``) differs from the reference configuration for its model in any parameter not listed, or carries a parameter the reference configuration does not, is INVALID.
 
 **Table: Checkpoint Workload Tunable Parameters for CLOSED**
 
@@ -541,12 +539,12 @@ root_folder (or any name you prefer)
 
 4.6.4. **checkpointOpenSubmissionScaling** -- For OPEN submissions of this benchmark, the total number of processes may be increased in multiples of (TP×PP) to showcase the scalability of the storage solution.
 
-**Table 3: Configuration parameters and their mutability in CLOSED and OPEN divisions**
+**Table 4: Configuration parameters and their mutability in CLOSED and OPEN divisions**
 
 | Parameter                          | Meaning                                      | Default value                                 | Changeable in CLOSED | Changeable in OPEN |
 |------------------------------------|----------------------------------------------|-----------------------------------------------|----------------------|--------------------|
 | --ppn hostname:slotcount           | Number of processes per node                 | N/A                                           | YES (minimal 4)      | YES (minimal 4)    |
-| --num-processes                    | Total number of processes                    | Node local: 8<br>Global: the value in Table 1 | NO                   | YES                |
+| --num-processes                    | Total number of processes                    | Node local: 8<br>Global: the value in Table 2 | NO                   | YES                |
 | --checkpoint-folder                | The folder to save the checkpoint data       | checkpoint/{workload}                         | YES                  | YES                |
 | --num-checkpoints-write            | Number of write checkpoints                  | 10 (or 0**)                                   | Only 10 or 0**       | YES                |
 | --num-checkpoints-read             | Number of read checkpoints                   | 10 (or 0**)                                   | Only 10 or 0**       | YES                |
@@ -557,20 +555,23 @@ root_folder (or any name you prefer)
 
 ## 4.7. Storage System Must Be Simultaneously R/W or _Remappable_
 
-4.7.1. **checkpointCacheFlushValidation** -- Checkpointing models the failure of a client node followed by another client picking up the last checkpoint file written by the failed node for the read phase. In every submission the write phase (10 checkpoint files written) runs first, followed by the read phase (10 checkpoint files read). When the storage system supports the client-to-client handoff transparently — i.e., the read phase can proceed immediately after the write phase without external orchestration — the write and read phases may be executed as a single combined invocation, and no gap check applies. Storage system architectures that require an external callout (e.g., a submitter-provided script) to complete the failover between the writing and reading clients must instead execute the write and read phases as two separate invocations, with the submitter's failover callout occurring between them. A common in-callout activity is clearing a client-side filesystem cache when the total checkpoint size written per client is less than 3× the client node's memory capacity (see ``checkpointing/README.md``); the callout is not limited to that activity. To ensure the callout is a lightweight programmatic step rather than a long-running manual procedure, the validator confirms that the read-phase invocation was launched — i.e., its ``mlpstorage`` process reached the entry point of ``main.py`` — within 30 seconds of the write-phase invocation ending. The gap is measured as ``read.invocation_start_time − write.summary.end_time``, where ``invocation_start_time`` is captured at ``mlpstorage`` process start (before framework startup, MPI spawn, and other unavoidable per-invocation overhead) and ``end_time`` is recorded in the write invocation's ``summary.json``. A negative gap indicates clock skew between the write and read nodes and is reported as such rather than as a causality violation.
+4.7.1. **checkpointCacheFlushValidation** -- In every submission the write phase (10 checkpoint files written) precedes the read phase (10 checkpoint files read).  A CLOSED *workload directory* holds either one *timestamp directory*, a *combined* invocation whose recorded arguments (`args` in its ``*_metadata.json``) have `num_checkpoints_write` and `num_checkpoints_read` both equal to 10, or exactly two: a *write-phase* invocation (`num_checkpoints_write` 10, `num_checkpoints_read` 0) followed by a *read-phase* invocation (`num_checkpoints_write` 0, `num_checkpoints_read` 10) whose ``*summary.json`` `start_time` is not before the write-phase invocation's `end_time`.  A CLOSED *workload directory* with any other number of *timestamp directories*, or any other combination of the two counts, is INVALID.  For any *workload directory* holding a write-phase and a read-phase invocation, the *failover gap* is the read-phase invocation's `invocation_start_time` minus the write-phase invocation's `invocation_end_time`, both recorded in ``*_metadata.json``; a *failover gap* greater than 30 seconds is INVALID.  A negative *failover gap* indicates clock skew between the two invocations' hosts and draws a warning; it is not thereby INVALID.  A write-phase leaf that records no `invocation_end_time` supplies instead the latest post-benchmark `collection_timestamp` in its ``*_metadata.json`` or, lacking that, its ``*summary.json`` `end_time`; a read-phase leaf that records no `invocation_start_time` supplies its ``*summary.json`` `start_time`.  (Commentary: `RulesCommentary.md` §4.7.1.)
 
-4.7.2. **checkpointTotalTestDuration** -- The validator must verify that the total test duration starts from the timestamp of the first checkpoint written and ends at the ending timestamp of the last checkpoint read, notably including the "remapping" time.
+4.7.2. **checkpointTotalTestDuration** -- The *total test duration* of a *workload directory* is the time from the `start_time` recorded in the ``*summary.json`` of its first *write-phase* invocation to the `end_time` recorded in the ``*summary.json`` of its last *read-phase* invocation, and so includes the "remapping" time between the phases.  A two-invocation *workload directory* whose leaves lack either timestamp is INVALID.
 
-4.7.3. **checkpointRemappingTimeReporting** -- For a _remapping_ solution, the time duration between the checkpoint being completed and the earliest time that that checkpoint could be read by a different host node must be reported in the `SystemDescription.yaml` file.
+4.7.3. **checkpointRemappingTimeReporting** -- For a _remapping_ solution, the time from a checkpoint being completely written to the earliest time that checkpoint can be read by a different client host must be reported, in seconds, as `remap_time_in_seconds` under `system_under_test.solution.capabilities` in the system's `.yaml` file (§2.1.7); a solution that does not remap reports 0.  A description declaring both `simultaneous_write` and `simultaneous_read` true (4.7.4) must report 0, and one declaring either false must report a value greater than 0; any other combination is INVALID.  In a two-invocation *workload directory* of a system reporting a value greater than 0, the interval from the write-phase invocation's ``*summary.json`` `end_time` to the read-phase invocation's `start_time` must be at least half the reported value; a shorter interval is INVALID.  (Commentary: `RulesCommentary.md` §4.7.3.)
 
-4.7.4. **checkpointSimultaneousRwSupport** -- The system_configuration.yaml document must list whether the solution support simultaneous reads and/or writes as such:
+4.7.4. **checkpointSimultaneousRwSupport** -- The system's `.yaml` file (§2.1.7) must declare, under `system_under_test.solution.capabilities`, whether the solution supports multiple client hosts and whether it supports simultaneous writes and simultaneous reads by multiple hosts, as such:
 ```
-System:
-  shared_capabilities:
-    multi_host_support: True            # False is used for local storage
-    simultaneous_write_support: False   # Are simultaneous writes by multiple hosts supported in the submitted configuration
-    simultaneous_read__support: True    # Are simultaneous reads by multiple hosts supported in the submitted configuration
+system_under_test:
+  solution:
+    capabilities:
+      multi_host: true             # false for storage local to one client host
+      simultaneous_write: true     # simultaneous writes by multiple hosts are supported in the submitted configuration
+      simultaneous_read: true      # simultaneous reads by multiple hosts are supported in the submitted configuration
+      remap_time_in_seconds: 0     # rule 4.7.3
 ```
+A description lacking any of the three boolean fields is INVALID.  A system with a completed checkpointing run whose description declares `simultaneous_write` or `simultaneous_read` false draws a warning; it is not thereby INVALID.
 
 # 5. Validating the VDB Workloads
 
