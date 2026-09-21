@@ -1,0 +1,57 @@
+"""
+Allowlist for tests/unit/test_rules_md_declarative.py.
+
+Maps a Rules.md block key (a rule id such as "3.3.8", or "<heading> (prose)"
+for text before a section's first rule) to the set of marker names that are
+tolerated there *for now*.  Every entry is pre-existing non-declarative text
+awaiting migration to RulesCommentary.md / ManPage.md / the tracker.
+
+This list only shrinks.  Do not add entries: if a new sentence trips a
+marker, either move the text or (if the sentence is genuinely declarative)
+tune the marker in the test module.  A stale entry -- one whose text no
+longer hits -- fails test_allowlist_entries_still_hit and must be removed.
+
+Regenerate the current-hits literal with:
+
+    uv run python tests/unit/test_rules_md_declarative.py
+"""
+
+# Baseline recorded 2026-09-21 (Rules.md as of #874): 64 hits in 36 blocks.
+ALLOWLIST: dict[str, set[str]] = {
+    "1. Introduction (prose)": {"intent_phrase", "tool_behaviour"},
+    "1.1": {"editorial", "intent_phrase", "tool_behaviour"},
+    "1.2": {"tool_behaviour"},
+    "2.1.2": {"rationale_word"},
+    "2.1.6": {"code_constant", "rationale_word", "tool_behaviour"},
+    "2.1.7": {"example"},
+    "2.1.8": {"example"},
+    "3.1.2": {"editorial"},
+    "3.3.1": {"intent_phrase"},
+    "3.3.3": {"code_reference"},
+    "3.3.5": {"editorial"},
+    "3.3.7": {"editorial"},
+    "3.4.2": {"intent_phrase", "tool_behaviour"},
+    "3.6.1": {"code_constant", "tool_behaviour"},
+    "4.3.4": {"rationale_word", "tool_behaviour"},
+    "4.3.5": {"rationale_word", "tool_behaviour"},
+    "4.4.2": {"intent_phrase", "tool_behaviour"},
+    "4.7.1": {"code_reference", "intent_phrase"},
+    "5.4.1": {"intent_phrase"},
+    "5.4.2": {"intent_phrase", "tool_behaviour"},
+    "5.6. VDB OPEN versus CLOSED Options (prose)": {"code_constant", "code_reference"},
+    "5.6.1": {"code_constant"},
+    "5.6.3": {"code_constant"},
+    "5.6.5": {"code_constant"},
+    "6.3. KVCache Run Options (prose)": {"code_constant", "code_reference", "editorial", "tool_behaviour", "tracker_ref"},
+    "6.3.1.1": {"code_constant", "code_reference"},
+    "6.3.2.2": {"rationale_word"},
+    "6.3.3.3": {"code_reference"},
+    "6.3.3.4": {"tool_behaviour", "tracker_ref"},
+    "6.3.4.1": {"code_reference"},
+    "6.3.4.3": {"code_reference", "rationale_word", "tracker_ref"},
+    "6.3.5. Example invocations (prose)": {"example"},
+    "6.4.1": {"intent_phrase"},
+    "6.4.2": {"code_constant", "code_reference"},
+    "6.6.2": {"code_constant", "code_reference", "editorial"},
+    "6.6.3": {"code_reference"},
+}
