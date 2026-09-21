@@ -379,43 +379,39 @@ root_folder (or any name you prefer)
 
 ## 3.1. Training Sizing Options
 
-3.1.1. **trainingVerifyDatasizeUsage** -- The *submission validator* must verify that the *datasize* option was used by finding the entry(s) in the log file showing its use.
+3.1.1. **trainingVerifyDatasizeUsage** -- The *datasize* phase must have been run for the workload: the "datasize" *phase directory* (2.1.12) holds a *timestamp directory* carrying the ``*_metadata.json`` file described in 3.3.1, and every *run* *timestamp directory*'s ``*_metadata.json`` carries both an ``args`` block and a ``parameters.dataset`` block.  A workload without the datasize record, or a run without those blocks, is INVALID.
 
-3.1.2. **trainingRecalculateDatasetSize** -- The *submission validator* must recalculate the minimum dataset size by using the provided number of simulated accelerators and the sizes of all of the host node’s memory as reported in the logfiles as described below and fail the run if the size recorded in the run's logfile doesn't exactly match the recalculated value.
-  * Calculate required minimum samples given number of steps per epoch (NB: `num_steps_per_epoch` is a minimum of 500):
-     * `min_samples_steps_per_epoch = num_steps_per_epoch * batch_size * num_accelerators_across_all_nodes`
-  * Calculate required minimum samples given host memory to eliminate client-side caching effects; (NB: HOST_MEMORY_MULTIPLIER = 5):
-     * `min_samples_host_memory_across_all_nodes = number_of_hosts * memory_per_host_in_GB * HOST_MEMORY_MULTIPLIER * 1024 * 1024 * 1024 / record_length`
-  * Ensure we meet both constraints:
+3.1.2. **trainingRecalculateDatasetSize** -- The number of training files a run used (`num_files_train` in the ``parameters.dataset`` block of the run's ``*_metadata.json``) must be at least `min_total_files`, recomputed from the run's own records as follows.  `num_accelerators` and the per-host memory list `host_memory_GB` are read from the run's ``*summary.json``; `batch_size` (``parameters.reader``), `num_samples_per_file` and `record_length` (``parameters.dataset.record_length_bytes``) from its ``*_metadata.json``.
+  * Minimum samples for 500 steps per epoch:
+     * `min_samples_steps_per_epoch = 500 * batch_size * num_accelerators`
+  * Minimum samples for five times the total client host memory (the sum of `host_memory_GB` over all hosts):
+     * `min_samples_host_memory_across_all_nodes = sum(host_memory_GB) * 5 * 1024 * 1024 * 1024 / record_length`
+  * Both constraints apply:
      * `min_samples = max(min_samples_steps_per_epoch, min_samples_host_memory_across_all_nodes)`
-  * Calculate minimum files to generate
-     * `min_total_files= min_samples / num_samples_per_file`
+  * Minimum files, and the storage they occupy in GB:
+     * `min_total_files = ceil(min_samples / num_samples_per_file)`
      * `min_files_size = min_samples * record_length / 1024 / 1024 / 1024`
-  * A minimum of `min_total_files` files are required which will consume `min_files_size` GB of storage.
+  A run with fewer than `min_total_files` training files is INVALID.  (Commentary: `RulesCommentary.md` §3.1.2.)
 
 ## 3.2. Training Generation Options
 
-3.2.1. **trainingDatagenMinimumSize** --  The amount of data generated during the *datagen* phase must be equal **or larger** -- than the amount of data calculated during the *datasize* phase or the run must be failed.
+3.2.1. **trainingDatagenMinimumSize** --  The amount of data generated during the *datagen* phase must be equal to **or larger than** the amount of data calculated during the *datasize* phase; a workload whose generated dataset is smaller is INVALID.
 
 ## 3.3. Training Run Options
 
-3.3.1. **trainingRunDataMatchesDatasize** -- The amount of data the *run* phase is told to use must be exactly equal to the *datasize* value calculated earlier, but can be less than the value used in the *datagen* phase.  To express that, you can run the benchmark on a subset of that dataset by setting `num_files_train` or `num_files_eval` smaller than the number of files available in the dataset folder, but `num_subfolders_train` and `num_subfolders_eval` must be to be equal to the actual number of subfolders inside the dataset folder in order to generate valid results.  Within the *timestamp directory* in the "datasize" *phase directory*, there must exist a ``*_metadata.json`` file whose ``parameters.dataset`` block records the outputs of the datasize calculation --- `num_files_train`, `num_subfolders_train`, and `total_disk_bytes` --- and whose ``args`` block records the inputs that produced them --- `model`, `accelerator_type`, `max_accelerators`, `client_host_memory_in_gb`, and `data_dir`.  These are the values the *run* phase is cross-checked against.
+3.3.1. **trainingRunDataMatchesDatasize** -- The number of training files a *run* uses (`num_files_train` in the run's ``*summary.json``) must be at least the `num_files_train` the *datasize* phase recorded and at most the `num_files_train` the *datagen* phase recorded.  A run may use a subset of the generated dataset by setting `num_files_train` or `num_files_eval` smaller than the number of files the dataset holds, but `num_subfolders_train` and `num_subfolders_eval` must equal the number of subfolders actually present in the dataset folder.  Within the *timestamp directory* in the "datasize" *phase directory*, there must exist a ``*_metadata.json`` file whose ``parameters.dataset`` block records the outputs of the datasize calculation --- `num_files_train`, `num_subfolders_train`, and `total_disk_bytes` --- and whose ``args`` block records the inputs that produced them --- `model`, `accelerator_type`, `max_accelerators`, `client_host_memory_in_gb`, and `data_dir`.  A *run* is paired with the datasize *timestamp directory* whose recorded `data_dir` equals the run's (a workload with a single datasize *timestamp directory* pairs every run with it); two datasize *timestamp directories* recording the same `data_dir`, or a run that pairs with none, make the workload INVALID.  A *run* leaf whose ``*_metadata.json`` declares `datagen_manifest_file` carries the `datagen-manifest.json` it names: its `source_datagen_result_dir` must be one of the workload's "datagen" *timestamp directories*, its `num_files_train` must equal what that directory recorded, and the run's `num_files_train` must not exceed it.  (Commentary: `RulesCommentary.md` §3.3.1.)
 
-3.3.2. **trainingAcceleratorUtilizationCheck** -- To pass a benchmark run, the AU (Accelerator Utilization) should be equal to or greater than the minimum value:
-  * `total_compute_time = (records_per_file * total_files) / simulated_accelerators / batch_size * computation_time * epochs`
-  * `AU = (total_compute_time/total_benchmark_running_time) * 100`
-  * All the I/O operations from the first step are excluded from the AU calculation. The I/O operations that are excluded from the AU calculation are included in the samples/second reported by the benchmark, however.
-  * The minimum for each model is the `metric.au` of its workload template and is recorded per rules edition in `mlpstorage_py/rules/editions.yaml` (edition 3.0: unet3d 90 %, retinanet 85 %).  The *submission validator* fails a run whose mean AU over its epochs is below the edition's minimum, as well as a run the benchmark itself judged below its template's threshold.
+3.3.2. **trainingAcceleratorUtilizationCheck** -- Each run's mean AU (Accelerator Utilization) over its epochs, `metric.train_au_mean_percentage` in the run's ``*summary.json``, must be at least the minimum for the model recorded for the submission's rules edition in the `checker` block of `mlpstorage_py/rules/editions.yaml` (edition 3.0: unet3d 90 %, retinanet 85 %), and the run's `metric.train_au_meet_expectation` must be "success".  A run that fails either condition is INVALID.  (Commentary: `RulesCommentary.md` §3.3.2.)
 
-3.3.3. **trainingSingleHostSimulatedAccelerators** -- For single-host submissions, increase the number of simulated accelerators by changing the `--num-accelerators` parameter to the benchmark.sh script. Note that the benchmarking tool requires approximately 0.5GB of host memory per simulated accelerator.
+3.3.3. **trainingSingleHostSimulatedAccelerators** -- A single-host submission (one client host, 3.3.4) may simulate any number of accelerators.  A run that simulates fewer than 4 (`num_accelerators` in its ``*summary.json``) draws a warning; it is not thereby INVALID.  (Commentary: `RulesCommentary.md` §3.3.3.)
 
-3.3.4. **trainingSingleHostClientLimit** -- For single-host submissions, in both CLOSED and OPEN division results, the validator should fail the run if there is more than one client node used during that run.
+3.3.4. **trainingSingleHostClientLimit** -- For single-host submissions, in both CLOSED and OPEN division results, a run in which more than one client node was used is INVALID.
 
-3.3.5. **trainingDistributedDataAccessibility** -- For distributed Training submissions, all the data must be accessible to all the host nodes.  **_(not clear how to check this, so maybe remove?)_**
+3.3.5. **trainingDistributedDataAccessibility** -- For distributed Training submissions, the dataset must be accessible at the run's data directory path from every client host that took part in the run.  (Commentary: `RulesCommentary.md` §3.3.5.)
 
 3.3.6. **trainingIdenticalAcceleratorsPerNode** -- For distributed Training submissions, the number of simulated accelerators in each host node must be identical.
 
-3.3.7. **trainingNodeCapabilityConsistency** -- For distributed Training submissions, the *submission validation checker* should emit a warning (not fail the validation) if the physical nodes that run the benchmark code are widely enough different in their capability.  **_(not clear we should do this, so maybe remove?)_**
+3.3.7. **trainingNodeCapabilityConsistency** -- For distributed Training submissions, the client hosts recorded in a run's `cluster_information` (the `hosts` list in its ``*_metadata.json``) must be of comparable capability: a run in which the largest and smallest host total memory, or the largest and smallest CPU core count, differ by a ratio greater than 1.5, or whose `cluster_information` records `host_consistency_issues`, draws a warning; it is not thereby INVALID.  (Commentary: `RulesCommentary.md` §3.3.7.)
 
 3.3.8. **trainingResultAggregation** -- The training figures published for a *workload directory* are functions of its 5 measured *timestamp directories* (§2.1.17): the *warm up* directory is excluded and no other directory is excluded.  `Read B/W (GiB/s)` in `results.csv` is the arithmetic mean, over those 5 directories, of each directory's `*summary.json` field `metric.train_io_mean_MB_per_second`, divided by 1024.  Each `train_mean_of_<name>` value in the "run" *phase directory*'s `results.json` is the arithmetic mean, over the 5 directories, of each directory's arithmetic mean of its per-epoch list `metric.train_<name>`.  The §3.3.2 AU minimum applies to each *timestamp directory* individually.  A *workload directory* in which any measured *timestamp directory* has an empty per-epoch metric list is INVALID; `Read B/W (GiB/s)` is blank when any measured *timestamp directory* lacks `metric.train_io_mean_MB_per_second`.  (Commentary: `RulesCommentary.md` §3.3.8.)
 
@@ -424,19 +420,15 @@ root_folder (or any name you prefer)
 
 3.4.1. **trainingMlpstoragePathArgs** --  The arguments to `mlpstorage` that set the directory pathname where the dataset is stored and the directory where the output logfiles are stored must both be set and must be set to different values.
 
-3.4.2. **trainingMlpstorageFilesystemCheck** --  The `mlpstorage` command should do a "df" command on the directory pathname where the dataset is stored and another one on the directory pathname where the output logfiles are stored and record those values in the logfile.  The *submission validator* should find those entries in the run's logfile and verify that they are different filesystems.  We don't want the submitter to, by acccident, place the logfiles onto the storage system under test since that would skew the results.
+3.4.2. **trainingMlpstorageFilesystemCheck** --  The dataset directory and the results directory of every run must be on different filesystems, and each *run* *timestamp directory* must carry the evidence: a `fs_separation.json` file whose `same_filesystem` is false, or, in a leaf without that file, a `df` listing in `training_run.stdout.log` covering both directories and showing them on different mounts.  A run whose evidence shows one filesystem, or a run carrying neither form of evidence, is INVALID.  Runs of a system whose description declares the object API are exempt.  (Commentary: `RulesCommentary.md` §3.4.2.)
 
 ## 3.5. Training Access Via Object API Options
 
 ## 3.6. Training OPEN versus CLOSED Options
 
-3.6.1. **trainingClosedSubmissionChecksum** -- For CLOSED submissions of this benchmark, the MLPerf Storage codebase must not be changed.  The *submission validation checker* enforces this with a layered check:
+3.6.1. **trainingClosedSubmissionChecksum** -- For CLOSED submissions of this benchmark, the MLPerf Storage source tree that produced every run leaf must be the sanctioned release for the submission's rules edition, unmodified: the recorded "hash" of each code image a CLOSED leaf points at (§2.1.6) must equal the *reference digest* of that release, which is the tree hash (§2.1.6) of the release's source tree as published by the working group for the edition.  An edition for which no reference digest is published draws no finding under this rule; the §2.1.6 requirement that each image's recomputed tree hash equal its recorded "hash" applies regardless.  (Commentary: `RulesCommentary.md` §3.6.1.)
 
-  (a) **Self-consistency check (always runs):** the validator recomputes the captured `code/` tree's MD5 (per the exclusion set documented in §2.1.6) and compares it against the recorded "hash" in `.code-hash.json`.  This detects post-capture tampering of the submission package itself.
-
-  (b) **Upstream-identity check (CLOSED only):** the validator additionally compares the captured tree's MD5 against a pinned digest from `REFERENCE_CHECKSUMS` (or a value supplied via the `--reference-checksum` CLI flag).  When no pinned digest is configured, the upstream-identity check is skipped with a single warning per run; the self-consistency check (a) still runs and can still fail.  The pinned digest, when present, must be computed against the same exclusion set as the runtime capture (currently dotfiles, dotdirs, `test/`, `tests/`, `__pycache__/`, `.egg-info/`, `*.pyc`, and `.code-hash.json` itself).
-
-3.6.2. **trainingClosedSubmissionParameters** -- For CLOSED submissions of this benchmark, only a small number of parameters can be modified, and those parameters are listed in the table below.  Any other parameters being modified must generate a message and fail the validation.
+3.6.2. **trainingClosedSubmissionParameters** -- For CLOSED submissions of this benchmark, only a small number of parameters can be modified, and those parameters are listed in the table below.  A submission that modifies any other parameter is INVALID.
 
 **Table: Training Workload Tunable Parameters for CLOSED**
 
@@ -459,7 +451,7 @@ root_folder (or any name you prefer)
 | storage.storage_type         | The storage type                                                                                                                    | local_fs |
 | storage.storage_options.prefetch_window | Client-side s3dlio prefetch depth for object-storage runs. Same class of knob as `reader.read_threads`: tunes client I/O concurrency, not workload semantics (same bytes, same access pattern, same AU rule). Object-storage-only: on POSIX, prefetch flows through the reclaimable page cache and imposes no whole-record host-memory pressure; on object storage each prefetch slot pins a whole record until consumed, so the closed default may leave no valid operating point for large-record models. Uncapped, matching `reader.read_threads`. | s3dlio default |
 
-3.6.3. **trainingOpenSubmissionParameters** -- For OPEN submissions of this benchmark, only a few additional parameters can be modified over those allowed in CLOSED, and those additional parameters are listed in the table below.  Any other parameters being modified must generate a message and fail the validation.
+3.6.3. **trainingOpenSubmissionParameters** -- For OPEN submissions of this benchmark, only a few additional parameters can be modified over those allowed in CLOSED, and those additional parameters are listed in the table below.  A submission that modifies any other parameter is INVALID.
 
 **Table: Training Workload Tunable Parameters for OPEN**
 

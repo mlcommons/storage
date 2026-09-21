@@ -697,10 +697,10 @@ Required positionals: `<model>` then `<command>` and, for `datagen`/`run`/`confi
   Any (model, accelerator) combination not marked **v3.0** is available under `whatif` for planning purposes if a workload definition file is provided.
 
 - **`--num-accelerators <N>`, `-na <N>`**
-  Number of simulated accelerators for `run`/`configview`. Ranks are distributed round-robin across `--hosts`.
+  Number of simulated accelerators for `run`/`configview`. Ranks are distributed round-robin across `--hosts`. Each simulated accelerator is one DLIO rank and needs roughly 0.5 GB of client host memory; a single-host run simulating fewer than 4 draws a Rules.md 3.3.3 warning at validation.
 
 - **`--max-accelerators <N>`, `-ma <N>`**
-  Used by `datasize` to size a dataset capable of feeding up to N accelerators.
+  Used by `datasize` to size a dataset capable of feeding up to N accelerators. The dataset must supply 500 steps per epoch at that count and be at least five times the total client host memory (Rules.md 3.1.2); the larger floor wins.
 
 - **`--num-processes <N>`, `-np <N>`**
   Process count for `datagen`. Distributed round-robin across `--hosts`.
@@ -1091,7 +1091,7 @@ mlpstorage validate <submission-dir> [--submitters <list>]
 - **`--skip-output-file`** — do not emit per-submission log files alongside the CSV.
 - **`--reference-checksum <md5>`** — override the bundled `REFERENCE_CHECKSUMS` used for the `code/` tree MD5 check.
 
-For every code image in the pool, `validate` recomputes the tree hash over the captured copy and compares it with the `hash` recorded in `.code-hash.json` (Rules.md §2.1.6); a mismatch is a §2.1.6 violation. For CLOSED submissions it then compares that hash with the pinned digest of the sanctioned release (`REFERENCE_CHECKSUMS`, or the `--reference-checksum` value) for Rules.md §3.6.1.
+For every code image in the pool, `validate` recomputes the tree hash over the captured copy and compares it with the `hash` recorded in `.code-hash.json` (Rules.md §2.1.6); a mismatch is a §2.1.6 violation. Rules.md §3.6.1 additionally requires, for CLOSED submissions, that the hash equal the reference digest of the sanctioned release; `validate` does not yet perform that comparison -- `REFERENCE_CHECKSUMS` carries no digest for any edition and `--reference-checksum` is accepted but not consulted -- so §3.6.1 draws no finding today.
 
 There is no edition flag. Each submission is checked with the parameters of the rules edition its `submission.yaml` declares (`rules_edition`), read from the `checker:` block of that edition in `mlpstorage_py/rules/editions.yaml` -- the required leaf contents, the minimum AU per training model (3.3.2), the Table 2 CLOSED process counts and checkpoint sizes, the Table 3 simulated accelerator memory (4.3.4) and the KVCache 6.3.2.1 sequence locks; a submission without a manifest is checked under the current edition. A manifest declaring an edition the table lists without a `checker:` block (a historical round checked by its own tool) fails EDN-04 and that submission's workload checks are skipped. A rule whose logic changed between editions is bound per edition in the checker source (`@rule(..., since=, until=)`, a half-open range), so only the checks bound to that edition run; the others are skipped at debug level.
 
