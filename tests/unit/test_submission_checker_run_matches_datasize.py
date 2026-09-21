@@ -586,3 +586,211 @@ class TestPlaceholderConstantsRemoved:
                 f"Config.{name} accessed the deleted placeholder dicts and "
                 "must be removed alongside them."
             )
+
+
+# ---------------------------------------------------------------------- #
+# Datagen-manifest snapshot linkage (datagen-manifest v1.0, D4)          #
+# ---------------------------------------------------------------------- #
+#
+# A run leaf written by a manifest-aware tool carries
+# ``<leaf>/datagen-manifest.json`` (the manifest it consumed) and declares it
+# in its metadata as ``datagen_manifest_file``. Rule 3.3.1 uses it to prove
+# the run read data produced by THIS submission's ``datagen/`` leaf, with no
+# access to ``--data-dir``:
+#
+#   [3.3.1 MANIFEST-MISSING]    declared but absent / unreadable        error
+#   [3.3.1 MANIFEST-OVERRIDDEN] run waived a MANIFEST-* finding         error
+#   [3.3.1 MANIFEST-LINK]       manifest's datagen leaf is not in tree  error
+#   [3.3.1 MANIFEST-COUNT]      manifest count != that datagen leaf's   error
+#   [3.3.1 MANIFEST-OVERRUN]    run.num_files_train > manifest count    error
+#   [3.3.1 MANIFEST-ABSENT]     stamped leaf, no manifest consumed      warning
+#
+# Leaves that declare neither ``provenance_file`` nor ``datagen_manifest_file``
+# (the whole frozen v3.0 tree) are silent.
+
+_DATAGEN_TS = "20260630_110000"   # the datagen timestamp _build_training_tree writes
+_RUN_TS = "20260630_120000"
+
+
+def _stamp_run_leaf(
+    workload_dir: Path,
+    *,
+    snapshot: Optional[dict] = None,
+    declare: bool = True,
+    provenance: bool = True,
+    source_ts: str = _DATAGEN_TS,
+    count: int = 1_000,
+    overridden: Optional[list] = None,
+) -> Path:
+    """Mark the run leaf as manifest-aware and (optionally) write its snapshot.
+
+    ``snapshot`` replaces the generated body wholesale (corruption cases).
+    ``declare=False`` leaves ``datagen_manifest_file`` out of the metadata;
+    ``provenance=False`` leaves ``provenance_file`` out too (legacy leaf).
+    """
+    run_dir = workload_dir / "run" / _RUN_TS
+    md_path = run_dir / f"training_{_RUN_TS}_metadata.json"
+    md = json.loads(md_path.read_text())
+    if provenance:
+        md["provenance_file"] = "provenance.json"
+    if declare:
+        md["datagen_manifest_file"] = "datagen-manifest.json"
+    md_path.write_text(json.dumps(md) + "\n")
+    if snapshot is None and declare:
+        snapshot = {
+            "schema": "mlps-datagen-manifest-snapshot/1",
+            "consumed_at": "2026-06-30T12:00:00Z",
+            "location": "/data/unet3d/.mlps-datagen-manifest.json",
+            "overridden": list(overridden or []),
+            "manifest": {
+                "schema_version": 1,
+                "model": "unet3d",
+                "num_files_train": count,
+                "num_samples_per_file": 1,
+                "record_length_bytes": 146600628,
+                "num_subfolders_train": 0,
+                "dataset_format": "npz",
+                "rules_edition": "3.0",
+                "created_at": "2026-06-30T11:00:00Z",
+                "mlpstorage_version": "3.0.46",
+                "source_datagen_result_dir":
+                    f"/mnt/results/closed/Acme/results/sys-v1/training/unet3d/datagen/{source_ts}",
+            },
+        }
+    if snapshot is not None:
+        (run_dir / "datagen-manifest.json").write_text(json.dumps(snapshot) + "\n")
+    return run_dir
+
+
+def _manifest_scenario(tmp_path, caplog, *, stamp: dict, **tree_kw):
+    tree_kw.setdefault("datasize_num_files", 400)
+    tree_kw.setdefault("datagen_num_files", 1_000)
+    tree_kw.setdefault("run_num_files", 400)
+    tree_kw.setdefault("eval_run", 0)
+    tree_kw.setdefault("eval_datasize", 0)
+    workload_dir = _build_training_tree(tmp_path, **tree_kw)
+    _stamp_run_leaf(workload_dir, **stamp)
+    root = _scaffold_division_root(tmp_path, workload_dir)
+    return _run_rule(root, caplog)
+
+
+def _tokens(records, token):
+    return [r for r in records if f"[3.3.1 {token}]" in r.getMessage()]
+
+
+class TestManifestSnapshotLinkage:
+    def test_linked_snapshot_passes_silently(self, tmp_path, caplog):
+        result, records = _manifest_scenario(tmp_path, caplog, stamp={})
+        assert result is True
+        assert not [r for r in records if "[3.3.1" in r.getMessage()]
+
+    def test_legacy_leaf_is_silent(self, tmp_path, caplog):
+        """No provenance_file, no datagen_manifest_file: the v3.0 tree."""
+        result, records = _manifest_scenario(
+            tmp_path, caplog, stamp={"declare": False, "provenance": False})
+        assert result is True
+        assert not [r for r in records if "MANIFEST" in r.getMessage()]
+
+    def test_stamped_leaf_without_manifest_warns_absent(self, tmp_path, caplog):
+        result, records = _manifest_scenario(tmp_path, caplog, stamp={"declare": False})
+        assert result is True, "MANIFEST-ABSENT is a warning, not a violation"
+        absent = _tokens(records, "MANIFEST-ABSENT")
+        assert len(absent) == 1 and absent[0].levelno == logging.WARNING
+        assert _RUN_TS in absent[0].getMessage()
+
+    def test_declared_but_absent_is_missing(self, tmp_path, caplog):
+        workload_dir = _build_training_tree(
+            tmp_path, datasize_num_files=400, datagen_num_files=1_000, run_num_files=400,
+            eval_run=0, eval_datasize=0)
+        _stamp_run_leaf(workload_dir, declare=True)
+        (workload_dir / "run" / _RUN_TS / "datagen-manifest.json").unlink()
+        root = _scaffold_division_root(tmp_path, workload_dir)
+        result, records = _run_rule(root, caplog)
+        assert result is False
+        missing = _tokens(records, "MANIFEST-MISSING")
+        assert len(missing) == 1 and missing[0].levelno == logging.ERROR
+        assert "datagen-manifest.json" in missing[0].getMessage()
+
+    def test_corrupt_snapshot_is_missing_with_the_parse_error(self, tmp_path, caplog):
+        result, records = _manifest_scenario(
+            tmp_path, caplog, stamp={"snapshot": {"schema": "mlps-datagen-manifest-snapshot/1",
+                                                  "consumed_at": "x", "location": "y",
+                                                  "overridden": [], "manifest": {}}})
+        assert result is False
+        missing = _tokens(records, "MANIFEST-MISSING")
+        assert len(missing) == 1
+        assert "missing required key" in missing[0].getMessage()
+
+    def test_overridden_finding_is_an_error(self, tmp_path, caplog):
+        result, records = _manifest_scenario(
+            tmp_path, caplog, stamp={"overridden": ["MANIFEST-003"]})
+        assert result is False
+        over = _tokens(records, "MANIFEST-OVERRIDDEN")
+        assert len(over) == 1 and over[0].levelno == logging.ERROR
+        assert "MANIFEST-003" in over[0].getMessage()
+        assert "--skip-validation" in over[0].getMessage()
+
+    def test_unlinked_datagen_leaf_is_an_error(self, tmp_path, caplog):
+        result, records = _manifest_scenario(
+            tmp_path, caplog, stamp={"source_ts": "20250101_000000"})
+        assert result is False
+        link = _tokens(records, "MANIFEST-LINK")
+        assert len(link) == 1 and link[0].levelno == logging.ERROR
+        msg = link[0].getMessage()
+        assert "20250101_000000" in msg and _DATAGEN_TS in msg
+
+    def test_no_source_recorded_is_a_link_error(self, tmp_path, caplog):
+        workload_dir = _build_training_tree(
+            tmp_path, datasize_num_files=400, datagen_num_files=1_000, run_num_files=400,
+            eval_run=0, eval_datasize=0)
+        run_dir = _stamp_run_leaf(workload_dir)
+        snap = json.loads((run_dir / "datagen-manifest.json").read_text())
+        del snap["manifest"]["source_datagen_result_dir"]
+        (run_dir / "datagen-manifest.json").write_text(json.dumps(snap))
+        root = _scaffold_division_root(tmp_path, workload_dir)
+        result, records = _run_rule(root, caplog)
+        assert result is False
+        assert len(_tokens(records, "MANIFEST-LINK")) == 1
+
+    def test_count_disagrees_with_linked_datagen_leaf(self, tmp_path, caplog):
+        result, records = _manifest_scenario(
+            tmp_path, caplog, stamp={"count": 900}, datagen_num_files=1_000)
+        assert result is False
+        count = _tokens(records, "MANIFEST-COUNT")
+        assert len(count) == 1 and count[0].levelno == logging.ERROR
+        msg = count[0].getMessage()
+        assert "900" in msg and "1000" in msg
+
+    def test_run_reads_more_than_the_manifest_generated(self, tmp_path, caplog):
+        # datagen leaf agrees with the snapshot (900) — the run leaf lies about 1,000.
+        result, records = _manifest_scenario(
+            tmp_path, caplog, stamp={"count": 900},
+            datagen_num_files=900, run_num_files=1_000, datasize_num_files=400)
+        assert result is False
+        over = _tokens(records, "MANIFEST-OVERRUN")
+        assert len(over) == 1 and over[0].levelno == logging.ERROR
+        assert not _tokens(records, "MANIFEST-COUNT")
+
+    def test_link_is_skipped_when_no_datagen_phase(self, tmp_path, caplog):
+        """DATAGEN-MISSING already fires; MANIFEST-LINK must not pile on."""
+        workload_dir = _build_training_tree(
+            tmp_path, datasize_num_files=400, datagen_num_files=1_000, run_num_files=400,
+            eval_run=0, eval_datasize=0)
+        _stamp_run_leaf(workload_dir)
+        import shutil
+        shutil.rmtree(workload_dir / "datagen")
+        root = _scaffold_division_root(tmp_path, workload_dir)
+        result, records = _run_rule(root, caplog)
+        assert result is False
+        assert _tokens(records, "DATAGEN-MISSING")
+        assert not _tokens(records, "MANIFEST-LINK")
+        assert not _tokens(records, "MANIFEST-COUNT")
+
+    def test_tokens_are_the_documented_set(self):
+        from mlpstorage_py.submission_checker.checks.training_checks import (
+            MANIFEST_SNAPSHOT_TOKENS,
+        )
+        assert MANIFEST_SNAPSHOT_TOKENS == (
+            "MANIFEST-MISSING", "MANIFEST-OVERRIDDEN", "MANIFEST-LINK",
+            "MANIFEST-COUNT", "MANIFEST-OVERRUN", "MANIFEST-ABSENT",
+        )
