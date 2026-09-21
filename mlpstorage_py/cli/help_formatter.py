@@ -138,13 +138,21 @@ mlpstorage
 Common argument groups
 
 CORE_STD — Standard arguments, every benchmark command and most utilities
+  Every flag below (and every flag marked "layered" elsewhere) is filled in
+  one order: typed flag > --config-file YAML > MLPSTORAGE_* env var >
+  ~/.config/mlpstorage/config.yaml > built-in default. The per-user file may
+  carry only environment keys: results_dir, systemname, data_dir,
+  checkpoint_folder, hosts, mpi_bin, mpi_btl, oversubscribe,
+  allow_run_as_root, mpi_params, dlio_bin_path, exec_type, color,
+  stream_log_level. main prints which file supplied what.
   --results-dir/-rd PATH        Benchmark results directory
-                                (resolved: this flag > MLPSTORAGE_RESULTS_DIR env var >
-                                 the results-dir recorded by `mlpstorage init`;
+                                (layered: this flag > --config-file > MLPSTORAGE_RESULTS_DIR
+                                 > the results-dir recorded by `mlpstorage init`;
                                  no tempdir fallback)
   --systemname/-sn NAME         System-under-test name — folder under results/
-                                (default: MLPSTORAGE_SYSTEMNAME env var)
-  --config-file/-c PATH         YAML overrides file (applied after CLI args)
+                                (layered: MLPSTORAGE_SYSTEMNAME env var, config.yaml)
+  --config-file/-c PATH         YAML of flag values for this invocation; fills
+                                what was not typed, may name any flag of the leaf
   --debug                       Enable debug output
   --verbose                     Enable verbose output
   --stream-log-level LEVEL      Logging level (default: INFO)
@@ -186,7 +194,7 @@ TR_DATASIZE_CLOSED
     --max-accelerators/-ma N
     --accelerator-type/-at {b200,mi355}
     --client-host-memory-in-gb/-cm N
-    --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
+    --systemname/-sn NAME           (layered; see CORE_STD)
   Optional:
     --data-dir/-dd PATH
     --num-client-hosts/-nc N        Derived from --hosts count if unset
@@ -195,7 +203,7 @@ TR_DATASIZE_CLOSED
     --hosts/-s HOST...              (default: 127.0.0.1)
     --params/-p/--param KEY=VALUE...  DLIO overrides (CLOSED: restricted subset)
   + MPI_ARGS
-  + CORE_STD  (--results-dir resolved: flag > MLPSTORAGE_RESULTS_DIR > init default)
+  + CORE_STD  (--results-dir layered: flag > --config-file > env > init default)
 
 TR_DATASIZE_OPEN
   = TR_DATASIZE_CLOSED  (flags identical; --params unrestricted)
@@ -210,7 +218,7 @@ TR_DATASIZE_WHATIF
 TR_DATAGEN_CLOSED
   Required:
     --num-processes/-np N
-    --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
+    --systemname/-sn NAME           (layered; see CORE_STD)
     --data-dir/-dd PATH             (required with file storage; object mode
                                      may supply data_dir via --config-file)
     [storage positional: file | object]
@@ -221,7 +229,7 @@ TR_DATAGEN_CLOSED
     --o-direct                      Route I/O through s3dlio's O_DIRECT local-fs mode
     --params/-p/--param KEY=VALUE...  DLIO overrides (CLOSED: restricted subset)
   + MPI_ARGS
-  + CORE_STD  (--results-dir resolved: flag > MLPSTORAGE_RESULTS_DIR > init default)
+  + CORE_STD  (--results-dir layered: flag > --config-file > env > init default)
 
 TR_DATAGEN_OPEN
   = TR_DATAGEN_CLOSED  (flags identical; --params unrestricted)
@@ -237,8 +245,8 @@ TR_RUN_CLOSED
     --num-accelerators/-na N
     --accelerator-type/-at {b200,mi355}
     --client-host-memory-in-gb/-cm N
-    --results-dir/-rd PATH          (or MLPSTORAGE_RESULTS_DIR)
-    --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
+    --results-dir/-rd PATH          (layered; see CORE_STD)
+    --systemname/-sn NAME           (layered; see CORE_STD)
     --data-dir/-dd PATH             (required with file storage; object mode
                                      may supply data_dir via --config-file)
     [storage positional: file | object]
@@ -270,8 +278,8 @@ TR_CONFIGVIEW_CLOSED
     --num-accelerators/-na N
     --accelerator-type/-at {b200,mi355}
     --client-host-memory-in-gb/-cm N
-    --results-dir/-rd PATH          (or MLPSTORAGE_RESULTS_DIR)
-    --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
+    --results-dir/-rd PATH          (layered; see CORE_STD)
+    --systemname/-sn NAME           (layered; see CORE_STD)
     [storage positional: file | object]
   Optional:
     --data-dir/-dd PATH
@@ -306,7 +314,7 @@ CK_DATASIZE_CLOSED
     --num-checkpoints-read/-ncr N   (default: 10; closed allows 10 or 0)
     --num-checkpoints-write/-ncw N  (default: 10; closed allows 10 or 0)
   + MPI_ARGS
-  + CORE_STD  (--results-dir resolved: flag > MLPSTORAGE_RESULTS_DIR > init default; --systemname optional)
+  + CORE_STD  (--results-dir layered: flag > --config-file > env > init default; --systemname optional)
   Note: closed runs use 10/10 by default. Use 10/0 then 0/10 in two
         invocations when a cache flush is required between phases
         (see Rules.md §4.7.1 and checkpointing/README.md).
@@ -329,8 +337,8 @@ CK_RUN_CLOSED
     --accelerator-type/-at {b200,mi355}
     --checkpoint-folder/-cf PATH
     --client-host-memory-in-gb/-cm N
-    --results-dir/-rd PATH          (or MLPSTORAGE_RESULTS_DIR)
-    --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
+    --results-dir/-rd PATH          (layered; see CORE_STD)
+    --systemname/-sn NAME           (layered; see CORE_STD)
     [storage positional: file | object]
   Optional:
     --checkpoint-subset             (8B at 8 processes only; declares a Subset run)
@@ -372,8 +380,8 @@ CK_CONFIGVIEW_CLOSED
     --num-processes/-np N
     --accelerator-type/-at {b200,mi355}
     --client-host-memory-in-gb/-cm N
-    --results-dir/-rd PATH          (or MLPSTORAGE_RESULTS_DIR)
-    --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
+    --results-dir/-rd PATH          (layered; see CORE_STD)
+    --systemname/-sn NAME           (layered; see CORE_STD)
     [storage positional: file | object]
   Optional:
     --exec-type/-et {mpi,docker}    (default: mpi)
@@ -407,7 +415,7 @@ VDB_DATASIZE_CLOSED
     --num-vectors N                 (default: 1,000,000)
     --num-shards N                  (default: 1)
     --vector-dtype {FLOAT_VECTOR}   (default: FLOAT_VECTOR)
-  + CORE_STD  (--results-dir resolved: flag > MLPSTORAGE_RESULTS_DIR > init default; --systemname optional)
+  + CORE_STD  (--results-dir layered: flag > --config-file > env > init default; --systemname optional)
 
 VDB_DATASIZE_OPEN
   = VDB_DATASIZE_CLOSED plus:
@@ -423,8 +431,8 @@ VDB_DATASIZE_WHATIF
 
 VDB_DATAGEN_CLOSED
   Required:
-    --results-dir/-rd PATH          (or MLPSTORAGE_RESULTS_DIR)
-    --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
+    --results-dir/-rd PATH          (layered; see CORE_STD)
+    --systemname/-sn NAME           (layered; see CORE_STD)
     [storage positional: file | object]
   Optional:
     --vdb-engine {milvus}           (default: milvus)
@@ -482,8 +490,8 @@ VDB_DATAGEN_WHATIF
 
 VDB_RUN_CLOSED
   Required:
-    --results-dir/-rd PATH          (or MLPSTORAGE_RESULTS_DIR)
-    --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
+    --results-dir/-rd PATH          (layered; see CORE_STD)
+    --systemname/-sn NAME           (layered; see CORE_STD)
     [storage positional: file | object]
   Optional:
     --vdb-engine {milvus}           (default: milvus)
@@ -541,7 +549,7 @@ KV_DATASIZE_CLOSED
   Optional:
     --cache-dir PATH                NVMe cache tier directory
                                     (default: subdirectory of results)
-  + CORE_STD  (--results-dir resolved: flag > MLPSTORAGE_RESULTS_DIR > init default; --systemname optional)
+  + CORE_STD  (--results-dir layered: flag > --config-file > env > init default; --systemname optional)
   Note: --gpu-mem-gb=16.0 and --cpu-mem-gb=32.0 fixed; not shown
 
 KV_DATASIZE_OPEN
@@ -559,8 +567,8 @@ KV_DATASIZE_WHATIF
 KV_RUN_CLOSED
   (Fixed 3-phase sequence; model pair and load parameters are pinned)
   Required:
-    --results-dir/-rd PATH          (or MLPSTORAGE_RESULTS_DIR)
-    --systemname/-sn NAME           (or MLPSTORAGE_SYSTEMNAME)
+    --results-dir/-rd PATH          (layered; see CORE_STD)
+    --systemname/-sn NAME           (layered; see CORE_STD)
   Optional:
     --cache-dir PATH
     --kvcache-bin-path PATH
@@ -611,7 +619,7 @@ Placeholder definitions — UTILITY COMMANDS
 
 RP_REPORTGEN
   Required:
-    --results-dir/-rd PATH          (or MLPSTORAGE_RESULTS_DIR)
+    --results-dir/-rd PATH          (layered; see CORE_STD)
   + CORE_STD  (every standard argument is accepted)
 
 ──────────────────────────────────────────────────────────────────

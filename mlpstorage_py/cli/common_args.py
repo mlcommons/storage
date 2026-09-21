@@ -116,8 +116,9 @@ HELP_MESSAGES = {
     'category': "Benchmark category to be submitted.",
     'results_dir': (
         "Directory where the benchmark results will be saved. Resolved as: "
-        "this flag, else MLPSTORAGE_RESULTS_DIR, else the results-dir "
-        "recorded by `mlpstorage init` in ~/.config/mlpstorage/config.yaml."
+        "this flag, else results_dir in the --config-file YAML, else "
+        "MLPSTORAGE_RESULTS_DIR, else the results-dir recorded by "
+        "`mlpstorage init` in ~/.config/mlpstorage/config.yaml."
     ),
     'params': (
         "Additional parameters to be passed to the benchmark. These will override the config file. "
@@ -140,7 +141,8 @@ HELP_MESSAGES = {
     # Checkpoint folder is used for training and checkpointing
     'checkpoint_folder': (
         "Location for checkpoint files for training or checkpointing workloads. "
-        "Defaults to MLPSTORAGE_CHECKPOINT_FOLDER env var if set."
+        "Defaults to MLPSTORAGE_CHECKPOINT_FOLDER env var if set, else "
+        "checkpoint_folder in ~/.config/mlpstorage/config.yaml."
     ),
 
     # Checkpointing help messages
@@ -193,12 +195,17 @@ HELP_MESSAGES = {
     'query_batch_size': "Number of vectors to query in each batch (per process).",
 
     # Reports help messages
-    'config_file': "Path to YAML file with argument overrides that will be applied after CLI arguments",
+    'config_file': (
+        "YAML file of flag values for this invocation. Fills every flag the "
+        "command line did not type (a typed flag always wins); ranks above "
+        "MLPSTORAGE_* env vars and ~/.config/mlpstorage/config.yaml."
+    ),
 
     # System-under-test name (LAY-04 / D-10) — folder under results/ in canonical layout
     'systemname': (
         "System-under-test name (folder under results/). "
-        "Defaults to MLPSTORAGE_SYSTEMNAME env var if set."
+        "Defaults to MLPSTORAGE_SYSTEMNAME env var if set, else systemname "
+        "in ~/.config/mlpstorage/config.yaml."
     ),
 
     # MPI help messages
@@ -231,26 +238,16 @@ PROGRAM_DESCRIPTIONS = {
 }
 
 
-class _ResultsDirAction(argparse.Action):
-    """Store ``--results-dir`` and remember that it came from the command
-    line, so the post-parse resolver (``cli_parser``) can label the source
-    and skip the env-var / user-config tiers."""
-
-    def __call__(self, parser, namespace, values, option_string=None):
-        setattr(namespace, self.dest, values)
-        setattr(namespace, "_mlps_results_dir_from_cli", True)
-
-
 def add_results_dir_argument(target):
     """Register ``--results-dir/-rd`` on ``target`` (a parser or an argument
-    group). The value is resolved after parsing by
-    ``cli_parser._apply_results_dir_resolution``: this flag >
-    ``MLPSTORAGE_RESULTS_DIR`` > the default recorded by ``mlpstorage init``.
+    group). The value is filled after parsing by
+    ``cli.config_layers.apply_config_layers``: this flag > ``results_dir`` in
+    the ``--config-file`` YAML > ``MLPSTORAGE_RESULTS_DIR`` > the default
+    recorded by ``mlpstorage init``.
     """
     target.add_argument(
         '--results-dir', '-rd',
         type=str,
-        action=_ResultsDirAction,
         default=ENV_FALLBACK_RESULTS_DIR,
         help=HELP_MESSAGES['results_dir']
     )
@@ -331,7 +328,7 @@ def add_universal_arguments(parser, req_results, req_systemname=False, req_check
     standard_args.add_argument(
         '--config-file', '-c',
         type=str,
-        help="Path to YAML file with argument overrides"
+        help=HELP_MESSAGES['config_file']
     )
 
     output_control = parser.add_argument_group("Output Control")

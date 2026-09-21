@@ -113,12 +113,10 @@ class TestLockfileNeedsNoResultsDir:
     @pytest.fixture(autouse=True)
     def _no_results_dir_anywhere(self, monkeypatch):
         monkeypatch.delenv("MLPSTORAGE_RESULTS_DIR", raising=False)
-        # No `mlpstorage init` default either.
-        monkeypatch.setattr("mlpstorage_py.cli_parser.resolve_results_dir",
-                            lambda explicit, cli_source=None: (None, None))
-        import mlpstorage_py.cli_parser as cp
-        if hasattr(cp, "ENV_FALLBACK_RESULTS_DIR"):
-            monkeypatch.setattr(cp, "ENV_FALLBACK_RESULTS_DIR", "")
+        # No `mlpstorage init` default either: conftest's _isolate_user_config
+        # already points XDG_CONFIG_HOME at an empty per-test directory.
+        from mlpstorage_py.cli import common_args
+        monkeypatch.setattr(common_args, "ENV_FALLBACK_RESULTS_DIR", "")
 
     @pytest.mark.parametrize("argv", [
         ["mlpstorage", "lockfile", "generate"],

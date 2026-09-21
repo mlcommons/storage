@@ -52,7 +52,12 @@ from mlpstorage_py.validation_helpers import validate_benchmark_environment
 from mlpstorage_py.progress import progress_context
 from mlpstorage_py.results_dir import MLPERF_RESULTS_FILENAME, resolve_orgname
 from mlpstorage_py.results_dir.errors import ResultsDirNotInitializedError
-from mlpstorage_py.results_dir.user_config import HOW_TO_SUPPLY, resolve_results_dir
+from mlpstorage_py.cli.config_layers import keys_from
+from mlpstorage_py.results_dir.user_config import (
+    HOW_TO_SUPPLY,
+    SOURCE_CONFIG_FILE_FLAG,
+    resolve_results_dir,
+)
 from mlpstorage_py.submission_checker.tools.code_image import capture_or_verify_code_image, CodeImageError
 from mlpstorage_py.submission_checker.tools.legacy_migration import _check_and_migrate_legacy_layout
 
@@ -446,6 +451,14 @@ def _main_impl():
             hist = HistoryTracker(history_file=history_file_for(results_dir), logger=logger)
             if args.mode not in ("history", "runs"):
                 hist.add_entry(sys.argv, datetime_str=datetime_str)
+    # ...and which other flags the two config files filled in.
+    from_override = keys_from(args, SOURCE_CONFIG_FILE_FLAG)
+    if from_override:
+        logger.status(f"values from --config-file {args.config_file}: {', '.join(from_override)}")
+    user_path = getattr(args, "user_config_path", None)
+    from_user = keys_from(args, user_path) if user_path else []
+    if from_user:
+        logger.status(f"defaults from {user_path}: {', '.join(from_user)}")
 
     # Bypass dispatch for utility modes that do NOT consume an orgname-pinned
     # results-dir. Per CONTEXT.md D-12 the bypass list is exactly four modes:

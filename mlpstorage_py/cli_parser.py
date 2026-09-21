@@ -24,13 +24,8 @@ from mlpstorage_py.config import (
 )
 
 # Import modular argument builders from cli package
-from mlpstorage_py.results_dir.user_config import (
-    HOW_TO_SUPPLY,
-    SOURCE_CLI,
-    SOURCE_CONFIG_FILE_FLAG,
-    SOURCE_ENV,
-    resolve_results_dir,
-)
+from mlpstorage_py.cli.config_layers import apply_config_layers, apply_override_file
+from mlpstorage_py.results_dir.user_config import HOW_TO_SUPPLY
 from mlpstorage_py.cli import (
     HELP_MESSAGES,
     PROGRAM_DESCRIPTIONS,
@@ -228,16 +223,23 @@ def parse_arguments():
 
     parser = build_parser()
 
-    parsed_args = parser.parse_args()
+    argv = sys.argv[1:]
+    parsed_args = parser.parse_args(argv)
 
     # NOTE: No post-parse consolidation for data_access_protocol here.
     # add_storage_type_arguments() registers 'data_access_protocol' as a positional;
     # argparse sets it directly to 'file'|'object'|None. The old --file/--object
     # consolidation block is removed entirely.
 
-    # File-mode --data-dir is enforced before YAML overrides so the user gets
-    # an immediate argparse-style error. Object mode is checked after YAML in
-    # validate_training_arguments so --config-file can supply data_dir.
+    # Fill every flag the command line left out, in one order for every key:
+    # flag > --config-file YAML > MLPSTORAGE_* env var > ~/.config/mlpstorage/
+    # config.yaml > argparse default (cli/config_layers.py). Records
+    # ``config_sources`` so main can say where each value came from.
+    apply_config_layers(parsed_args, argv)
+
+    # File-mode --data-dir is enforced here, after the layers, so any tier
+    # (--config-file, MLPSTORAGE_DATA_DIR, the per-user file) can satisfy it.
+    # Object mode is checked in validate_training_arguments.
     if (
         getattr(parsed_args, 'benchmark', None) == 'training'
         and getattr(parsed_args, 'command', None) in ('datagen', 'run')
@@ -248,81 +250,28 @@ def parse_arguments():
             f"--data-dir is required for training {parsed_args.command} with file storage"
         )
 
-    # Apply YAML config file overrides if specified
-    if hasattr(parsed_args, 'config_file') and parsed_args.config_file:
-        parsed_args = apply_yaml_config_overrides(parsed_args)
-
     validate_args(parsed_args)
     return parsed_args
 
 
-def apply_yaml_config_overrides(args):
+def apply_yaml_config_overrides(args, explicit=frozenset()):
     """
-    Apply overrides from a YAML config file to the parsed arguments.
+    Apply the ``--config-file`` YAML to a parsed namespace.
+
+    Kept as the public name; the work lives in
+    ``cli.config_layers.apply_override_file``. ``explicit`` is the set of
+    dests the command line typed, which the file must not overwrite. Direct
+    callers (tests, tooling) that pass no ``explicit`` get the historical
+    "override everything the file names" behaviour.
 
     Args:
         args (argparse.Namespace): The parsed command-line arguments
 
     Returns:
-        argparse.Namespace: The updated arguments with YAML overrides applied
+        argparse.Namespace: The updated arguments with YAML values applied
     """
-    import yaml
+    return apply_override_file(args, explicit)
 
-    try:
-        with open(args.config_file, 'r') as f:
-            yaml_config = yaml.safe_load(f)
-
-        if not yaml_config:
-            print(f"Warning: Config file {args.config_file} is empty or invalid")
-            return args
-
-        # Convert args to a dictionary for easier manipulation
-        args_dict = vars(args)
-
-        # Apply overrides from YAML
-        for key, value in yaml_config.items():
-            # Skip if the key doesn't exist in args
-            if key not in args_dict:
-                print(f"Warning: Config file contains unknown parameter '{key}', skipping")
-                continue
-
-            # Skip if the value is None (to avoid overriding CLI args with None)
-            if value is None:
-                continue
-
-            # Handle special cases for list arguments
-            if isinstance(args_dict.get(key), list) and not isinstance(value, list):
-                if key == 'hosts':
-                    # Convert string to list for hosts
-                    args_dict[key] = value.split(',')
-                elif key == 'params':
-                    # Convert dict to list of "key=value" strings for params
-                    if isinstance(value, dict):
-                        args_dict[key] = [f"{k}={v}" for k, v in value.items()]
-                    else:
-                        print(f"Warning: Invalid format for 'params' in config file, skipping")
-                        continue
-            else:
-                # Regular case - just override the value
-                args_dict[key] = value
-
-        if yaml_config.get('results_dir'):
-            # Explicit like the flag: the resolver must not override it
-            # with the env var or the per-user default.
-            args_dict['_mlps_results_dir_from_config_file'] = True
-
-        # Convert back to Namespace
-        return argparse.Namespace(**args_dict)
-
-    except FileNotFoundError:
-        print(f"Error: Config file {args.config_file} not found")
-        sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
-    except yaml.YAMLError as e:
-        print(f"Error parsing YAML config file: {e}")
-        sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
-    except Exception as e:
-        print(f"Error applying config file overrides: {e}")
-        sys.exit(EXIT_CODE.INVALID_ARGUMENTS)
 
 # These are used by the history tracker to know if logging needs to be updated.
 logging_options = ['debug', 'verbose', 'stream_log_level']
@@ -358,29 +307,18 @@ def validate_args(args):
 
 
 def _apply_results_dir_resolution(args):
-    """Fill ``args.results_dir`` when the command line did not supply it.
+    """Label ``args.results_dir_source`` for ``main``.
 
-    Order: ``--results-dir`` (or ``results_dir`` in a ``--config-file``
-    YAML) > ``MLPSTORAGE_RESULTS_DIR`` read now > ``results_dir`` recorded
-    by ``mlpstorage init`` in the per-user config file. The winning tier is
-    stored on ``args.results_dir_source`` (``None`` when nothing supplied a
-    value) so ``main`` can print it. Commands without a ``--results-dir``
-    flag are left alone.
+    The value itself was filled by ``apply_config_layers`` (``--results-dir``
+    > ``results_dir`` in the ``--config-file`` YAML > ``MLPSTORAGE_RESULTS_DIR``
+    > ``results_dir`` recorded by ``mlpstorage init``). ``None`` when nothing
+    supplied a value. Commands without a ``--results-dir`` flag are left alone.
     """
     if not hasattr(args, 'results_dir'):
         return
-    if getattr(args, '_mlps_results_dir_from_config_file', False):
-        explicit, label = args.results_dir, SOURCE_CONFIG_FILE_FLAG
-    elif getattr(args, '_mlps_results_dir_from_cli', False):
-        explicit, label = args.results_dir, SOURCE_CLI
-    else:
-        explicit, label = None, SOURCE_CLI
-    path, source = resolve_results_dir(explicit, cli_source=label)
-    if path is None and args.results_dir:
-        # argparse's default captured MLPSTORAGE_RESULTS_DIR at import time.
-        path, source = args.results_dir, SOURCE_ENV
-    args.results_dir = path or ""
-    args.results_dir_source = source
+    sources = getattr(args, 'config_sources', None) or {}
+    args.results_dir = args.results_dir or ""
+    args.results_dir_source = sources.get('results_dir') if args.results_dir else None
 
 
 def _check_universal_required_present(args):

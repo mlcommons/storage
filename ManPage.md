@@ -144,17 +144,57 @@ Version 2 trees (written by this release) keep their command history under `<pat
 
 On success — first init or idempotent re-init — `init` also writes `results_dir: <absolute path>` into the per-user config file `$XDG_CONFIG_HOME/mlpstorage/config.yaml` (`~/.config/mlpstorage/config.yaml` when `XDG_CONFIG_HOME` is unset or relative), keeping any other keys the file holds. Every later command resolves its results-dir in this order and prints the winner on a `results-dir: <path> (from <source>)` status line:
 
-1. `--results-dir` on the command line (or `results_dir` in a `--config-file` YAML);
-2. the `MLPSTORAGE_RESULTS_DIR` environment variable;
-3. `results_dir` in the per-user config file.
+1. `--results-dir` on the command line;
+2. `results_dir` in the `--config-file` YAML named on that command line;
+3. the `MLPSTORAGE_RESULTS_DIR` environment variable;
+4. `results_dir` in the per-user config file.
 
-The most recent `init` wins, so re-running `init` against a second tree is how you switch defaults; `--results-dir` and `MLPSTORAGE_RESULTS_DIR` remain for CI and for one-off runs against another tree. When none of the three tiers supplies a path, the CLI fails at parse time:
+The most recent `init` wins, so re-running `init` against a second tree is how you switch defaults; `--results-dir` and `MLPSTORAGE_RESULTS_DIR` remain for CI and for one-off runs against another tree. When none of the four tiers supplies a path, the CLI fails at parse time:
 
 ```
 error: --results-dir/-rd is required: run `mlpstorage init <orgname> [path]` once to record a default, pass it on the command line, or set MLPSTORAGE_RESULTS_DIR
 ```
 
-The config file supplies defaults only for flags that describe the *environment* (today: `results_dir`); it never supplies workload-selecting flags such as model, accelerator type or count, so a stale file cannot reshape a run.
+### The per-user config file
+
+The same file may carry, by hand edit, a default for every other flag that describes the *environment* a benchmark runs in. It never supplies a workload-selecting flag (model, accelerator type or count, mode, client memory, `params`): those stay on the command line so a stale file cannot reshape a run, and such a key in the file is a hard error at parse time. An unknown key is a warning. The keys, each an argparse destination spelled with underscores:
+
+| key | flag | notes |
+|---|---|---|
+| `results_dir` | `--results-dir` | written by `mlpstorage init` |
+| `systemname` | `--systemname` | single-system shops |
+| `data_dir` | `--data-dir` | training |
+| `checkpoint_folder` | `--checkpoint-folder` | checkpointing `run` |
+| `hosts` | `--hosts` | YAML list, or one comma-separated string |
+| `mpi_bin` | `--mpi-bin` | `mpirun` or `mpiexec` |
+| `mpi_btl` | `--mpi-btl` | `auto`, `vader` or `tcp` |
+| `oversubscribe` | `--oversubscribe` | `true` / `false` |
+| `allow_run_as_root` | `--allow-run-as-root` | `true` / `false` |
+| `mpi_params` | `--mpi-params` | one string, or a list of strings |
+| `dlio_bin_path` | `--dlio-bin-path` | |
+| `exec_type` | `--exec-type` | `mpi` or `docker` |
+| `color` | `--color` | `auto`, `always` or `never` |
+| `stream_log_level` | `--stream-log-level` | |
+
+A key is applied only where the command has the flag (`hosts` does nothing for `reports reportgen`). Values are type-checked and choice-checked exactly as the flag would be. Every layered flag is filled in one order, for every key:
+
+```
+typed flag  >  --config-file YAML  >  MLPSTORAGE_* env var  >  ~/.config/mlpstorage/config.yaml  >  built-in default
+```
+
+Only `results_dir`, `systemname`, `data_dir` and `checkpoint_folder` have an env var. `main` prints what the files supplied, after the `results-dir:` line, as `values from --config-file <path>: ...` and `defaults from <config.yaml>: ...`, so no default is ever silent. Example:
+
+```yaml
+# ~/.config/mlpstorage/config.yaml
+results_dir: /mnt/results          # written by `mlpstorage init`
+systemname: lab-a
+data_dir: /mnt/nvme/unet3d
+checkpoint_folder: /mnt/nvme/ckpt
+hosts: [node1, node2, node3, node4]
+mpi_btl: tcp
+oversubscribe: true
+color: never
+```
 
 ### Bypass set
 
@@ -507,13 +547,13 @@ The `init` subcommand takes no flags — universal flags such as `--results-dir`
 ### Universal options (every non-init command)
 
 - **`--results-dir <path>`, `-rd <path>`**
-  Root directory for all written artifacts. Required for every benchmark command (`datasize` included) and for `reports` and `history`; `lockfile` accepts it but never uses it. Resolved as this flag > `$MLPSTORAGE_RESULTS_DIR` > the default recorded by `mlpstorage init`, and the winner is printed on a `results-dir: <path> (from <source>)` status line. Must already be initialized with `mlpstorage init`; commands that consult the orgname-resolution gate refuse to run otherwise.
+  Root directory for all written artifacts. Required for every benchmark command (`datasize` included) and for `reports` and `history`; `lockfile` accepts it but never uses it. Resolved as this flag > `results_dir` in the `--config-file` YAML > `$MLPSTORAGE_RESULTS_DIR` > the default recorded by `mlpstorage init`, and the winner is printed on a `results-dir: <path> (from <source>)` status line. Must already be initialized with `mlpstorage init`; commands that consult the orgname-resolution gate refuse to run otherwise.
 
 - **`--systemname <name>`, `-sn <name>`**
-  System-under-test identifier for the current run. Required on every emitting subcommand (`run`, `datagen`, `configview`, `history rerun`). Defaults to `$MLPSTORAGE_SYSTEMNAME`. Each mode (closed/open/whatif) owns its own `<systemname>.yaml` under the per-mode `systems/` directory, so the same name across modes is fine. See the Reports subsection for reportgen's optional-systemname multi-system-fallback behavior.
+  System-under-test identifier for the current run. Required on every emitting subcommand (`run`, `datagen`, `configview`, `history rerun`). Defaults to `$MLPSTORAGE_SYSTEMNAME`, else `systemname` in the per-user config file (see ORGNAME PINNING). Each mode (closed/open/whatif) owns its own `<systemname>.yaml` under the per-mode `systems/` directory, so the same name across modes is fine. See the Reports subsection for reportgen's optional-systemname multi-system-fallback behavior.
 
 - **`--config-file <path>`, `-c <path>`**
-  YAML file of argument overrides merged in *after* CLI parsing. Useful for keeping repeatable closed-submission knob settings in one place.
+  YAML file of flag values for this invocation, keyed by argparse destination (`num_accelerators`, `hosts`, `params`, ...). It fills every flag the command line did not type; a typed flag always wins. It ranks above the `MLPSTORAGE_*` env vars and the per-user config file, and unlike that file it may name any flag of the command, so repeatable submission knob settings can live in one place. Unknown keys warn, `null` values are skipped. `main` lists the keys it supplied on a `values from --config-file` status line.
 
 - **`--debug`**
   Verbose internal logging, full tracebacks on error.
@@ -1000,10 +1040,10 @@ This section enumerates every environment variable mlpstorage reads or borrows, 
 
 | Env var | Read by | Default when unset | Notes |
 |---|---|---|---|
-| `MLPSTORAGE_RESULTS_DIR` | every command that takes `--results-dir`, plus `history` | the results-dir recorded by `mlpstorage init` in the per-user config file; with neither, the CLI fails at parse time with a loud error | Second tier of results-dir resolution (`--results-dir` > this > recorded default); path must already be initialized with `mlpstorage init`. |
-| `MLPSTORAGE_SYSTEMNAME` | all emitting subcommands | none — CLI fails at parse time with loud error (see Phase 5 D-02 template) | Required on every emitting subcommand; per-run system-under-test identifier. |
-| `MLPSTORAGE_DATA_DIR` | all emitting subcommands | [not set] | Optional fallback for `--data-dir`; if unset the flag must be supplied explicitly. |
-| `MLPSTORAGE_CHECKPOINT_FOLDER` | all emitting subcommands | [not set] | Optional fallback for `--checkpoint-folder`; if unset the flag must be supplied explicitly. |
+| `MLPSTORAGE_RESULTS_DIR` | every command that takes `--results-dir`, plus `history` | the results-dir recorded by `mlpstorage init` in the per-user config file; with neither, the CLI fails at parse time with a loud error | Third tier of results-dir resolution (`--results-dir` > `--config-file` > this > recorded default); path must already be initialized with `mlpstorage init`. |
+| `MLPSTORAGE_SYSTEMNAME` | all emitting subcommands | `systemname` in the per-user config file; with neither, the CLI fails at parse time with a loud error | Required on every emitting subcommand; per-run system-under-test identifier. Same tier order as results-dir. |
+| `MLPSTORAGE_DATA_DIR` | all emitting subcommands | `data_dir` in the per-user config file, else [not set] | Fallback for `--data-dir` (same tier order as results-dir); with none of the tiers the flag must be supplied explicitly. |
+| `MLPSTORAGE_CHECKPOINT_FOLDER` | all emitting subcommands | `checkpoint_folder` in the per-user config file, else [not set] | Fallback for `--checkpoint-folder` (same tier order as results-dir); with none of the tiers the flag must be supplied explicitly. |
 | `MLPS_CHECKPOINT_MP_START_METHOD` | `mlpstorage_py/checkpointing/streaming_checkpoint.py` (`MP_START_METHOD_ENV`) | [not set] — `forkserver` on the object-storage path, `fork` otherwise | Overrides the multiprocessing start method for the streaming checkpoint writer; the `mp_start_method` constructor argument wins when both are given. `fork` is refused on the object-storage path because it deadlocks (#642). |
 | `MLPSTORAGE_CHECKPOINT_URI_SCHEME` | `mlpstorage_py/checkpointing/storage_writers/__init__.py:44` (via `CHECKPOINT_URI_SCHEME_ENV` constant) | [not set] | Selects checkpoint storage backend (`s3`, `file`, etc.). `[internal-write]` — also written by `mlpstorage_py/benchmarks/dlio.py` during checkpointing setup. |
 | `KVCACHE_SELECTED_WORKLOADS` | `kv-cache-wrapper.sh` (shell dispatch layer); displayed by `run_summary.py:546` | [not set] | `[shell-wrapper-read]` — filters which kvcache workloads run; unset = run all. Functionally owned by mlpstorage; only the shell wrapper reads it. |
@@ -1188,7 +1228,7 @@ mlpstorage validate /submissions/acme \
 
 - `<repo>/configs/dlio/workload/*.yaml` — bundled DLIO workload templates for training and checkpointing.
 - `<repo>/Rules.md` — authoritative submission rules.
-- `~/.config/mlpstorage/config.yaml` (`$XDG_CONFIG_HOME/mlpstorage/config.yaml`) — per-user defaults written by `mlpstorage init`; today only `results_dir`. Hand edits are kept.
+- `~/.config/mlpstorage/config.yaml` (`$XDG_CONFIG_HOME/mlpstorage/config.yaml`) — per-user defaults; `mlpstorage init` writes `results_dir`, the other environment keys (`systemname`, `data_dir`, `checkpoint_folder`, `hosts`, `mpi_bin`, `mpi_btl`, `oversubscribe`, `allow_run_as_root`, `mpi_params`, `dlio_bin_path`, `exec_type`, `color`, `stream_log_level`) are hand-added and kept across re-inits. See ORGNAME PINNING → "The per-user config file".
 - `<results-dir>/mlperf-results.yaml` — sentinel written by `mlpstorage init`; pins orgname to the results-dir.
 - `<results-dir>/<mode>/<orgname>/systems/<systemname>.yaml` — auto-generated partial system description; one per mode; see SYSTEM DESCRIPTION.
 - `<results-dir>/<mode>/<orgname>/results/<systemname>/...` — per-run output trees as documented under RESULTS DIRECTORY.
