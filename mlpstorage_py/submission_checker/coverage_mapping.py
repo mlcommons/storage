@@ -40,21 +40,22 @@ OUT_OF_SCOPE_RULES: dict[str, str] = {
         "code/ enforcement (CHECK-05) is deferred to a follow-up cycle."
     ),
     "3.3.8": (
-        "descriptive — Rules.md §3.3.8 trainingResultAggregation defines "
-        "how ``mlpstorage reports reportgen`` reduces the 5 measured "
-        "training invocations to the published figures (arithmetic mean "
-        "of per-invocation means; report_generator._aggregate_training). "
-        "It is a reportgen contract, not a submission-validator check — "
-        "the per-invocation AU minimum it references is enforced by 3.3.2."
+        "definition — Rules.md §3.3.8 trainingResultAggregation defines "
+        "the published training figures as functions of the 5 measured "
+        "leaves (arithmetic mean of per-leaf means). Implemented by "
+        "report_generator._aggregate_training; commentary in "
+        "RulesCommentary.md §3.3.8. No submission-validator check of its "
+        "own — the per-leaf AU minimum it references is enforced by 3.3.2; "
+        "a validator recomputation gate is a candidate follow-up."
     ),
     "4.3.6": (
-        "descriptive — Rules.md §4.3.6 checkpointResultAggregation defines "
-        "how ``mlpstorage reports reportgen`` derives the checkpointing "
-        "B/W and duration columns (mean of DLIO's per-invocation means, "
-        "selected per write/read phase; "
-        "report_generator._aggregate_checkpointing). It is a reportgen "
-        "contract, not a submission-validator check; invocation "
-        "structure is enforced by 2.1.23 / 4.7.1."
+        "definition — Rules.md §4.3.6 checkpointResultAggregation defines "
+        "the published checkpointing B/W and duration columns as functions "
+        "of the write-/read-phase leaves (mean of per-leaf means). "
+        "Implemented by report_generator._aggregate_checkpointing; "
+        "commentary in RulesCommentary.md §4.3.6. No submission-validator "
+        "check of its own; leaf structure is enforced by 2.1.23 / 4.7.1; "
+        "a validator recomputation gate is a candidate follow-up."
     ),
     "6.4.2": (
         "descriptive — Rules.md §6.4.2 documents the KVCache POSIX I/O "

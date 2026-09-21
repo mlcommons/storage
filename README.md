@@ -54,7 +54,13 @@ are retained for submission compliance.
 ## Submission Rules
 
 MLPerf™ Storage Benchmark submission rules are described in the
-[Rules.md](https://github.com/mlcommons/storage/blob/main/Rules.md) file.
+[Rules.md](https://github.com/mlcommons/storage/blob/main/Rules.md) file, a
+declarative definition of a valid submission package.  The reasoning behind
+individual rules and how the benchmark derives the values those rules refer to
+is kept separately in
+[RulesCommentary.md](https://github.com/mlcommons/storage/blob/main/RulesCommentary.md),
+keyed by rule number; what the `mlpstorage` command itself does is in
+[ManPage.md](ManPage.md).
 If you have questions, please contact the [Storage WG chairs](https://mlcommons.org/en/groups/research-storage/).
 
 ### Validating a submission package
