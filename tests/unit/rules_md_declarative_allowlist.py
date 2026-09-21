@@ -18,14 +18,8 @@ Regenerate the current-hits literal with:
 
 # Baseline recorded 2026-09-21 (Rules.md as of #874): 64 hits in 36 blocks.
 # Sweep B2 §1+§2 (2026-09-21): 51 hits in 29 blocks.
+# Sweep B2 §3 (2026-09-21): 41 hits in 22 blocks.
 ALLOWLIST: dict[str, set[str]] = {
-    "3.1.2": {"editorial"},
-    "3.3.1": {"intent_phrase"},
-    "3.3.3": {"code_reference"},
-    "3.3.5": {"editorial"},
-    "3.3.7": {"editorial"},
-    "3.4.2": {"intent_phrase", "tool_behaviour"},
-    "3.6.1": {"code_constant", "tool_behaviour"},
     "4.3.4": {"rationale_word", "tool_behaviour"},
     "4.3.5": {"rationale_word", "tool_behaviour"},
     "4.4.2": {"intent_phrase", "tool_behaviour"},
