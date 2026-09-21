@@ -601,6 +601,8 @@ A minimum of ``min_total_files`` files are required which will consume ``min_fil
 
 **Running the benchmark on a subset of a larger dataset**. We support running the benchmark on a subset of the synthetically generated dataset. One can generate a large dataset and then run the benchmark on a subset of that dataset by setting ``num_files_train`` or ``num_files_eval`` smaller than the number of files available in the dataset folder. Note that if the dataset is stored in multiple subfolders, the subset actually used by this run will be evenly selected from all the subfolders. In this case, ``num_subfolders_train`` and ``num_subfolders_eval`` need to be equal to the actual number of subfolders inside the dataset folder in order to generate valid results.
 
+That subset run is checked, not assumed: `datagen` records what it generated in `<data-dir>/<model>/.mlps-datagen-manifest.json`, and `run` reads that manifest to pass the generated count to DLIO (`dataset.num_files_generated`) while reading only `dataset.num_files_train` files, so one dataset generated for the largest client configuration serves the smaller ones too (minimum ≤ run ≤ generated), and `num_subfolders_train` is filled in from the manifest when the run does not set it. A run that asks for more files than were generated, or for a dataset generated for another model or record length, stops before DLIO launches (`MANIFEST-003` / `MANIFEST-001`); see the top-level [ManPage.md](../ManPage.md), DATA DIRECTORY → "The datagen manifest".
+
 Please note that the log file(s) output during the generation step needs to be included in the benchmark results submission package.
 
 ## Single-host Submissions

@@ -84,7 +84,7 @@ Mechanisms used:
 - **Pinned defaults in closed.** Closed kvcache pins `--gpu-mem-gb`, `--cpu-mem-gb`, `--duration`, `--trials`, `--seed`, `--rag-num-docs`, and several boolean knobs to their rules-mandated values, with no flag exposed to change them. Closed training/checkpointing/vectordb pin `--loops=1`, an empty `--params`, and `--allow-invalid-params=False` as internal defaults (the flags themselves are not registered on the closed parsers).
 - **Post-parse validators.** What argparse cannot express (for example, "`--num-checkpoints-write` must be 10 or 0 in closed per Rules §4.7.1") is enforced by `validate_<benchmark>_arguments()` functions called immediately after parsing.
 - **Environment validation.** Before a benchmark starts, `validate_benchmark_environment()` verifies SSH connectivity to client hosts, MPI availability, DLIO accessibility, and results-directory writability. `--skip-validation` disables this for debugging only.
-- **Pre-execution capacity gates.** Before a benchmark spawns DLIO or any other workload, `_pre_execution_gate()` runs the CAP-01 disk-space check, (on multi-host runs) the CAP-02 shared-filesystem probe, and the CAP-03 filesystem-separation probe that verifies `--data-dir` / `--checkpoint-folder` and `--results-dir` live on different filesystems. Failures raise `FileSystemError` with a four-field message. CAP-01 and CAP-02 are unbypassable; CAP-03 can be bypassed for dev-only runs via `--skip-fs-separation-gate` (the probe still runs and writes its sidecar so the validator has telemetry, but no exception is raised).
+- **Pre-execution capacity gates.** Before a benchmark spawns DLIO or any other workload, `_pre_execution_gate()` runs the CAP-01 disk-space check, (on multi-host runs) the CAP-02 shared-filesystem probe, and the CAP-03 filesystem-separation probe that verifies `--data-dir` / `--checkpoint-folder` and `--results-dir` live on different filesystems. Failures raise `FileSystemError` with a four-field message. CAP-01 and CAP-02 are unbypassable; CAP-03 can be bypassed for dev-only runs via `--skip-fs-separation-gate` (the probe still runs and writes its sidecar so the validator has telemetry, but no exception is raised). Training `run` / `configview` then read the datagen manifest the dataset carries and refuse a run the dataset cannot serve (`MANIFEST-001` / `MANIFEST-003`; see DATA DIRECTORY).
 
 The result is that a closed-mode command line is exactly the command line a closed-mode submission requires, and an attempt to deviate is rejected at the earliest possible moment.
 
@@ -302,6 +302,7 @@ The data directory is the on-storage workspace for the generated **training** da
 ```
 <data-dir>/
 └── <model>/                        e.g. unet3d, retinanet — auto-appended
+    ├── .mlps-datagen-manifest.json what datagen generated; read by run (see below)
     ├── train/                      <data files> .npz / .npy / .jpeg /
     │                               .hdf5 / .tfrecord depending on model
     │                               and workload YAML
@@ -314,6 +315,46 @@ The `<model>/` segment is appended by `datagen` if `--data-dir` does not already
 > **Note on `valid/` and `test/`** — every bundled v3.0 training workload YAML sets `workflow.train: True` only, with no `evaluation` step and no `num_files_eval`. Both subdirectories are therefore created on disk but **not populated by `datagen` today**. They follow the conventional train/valid/test split used throughout the ML ecosystem (`valid/` for held-out evaluation files consumed during training, `test/` for a post-training generalization corpus) so the layout remains immediately recognizable and a future workload that enables `workflow.evaluation: True` writes into the path practitioners expect. Submitters can ignore the empty subdirectories; `mlpstorage validate` does not inspect `--data-dir` contents.
 
 Each `datagen` invocation should own its `--data-dir` — sharing a single `--data-dir` across multiple workloads or repeated runs is not supported. The `--data-dir` must live on the storage system under test. For closed training submissions, the generated dataset must total at least five times the client host memory (`--client-host-memory-in-gb`) to prevent the OS page cache from absorbing the workload; `datasize` exists specifically to compute and report this lower bound.
+
+### The datagen manifest (`.mlps-datagen-manifest.json`)
+
+A `datagen` that completed (DLIO exited 0 and the results leaf is whole) leaves one small file beside the split directories, `<data-dir>/<model>/.mlps-datagen-manifest.json`, recording what it generated. It is the dataset's only self-description. `mlpstorage` forces `dataset.skip_listing=True` on every backend, so DLIO never lists `train/`: every rank reconstructs the `{prefix}_{idx}_of_{total}.{format}` names and has to be told the total the files were generated with. The manifest sits outside `train/` / `valid/` and is never picked up as a data file. Object-storage datasets carry it at the same key (`<prefix>/<model>/.mlps-datagen-manifest.json`), written and read through `s3dlio`.
+
+```json
+{
+  "schema_version": 1,
+  "model": "unet3d",
+  "num_files_train": 42000,
+  "num_samples_per_file": 1,
+  "record_length_bytes": 146600628,
+  "num_subfolders_train": 0,
+  "dataset_format": "npz",
+  "rules_edition": "3.0",
+  "created_at": "2026-09-21T14:03:11Z",
+  "mlpstorage_version": "3.0.46",
+  "source_datagen_result_dir": "/mnt/results/closed/Acme/results/dev-system/training/unet3d/datagen/20260921_140311"
+}
+```
+
+`model` and the three sizing knobs (`num_files_train`, `num_samples_per_file`, `record_length_bytes`) are required; the rest is provenance. `num_subfolders_train`, `dataset_format` and `rules_edition` are additive fields of the same schema version (added after the writer first shipped in 3.0.37), so a reader tolerates their absence. The schema only ever grows additively; a breaking change bumps `schema_version` and keeps the v1 reader alive.
+
+**On `run` and `configview`**, right after the CAP gates (so on a multi-host run the data-dir has just been proven shared), `mlpstorage` reads the manifest and fits the run to the dataset:
+
+- The generated count goes to DLIO as `dataset.num_files_generated` (the `_of_{total}` name suffix), while `dataset.num_files_train` stays the number of files the run reads. The rule is **minimum ≤ run ≤ generated**: one over-generated dataset serves every run configuration whose minimum it covers, as directory listing always allowed. The run count itself is not changed here: an explicit `--params dataset.num_files_train=N` wins, otherwise the `datasize` minimum for this system, and `check_num_files_train()` still enforces the minimum.
+- `dataset.num_subfolders_train` is taken from the manifest when the run did not set it; it is a layout fact of the generated tree, not a workload choice, so the run no longer has to repeat it.
+- The `run` leaf's `*_metadata.json` records the injected value under `override_parameters` and `parameters.dataset`, alongside the other tool-managed knobs.
+
+The finding IDs are stable, so a submitter's CI can match on them. `MANIFEST-002` is reserved and unused.
+
+| ID | Level | Condition | What to do |
+|---|---|---|---|
+| `MANIFEST-000` | warning | No manifest under `<data-dir>/<model>/` (dataset generated by hand, or by an `mlpstorage` older than 3.0.37). | Nothing is verified; DLIO assumes the dataset was generated with exactly `num_files_train` files, as before. Regenerate with this tool to get the check. |
+| `MANIFEST-001` | error | The dataset was not generated for this workload: `model`, `record_length_bytes`, `num_samples_per_file`, `format`, or an explicitly requested `num_subfolders_train` differs from the manifest. | Regenerate for this model and configuration, or point `--data-dir` at the matching dataset. |
+| `MANIFEST-003` | error | The run reads more files than were generated (`num_files_train` above the manifest count). | The message carries the exact `datagen` command for the larger count (remove `<data-dir>/<model>` first; `datagen` refuses to overwrite) and, when the generated count still meets this system's minimum, the `--params dataset.num_files_train=<generated>` alternative. |
+
+A manifest that exists but cannot be read or parsed is an error as well. `--skip-validation` and `whatif` mode downgrade every `MANIFEST` error to a warning and proceed. Where `--params` is available (open, whatif), `dataset.num_files_generated=N` overrides the manifest's count, with a warning. `datasize` and `datagen` never read the manifest; `datagen` instead refuses to run into a populated `<data-dir>/<model>`, so a manifest always describes one whole generation.
+
+`mlpstorage validate` never inspects `--data-dir`, so the manifest plays no part in submission validation and has no CLOSED-submission impact: Rule 3.3.1 keeps reading the `datasize/`, `datagen/` and `run/` leaves. Checkpointing does not use `--data-dir` and neither writes nor reads a manifest.
 
 Checkpointing benchmarks use a separate `--checkpoint-folder` (not `--data-dir`); its layout is `<checkpoint-folder>/<model>/…` where the contents under `<model>/` are managed by the DLIO checkpointing workload (shard counts, ranks, and shapes depend on the model and `--num-processes`).
 
@@ -466,7 +507,7 @@ This framing applies uniformly to every per-benchmark metric column `reportgen` 
    `validate_benchmark_environment()` is called before any benchmark instantiates. It checks DLIO binary availability, MPI launcher availability, SSH connectivity to every `--hosts` entry, and the writability of `--results-dir`. Bypass with `--skip-validation` for offline debugging.
 
 3. **Pre-execution capacity gates** (`mlpstorage_py/benchmarks/base.py::_pre_execution_gate`).
-   After cluster collection and before the workload subprocess is spawned, every benchmark runs three checks. CAP-01 and CAP-02 have no bypass flag; CAP-03 has `--skip-fs-separation-gate` for dev-only runs.
+   After cluster collection and before the workload subprocess is spawned, every benchmark runs three checks. CAP-01 and CAP-02 have no bypass flag; CAP-03 has `--skip-fs-separation-gate` for dev-only runs. Training `run` / `configview` add a fourth step after them: the datagen-manifest check (`MANIFEST-000` / `001` / `003`, DATA DIRECTORY → "The datagen manifest"), which feeds `dataset.num_files_generated` to DLIO.
 
    - **CAP-01 — Disk-space gate.** Reads the destination filesystem via `os.statvfs(...)`, compares `available_bytes` against the benchmark's `required_bytes_for_capacity_gate` (computed per-subclass: training and checkpointing project the workload size from CLI arguments; vectordb returns `None` for the remote-engine escape hatch; kvcache projects from cache-tier sizes). On shortfall, raises `FileSystemError(code=FS_DISK_FULL)` with a four-field message:
      ```
@@ -577,7 +618,7 @@ The `init` subcommand takes no flags — universal flags such as `--results-dir`
   Validate installed Python packages against the supplied lockfile before executing the benchmark. Used to guarantee reproducibility against a frozen environment.
 
 - **`--skip-validation`**
-  Skip environment checks (MPI, SSH, DLIO). For debugging only; should never be used for a real submission.
+  Skip environment checks (MPI, SSH, DLIO) and downgrade the training datagen-manifest errors (`MANIFEST-001` / `MANIFEST-003`) to warnings. For debugging only; should never be used for a real submission.
 
 - **`--skip-fs-separation-gate`**
   Bypass the CAP-03 hard gate that raises when data/checkpoint and results directories live on the same filesystem. The probe still runs and writes `fs_separation.json` so the validator has telemetry — rules 3.4.2 / 4.4.2 / 5.4.2 will still fire at validation time. For dev-only runs that are not intended for submission.
@@ -645,7 +686,7 @@ Required positionals: `<model>` then `<command>` and, for `datagen`/`run`/`confi
   Execution backend. Default `mpi`. `docker` runs DLIO inside a container per host.
 
 - **`--data-dir <path>`, `-dd <path>`**
-  Filesystem location for generated data. Read by `run`, written by `datagen`.
+  Filesystem location for generated data. Read by `run`, written by `datagen`. `datagen` leaves `<data-dir>/<model>/.mlps-datagen-manifest.json` describing what it generated; `run` / `configview` read it to check the dataset fits the run (see DATA DIRECTORY).
 
 - **`--dlio-bin-path <path>`, `-dp <path>`**
   Override the DLIO binary location. Default: alongside the `mlpstorage` binary.
@@ -1230,6 +1271,7 @@ mlpstorage validate /submissions/acme \
 - `<repo>/Rules.md` — authoritative submission rules.
 - `~/.config/mlpstorage/config.yaml` (`$XDG_CONFIG_HOME/mlpstorage/config.yaml`) — per-user defaults; `mlpstorage init` writes `results_dir`, the other environment keys (`systemname`, `data_dir`, `checkpoint_folder`, `hosts`, `mpi_bin`, `mpi_btl`, `oversubscribe`, `allow_run_as_root`, `mpi_params`, `dlio_bin_path`, `exec_type`, `color`, `stream_log_level`) are hand-added and kept across re-inits. See ORGNAME PINNING → "The per-user config file".
 - `<results-dir>/mlperf-results.yaml` — sentinel written by `mlpstorage init`; pins orgname to the results-dir.
+- `<data-dir>/<model>/.mlps-datagen-manifest.json` — written by a completed training `datagen`: model, file count, samples per file, record length, subfolder count, format, rules edition, provenance. Read by training `run` / `configview` (`MANIFEST-000/001/003`); never read by `validate`. See DATA DIRECTORY.
 - `<results-dir>/<mode>/<orgname>/systems/<systemname>.yaml` — auto-generated partial system description; one per mode; see SYSTEM DESCRIPTION.
 - `<results-dir>/<mode>/<orgname>/results/<systemname>/...` — per-run output trees as documented under RESULTS DIRECTORY.
 - `<results-dir>/<mode>/<orgname>/results/<systemname>/.../<YYYYMMDD_HHMMSS>/provenance.json` — per-leaf provenance stamp (rules edition, tool, DLIO revision, storage library, core-config hash); see Common artifacts.
