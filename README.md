@@ -360,8 +360,10 @@ stops before DLIO launches with a stable finding ID -- `MANIFEST-001` (the
 dataset was generated for a different workload) or `MANIFEST-003` (more files
 requested than generated; the message carries the exact `datagen` command to
 fix it) -- and a dataset without a manifest only draws the `MANIFEST-000`
-warning. `mlpstorage validate` never reads `--data-dir`, so the manifest has
-no effect on submission validation. Full detail in
+warning. The run copies the manifest it consumed into its results leaf as
+`datagen-manifest.json`; `mlpstorage validate` never reads `--data-dir`, but
+rule 3.3.1 uses that copy to tie the run to the `datagen` leaf that produced
+its data (`MANIFEST-LINK` and friends). Full detail in
 [ManPage.md](ManPage.md) → DATA DIRECTORY → "The datagen manifest".
 
 ### Storage Backend Selection (file | object)

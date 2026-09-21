@@ -250,3 +250,119 @@ class TestScope:
         # Otherwise check_allowed_params marks every manifest-aware CLOSED
         # run INVALID for a value the tool wrote (storage#494 precedent).
         assert "dataset.num_files_generated" in TrainingRunRulesChecker.TOOL_INJECTED_PARAMS
+
+
+# --------------------------------------------------------------------------- #
+# D4 linkage: the consumed manifest is snapshotted into the run leaf           #
+# --------------------------------------------------------------------------- #
+
+import json as _json
+import os as _os
+
+from mlpstorage_py.rules.datagen_hierarchy import (
+    DATAGEN_MANIFEST_SNAPSHOT_FILENAME,
+    METADATA_DATAGEN_MANIFEST_KEY,
+    datagen_manifest_body,
+)
+
+
+def _leaf_stub(tmp_path, **kw):
+    stub = _stub(**kw)
+    stub.run_result_output = str(tmp_path)
+    return stub
+
+
+def _snapshot(tmp_path):
+    p = tmp_path / DATAGEN_MANIFEST_SNAPSHOT_FILENAME
+    return _json.loads(p.read_text()) if p.exists() else None
+
+
+class TestSnapshotIntoRunLeaf:
+    def test_run_writes_the_snapshot_and_declares_it(self, tmp_path):
+        stub = _leaf_stub(tmp_path)
+        _apply(stub, _manifest())
+        snap = _snapshot(tmp_path)
+        assert snap is not None
+        assert snap["location"] == "/data/unet3d/.mlps-datagen-manifest.json"
+        assert snap["overridden"] == []
+        assert snap["manifest"] == datagen_manifest_body(_manifest())
+        assert stub._datagen_manifest_snapshot == DATAGEN_MANIFEST_SNAPSHOT_FILENAME
+
+    def test_configview_does_not_write_a_leaf_file(self, tmp_path):
+        stub = _leaf_stub(tmp_path, command="configview")
+        _apply(stub, _manifest())
+        assert _snapshot(tmp_path) is None
+        assert not hasattr(stub, "_datagen_manifest_snapshot")
+
+    def test_no_manifest_means_no_snapshot(self, tmp_path):
+        stub = _leaf_stub(tmp_path)
+        _apply(stub, None)
+        assert _snapshot(tmp_path) is None
+        assert not hasattr(stub, "_datagen_manifest_snapshot")
+
+    def test_hard_manifest_003_error_leaves_no_snapshot(self, tmp_path):
+        stub = _leaf_stub(tmp_path, dataset={"num_files_train": 2_000})
+        with pytest.raises(ConfigurationError):
+            _apply(stub, _manifest(num_files_train=1_000))
+        assert _snapshot(tmp_path) is None
+
+    def test_skip_validation_over_003_records_the_override(self, tmp_path):
+        stub = _leaf_stub(tmp_path, skip_validation=True, dataset={"num_files_train": 2_000})
+        _apply(stub, _manifest(num_files_train=1_000))
+        assert _snapshot(tmp_path)["overridden"] == ["MANIFEST-003"]
+        assert stub._datagen_manifest_snapshot == DATAGEN_MANIFEST_SNAPSHOT_FILENAME
+
+    def test_whatif_over_001_records_the_override(self, tmp_path):
+        stub = _leaf_stub(tmp_path, mode="whatif", dataset={"record_length_bytes": 1})
+        _apply(stub, _manifest())
+        assert _snapshot(tmp_path)["overridden"] == ["MANIFEST-001"]
+
+    def test_both_overrides_are_recorded_in_order(self, tmp_path):
+        stub = _leaf_stub(tmp_path, skip_validation=True,
+                          dataset={"record_length_bytes": 1, "num_files_train": 2_000})
+        _apply(stub, _manifest(num_files_train=1_000))
+        assert _snapshot(tmp_path)["overridden"] == ["MANIFEST-001", "MANIFEST-003"]
+
+    def test_stub_without_a_leaf_is_a_no_op(self):
+        stub = _stub()
+        _apply(stub, _manifest())
+        assert stub.params_dict["dataset.num_files_generated"] == 1_000
+        assert not hasattr(stub, "_datagen_manifest_snapshot")
+
+    def test_snapshot_write_failure_is_a_warning_not_an_abort(self, tmp_path):
+        stub = _leaf_stub(tmp_path / "missing-leaf")
+        _apply(stub, _manifest())
+        assert stub.params_dict["dataset.num_files_generated"] == 1_000
+        assert DATAGEN_MANIFEST_SNAPSHOT_FILENAME in _logged(stub, "warning")
+        assert not hasattr(stub, "_datagen_manifest_snapshot")
+
+
+class TestMetadataDeclaresSnapshot:
+    """``training_<ts>_metadata.json`` names the sidecar, like ``provenance_file``."""
+
+    def _metadata(self, tmp_path, declare):
+        # A real TrainingBenchmark object without its constructor (which
+        # reserves a leaf, registers the run, collects the cluster...), so the
+        # inherited ``metadata`` property runs against the real helpers.
+        stub = TrainingBenchmark.__new__(TrainingBenchmark)
+        stub.args = SimpleNamespace(command="run", model="unet3d", data_dir="/data")
+        stub.run_datetime = "20260921_180000"
+        stub.run_result_output = str(tmp_path)
+        stub.combined_params = {"dataset": {"num_files_train": 400}}
+        stub.params_dict = {}
+        stub.cluster_information = None
+        stub.runtime = None
+        stub.verification = None
+        stub.command_output_files = []
+        if declare:
+            stub._datagen_manifest_snapshot = DATAGEN_MANIFEST_SNAPSHOT_FILENAME
+        return stub.metadata
+
+    def test_declared_when_snapshot_written(self, tmp_path):
+        md = self._metadata(tmp_path, declare=True)
+        assert md[METADATA_DATAGEN_MANIFEST_KEY] == DATAGEN_MANIFEST_SNAPSHOT_FILENAME
+        assert md["parameters"]["dataset"]["num_files_train"] == 400
+
+    def test_absent_when_no_snapshot(self, tmp_path):
+        md = self._metadata(tmp_path, declare=False)
+        assert METADATA_DATAGEN_MANIFEST_KEY not in md

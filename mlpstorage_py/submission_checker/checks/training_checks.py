@@ -22,6 +22,20 @@ from mlpstorage_py.rules.run_checkers.training import (
     TrainingRunRulesChecker as _TrainingRunRulesChecker,
 )
 from mlpstorage_py.rules.param_hints import format_typo_hint
+from mlpstorage_py.rules.datagen_hierarchy import (
+    DATAGEN_MANIFEST_SNAPSHOT_FILENAME as _SNAPSHOT_FILENAME,
+    METADATA_DATAGEN_MANIFEST_KEY as _SNAPSHOT_KEY,
+    read_datagen_manifest_snapshot as _read_snapshot,
+)
+from mlpstorage_py.provenance import METADATA_PROVENANCE_KEY as _PROVENANCE_KEY
+
+# Rule 3.3.1's datagen-manifest linkage tokens (datagen-manifest v1.0, D4).
+# The first five are errors; MANIFEST-ABSENT is a warning. Documented in
+# ManPage.md DATA DIRECTORY → "The datagen manifest".
+MANIFEST_SNAPSHOT_TOKENS = (
+    "MANIFEST-MISSING", "MANIFEST-OVERRIDDEN", "MANIFEST-LINK",
+    "MANIFEST-COUNT", "MANIFEST-OVERRUN", "MANIFEST-ABSENT",
+)
 _TOOL_INJECTED_PARAMS = _TrainingRunRulesChecker.TOOL_INJECTED_PARAMS
 # The allow-lists themselves come from the same place (mlcommons/storage#842):
 # §3.6.2/§3.6.3 used to carry hand-copied sets that had drifted (missing
@@ -331,9 +345,28 @@ class TrainingCheck(BaseCheck):
         Missing datasize/datagen phases emit ``[3.3.1 DATASIZE-MISSING]``
         / ``[3.3.1 DATAGEN-MISSING]`` errors rather than silent skip.
 
-        See `.planning/BACKLOG.md` B-04 for the post-window manifest
-        extension that closes the "but is the data really on disk?"
-        loop without paying object-store LIST cost.
+        Datagen-manifest linkage (datagen-manifest v1.0, D4; closes
+        BACKLOG B-04 without any ``--data-dir`` access, which this
+        validator never performs): a run leaf whose metadata declares
+        ``datagen_manifest_file`` carries ``datagen-manifest.json``, the
+        manifest the run consumed. ``_check_manifest_snapshot`` ties it
+        to THIS submission's ``datagen/`` leaf:
+
+        * ``[3.3.1 MANIFEST-MISSING]`` declared but absent / unreadable;
+        * ``[3.3.1 MANIFEST-OVERRIDDEN]`` the run proceeded past a
+          ``MANIFEST-*`` finding under ``--skip-validation`` / whatif;
+        * ``[3.3.1 MANIFEST-LINK]`` the manifest's
+          ``source_datagen_result_dir`` is not one of this submission's
+          ``datagen/<ts>/`` leaves;
+        * ``[3.3.1 MANIFEST-COUNT]`` the manifest's ``num_files_train``
+          differs from what that datagen leaf recorded;
+        * ``[3.3.1 MANIFEST-OVERRUN]`` the run read more files than the
+          manifest says were generated;
+        * ``[3.3.1 MANIFEST-ABSENT]`` (warning) a stamped leaf
+          (``provenance_file``) that consumed no manifest — nothing to
+          link, the run's data provenance rests on the leaves alone.
+
+        Leaves that declare neither key (the frozen v3.0 tree) are silent.
 
         (Rules.md 3.3.1)
         """
@@ -352,6 +385,11 @@ class TrainingCheck(BaseCheck):
         # as one-per-submission; sweep workflows generate once for the largest
         # size and run multiple smaller configs against it).
         datagen_num_files_train, datagen_data_dir = self._extract_latest_datagen_cardinality(datagen_files)
+        # Every datagen leaf by timestamp, for the manifest-snapshot linkage.
+        datagen_count_by_ts = {}
+        for _summary, dg_metadata, dg_ts in datagen_files:
+            dg_params = ((dg_metadata or {}).get("parameters") or {}).get("dataset") or {}
+            datagen_count_by_ts[dg_ts] = self._to_int(dg_params.get("num_files_train"))
 
         if not datasize_files:
             self.log_violation(
@@ -434,6 +472,11 @@ class TrainingCheck(BaseCheck):
                 )
                 valid = False
 
+            # Datagen-manifest snapshot linkage (D4).
+            if not self._check_manifest_snapshot(
+                    ts, metadata, run_num_files_train, datagen_count_by_ts):
+                valid = False
+
             # num_files_eval mirror — absent-key is a warning, NOT silent skip
             # (issue #608 WRT 4). Models without an eval phase legitimately
             # omit the field, so this stays a warning (not a violation) and
@@ -448,6 +491,83 @@ class TrainingCheck(BaseCheck):
                 )
 
         return valid
+
+    def _check_manifest_snapshot(self, ts, metadata, run_num_files_train, datagen_count_by_ts):
+        """Tie ``run/<ts>/`` to the datagen leaf whose manifest it consumed.
+
+        See ``run_data_matches_datasize`` for the token table. Returns
+        ``False`` when an error-level token fired.
+        """
+        declared = metadata.get(_SNAPSHOT_KEY)
+        if not declared:
+            if metadata.get(_PROVENANCE_KEY):
+                self.warn_violation(
+                    "3.3.1", "trainingRunDataMatchesDatasize", self.path,
+                    "[3.3.1 MANIFEST-ABSENT] run/%s consumed no datagen manifest "
+                    "(no %s in its metadata); the run cannot be linked to a "
+                    "datagen/ leaf, its data provenance rests on the leaves alone",
+                    ts, _SNAPSHOT_KEY,
+                )
+            return True   # undeclared: predates the snapshot, silent
+        leaf = os.path.join(self.run_path, ts)
+        try:
+            snapshot = _read_snapshot(leaf)
+        except Exception as e:  # ConfigurationError from the parser, OSError
+            snapshot = None
+            problem = str(e)
+        else:
+            problem = "the file is absent"
+        if snapshot is None:
+            self.log_violation(
+                "3.3.1", "trainingRunDataMatchesDatasize", self.path,
+                "[3.3.1 MANIFEST-MISSING] run/%s declares %s = %r but %s",
+                ts, _SNAPSHOT_KEY, declared, problem,
+            )
+            return False
+        ok = True
+        manifest = snapshot.manifest
+        if snapshot.overridden:
+            self.log_violation(
+                "3.3.1", "trainingRunDataMatchesDatasize", self.path,
+                "[3.3.1 MANIFEST-OVERRIDDEN] run/%s proceeded past %s under "
+                "--skip-validation / whatif (see %s); the dataset did not fit "
+                "the run as configured",
+                ts, ", ".join(snapshot.overridden), _SNAPSHOT_FILENAME,
+            )
+            ok = False
+        if datagen_count_by_ts:
+            source = (manifest.source_datagen_result_dir or "").rstrip("/")
+            source_ts = os.path.basename(source) if source else None
+            if source_ts not in datagen_count_by_ts:
+                self.log_violation(
+                    "3.3.1", "trainingRunDataMatchesDatasize", self.path,
+                    "[3.3.1 MANIFEST-LINK] run/%s consumed a manifest written by "
+                    "datagen leaf %r, which is not one of this submission's "
+                    "datagen/ leaves (%s); the run's data was not produced by "
+                    "this submission",
+                    ts, source or None, ", ".join(sorted(datagen_count_by_ts)),
+                )
+                ok = False
+            else:
+                linked_count = datagen_count_by_ts[source_ts]
+                if linked_count is not None and linked_count != manifest.num_files_train:
+                    self.log_violation(
+                        "3.3.1", "trainingRunDataMatchesDatasize", self.path,
+                        "[3.3.1 MANIFEST-COUNT] run/%s consumed a manifest saying "
+                        "%s files were generated, but datagen/%s recorded "
+                        "num_files_train = %s",
+                        ts, manifest.num_files_train, source_ts, linked_count,
+                    )
+                    ok = False
+        if run_num_files_train is not None and run_num_files_train > manifest.num_files_train:
+            self.log_violation(
+                "3.3.1", "trainingRunDataMatchesDatasize", self.path,
+                "[3.3.1 MANIFEST-OVERRUN] run/%s num_files_train (%s) > the %s "
+                "files its datagen manifest says were generated",
+                ts, run_num_files_train, manifest.num_files_train,
+            )
+            ok = False
+        return ok
 
     _DATASIZE_REQUIRED_OUTPUT_KEYS = ("num_files_train", "num_subfolders_train", "total_disk_bytes")
 
