@@ -17,6 +17,7 @@ mlpstorage reports reportgen [OPTIONS]
 mlpstorage history (show|rerun) [OPTIONS]
 mlpstorage runs (list|show|rm|purge|gc) [OPTIONS]
 mlpstorage lockfile (generate|verify) [OPTIONS]
+mlpstorage config (show|set|unset|path) [OPTIONS]
 mlpstorage validate <submission-dir> [OPTIONS]
 mlpstorage rules-coverage [OPTIONS]
 mlpstorage version
@@ -117,6 +118,7 @@ mlpstorage
 ├── history (show | rerun)
 ├── runs (list | show <id> | rm [<id>...] | purge | gc)
 ├── lockfile (generate | verify)
+├── config (show | set <key> <value>... | unset <key> | path)
 ├── validate <submission-dir>
 ├── rules-coverage
 └── version
@@ -157,7 +159,7 @@ error: --results-dir/-rd is required: run `mlpstorage init <orgname> [path]` onc
 
 ### The per-user config file
 
-The same file may carry, by hand edit, a default for every other flag that describes the *environment* a benchmark runs in. It never supplies a workload-selecting flag (model, accelerator type or count, mode, client memory, `params`): those stay on the command line so a stale file cannot reshape a run, and such a key in the file is a hard error at parse time. An unknown key is a warning. The keys, each an argparse destination spelled with underscores:
+The same file may carry a default for every other flag that describes the *environment* a benchmark runs in. It never supplies a workload-selecting flag (model, accelerator type or count, mode, client memory, `params`): those stay on the command line so a stale file cannot reshape a run, and such a key in the file is a hard error at parse time. An unknown key is a warning. The keys, each an argparse destination spelled with underscores:
 
 | key | flag | notes |
 |---|---|---|
@@ -182,7 +184,7 @@ A key is applied only where the command has the flag (`hosts` does nothing for `
 typed flag  >  --config-file YAML  >  MLPSTORAGE_* env var  >  ~/.config/mlpstorage/config.yaml  >  built-in default
 ```
 
-Only `results_dir`, `systemname`, `data_dir` and `checkpoint_folder` have an env var. `main` prints what the files supplied, after the `results-dir:` line, as `values from --config-file <path>: ...` and `defaults from <config.yaml>: ...`, so no default is ever silent. Example:
+Only `results_dir`, `systemname`, `data_dir` and `checkpoint_folder` have an env var. `main` prints what the files supplied, after the `results-dir:` line, as `values from --config-file <path>: ...` and `defaults from <config.yaml>: ...`, so no default is ever silent. `mlpstorage config show` prints every key with its value and the env var outranking it, `config set <key> <value>...` and `config unset <key>` edit the file with the same checks (see Config options under OPTIONS); a hand edit works too. Example:
 
 ```yaml
 # ~/.config/mlpstorage/config.yaml
@@ -599,7 +601,23 @@ mlpstorage init <orgname> [<path>]
 
 The `init` subcommand takes no flags — universal flags such as `--results-dir`, `--systemname`, `--debug`, etc. are not registered on the init parser, because the results-dir is the optional second positional and the sentinel does not yet exist.
 
-### Universal options (every non-init command)
+### Config options
+
+```
+mlpstorage config show  [--json]
+mlpstorage config set   <key> <value>...
+mlpstorage config unset <key>
+mlpstorage config path
+```
+
+Manages the per-user config file described under ORGNAME PINNING ("The per-user config file"). `config` takes no `--results-dir` and no universal flag, is not recorded in `.mlps/history`, and is the one command that skips the tier resolver at parse time, so it works on a file that resolver refuses.
+
+- **`show`** — the file path (`[not present]` when it does not exist), then one line per key the file may carry: its value or `[unset]`, and when the key's `MLPSTORAGE_*` env var is set, `(outranked by MLPSTORAGE_X=...)` or `(MLPSTORAGE_X=... supplies it)`. A workload-selecting key found in the file is flagged `REJECTED` with the `config unset` command that clears it; a key no command knows is flagged `ignored`. **`--json`** prints the same as one object (`path`, `exists`, `keys` → `{value, env}`, `rejected`, `ignored`).
+- **`set <key> <value>...`** — records a default. `<key>` must be one of the table's keys: a workload-selecting key is the same hard error the resolver gives, an unknown key an error too. One value stores a scalar; several values (or one comma-separated value for `hosts`) store a list; `oversubscribe` and `allow_run_as_root` take `true`/`false` (also `yes`/`no`, `on`/`off`, `1`/`0`). The value is type- and choice-checked exactly as the flag would be, so `mpi_bin mpi` is refused before it can break the next benchmark command. Paths are stored as typed (`~` is expanded when read). Every other key in the file is kept.
+- **`unset <key>`** — removes the key; any key, so a stray workload key can be cleared. A key that is not set is a no-op. Removing `results_dir` prints how to supply one from then on.
+- **`path`** — prints the file path.
+
+### Universal options (every non-init, non-config command)
 
 - **`--results-dir <path>`, `-rd <path>`**
   Root directory for all written artifacts. Required for every benchmark command (`datasize` included) and for `reports` and `history`; `lockfile` accepts it but never uses it. Resolved as this flag > `results_dir` in the `--config-file` YAML > `$MLPSTORAGE_RESULTS_DIR` > the default recorded by `mlpstorage init`, and the winner is printed on a `results-dir: <path> (from <source>)` status line. Must already be initialized with `mlpstorage init`; commands that consult the orgname-resolution gate refuse to run otherwise.

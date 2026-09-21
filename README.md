@@ -521,14 +521,25 @@ or a list of `key=value` strings.
 
 **Per-user defaults.** Settings that describe your *environment* rather than
 a particular run belong in `~/.config/mlpstorage/config.yaml` instead, the
-file `mlpstorage init` creates. Hand-add any of `systemname`, `data_dir`,
+file `mlpstorage init` creates. Any of `systemname`, `data_dir`,
 `checkpoint_folder`, `hosts`, `mpi_bin`, `mpi_btl`, `oversubscribe`,
 `allow_run_as_root`, `mpi_params`, `dlio_bin_path`, `exec_type`, `color`,
-`stream_log_level` next to the `results_dir` line and every command picks
-them up. Workload-selecting keys (model, accelerator type or count, mode,
-client memory, `params`) are refused there so a stale file can never reshape
-a run; put those in a `--config-file` YAML. See ManPage.md "The per-user
-config file" for the full table.
+`stream_log_level` can sit next to the `results_dir` line and every command
+picks them up. `mlpstorage config` manages the file without an editor:
+
+```bash
+mlpstorage config set systemname lab-a
+mlpstorage config set hosts node1,node2,node3,node4
+mlpstorage config set oversubscribe true
+mlpstorage config show          # every key, its value, and any env var outranking it
+mlpstorage config unset hosts
+```
+
+`set` checks the value as the flag would (`mpi_bin mpi` is refused).
+Workload-selecting keys (model, accelerator type or count, mode, client
+memory, `params`) are refused there so a stale file can never reshape a run;
+put those in a `--config-file` YAML. See ManPage.md "The per-user config
+file" and "Config options" for the full table.
 
 ### Parameter Overrides (`--params`)
 
