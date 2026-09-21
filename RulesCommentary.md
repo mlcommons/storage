@@ -24,6 +24,183 @@ the commentary is wrong.
 
 ---
 
+## 1.1 mlpstorageGeneratesHierarchy
+
+### Why
+
+The package is defined by its contents, but nearly all of those contents are
+produced by one program.  Requiring that every file except the hand-authored
+system descriptions be written by `mlpstorage` is what lets the rest of
+Rules.md assume consistent naming, timestamps, provenance stamps and code
+images: a submitter is not expected to create anything inside the hierarchy
+by hand, and a package assembled by running DLIO or the other benchmarks
+directly is not a submission even if it happens to look like one.
+
+### How the value is produced
+
+`mlpstorage` resolves the results directory (flag, environment variable, or
+the default recorded by `mlpstorage init`) and creates or appends to the
+files under it on every invocation; ManPage.md → RESULTS DIRECTORY and ORGNAME
+PINNING describe the resolution and the layout it writes.
+
+### Implementation
+
+- `mlpstorage_py/benchmarks/base.py` -- result-directory creation and the
+  metadata / provenance / code-image writes every run performs.
+- `mlpstorage_py/cli_parser.py` (`_apply_results_dir_resolution`) and
+  `mlpstorage_py/config.py` -- the results-dir resolver and sentinel.
+
+---
+
+## 2.1.2 topLevelSubdirectories
+
+### Why
+
+Dot-prefixed entries are tolerated at the top level because merged reviewer
+trees are distributed as git working trees, which carry `.git/`,
+`.gitignore` and `.github/` alongside the submission proper.  A
+per-organization pool root is tolerated because the v3.0 release placed each
+organization's code images at `<root>/<orgname>/code-<hash8>/`, and the v3.0
+submissions tree is preserved as published rather than rewritten.
+
+### Implementation
+
+- `mlpstorage_py/submission_checker/checks/submission_structure_checks.py`
+  (STRUCT-02).
+
+---
+
+## 2.1.6 codeDirectoryContents
+
+### Why
+
+A result is only reproducible if the exact source that produced it travels
+with it.  Content-addressing the captured tree by its hash means identical
+source captured by different submitters, or by the same submitter across many
+runs, coincides in one pool image; the per-leaf pointer preserves the
+run-to-image link across that flat layout, so a merged reviewer tree holds one
+`code-images/` directory and no duplication.  The per-organization pool of the
+v3.0 release is accepted indefinitely for the same reason 2.1.2 tolerates its
+root: that tree is frozen as published.
+
+The provenance stamp and the submission manifest make a package
+self-describing across rounds -- which rules edition, tool, layout, DLIO
+revision and storage library produced each leaf -- so results from different
+rounds can be compared by declared class rather than by inference.  Leaves
+that predate the stamp are never rewritten; the derived stamp exists so the
+frozen v3.0 tree validates exactly as it did before stamping existed.
+
+The core-config hash excludes site tunables so that two runs of the same
+workload hash alike wherever they ran; that is what makes it usable as the
+comparability-class key.
+
+LEAF-01 exists because nothing but the `*_metadata.json` file identifies a
+`kv_cache` or `vector_database` run (training and checkpointing leaves
+identify themselves through their DLIO configuration); a leaf without it is
+one `reportgen` silently drops, publishing blank metric columns for the
+workload.  RPT-01 exists for the same reason: rollup/leaf disagreement is
+otherwise absorbed by `reportgen` and invisible at review.  Both make the
+failure visible at validation time.  A LEAF-01 finding is repaired by
+restoring the file; the measured data need not be regenerated.
+
+EDN-03 is a warning rather than an error so review chairs can extend the
+accepted-revision list in `editions.yaml` when a new DLIO commit turns up.
+Checkpointing classes of editions 3.0 and earlier use `accelerator: any`
+because those rounds recorded no emulated accelerator for checkpoint runs.  A
+row whose leaves fall into different classes gets a blank class because such
+a row is not comparable with anything.
+
+### How the value is produced
+
+**Tree hash.**  The tree is walked without following symlinks; excluded
+directory names are pruned at any depth, `*.egg-info` directories are pruned
+by suffix, excluded file names are matched against the basename, and symlinks
+are skipped with a warning.  The surviving files are sorted by the UTF-8
+bytes of their POSIX relative path and fed to one MD5 in that order, each as
+its relative-path bytes followed by its full content.  The capture writes the
+copy with the same exclusion predicate, so hashing the copy reproduces the
+hash of the source.
+
+**Capture and pool.**  Every `closed`/`open` `datasize`, `datagen` or `run`
+hashes the running source tree first; if the pool already holds that hash the
+image is reused, otherwise a new `code-<hash8>/` is captured beside the
+existing ones (a changed tree is never a rejection -- source iteration is
+supported).  A per-organization pool from a v3.0-layout tree is relocated
+into `code-images/` the next time the tool captures into that tree.  ManPage.md
+→ RESULTS DIRECTORY has the operator's view.
+
+**Provenance stamp.**  Written right after `*_metadata.json`, which declares
+it under `"provenance_file"`.  The DLIO git commit comes from the installed
+package's PEP 610 `direct_url.json`; the storage library is the client
+library the `object` run used.  The core-config hash is SHA-256 over the
+canonical JSON of the allowlisted keys, truncated to 16 hex digits; a
+`kv_cache` or `vector_database` leaf written before its family's block
+existed in `*_metadata.json` is rebuilt at read time from what it recorded
+(the wrapper command lines and `summary.json` / `config.json` /
+`result_verdict.json`), stamping "unknown" when that is not enough.
+
+**Derived stamp.**  `validate`, `reportgen` and `runs show` derive the stamp
+of an unstamped leaf at read time from the pointed-to image's
+`.code-hash.json` and `uv.lock` and from the leaf's own metadata; nothing is
+written back.
+
+**Submission manifest.**  `mlpstorage reports reportgen` writes
+`submission.yaml` for every organization when run against a live results-dir
+(one carrying the `mlperf-results.yaml` sentinel); a submissions or archive
+tree is never touched.  A manifest that no longer matches the tree (PROV-02)
+is refreshed by re-running `reportgen`.
+
+**Editions and classes.**  `validate` reads the `checker` block of the
+edition a submission declares and runs only the checks bound to that edition
+(`@rule(..., since=, until=)`); a historical edition without a `checker`
+block is checked by the tool of its own round.  `mlpstorage runs show` prints
+a leaf's class; `reportgen` emits the `Rules Edition` and `Comparability
+Class` columns.
+
+### Implementation
+
+- `mlpstorage_py/submission_checker/tools/code_checksum.py`
+  (`compute_code_tree_md5`) and `mlpstorage_py/submission_checker/constants.py`
+  (`MD5_EXCLUDE_PREFIXES`, `MD5_EXCLUDE_FILENAMES`, `REFERENCE_CHECKSUMS`).
+- `mlpstorage_py/submission_checker/tools/code_image.py` -- capture, pool
+  lookup and relocation, `.code-hash.json` (`_ALGORITHM`).
+- `mlpstorage_py/provenance.py` -- the stamp, the derived stamp and the
+  core-config hash; allowlists in `mlpstorage_py/rules/core_config_keys.yaml`.
+- `mlpstorage_py/editions.py` / `mlpstorage_py/rules/editions.yaml` --
+  editions, `checker` blocks and comparability classes.
+- Checks (`mlpstorage_py/submission_checker/checks/`): STRUCT-06 and
+  CHECK-01/02/03 (`directory_checks.py`, `pool_structure_checks.py`),
+  PROV-01/02 (`provenance_checks.py`), LEAF-01 / RPT-01
+  (`results_integrity_checks.py`), EDN-01..04 (`edition_checks.py`).
+- Tests: `mlpstorage_py/tests/test_code_checksum.py`,
+  `mlpstorage_py/tests/test_capture_or_verify_pool.py`,
+  `tests/unit/test_leaf_provenance.py`, `tests/unit/test_rules_editions.py`,
+  `tests/unit/test_edition_parameters.py`, `tests/unit/test_edition_values.py`.
+
+---
+
+## 2.1.18 runTimestampGap
+
+### Why
+
+The gap between consecutive *timestamp directories* is bounded so that a
+reviewer can be sure no benchmark activity took place between them: the runs
+that remain in the package are the runs that were executed back to back.
+2.1.18a and 2.1.24a permit deleting all but a consecutive window from a longer
+series precisely because this bound distinguishes that from cherry-picking
+non-adjacent runs.  2.1.24 (checkpointing) is the same rule for the same
+reason.
+
+### Implementation
+
+- `mlpstorage_py/submission_checker/checks/directory_checks.py` -- the
+  timestamp-gap checks for 2.1.18 and 2.1.24.
+- Tests: `tests/unit/test_directory_check_run_timestamps.py`,
+  `tests/unit/test_run_timestamp_gap_none_guard.py`,
+  `tests/unit/test_checkpointing_timestamp_gap_sentinel.py`.
+
+---
+
 ## 3.3.8 trainingResultAggregation
 
 ### Why
