@@ -3,21 +3,26 @@ Per-user mlpstorage config file and results-dir resolution.
 
 ``mlpstorage init`` records the results-dir it initialized in
 ``$XDG_CONFIG_HOME/mlpstorage/config.yaml`` (``~/.config/mlpstorage/config.yaml``
-when ``XDG_CONFIG_HOME`` is unset or relative). Every later command resolves
-its results-dir through :func:`resolve_results_dir`, in this order:
+when ``XDG_CONFIG_HOME`` is unset or relative). The file may also carry, by
+hand edit, a default for every other flag that describes the *environment* a
+benchmark runs in — :data:`USER_CONFIG_KEYS`. It never supplies a
+workload-selecting flag (model, accelerator, mode, counts): those stay on the
+command line so a stale file cannot reshape a run, and
+``mlpstorage_py.cli.config_layers`` refuses such a key with a hard error.
 
-1. ``--results-dir`` on the command line (or ``results_dir`` in a
-   ``--config-file`` YAML, which the parser applies on top of the flag);
-2. the ``MLPSTORAGE_RESULTS_DIR`` environment variable;
-3. ``results_dir`` in the per-user config file.
+Every command fills each key in one order (``cli.config_layers``):
 
-The winning tier is reported alongside the path so ``main`` can print
-``results-dir: <path> (from <source>)`` and the choice is never silent.
+1. the flag on the command line;
+2. the ``--config-file`` YAML named on that command line;
+3. the ``MLPSTORAGE_*`` environment variable (:data:`ENV_BACKED_KEYS`);
+4. this file;
+5. the built-in default.
 
-The config file holds defaults for flags that describe the *environment*
-(where results go, later: systemname, data dirs, hosts, MPI settings). It
-never supplies workload-selecting flags (model, accelerator, mode), so a
-stale file cannot reshape a run. Only ``results_dir`` is read today.
+The winning tier is recorded per key so ``main`` can print
+``results-dir: <path> (from <source>)`` and ``defaults from <file>: ...``;
+the choice is never silent. :func:`resolve_results_dir` is the same order
+for ``results_dir`` alone, used by commands that take no ``--results-dir``
+flag (``history``).
 
 The file is written atomically (tmp + ``os.replace``) and existing keys are
 preserved, so hand-added keys survive the next ``mlpstorage init``.
@@ -30,12 +35,46 @@ from typing import Optional, Tuple
 
 import yaml
 
-from mlpstorage_py.config import MLPSTORAGE_RESULTS_DIR_ENVVAR
+from mlpstorage_py.config import (
+    MLPSTORAGE_CHECKPOINT_FOLDER_ENVVAR,
+    MLPSTORAGE_DATA_DIR_ENVVAR,
+    MLPSTORAGE_RESULTS_DIR_ENVVAR,
+    MLPSTORAGE_SYSTEMNAME_ENVVAR,
+)
 from mlpstorage_py.errors import ConfigurationError, ErrorCode
 
 USER_CONFIG_DIRNAME = "mlpstorage"
 USER_CONFIG_FILENAME = "config.yaml"
 RESULTS_DIR_KEY = "results_dir"
+
+#: Keys the per-user file may carry. Each is an argparse dest that describes
+#: the ENVIRONMENT (where things are, how MPI launches, how output looks).
+#: Adding a key here is the acceptance test: if it would pick the workload
+#: (model, accelerator type/count, mode, memory, params) it does not belong.
+USER_CONFIG_KEYS = (
+    RESULTS_DIR_KEY,      # tree every command writes into (`mlpstorage init`)
+    "systemname",         # --systemname / -sn
+    "data_dir",           # --data-dir / -dd (training)
+    "checkpoint_folder",  # --checkpoint-folder / -cf (checkpointing run)
+    "hosts",              # --hosts / -s: list, or one comma-separated string
+    "mpi_bin",            # --mpi-bin {mpirun,mpiexec}
+    "mpi_btl",            # --mpi-btl {auto,vader,tcp}
+    "oversubscribe",      # --oversubscribe (true/false)
+    "allow_run_as_root",  # --allow-run-as-root (true/false)
+    "mpi_params",         # --mpi-params: string, or list of strings
+    "dlio_bin_path",      # --dlio-bin-path / -dp
+    "exec_type",          # --exec-type / -et {mpi,docker}
+    "color",              # --color {auto,always,never}
+    "stream_log_level",   # --stream-log-level
+)
+
+#: Keys that also have an ``MLPSTORAGE_*`` env var (tier 3, above this file).
+ENV_BACKED_KEYS = {
+    RESULTS_DIR_KEY: MLPSTORAGE_RESULTS_DIR_ENVVAR,
+    "systemname": MLPSTORAGE_SYSTEMNAME_ENVVAR,
+    "data_dir": MLPSTORAGE_DATA_DIR_ENVVAR,
+    "checkpoint_folder": MLPSTORAGE_CHECKPOINT_FOLDER_ENVVAR,
+}
 
 #: Where ``mlpstorage init`` puts the tree when no ``[path]`` is given.
 DEFAULT_RESULTS_DIR = "~/mlpstorage-results"
@@ -47,7 +86,12 @@ SOURCE_ENV = MLPSTORAGE_RESULTS_DIR_ENVVAR
 
 _HEADER = (
     "# Per-user mlpstorage defaults. Written by `mlpstorage init`; hand edits\n"
-    "# are kept. Precedence: command-line flag > MLPSTORAGE_* env var > this file.\n"
+    "# are kept. Precedence: command-line flag > --config-file YAML >\n"
+    "# MLPSTORAGE_* env var > this file. Keys this file may carry (all\n"
+    "# describe the environment, never the workload): results_dir, systemname,\n"
+    "# data_dir, checkpoint_folder, hosts, mpi_bin, mpi_btl, oversubscribe,\n"
+    "# allow_run_as_root, mpi_params, dlio_bin_path, exec_type, color,\n"
+    "# stream_log_level. See `mlpstorage --help_all` / ManPage.md FILES.\n"
 )
 
 

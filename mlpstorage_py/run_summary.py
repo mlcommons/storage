@@ -16,6 +16,7 @@ from typing import Any, List, Optional, Tuple
 import yaml
 
 from mlpstorage_py import VERSION
+from mlpstorage_py.cli.config_layers import keys_from
 from mlpstorage_py.config import (
     CONFIGS_ROOT_DIR,
     VDB_INDEX_DEFAULT,
@@ -538,6 +539,11 @@ def print_run_summary(args) -> None:
     lines.append(_row("MLPSTORAGE_SYSTEMNAME:",        os.environ.get('MLPSTORAGE_SYSTEMNAME',        '[not set]')))
     lines.append(_row("MLPSTORAGE_DATA_DIR:",          os.environ.get('MLPSTORAGE_DATA_DIR',          '[not set]')))
     lines.append(_row("MLPSTORAGE_CHECKPOINT_FOLDER:", os.environ.get('MLPSTORAGE_CHECKPOINT_FOLDER', '[not set]')))
+    # The per-user config file (tier below the env vars) and what it filled.
+    user_path = getattr(args, 'user_config_path', None)
+    lines.append(_row("USER_CONFIG_FILE:", user_path if user_path and os.path.isfile(user_path) else '[not present]'))
+    applied = keys_from(args, user_path) if user_path else []
+    lines.append(_row("USER_CONFIG_KEYS_APPLIED:", ', '.join(applied) if applied else '[none]'))
     lines.append(_row("MPI_RUN_BIN:",                  os.environ.get('MPI_RUN_BIN',                  '[not set]')))
     lines.append(_row("MPI_EXEC_BIN:",                 os.environ.get('MPI_EXEC_BIN',                 '[not set]')))
     # KVCACHE_SELECTED_WORKLOADS is read by kv-cache-wrapper.sh and filters the

@@ -1,6 +1,10 @@
-# Sample for the --config-file/-c override mechanism (YAML applied on top of
-# the parsed command line). This is NOT the per-user config that
-# `mlpstorage init` writes to ~/.config/mlpstorage/config.yaml.
+# Sample for the --config-file/-c mechanism: a YAML of flag values for ONE
+# invocation, keyed by argparse destination. It fills whatever the command
+# line did not type (a typed flag always wins) and may name any flag of the
+# command, including workload-selecting ones. Precedence for every key:
+#   typed flag > --config-file > MLPSTORAGE_* env var > ~/.config/mlpstorage/config.yaml
+# This is NOT the per-user config that `mlpstorage init` writes to
+# ~/.config/mlpstorage/config.yaml (environment keys only; see ManPage.md).
 hosts: 127.0.0.1
 data_dir: /mnt/nvme
 results_dir: /root/mlpstorage_results/

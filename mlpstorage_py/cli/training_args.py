@@ -169,11 +169,10 @@ def _add_training_core_args(parser, command, accel_choices):
 
     add_mpi_arguments(parser)
 
-    # --data-dir is optional at the argparse layer so --config-file (applied
-    # after parse_args) can supply it for object-storage workflows. Enforcement
-    # is split: file mode is checked in cli_parser before YAML overrides so
-    # users get an immediate, argparse-style error; object mode is checked in
-    # validate_training_arguments after YAML has had its chance to populate it.
+    # --data-dir is optional at the argparse layer so the lower tiers
+    # (--config-file YAML, MLPSTORAGE_DATA_DIR, the per-user config file) can
+    # supply it. Enforcement: file mode is checked in cli_parser right after
+    # the layers are applied; object mode in validate_training_arguments.
     parser.add_argument(
         '--data-dir', '-dd',
         type=str,
@@ -181,7 +180,8 @@ def _add_training_core_args(parser, command, accel_choices):
         help=(
             "Dataset location. For file storage, this is a filesystem path. "
             "For object storage, this is an object key prefix or full object URI. "
-            "Defaults to MLPSTORAGE_DATA_DIR env var if set."
+            "Defaults to MLPSTORAGE_DATA_DIR env var if set, else data_dir in "
+            "~/.config/mlpstorage/config.yaml."
         )
     )
 

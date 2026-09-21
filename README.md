@@ -457,16 +457,19 @@ are documented in [docs/OBJECT_STORAGE_GUIDE.md](docs/OBJECT_STORAGE_GUIDE.md).
 
 ### YAML Config-file Overrides (`--config-file`)
 
-Every benchmark leaf accepts `--config-file PATH` (short form: `-c PATH`).
-The YAML file is loaded **after** the CLI arguments are parsed and overrides
-matching keys in the parsed namespace. Precedence is:
+Every benchmark leaf accepts `--config-file PATH` (short form: `-c PATH`), a
+YAML file of flag values keyed by argparse destination. It fills every flag
+the command line did not type; a flag you typed always wins. Every layered
+flag is resolved in one order, for every key:
 
 ```
-CLI args  >  YAML config file  >  argparse defaults  >  environment variables
+typed flag  >  --config-file YAML  >  MLPSTORAGE_* env var  >  ~/.config/mlpstorage/config.yaml  >  built-in default
 ```
 
 Unknown keys produce a warning and are ignored; explicit `null` values are
-skipped so a YAML file cannot silently null out a CLI-supplied flag.
+skipped so a YAML file cannot silently null out a flag. `mlpstorage` prints
+the keys each file supplied (`values from --config-file ...`, `defaults from
+~/.config/mlpstorage/config.yaml: ...`) right after the `results-dir:` line.
 
 Example `unet3d-h100.yaml`:
 
@@ -499,6 +502,17 @@ mlpstorage closed training unet3d run file -c unet3d-h100.yaml
 
 The YAML form for `params` accepts either a dict (shown above, recommended)
 or a list of `key=value` strings.
+
+**Per-user defaults.** Settings that describe your *environment* rather than
+a particular run belong in `~/.config/mlpstorage/config.yaml` instead, the
+file `mlpstorage init` creates. Hand-add any of `systemname`, `data_dir`,
+`checkpoint_folder`, `hosts`, `mpi_bin`, `mpi_btl`, `oversubscribe`,
+`allow_run_as_root`, `mpi_params`, `dlio_bin_path`, `exec_type`, `color`,
+`stream_log_level` next to the `results_dir` line and every command picks
+them up. Workload-selecting keys (model, accelerator type or count, mode,
+client memory, `params`) are refused there so a stale file can never reshape
+a run; put those in a `--config-file` YAML. See ManPage.md "The per-user
+config file" for the full table.
 
 ### Parameter Overrides (`--params`)
 

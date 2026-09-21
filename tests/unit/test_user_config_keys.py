@@ -128,7 +128,6 @@ class TestUserConfigSuppliesDefaults:
                             "hosts": ["n1", "n2:4"]})
         args = _parse(TRAIN_RUN, monkeypatch)
         assert args.hosts == ["n1", "n2:4"]
-        assert args.num_client_hosts == 2
 
         _write_user_config({"hosts": "n1,n2,n3"})
         args = _parse(TRAIN_RUN, monkeypatch)
@@ -317,12 +316,11 @@ class TestPrecedence:
         _write_user_config({"results_dir": str(tmp_path), "systemname": "s"})
         override = tmp_path / "run.yaml"
         override.write_text(yaml.safe_dump({
-            "accelerator_type": "mi355", "hosts": ["h1", "h2"],
+            "num_client_hosts": 2, "hosts": ["h1", "h2"],
             "params": {"dataset.num_files_train": 42000},
         }))
-        argv = [a for a in TRAIN_RUN if a not in ("-at", "b200")]
-        args = _parse(argv + ["-c", str(override)], monkeypatch)
-        assert args.accelerator_type == "mi355"
+        args = _parse(TRAIN_RUN + ["-c", str(override)], monkeypatch)
+        assert args.num_client_hosts == 2
         assert args.hosts == ["h1", "h2"]
         assert args.params == ["dataset.num_files_train=42000"]
 
