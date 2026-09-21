@@ -45,11 +45,17 @@ from mlpstorage_py.reporting import (
 # asserts these substrings verbatim (Phase 5 D-02 precedent). Formatted at call sites via
 # ``.format(n=..., key=..., basename=...)``; the ``§`` (U+00A7) character is intentional and
 # grep-tested.
+#
+# There is deliberately NO checkpointing op-count template here. The former
+# ``_INVALID_MSG_CHECKPOINT_COUNT`` ("expected 10 checkpoint operations …")
+# counted entries of list-valued metrics, and real DLIO checkpointing output
+# carries none — the gate could never fire (Issue #865). The 10-write/10-read
+# rule (Rules.md §2.1.23 / §4.7.1) is enforced from the recorded
+# ``--num-checkpoints-write/read`` args by ``CheckpointSubmissionRulesChecker``,
+# which ``_process_workload_groups`` runs for every checkpointing group, and
+# by ``mlpstorage validate`` (4.7.1 checkpointCacheFlushValidation).
 _INVALID_MSG_TRAINING_COUNT = (
     "expected 6 training invocations per Rules.md §2.1.17 (1 warmup + 5 real); found {n}"
-)
-_INVALID_MSG_CHECKPOINT_COUNT = (
-    "expected 10 checkpoint operations per Rules.md §2.1.23; found {n}"
 )
 _INVALID_MSG_EMPTY_METRIC = (
     "metric {key} is empty in invocation {basename}; cannot aggregate"
@@ -2495,8 +2501,10 @@ class ReportGenerator:
         list per invocation. If ``len(runs) > 1`` (rare per Rules.md
         §2.1.23 which permits 1–2 timestamp directories), takes the
         inter-invocation ``fmean`` for shape consistency with the
-        training branch. Op-count strictness (D-24 template c) is a
-        caller-side gate in 06-04, not here.
+        training branch. Op-count strictness (10 writes / 10 reads) is
+        NOT a metric-list concern — it is enforced from the recorded args
+        by ``CheckpointSubmissionRulesChecker`` in the caller's verifier
+        pass (Issue #865), not here.
 
         Empty metric list -> ``StatisticsError`` propagates (D-23). Do
         NOT copy the "fmean(x) if x, coerce to zero otherwise" idiom
@@ -3451,7 +3459,15 @@ class ReportGenerator:
                     f'{runs[0].benchmark_type.value if runs[0].benchmark_type else "?"} '
                     f'({ident1}, {ident2}) — {len(runs)} runs'
                 )
-                verifier = BenchmarkVerifier(*runs, logger=self.logger)
+                # Submission-level pass: force the ``*SubmissionRulesChecker``
+                # family even when the group holds ONE invocation. Without
+                # ``mode="multi"`` a single-invocation group (the common
+                # CLOSED checkpointing shape — one combined 10-write/10-read
+                # run) got the per-run checks a second time and never saw
+                # ``check_num_runs`` / ``check_invocation_structure``
+                # (Issue #865). The per-run pass in ``_process_benchmark_run``
+                # has already run the single-run checkers for each run.
+                verifier = BenchmarkVerifier(*runs, logger=self.logger, mode="multi")
                 verifier_category = verifier.verify()
                 issues = list(verifier.issues) if verifier.issues else []
 
@@ -3470,11 +3486,10 @@ class ReportGenerator:
                 # is a simulation, not a submission; INVALID semantics
                 # don't apply.
                 invalid_messages: List[str] = []
-                # Issue #717: the D-26/D-27 (training) and D-20/D-24
-                # (checkpointing) rules-strict gates encode Rules.md
-                # invariants that apply to the ``run`` command only —
-                # ``datagen`` legitimately produces a single invocation
-                # and carries no metric lists. The workload grouping
+                # Issue #717: the D-26/D-27 (training) rules-strict
+                # gates encode Rules.md invariants that apply to the
+                # ``run`` command only — ``datagen`` legitimately
+                # produces a single invocation. The workload grouping
                 # key does not include ``command`` (D-05), and datagen
                 # runs typically land in their own group anyway because
                 # they carry ``accelerator=None`` while ``run`` groups
@@ -3524,20 +3539,15 @@ class ReportGenerator:
                                     f"{os.path.basename(earliest_abs)} "
                                     "(excluded from aggregate)"
                                 )
-                    elif bt == BENCHMARK_TYPES.checkpointing:
-                        # D-20/D-24: each invocation's metric lists MUST
-                        # have exactly 10 entries (Rules.md §2.1.23).
-                        for run in runs:
-                            violated = False
-                            for _mkey, val in (run.metrics or {}).items():
-                                if isinstance(val, list) and len(val) != 10:
-                                    invalid_messages.append(
-                                        _INVALID_MSG_CHECKPOINT_COUNT.format(n=len(val))
-                                    )
-                                    violated = True
-                                    break  # one violation per run is enough
-                            if violated:
-                                break
+                    # checkpointing has NO reportgen-side rules-strict
+                    # gate. The former D-20/D-24 gate counted entries of
+                    # list-valued metrics ("expected 10 checkpoint
+                    # operations …"); real DLIO checkpointing output has no
+                    # list-valued metrics, so it was unreachable (Issue
+                    # #865). The 10-write/10-read rule is enforced from the
+                    # recorded args by ``CheckpointSubmissionRulesChecker``
+                    # in the verifier pass above (``mode="multi"``) and by
+                    # ``mlpstorage validate`` §4.7.1.
                     # vdb + kvcache SKIP rules-strict gates entirely per
                     # the D-22 pass-through boundary — their INVALID
                     # category (if any) is set by the upstream

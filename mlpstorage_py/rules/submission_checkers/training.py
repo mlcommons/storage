@@ -6,7 +6,7 @@ Validates training benchmark submissions (multiple runs).
 
 from typing import Optional
 
-from mlpstorage_py.config import PARAM_VALIDATION
+from mlpstorage_py.config import BENCHMARK_TYPES, PARAM_VALIDATION
 from mlpstorage_py.editions import current_edition
 from mlpstorage_py.rules.issues import Issue
 from mlpstorage_py.rules.submission_checkers.base import MultiRunRulesChecker
@@ -21,11 +21,36 @@ class TrainingSubmissionRulesChecker(MultiRunRulesChecker):
     supported_models = current_edition().models("training", "closed")
     REQUIRED_RUNS = 5
 
+    def _submission_invocations(self):
+        """Return training runs that count as submission invocations.
+
+        Only ``command == 'run'`` invocations are scored runs. Auxiliary
+        commands (``datagen``, ``datasize``, ``configview``) emit a results
+        directory too, and reportgen's workload pass now verifies every
+        group at submission level (Issue #865, ``BenchmarkVerifier(...,
+        mode="multi")``) — without this filter a lone ``datagen`` group
+        would be marked INVALID for "requires 5 runs", the #717 shape.
+        Mirrors ``CheckpointSubmissionRulesChecker._submission_invocations``
+        (#791).
+        """
+        return [
+            run for run in self.benchmark_runs
+            if run.benchmark_type == BENCHMARK_TYPES.training
+            and run.command == 'run'
+        ]
+
     def check_num_runs(self) -> Optional[Issue]:
         """
         Require 5 runs for training benchmark closed submission.
+
+        Counts ``run`` invocations only; a group with none (e.g. a
+        ``datagen``-only group) has no run-count rule to apply.
         """
-        num_runs = len(self.benchmark_runs)
+        submission_runs = self._submission_invocations()
+        if not submission_runs:
+            return None
+
+        num_runs = len(submission_runs)
         if num_runs < self.REQUIRED_RUNS:
             return Issue(
                 validation=PARAM_VALIDATION.INVALID,
