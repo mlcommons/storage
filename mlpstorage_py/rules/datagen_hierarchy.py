@@ -33,6 +33,15 @@ the run side needs to reproduce the generated names under ``skip_listing``:
 ``num_subfolders_train``, ``dataset_format``, ``rules_edition``. Readers
 tolerate their absence (manifests written before the extension).
 
+``training run`` also copies the manifest it consumed into its own results
+leaf as ``<leaf>/datagen-manifest.json`` (``write_datagen_manifest_snapshot``,
+schema ``mlps-datagen-manifest-snapshot/1``: the v1 body verbatim plus where
+it was read from, when, and which ``MANIFEST-*`` findings ``--skip-validation``
+waived) and names it in the leaf metadata as ``datagen_manifest_file``. That
+is the D4 linkage: ``mlpstorage validate`` (rule 3.3.1 ``MANIFEST-*`` tokens)
+ties the run to this submission's ``datagen/`` leaf through
+``source_datagen_result_dir`` without ever touching ``--data-dir``.
+
 Whatif exemption
 ----------------
 
@@ -63,6 +72,13 @@ from mlpstorage_py.editions import checker_parameters, current_edition
 
 DATAGEN_MANIFEST_FILENAME = ".mlps-datagen-manifest.json"
 DATAGEN_MANIFEST_SCHEMA_VERSION = 1
+# The run leaf's copy of the manifest it consumed (D4 linkage) and the
+# ``*_metadata.json`` key that declares it — same doctrine as
+# ``provenance.json`` / ``provenance_file``: declared-but-absent is a
+# validator error, undeclared is silent (leaves that predate the snapshot).
+DATAGEN_MANIFEST_SNAPSHOT_FILENAME = "datagen-manifest.json"
+DATAGEN_MANIFEST_SNAPSHOT_SCHEMA = "mlps-datagen-manifest-snapshot/1"
+METADATA_DATAGEN_MANIFEST_KEY = "datagen_manifest_file"
 
 # Files required inside dlio_config/ per submission_checker rule §2.1.15
 # (see checks/directory_checks.py:129-130). Kept local because §2.1.15
@@ -711,3 +727,138 @@ def read_datagen_manifest(data_dir: str, model: str) -> Optional[DatagenManifest
             code=ErrorCode.CONFIG_INVALID_VALUE,
         ) from e
     return _parse_datagen_manifest(raw, location)
+
+
+# --------------------------------------------------------------------------- #
+# Run-leaf snapshot of the consumed manifest (D4 linkage)                      #
+# --------------------------------------------------------------------------- #
+
+_MANIFEST_BODY_KEYS = (
+    "schema_version", "model", "num_files_train", "num_samples_per_file",
+    "record_length_bytes", "num_subfolders_train", "dataset_format",
+    "rules_edition", "created_at", "mlpstorage_version",
+    "source_datagen_result_dir",
+)
+
+
+def datagen_manifest_body(manifest: DatagenManifest) -> Dict[str, Any]:
+    """The v1 on-disk body of ``manifest`` (no ``location``), in the writer's
+    key order. Optional fields a pre-extension manifest lacks are omitted,
+    never emitted as ``null``, so the body round-trips through
+    :func:`_parse_datagen_manifest` exactly as the original did."""
+    return {k: getattr(manifest, k) for k in _MANIFEST_BODY_KEYS
+            if getattr(manifest, k) is not None}
+
+
+@dataclasses.dataclass
+class DatagenManifestSnapshot:
+    """A parsed ``<run-leaf>/datagen-manifest.json``.
+
+    ``manifest.location`` is where the run read the manifest from
+    (``<data-dir>/<model>/.mlps-datagen-manifest.json``); ``path`` is the
+    snapshot file itself. ``overridden`` lists the ``MANIFEST-*`` findings
+    the run proceeded past under ``--skip-validation`` / whatif.
+    """
+
+    path: str
+    consumed_at: str
+    overridden: List[str]
+    manifest: DatagenManifest
+
+
+def write_datagen_manifest_snapshot(
+    leaf_dir: str,
+    manifest: DatagenManifest,
+    overridden: Optional[List[str]] = None,
+    now: Optional[datetime.datetime] = None,
+) -> str:
+    """Write ``<leaf_dir>/datagen-manifest.json`` atomically (tmp sibling +
+    ``os.replace``) and return its path. ``leaf_dir`` must exist."""
+    if now is None:
+        now = datetime.datetime.now(datetime.timezone.utc)
+    consumed_at = now.astimezone(datetime.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    payload = {
+        "schema": DATAGEN_MANIFEST_SNAPSHOT_SCHEMA,
+        "consumed_at": consumed_at,
+        "location": manifest.location,
+        "overridden": list(overridden or []),
+        "manifest": datagen_manifest_body(manifest),
+    }
+    dst = os.path.join(leaf_dir, DATAGEN_MANIFEST_SNAPSHOT_FILENAME)
+    tmp = os.path.join(leaf_dir, f".{DATAGEN_MANIFEST_SNAPSHOT_FILENAME}.tmp.{os.getpid()}")
+    try:
+        with open(tmp, "w", encoding="utf-8") as fh:
+            fh.write(json.dumps(payload, indent=2) + "\n")
+        os.replace(tmp, dst)
+    except BaseException:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+    return dst
+
+
+def read_datagen_manifest_snapshot(leaf_dir: str) -> Optional[DatagenManifestSnapshot]:
+    """Read ``<leaf_dir>/datagen-manifest.json``; ``None`` when absent.
+
+    A snapshot that exists but cannot be read or parsed raises
+    ``ConfigurationError`` — the inner manifest goes through the same v1
+    parser as the data-dir file, so a corrupt snapshot is just as loud.
+    """
+    path = os.path.join(leaf_dir, DATAGEN_MANIFEST_SNAPSHOT_FILENAME)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "rb") as fh:
+            raw = fh.read()
+    except OSError as e:
+        raise ConfigurationError(
+            f"Cannot read the datagen manifest snapshot at {path!r}: {e}.",
+            parameter="results_dir", actual=path,
+            code=ErrorCode.CONFIG_INVALID_VALUE,
+        ) from e
+    try:
+        data = json.loads(raw.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as e:
+        raise ConfigurationError(
+            f"Datagen manifest snapshot at {path!r} is not valid JSON: {e}.",
+            parameter="results_dir", actual=path,
+            code=ErrorCode.CONFIG_PARSE_ERROR,
+        ) from e
+    if not isinstance(data, dict):
+        raise ConfigurationError(
+            f"Datagen manifest snapshot at {path!r} must be a JSON object, got "
+            f"{type(data).__name__}.",
+            parameter="results_dir", actual=path,
+            code=ErrorCode.CONFIG_PARSE_ERROR,
+        )
+    schema = data.get("schema")
+    if schema != DATAGEN_MANIFEST_SNAPSHOT_SCHEMA:
+        raise ConfigurationError(
+            f"Datagen manifest snapshot at {path!r} has schema {schema!r}; this "
+            f"mlpstorage reads {DATAGEN_MANIFEST_SNAPSHOT_SCHEMA!r}.",
+            parameter="schema", expected=DATAGEN_MANIFEST_SNAPSHOT_SCHEMA,
+            actual=schema, code=ErrorCode.CONFIG_INCOMPATIBLE,
+        )
+    body = data.get("manifest")
+    if not isinstance(body, dict):
+        raise ConfigurationError(
+            f"Datagen manifest snapshot at {path!r} has no 'manifest' object.",
+            parameter="manifest", actual=body, code=ErrorCode.CONFIG_PARSE_ERROR,
+        )
+    location = str(data.get("location") or path)
+    manifest = _parse_datagen_manifest(json.dumps(body).encode("utf-8"), location)
+    overridden = data.get("overridden") or []
+    if not isinstance(overridden, list):
+        raise ConfigurationError(
+            f"Datagen manifest snapshot at {path!r}: 'overridden' must be a list.",
+            parameter="overridden", actual=overridden,
+            code=ErrorCode.CONFIG_PARSE_ERROR,
+        )
+    return DatagenManifestSnapshot(
+        path=path,
+        consumed_at=str(data.get("consumed_at") or ""),
+        overridden=[str(x) for x in overridden],
+        manifest=manifest,
+    )

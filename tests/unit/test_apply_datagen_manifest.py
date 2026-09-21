@@ -341,16 +341,22 @@ class TestMetadataDeclaresSnapshot:
     """``training_<ts>_metadata.json`` names the sidecar, like ``provenance_file``."""
 
     def _metadata(self, tmp_path, declare):
-        stub = SimpleNamespace(
-            args=SimpleNamespace(command="run", model="unet3d", data_dir="/data"),
-            run_datetime="20260921_180000", run_result_output=str(tmp_path),
-            combined_params={"dataset": {"num_files_train": 400}}, params_dict={},
-            cluster_information=None, runtime=None, verification=None,
-            command_output_files=[],
-        )
+        # A real TrainingBenchmark object without its constructor (which
+        # reserves a leaf, registers the run, collects the cluster...), so the
+        # inherited ``metadata`` property runs against the real helpers.
+        stub = TrainingBenchmark.__new__(TrainingBenchmark)
+        stub.args = SimpleNamespace(command="run", model="unet3d", data_dir="/data")
+        stub.run_datetime = "20260921_180000"
+        stub.run_result_output = str(tmp_path)
+        stub.combined_params = {"dataset": {"num_files_train": 400}}
+        stub.params_dict = {}
+        stub.cluster_information = None
+        stub.runtime = None
+        stub.verification = None
+        stub.command_output_files = []
         if declare:
             stub._datagen_manifest_snapshot = DATAGEN_MANIFEST_SNAPSHOT_FILENAME
-        return TrainingBenchmark.metadata.fget(stub)
+        return stub.metadata
 
     def test_declared_when_snapshot_written(self, tmp_path):
         md = self._metadata(tmp_path, declare=True)

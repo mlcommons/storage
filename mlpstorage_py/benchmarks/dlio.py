@@ -15,8 +15,11 @@ from mlpstorage_py.dependency_check import validate_benchmark_dependencies
 from mlpstorage_py.errors import ConfigurationError, ErrorCode
 from mlpstorage_py.rules import calculate_training_data_size, HostInfo, HostMemoryInfo, HostCPUInfo, ClusterInformation
 from mlpstorage_py.rules.datagen_hierarchy import (
+    DATAGEN_MANIFEST_SNAPSHOT_FILENAME,
+    METADATA_DATAGEN_MANIFEST_KEY,
     datagen_manifest_location,
     read_datagen_manifest,
+    write_datagen_manifest_snapshot,
     assert_data_dir_hierarchy_absent,
     validate_checkpoint_leaf,
     validate_datagen_leaf,
@@ -39,6 +42,30 @@ def _quiet_sizing_logger():
     quiet.propagate = False
     return quiet
 
+
+
+def _snapshot_datagen_manifest(benchmark, manifest, overridden) -> None:
+    """Copy the consumed manifest into the run leaf as ``datagen-manifest.json``
+    (D4 linkage) and remember the filename so ``metadata`` declares it.
+
+    ``run`` only — ``configview`` writes no leaf artifacts. Never fatal: a
+    snapshot problem is a warning; the leaf then declares nothing and
+    validate stays silent on it (as for a run without a manifest). Module
+    level, like ``_datasize_minimum``, so the stub-based unit tests reach it.
+    """
+    leaf = getattr(benchmark, 'run_result_output', None)
+    if not leaf or getattr(benchmark.args, 'command', None) != 'run':
+        return
+    try:
+        path = write_datagen_manifest_snapshot(leaf, manifest, overridden)
+    except Exception as e:  # noqa: BLE001 — see docstring
+        benchmark.logger.warning(
+            f'Could not write {DATAGEN_MANIFEST_SNAPSHOT_FILENAME} in {leaf!r}: {e}. '
+            f'validate will not be able to link this run to its datagen leaf.'
+        )
+        return
+    benchmark._datagen_manifest_snapshot = DATAGEN_MANIFEST_SNAPSHOT_FILENAME
+    benchmark.logger.debug(f'Datagen manifest snapshotted to {path}')
 
 def _datasize_minimum(benchmark) -> Optional[int]:
     """The CLOSED minimum ``num_files_train`` for ``benchmark``'s run cluster,
@@ -911,10 +938,13 @@ class TrainingBenchmark(DLIOBenchmark):
         except (TypeError, ValueError):
             run_count = None
 
+        overridden = []   # MANIFEST-* findings waived under --skip-validation / whatif
+
         def _fail(message: str, suggestion: str, parameter: str) -> None:
             if lenient:
                 why = '--skip-validation' if getattr(args, 'skip_validation', False) else 'whatif mode'
                 self.logger.warning(f'{message} {suggestion} Proceeding anyway ({why}).')
+                overridden.append(message.split(':', 1)[0])
                 return
             raise ConfigurationError(
                 message,
@@ -1009,6 +1039,7 @@ class TrainingBenchmark(DLIOBenchmark):
                 suggestion,
                 'dataset.num_files_train',
             )
+            _snapshot_datagen_manifest(self, manifest, overridden)
             return
 
         # --- inject ---------------------------------------------------------
@@ -1040,6 +1071,18 @@ class TrainingBenchmark(DLIOBenchmark):
             f'{generated:,} files; this run reads the first {reads} '
             f'(dataset.num_files_generated={generated:,}).'
         )
+        _snapshot_datagen_manifest(self, manifest, overridden)
+
+    @property
+    def metadata(self):
+        """Base metadata plus ``datagen_manifest_file`` when this run
+        snapshotted the manifest it consumed (D4 linkage; declared-but-absent
+        is a 3.3.1 ``MANIFEST-MISSING`` error at validation time)."""
+        metadata = Benchmark.metadata.fget(self)
+        snapshot = getattr(self, '_datagen_manifest_snapshot', None)
+        if snapshot:
+            metadata[METADATA_DATAGEN_MANIFEST_KEY] = snapshot
+        return metadata
 
     def add_datadir_param(self):
         # Detect storage mode set by _apply_object_storage_params or _apply_odirect_params.

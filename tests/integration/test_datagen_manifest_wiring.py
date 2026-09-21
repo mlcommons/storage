@@ -122,3 +122,50 @@ class TestRunWiring:
         meta = json.load(open(os.path.join(benchmark.run_result_output, f"training_{ts}_metadata.json")))
         assert meta["override_parameters"]["dataset.num_files_generated"] == run_count + 1
         assert meta["parameters"]["dataset"]["num_files_generated"] == run_count + 1
+
+
+class TestSnapshotWiring:
+    """D4 linkage: a real run leaf gets ``datagen-manifest.json`` and its
+    metadata declares it; configview writes nothing into a leaf."""
+
+    def test_run_leaf_carries_the_consumed_manifest(self, tmp_path):
+        from mlpstorage_py.rules.datagen_hierarchy import (
+            DATAGEN_MANIFEST_SNAPSHOT_FILENAME, METADATA_DATAGEN_MANIFEST_KEY,
+            read_datagen_manifest_snapshot,
+        )
+        benchmark, _ = _run_benchmark(tmp_path)
+        run_count = int(benchmark.combined_params["dataset"]["num_files_train"])
+        _write_manifest(benchmark, run_count + 5)
+        benchmark._pre_execution_gate()
+        benchmark.write_metadata()
+        leaf = benchmark.run_result_output
+        snapshot = read_datagen_manifest_snapshot(leaf)
+        assert snapshot is not None
+        assert snapshot.manifest.num_files_train == run_count + 5
+        assert snapshot.manifest.location == os.path.join(
+            benchmark.args.data_dir, "unet3d", DATAGEN_MANIFEST_FILENAME)
+        assert snapshot.overridden == []
+        ts = os.path.basename(leaf)
+        meta = json.load(open(os.path.join(leaf, f"training_{ts}_metadata.json")))
+        assert meta[METADATA_DATAGEN_MANIFEST_KEY] == DATAGEN_MANIFEST_SNAPSHOT_FILENAME
+        assert meta["parameters"]["dataset"]["num_files_generated"] == run_count + 5
+
+    def test_configview_writes_no_snapshot(self, tmp_path):
+        from mlpstorage_py.rules.datagen_hierarchy import DATAGEN_MANIFEST_SNAPSHOT_FILENAME
+        benchmark, _ = _run_benchmark(tmp_path, command="configview")
+        run_count = int(benchmark.combined_params["dataset"]["num_files_train"])
+        _write_manifest(benchmark, run_count + 5)
+        benchmark._pre_execution_gate()
+        assert benchmark.params_dict["dataset.num_files_generated"] == run_count + 5
+        assert not os.path.exists(os.path.join(benchmark.run_result_output,
+                                               DATAGEN_MANIFEST_SNAPSHOT_FILENAME))
+        assert "datagen_manifest_file" not in benchmark.metadata
+
+    def test_whatif_shortfall_snapshot_records_the_override(self, tmp_path):
+        from mlpstorage_py.rules.datagen_hierarchy import read_datagen_manifest_snapshot
+        benchmark, _ = _run_benchmark(tmp_path, mode="whatif")
+        run_count = int(benchmark.combined_params["dataset"]["num_files_train"])
+        _write_manifest(benchmark, run_count - 1)
+        benchmark._pre_execution_gate()
+        snapshot = read_datagen_manifest_snapshot(benchmark.run_result_output)
+        assert snapshot.overridden == ["MANIFEST-003"]
