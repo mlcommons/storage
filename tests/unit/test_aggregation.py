@@ -33,10 +33,13 @@ Seven test classes mapped 1:1 onto contracts and to fixtures under
   aggregate is emitted verbatim per D-22 (no ``if x else`` reinterpret).
 
 - ``TestInvalidRulesStrict``        — D-23 / D-24 / D-26 / D-27 / D-29
-  The FOUR D-24 verbatim templates fire as substrings in their INVALID
+  The THREE D-24 verbatim templates fire as substrings in their INVALID
   scenarios (training count != 6, warmup undetected in 6-invocation
-  set, checkpointing op count != 10, empty metric list). Whatif rows
-  SKIP the rules-strict gates entirely (D-29).
+  set, empty metric list). Whatif rows SKIP the rules-strict gates
+  entirely (D-29). The former fourth template — checkpointing metric-list
+  length != 10 — was retired by #865: real DLIO checkpointing output has
+  no list-valued metrics, and op-count enforcement is the verifier's
+  (``CheckpointSubmissionRulesChecker``) and ``validate`` §4.7.1's job.
 
 - ``TestColumnOrdering``            — D-14 / D-18
   The D-18 test-lock: 6-column prefix in exact order, trailing
@@ -72,9 +75,9 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from mlpstorage_py import report_generator as _report_generator_module
 from mlpstorage_py.report_generator import (
     ReportGenerator,
-    _INVALID_MSG_CHECKPOINT_COUNT,
     _INVALID_MSG_EMPTY_METRIC,
     _INVALID_MSG_TRAINING_COUNT,
 )
@@ -2154,18 +2157,30 @@ class TestInvalidRulesStrict:
         )
         assert preset_warmup in gen.warmup_result_dirs
 
-    def test_checkpointing_op_count_mismatch_downgrades_to_invalid(self, tmp_path):
-        """D-24 template c: a checkpointing metric list of len != 10 → INVALID.
+    def test_checkpoint_count_template_retired(self):
+        """Issue #865: the unreachable D-24 checkpoint op-count template is gone.
 
-        The gate counts entries of any list-valued metric. Real DLIO
-        checkpointing output carries no per-op lists (#830), so on a real
-        tree this gate never has anything to count; the checkpoint-count
-        rule that does fire in production is the validator's §4.7.1
-        (``--num-checkpoints-write/read``). The list is synthesized here so
-        the gate's own logic stays covered without a fixture pretending
-        DLIO writes one. Verifies the verbatim substring
-        ``"expected 10 checkpoint operations per Rules.md §2.1.23;
-        found 7"``.
+        ``_INVALID_MSG_CHECKPOINT_COUNT`` described a count of metric-list
+        entries that real DLIO checkpointing output never carries. Retiring
+        the gate retires its template; nothing may import it back.
+        """
+        assert not hasattr(_report_generator_module, "_INVALID_MSG_CHECKPOINT_COUNT"), (
+            "_INVALID_MSG_CHECKPOINT_COUNT still exists — the #865 gate was "
+            "meant to be deleted, not re-keyed"
+        )
+
+    def test_checkpointing_metric_list_length_is_not_an_invalid_gate(self, tmp_path):
+        """Issue #865: reportgen no longer counts metric-list entries for checkpointing.
+
+        The retired D-24 "template c" gate marked a checkpointing row
+        INVALID when any list-valued metric had ``len != 10``. Real DLIO
+        checkpointing output has no list-valued metrics (#830 / #864), so
+        the gate could never fire on a real tree; the op count is enforced
+        from the recorded ``--num-checkpoints-write/read`` args by the
+        verifier reportgen already runs per group (see the next test) and
+        by ``mlpstorage validate`` §4.7.1. A ``run`` whose args say 10/10
+        but whose in-memory metrics carry a synthetic 7-element list must
+        therefore NOT be INVALID, and no op-count text may appear.
         """
         gen = _make_bare_generator(tmp_path)
         runs_root = tmp_path / "closed" / "acme" / "results" / "sys-a" / "checkpointing" / "llama3-8b" / "run"
@@ -2176,6 +2191,9 @@ class TestInvalidRulesStrict:
             model="llama3-8b",
             result_dir=run.result_dir,
             metrics={"synthetic_per_op_list": [1.0] * 7},
+            parameters={"checkpoint": {
+                "num_checkpoints_write": 10, "num_checkpoints_read": 10,
+            }},
             accelerator=None,
             run_datetime="20260703_120000",
         )
@@ -2184,14 +2202,61 @@ class TestInvalidRulesStrict:
 
         assert len(gen.workload_results) == 1
         result = next(iter(gen.workload_results.values()))
-        assert result.category == PARAM_VALIDATION.INVALID
         text = self._row_issue_text(result)
-        assert _INVALID_MSG_CHECKPOINT_COUNT.format(n=7) in text, (
-            f"D-24 template c not present verbatim in issues text; got: {text!r}"
+        assert "checkpoint operations per Rules.md" not in text, (
+            f"retired #865 op-count template fired on a 10/10 run; got: {text!r}"
         )
-        # Verbatim substring pin.
-        assert "expected 10 checkpoint operations per Rules.md" in text
-        assert "found 7" in text
+        assert result.category != PARAM_VALIDATION.INVALID, (
+            f"10/10 checkpointing run downgraded to INVALID by a metric-list "
+            f"length; category={result.category!r}, issues={text!r}"
+        )
+
+    def test_checkpointing_op_count_enforced_from_recorded_args(self, tmp_path):
+        """Issue #865: the live op-count enforcement inside reportgen is the verifier's.
+
+        A single ``run`` invocation whose recorded args say 3 writes /
+        10 reads carries only scalar DLIO metrics (the list-only extractor
+        hands reportgen nothing to aggregate). reportgen must still publish the row
+        INVALID — via ``CheckpointSubmissionRulesChecker.check_num_runs``,
+        which ``_process_workload_groups`` runs for every checkpointing
+        group — so a tree that never ran ``mlpstorage validate`` is not
+        unprotected. Pins the verifier's message so the enforcement path
+        cannot be silently lost.
+        """
+        gen = _make_bare_generator(tmp_path)
+        runs_root = tmp_path / "closed" / "acme" / "results" / "sys-a" / "checkpointing" / "llama3-8b" / "run"
+        runs_root.mkdir(parents=True)
+        fixture = _checkpointing_run(runs_root, "20260703_120000")
+        assert not fixture.metrics, (
+            "fixture invariant (#864): real checkpointing summaries carry no list metrics"
+        )
+        run = _make_run(
+            benchmark_type=BENCHMARK_TYPES.checkpointing,
+            model="llama3-8b",
+            result_dir=fixture.result_dir,
+            metrics=fixture.metrics,
+            parameters={"checkpoint": {
+                "num_checkpoints_write": 3, "num_checkpoints_read": 10,
+            }},
+            accelerator=None,
+            run_datetime="20260703_120000",
+        )
+
+        # Deliberately NOT ``_run_process_workload_groups``: that helper
+        # stubs BenchmarkVerifier to CLOSED, and the verifier is exactly
+        # the enforcement path this test pins.
+        gen._process_workload_groups([run])
+
+        assert len(gen.workload_results) == 1
+        result = next(iter(gen.workload_results.values()))
+        text = self._row_issue_text(result)
+        assert result.category == PARAM_VALIDATION.INVALID, (
+            f"3-write checkpointing run published as {result.category!r}; "
+            f"issues={text!r}"
+        )
+        assert "Expected 10 total write operations, but found 3" in text, (
+            f"verifier op-count message missing; got: {text!r}"
+        )
 
     def test_empty_metric_list_downgrades_to_invalid_with_null_emission(self, tmp_path):
         """D-24 template d: empty metric list → INVALID, ``cannot aggregate`` verbatim.
@@ -2278,8 +2343,8 @@ class TestInvalidRulesStrict:
             getattr(issue, "message", "") or str(issue)
             for issue in (result.issues or [])
         )
-        # None of the four D-24 template substrings appear in the
-        # whatif row's issues column.
+        # None of the D-24 template substrings (nor the #865-retired
+        # checkpoint op-count text) appear in the whatif row's issues column.
         assert "expected 6 training invocations per Rules.md" not in text
         assert "expected exactly 1 warmup invocation to be detected" not in text
         assert "expected 10 checkpoint operations per Rules.md" not in text
@@ -2337,18 +2402,13 @@ class TestInvalidRulesStrict:
     def test_checkpointing_non_run_group_skips_rules_strict_gates(self, tmp_path):
         """Guard for #717-shape latent bug in the checkpointing branch.
 
-        The D-20/D-24 gate at ``_process_workload_groups`` iterates
-        ``run.metrics`` looking for list values of length != 10. Like
-        the training D-27 gate, it filters only by ``benchmark_type``,
-        not by command. Checkpointing does not currently accept
-        ``datagen`` / ``validate`` at the CLI, so this cannot fire in
-        production today — but the same-shape defense keeps the gate
-        honest if either command is added later.
-
-        Synthesizes a checkpointing ``BenchmarkRun`` with
-        ``command != 'run'`` and a metric list of length 7 (would trip
-        D-24 template c under the current gate). Asserts the
-        checkpoint-count template does NOT appear.
+        Historically the D-20/D-24 metric-list gate at
+        ``_process_workload_groups`` filtered only by ``benchmark_type``,
+        not by command, so a non-``run`` checkpointing group could trip it.
+        #865 retired that gate outright, but the same-shape defense stays:
+        a checkpointing ``BenchmarkRun`` with ``command != 'run'`` and no
+        recorded op-count args must not be downgraded to INVALID by any
+        rules-strict gate, and no checkpoint op-count text may appear.
         """
         gen = _make_bare_generator(tmp_path)
         run_root = tmp_path / "closed" / "acme" / "results" / "sys-a" / "checkpointing" / "llama3-8b"
@@ -2359,7 +2419,7 @@ class TestInvalidRulesStrict:
             benchmark_type=BENCHMARK_TYPES.checkpointing,
             model="llama3-8b",
             result_dir=str(run_dir),
-            # 7 entries — under the current gate this would be INVALID.
+            # 7 entries — under the retired #865 gate this was INVALID.
             metrics={"checkpoint_read_throughput_GB_per_second": [1.0] * 7},
             accelerator=None,
             run_datetime=ts,
@@ -2374,7 +2434,6 @@ class TestInvalidRulesStrict:
         assert "expected 10 checkpoint operations per Rules.md" not in text, (
             f"Latent #717-shape bug fired on non-run checkpointing group; got: {text!r}"
         )
-        assert _INVALID_MSG_CHECKPOINT_COUNT.format(n=7) not in text
         assert result.category != PARAM_VALIDATION.INVALID, (
             f"Non-run checkpointing group downgraded to INVALID; "
             f"category={result.category!r}, issues={text!r}"

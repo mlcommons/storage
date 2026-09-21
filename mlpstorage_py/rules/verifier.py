@@ -42,18 +42,31 @@ class BenchmarkVerifier:
 
         # Multi-run verification
         verifier = BenchmarkVerifier(run1, run2, run3, logger=logger)
+
+        # Submission-level verification of a workload group that happens
+        # to hold a single invocation (e.g. one combined 10-write/10-read
+        # checkpointing run) — force the submission checkers:
+        verifier = BenchmarkVerifier(run1, logger=logger, mode="multi")
     """
 
-    def __init__(self, *sources, logger=None):
+    def __init__(self, *sources, logger=None, mode=None):
         """
         Initialize the verifier.
 
         Args:
             *sources: BenchmarkRun instances, Benchmark instances, or result directory paths.
             logger: Logger instance for output.
+            mode: ``None`` (default) picks ``"single"`` for one source and
+                ``"multi"`` otherwise. ``"multi"`` forces the submission-level
+                ``*SubmissionRulesChecker`` family even for one source — the
+                workload-group pass in reportgen needs this so a
+                single-invocation group still gets its submission rules
+                (Issue #865). ``"single"`` is accepted only with one source.
 
         Raises:
-            ValueError: If no sources provided or unsupported benchmark type.
+            ValueError: If no sources provided, unsupported benchmark type,
+                or ``mode`` is not one of ``None``/``"single"``/``"multi"``
+                (or ``"single"`` is requested for several sources).
             TypeError: If unsupported source type.
         """
         self.logger = logger
@@ -78,10 +91,20 @@ class BenchmarkVerifier:
                                f"Expected BenchmarkRun, Benchmark instance, or result directory path.")
 
         # Determine mode
-        if len(self.benchmark_runs) == 1:
+        if mode is None:
+            self.mode = "single" if len(self.benchmark_runs) == 1 else "multi"
+        elif mode == "multi":
+            self.mode = "multi"
+        elif mode == "single":
+            if len(self.benchmark_runs) != 1:
+                raise ValueError(
+                    f"mode='single' requires exactly one source; got {len(self.benchmark_runs)}"
+                )
             self.mode = "single"
         else:
-            self.mode = "multi"
+            raise ValueError(
+                f"Unknown verifier mode {mode!r}; expected None, 'single' or 'multi'"
+            )
 
         # Create appropriate rules checker
         self._create_rules_checker()

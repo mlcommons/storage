@@ -372,7 +372,6 @@ class TestWhatifCategoryValue:
         d24_substrings = [
             "expected 6 training invocations per Rules.md",
             "expected exactly 1 warmup invocation to be detected",
-            "expected 10 checkpoint operations per Rules.md",
             "cannot aggregate",
         ]
         for wk, wr in gen.workload_results.items():
