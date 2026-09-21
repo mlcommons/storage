@@ -67,7 +67,7 @@ signal_received = False
 # CONTEXT.md D-12 — modes that DO NOT require a sentinel-resolved orgname.
 # Every other mode (closed, open, whatif, reports, history, validate) is
 # subject to the LAY-03 orgname-resolution gate in `_main_impl`.
-NON_BENCHMARK_NO_ORGNAME_MODES = frozenset({"init", "version", "lockfile", "rules-coverage"})
+NON_BENCHMARK_NO_ORGNAME_MODES = frozenset({"init", "config", "version", "lockfile", "rules-coverage"})
 
 
 def signal_handler(sig, frame):
@@ -430,6 +430,12 @@ def _main_impl():
     if args.mode == "init":
         from mlpstorage_py.results_dir.init import run_init
         return run_init(args)
+
+    # `config` edits the per-user file every later command reads; like
+    # `init` it has no results-dir and is not recorded in history.
+    if args.mode == "config":
+        from mlpstorage_py.results_dir.config_cmd import run_config_command
+        return run_config_command(args, logger)
 
     if args.mode == "version":
         from mlpstorage_py import VERSION

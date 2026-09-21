@@ -26,6 +26,8 @@ flag (``history``).
 
 The file is written atomically (tmp + ``os.replace``) and existing keys are
 preserved, so hand-added keys survive the next ``mlpstorage init``.
+``mlpstorage config show|set|unset|path`` (``results_dir/config_cmd.py``)
+manages the file from the command line.
 """
 
 from __future__ import annotations
@@ -85,8 +87,8 @@ SOURCE_CONFIG_FILE_FLAG = "--config-file"
 SOURCE_ENV = MLPSTORAGE_RESULTS_DIR_ENVVAR
 
 _HEADER = (
-    "# Per-user mlpstorage defaults. Written by `mlpstorage init`; hand edits\n"
-    "# are kept. Precedence: command-line flag > --config-file YAML >\n"
+    "# Per-user mlpstorage defaults. Written by `mlpstorage init` and\n"
+    "# `mlpstorage config set`; hand edits are kept. Precedence: command-line flag > --config-file YAML >\n"
     "# MLPSTORAGE_* env var > this file. Keys this file may carry (all\n"
     "# describe the environment, never the workload): results_dir, systemname,\n"
     "# data_dir, checkpoint_folder, hosts, mpi_bin, mpi_btl, oversubscribe,\n"
@@ -152,6 +154,20 @@ def write_user_config(values: dict, path: Optional[str] = None) -> str:
     path = path or user_config_path()
     merged = dict(read_user_config(path))
     merged.update(values)
+    return _replace_user_config(merged, path)
+
+
+def remove_user_config_key(key: str, path: Optional[str] = None) -> str:
+    """Drop ``key`` from the config file (``mlpstorage config unset``);
+    every other key is kept. A missing key is a no-op."""
+    path = path or user_config_path()
+    merged = dict(read_user_config(path))
+    merged.pop(key, None)
+    return _replace_user_config(merged, path)
+
+
+def _replace_user_config(merged: dict, path: str) -> str:
+    """Write ``merged`` as the whole file, header included, atomically."""
     os.makedirs(os.path.dirname(path), exist_ok=True)
     tmp = f"{path}.tmp.{os.getpid()}"
     try:
