@@ -865,7 +865,7 @@ class CheckpointingCheck(BaseCheck):
 
         The 30-second upper bound on the inter-phase gap is enforced separately
         by ``cache_flush_validation``. OPEN submissions may use any non-negative
-        integer for --num-checkpoints-* per Rules.md Table 3, so this check is
+        integer for --num-checkpoints-* per Rules.md Table 4, so this check is
         a no-op for them.
         """
         valid = True

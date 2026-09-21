@@ -493,7 +493,7 @@ Checkpointing intentionally omits the `<command>` segment under `<systemname>/ch
 
 Every benchmark run writes:
 
-- **`*_metadata.json`** — run timestamp, benchmark type, model, full command line, all CLI argument values, cluster information (collected by `cluster_collector.py` over MPI), MPI configuration, environment variables (credentials redacted), and `exit_status` (0 when the run returned success; anything else, including a run that never returned, is a failure — `mlpstorage runs list` reads this).
+- **`*_metadata.json`** — run timestamp, benchmark type, model, full command line, all CLI argument values, cluster information (collected by `cluster_collector.py` over MPI), MPI configuration, environment variables (credentials redacted), and `exit_status` (0 when the run returned success; anything else, including a run that never returned, is a failure — `mlpstorage runs list` reads this). Also `invocation_start_time` (wall clock at the first import of the entry module, before framework startup) and `invocation_end_time` (wall clock at the start of the metadata write, after post-run cluster collection): the bookends the validator uses for the Rules §4.7.1 failover gap.
 - **`*_timeseries.json`** — sampled host metrics (CPU, memory, disk I/O, network) collected at `--timeseries-interval` (default 10s) up to `--max-timeseries-samples` (default 3600). Single-host runs use a local collector; multi-host runs use SSH fan-out.
 - **`stdout.log` / `stderr.log`** — streamed subprocess output captured by `CommandExecutor`.
 - **`mlpstorage.log`** — every message `mlpstorage` itself logged during the invocation, at DEBUG level with `module:line`, uncoloured. Messages emitted before the run directory existed (argument parsing, environment validation, code-image capture) are buffered and written first, so the file is complete from process start.
@@ -761,7 +761,10 @@ Required positionals: `<model>` (one of `llama3-8b`, `llama3-70b`, `llama3-405b`
   Number of checkpoint read iterations. Default 10.
 
 - **`--num-checkpoints-write <N>`, `-ncw <N>`**
-  Number of checkpoint write iterations. Default 10. In closed mode must be 10 or 0; supplying 0 lets the run cover only the read or only the write half, with the missing half supplied by a separate invocation (Rules §4.7.1).
+  Number of checkpoint write iterations. Default 10. In closed mode must be 10 or 0; supplying 0 lets the run cover only the read or only the write half, with the missing half supplied by a separate invocation (Rules §4.7.1). Between the two invocations the submitter's failover callout runs (for example `echo 3 > /proc/sys/vm/drop_caches` on every client host when the data written per host is under 3x host memory, Rules §4.3.1); the validator measures the gap from the write invocation's `invocation_end_time` to the read invocation's `invocation_start_time` (both in `*_metadata.json`; see Common artifacts) and fails a gap over 30 seconds. Framework startup of the read invocation and post-run collection of the write invocation fall outside those bookends and are not charged.
+
+- **`--checkpoint-subset`** *(run only)*
+  Declares the run a Rules §4.3.5 *subset* run: one 8-accelerator host running `llama3-8b`, the claim form for solutions that centrally manage storage local to each client host. Accepted only with `llama3-8b` and `--num-processes 8`; any other combination aborts before launch. Recorded in `*_metadata.json` as `args.checkpoint_subset`, which is how the validator and `reportgen` recognise the claim (the run itself is identical to a full 8B run). A run of any model at fewer processes than its Table 2 count is separately labelled `checkpoint.mode: subset` for DLIO's partial-checkpoint mechanics and warned about at launch; that is not a CLOSED submission form.
 
 - **`--checkpoint-folder <path>`, `-cf <path>`**
   Storage location for checkpoint files. Required for `run`.
