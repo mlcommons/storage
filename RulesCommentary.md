@@ -201,6 +201,218 @@ reason.
 
 ---
 
+## 3.1.2 trainingRecalculateDatasetSize
+
+### Why
+
+Two floors size the dataset, and the larger governs.  Five hundred steps per
+epoch gives DLIO enough steps for the AU figure (3.3.2) to be a measurement of
+the storage system rather than of start-up: the first step is excluded from AU
+and a short epoch would be dominated by that exclusion.  Five times the total
+client host memory defeats the client page cache: a dataset that fits in RAM
+across the hosts is served from memory after the first epoch and the storage
+system under test is not what is being measured.
+
+The rule is a floor, not an exact match.  Earlier text said the size recorded
+for the run must "exactly match" the recalculated value, but 3.2.1 permits a
+larger generated dataset and 3.3.1 permits a run over a subset of it, and the
+only thing ever enforced is that the run's file count reaches the minimum; the
+rule now says so.  The ceil-minus-one tolerance that the v3.0 round carried
+for datasets sized by tool versions older than 3.0.43 (which floored the file
+count) was retired when the round closed.
+
+### How the value is produced
+
+`mlpstorage ... training <model> datasize` computes the same two floors from
+`--max-accelerators`, `--client-host-memory-in-gb` times `--num-client-hosts`,
+and the model's record length and samples per file, rounds up to whole files,
+and records the outputs in the datasize leaf (3.3.1).  The validator recomputes
+the floors from the run's own records.  `host_memory_GB` in the run's
+`*summary.json` is DLIO's per-host list, and the validator sums it: on clusters
+with several ranks per host DLIO's per-slot layout can double some slots and
+zero others, and the sum is right either way where "hosts times memory per
+host" is not.  `num_accelerators` in the summary is the total across hosts.
+The validator's steps term is `max(500, steps the dataset yields per epoch)`
+times batch size times accelerators; the second operand never exceeds the
+dataset's own sample count, so it can never make a dataset fail, and the rule
+states the 500 form that decides every case.
+
+### Implementation
+
+- `mlpstorage_py/submission_checker/checks/training_checks.py` --
+  `recalculate_dataset_size`; `mlpstorage_py/submission_checker/dlio_summary_helpers.py`
+  -- `cluster_total_host_memory_gb`.
+- Runtime: `mlpstorage_py/rules/utils.py` -- `calculate_training_data_size`;
+  `mlpstorage_py/config.py` -- `STEPS_PER_EPOCH`.
+- Tests: `mlpstorage_py/tests/test_rule_3_1_2_exact_ceil_threshold.py`,
+  `mlpstorage_py/tests/test_issue_669_host_memory_aggregation.py`.
+
+---
+
+## 3.3.1 trainingRunDataMatchesDatasize
+
+### Why
+
+One generated dataset may serve several run configurations: a sweep generates
+once at the largest size and runs smaller configurations against it, so a run
+may read fewer files than were generated.  It may never read fewer than the
+datasize phase prescribed (that floor is what makes the run representative,
+3.1.2) nor more than exist.  The subfolder counts must match the generated
+tree because DLIO reconstructs file names from them rather than listing the
+directory.  A run is paired with a datasize record by `data_dir` because one
+results tree can hold datasize records for several datasets; an ambiguous
+pairing is failed rather than guessed.  The manifest snapshot ties the run to
+the datagen leaf inside the same package, so the run's data provenance can be
+decided without access to the data directory, which the validator never reads.
+
+### How the value is produced
+
+`datasize` writes its inputs and outputs into its leaf's `training_<ts>_metadata.json`.
+`datagen` leaves `.mlps-datagen-manifest.json` beside the generated splits;
+`run` reads it, fits the run to the dataset, copies it into the run leaf as
+`datagen-manifest.json` and names it under `"datagen_manifest_file"`
+(ManPage.md → DATA DIRECTORY → "The datagen manifest").  Leaves that declare
+neither `datagen_manifest_file` nor `provenance_file` (every leaf of the v3.0
+round) are judged on the datasize, datagen and run leaves alone; a stamped leaf
+that consumed no manifest draws a warning, not a failure.  A run whose summary
+carries no `num_files_eval` draws a warning (models without an eval phase omit
+it).
+
+### Implementation
+
+- `mlpstorage_py/submission_checker/checks/training_checks.py` --
+  `run_data_matches_datasize` and `_check_manifest_snapshot`.  Finding tokens:
+  `DATASIZE-MISSING`, `DATAGEN-MISSING`, `DATASIZE-MALFORMED`,
+  `DATASIZE-REUSED`, `DATADIR-MISMATCH`, `DATASIZE-UNDERRUN`,
+  `DATAGEN-OVERRUN`, `MANIFEST-MISSING`, `MANIFEST-OVERRIDDEN`,
+  `MANIFEST-LINK`, `MANIFEST-COUNT`, `MANIFEST-OVERRUN` (errors);
+  `EVAL-FIELD-MISSING`, `MANIFEST-ABSENT` (warnings).
+- Runtime: `mlpstorage_py/rules/utils.py` (datasize), the datagen manifest
+  writer and the run-time manifest check in `mlpstorage_py/benchmarks/`.
+- Tests: `tests/unit/test_submission_checker_run_matches_datasize.py`.
+
+---
+
+## 3.3.2 trainingAcceleratorUtilizationCheck
+
+### Why
+
+A training result is a storage measurement only while the emulated
+accelerators are kept busy; a run whose accelerators sit idle waiting for
+data is measuring a bottleneck the benchmark is meant to exclude, so the AU
+floor is what makes a run's bandwidth figure meaningful.  The minimum lives in
+the edition table rather than only in DLIO's workload template because the
+template travels with the captured source tree: recording the value per
+edition means a template with a lowered threshold cannot pass, and since the
+threshold key is in the `training@1` core-config allowlist such a template
+also hashes outside every comparability class.
+
+### How the value is produced
+
+DLIO computes, per rank and per epoch:
+
+- `total_compute_time = (records_per_file * total_files) / simulated_accelerators / batch_size * computation_time * epochs`
+- `AU = (total_compute_time / total_benchmark_running_time) * 100`
+
+All I/O of the first step is excluded from the AU calculation; the same I/O
+is included in the samples-per-second figure.  The per-epoch AU is the mean
+across ranks (see §3.3.8 for the reduction), and DLIO writes the mean over the
+invocation's epochs as `metric.train_au_mean_percentage` together with its own
+verdict, `metric.train_au_meet_expectation`, judged against the `metric.au` of
+the workload template it ran.  The validator requires both: the verdict and
+the edition's minimum.
+
+### Implementation
+
+- `mlpstorage_py/submission_checker/checks/training_checks.py` --
+  `accelerator_utilization_check`; `mlpstorage_py/rules/editions.yaml` --
+  `checker.training_au_thresholds`; `Config.get_training_au_threshold`.
+- Tests: `tests/unit/test_edition_values.py`.
+- Upstream: `dlio_benchmark/utils/statscounter.py`.
+
+---
+
+## 3.3.3 trainingSingleHostSimulatedAccelerators
+
+### Why
+
+The number of simulated accelerators is what loads the storage system.  A
+single-host run simulating one or two is rarely representative of what the
+system can deliver, so the validator draws the reviewer's attention to it
+without failing the run: no rule sets a minimum count.  The threshold of four
+is the value the advisory check was written with; the working group has not
+set it by rule.
+
+### How the value is produced
+
+Each simulated accelerator is one DLIO rank.  Raising the count on one host
+costs host memory (ManPage.md → Training options → `--num-accelerators`).
+
+### Implementation
+
+- `mlpstorage_py/submission_checker/checks/training_checks.py` --
+  `single_host_simulated_accelerators` (one warning per distinct count across
+  a workload's runs).
+- Tests: `mlpstorage_py/tests/test_training_check_retrofit.py`.
+
+---
+
+## 3.3.5 trainingDistributedDataAccessibility
+
+### Why
+
+A distributed run measures the storage system only if every host reads from
+it; a host with a local-disk path where the shared mount was expected would
+measure its local disk and inflate the result.
+
+### How the value is produced
+
+Before a multi-host run launches its workload, the CAP-02 probe writes a
+sentinel into the data directory from rank 0 and stats it from every rank;
+differing `(st_dev, st_ino)` pairs fail the run before it starts (ManPage.md →
+VALIDATOR → CAP-02).  A run leaf that holds a completed summary therefore
+satisfies this rule by construction, and the validator emits one INFO line
+per workload so tooling that greps by rule id sees the rule was visited.
+
+### Implementation
+
+- `mlpstorage_py/cluster_collector.py` -- `run_shared_fs_probe`;
+  `mlpstorage_py/benchmarks/base.py` -- `_pre_execution_gate`.
+- `mlpstorage_py/submission_checker/checks/training_checks.py` --
+  `distributed_data_accessibility_check`.
+- Tests: `mlpstorage_py/tests/test_training_check_retrofit.py`,
+  `tests/unit/test_pre_execution_gate_results_dir.py`.
+
+---
+
+## 3.3.7 trainingNodeCapabilityConsistency
+
+### Why
+
+Client hosts of widely different capability make per-host throughput uneven
+and the AU figure harder to interpret, so a reviewer should look at such a
+cluster; it is not itself illegal, hence a warning rather than a failure.
+The 1.5 ratio is the value the check was written with; the working group has
+not set it by rule.
+
+### How the value is produced
+
+`mlpstorage` records the cluster collector's snapshot in each run leaf's
+`*_metadata.json` under `cluster_information`: per host, total memory and CPU
+core count, plus any `host_consistency_issues` the collector itself flagged.
+The validator assesses one run per workload -- the cluster is the same across
+the measured runs -- and compares the largest and smallest value of each
+metric.
+
+### Implementation
+
+- `mlpstorage_py/submission_checker/checks/training_checks.py` --
+  `node_capability_consistency_check`, `_NODE_CAPABILITY_DIVERGENCE_RATIO`.
+- `mlpstorage_py/cluster_collector.py` -- the per-host snapshot.
+- Tests: `mlpstorage_py/tests/test_training_check_retrofit.py`.
+
+---
+
 ## 3.3.8 trainingResultAggregation
 
 ### Why
@@ -218,8 +430,8 @@ covered all five.
 ### How the value is produced
 
 Within one invocation the benchmark records one value per epoch.  The
-per-epoch AU is the mean across all ranks of each rank's AU (the formula in
-Rules.md 3.3.2), and the per-epoch throughput in samples/s is the sum across
+per-epoch AU is the mean across all ranks of each rank's AU (the formula under
+§3.3.2 above), and the per-epoch throughput in samples/s is the sum across
 all ranks (DLIO `statscounter.py`, `end_run`: `allreduce(...) / comm.size`
 for AU, `allreduce(...)` for throughput).  DLIO then writes the arithmetic
 mean over that invocation's epochs as `metric.train_au_mean_percentage` and,
@@ -253,6 +465,80 @@ informational.
   `TestTrainingFinalTableColumns`).
 - Upstream: `dlio_benchmark/utils/statscounter.py` (`end_run`,
   `compute_metrics_train`).
+
+---
+
+## 3.4.2 trainingMlpstorageFilesystemCheck
+
+### Why
+
+Logfiles written onto the storage system under test would add I/O to the
+measurement and skew the result; requiring the two directories to be on
+different filesystems, and requiring the package to carry the evidence, lets a
+reviewer decide it without access to the hosts.  4.4.2 and 5.4.2 are the same
+rule for checkpointing and VectorDB.
+
+### How the value is produced
+
+Before the workload launches, the CAP-03 probe on rank 0 hard-links a sentinel
+from the data (or checkpoint) directory into the results directory: `EXDEV`
+is the unambiguous "different filesystems" answer, so no `df` output is
+parsed.  The structured result is written to `<run-leaf>/fs_separation.json`
+whatever the outcome; a same-filesystem result fails the run before it starts
+unless `--skip-fs-separation-gate` was given for a development run, in which
+case the sidecar still records it and validation fails the leaf (ManPage.md →
+VALIDATOR → CAP-03, and Common artifacts).  Leaves written before the sidecar
+existed carry instead the `df` output the tool logged for both paths in
+`training_run.stdout.log`; the validator matches each path against the
+longest mount-point prefix in that listing.  Object-API runs have no
+filesystem to compare, hence the exemption.
+
+### Implementation
+
+- `mlpstorage_py/benchmarks/fs_separation_probe.py` -- the probe and sidecar.
+- `mlpstorage_py/submission_checker/checks/training_checks.py` --
+  `mlpstorage_filesystem_check`; `checks/helpers.py` --
+  `read_fs_separation_sidecar`, `_check_filesystem_separation`.
+- Tests: `mlpstorage_py/tests/test_training_check_phase2.py`,
+  `mlpstorage_py/tests/test_issue601_validator_reads_sidecar.py`,
+  `mlpstorage_py/tests/test_issue601_fs_separation_probe.py`.
+
+---
+
+## 3.6.1 trainingClosedSubmissionChecksum
+
+### Why
+
+CLOSED results are comparable only if every submitter ran the same code.
+Two layers establish that: the §2.1.6 self-consistency requirement (the
+recomputed tree hash equals the recorded one) proves the captured image was
+not altered after capture, and this rule proves the captured image *is* the
+sanctioned release.  The first layer applies in every division; the second
+only in CLOSED, where OPEN submitters are free to modify the code and
+disclose it through the same code-image mechanism.
+
+### How the value is produced
+
+The reference digest is the tree hash of the release's source tree computed
+with the §2.1.6 exclusions (test trees, caches and editor metadata are
+excluded so the digest is stable across checkouts of the same release); the
+same tool computes it:
+`python -m mlpstorage_py.submission_checker.tools.compute_code_checksum <path>`.
+
+### Implementation
+
+- The self-consistency layer is live: CHECK-02 / STRUCT-06
+  (`mlpstorage_py/submission_checker/checks/pool_structure_checks.py`,
+  `submission_structure_checks.py`).
+- The reference-digest comparison is not yet performed.  `REFERENCE_CHECKSUMS`
+  in `mlpstorage_py/submission_checker/constants.py` carries no digest for any
+  edition, the 3.6.1 and 5.6.1 check bodies return without a finding, and the
+  `--reference-checksum` option of `mlpstorage validate` is parsed but not
+  consulted.  The natural home for a published digest is the edition's
+  `checker` block in `mlpstorage_py/rules/editions.yaml`, next to the other
+  per-edition values.
+- Tests: `mlpstorage_py/tests/test_config_reference_checksum.py` pins the
+  empty table; `mlpstorage_py/tests/test_code_checksum.py` the hash.
 
 ---
 
