@@ -15,6 +15,8 @@ from mlpstorage_py.dependency_check import validate_benchmark_dependencies
 from mlpstorage_py.errors import ConfigurationError, ErrorCode
 from mlpstorage_py.rules import calculate_training_data_size, HostInfo, HostMemoryInfo, HostCPUInfo, ClusterInformation
 from mlpstorage_py.rules.datagen_hierarchy import (
+    datagen_manifest_location,
+    read_datagen_manifest,
     assert_data_dir_hierarchy_absent,
     validate_checkpoint_leaf,
     validate_datagen_leaf,
@@ -24,6 +26,37 @@ from mlpstorage_py.rules.datagen_hierarchy import (
 )
 from mlpstorage_py.utils import (read_config_from_file, create_nested_dict, update_nested_dict, generate_mpi_prefix_cmd)
 from mlpstorage_py.storage_config import resolve_object_storage_config
+
+
+def _quiet_sizing_logger():
+    """A logger that swallows everything, for re-running the datasize
+    arithmetic where its RESULT/WARNING lines would only be noise."""
+    import logging as _logging
+    quiet = _logging.getLogger("mlpstorage_py.num_files_train.resolve")
+    if not quiet.handlers:
+        quiet.addHandler(_logging.NullHandler())
+    quiet.setLevel(_logging.CRITICAL + 1)
+    quiet.propagate = False
+    return quiet
+
+
+def _datasize_minimum(benchmark) -> Optional[int]:
+    """The CLOSED minimum ``num_files_train`` for ``benchmark``'s run cluster,
+    or ``None`` when it cannot be computed (no cluster info, bad params)."""
+    cluster_info = getattr(benchmark, 'cluster_information', None)
+    if not cluster_info:
+        return None
+    try:
+        computed, _, _ = calculate_training_data_size(
+            benchmark.args,
+            cluster_info,
+            benchmark.combined_params['dataset'],
+            benchmark.combined_params['reader'],
+            _quiet_sizing_logger(),
+        )
+        return int(computed)
+    except (ValueError, KeyError, TypeError):
+        return None
 
 
 class DLIOBenchmark(Benchmark, abc.ABC):
@@ -392,20 +425,13 @@ class DLIOBenchmark(Benchmark, abc.ABC):
         # moment later, so a second copy here — plus the storage#785
         # reconciliation warning, which runs never emit today — would just be
         # noise. Our own INFO below carries the "why".
-        import logging as _logging
-        quiet = _logging.getLogger("mlpstorage_py.num_files_train.resolve")
-        if not quiet.handlers:
-            quiet.addHandler(_logging.NullHandler())
-        quiet.setLevel(_logging.CRITICAL + 1)
-        quiet.propagate = False
-
         try:
             computed, _, _ = calculate_training_data_size(
                 self.args,
                 cluster_info,
                 self.combined_params['dataset'],
                 self.combined_params['reader'],
-                quiet,
+                _quiet_sizing_logger(),
             )
         except (ValueError, KeyError) as exc:
             self.logger.debug(f'num_files_train auto-resolution skipped: {exc}')
@@ -826,6 +852,194 @@ class TrainingBenchmark(DLIOBenchmark):
             self.add_datadir_param()
         self._check_storage_scheme_consistency()
         self.logger.verboser(f'Instantiated the Training Benchmark...')
+
+    def _pre_execution_gate(self) -> None:
+        """CAP-01/02/03 (base), then the datagen-manifest check.
+
+        The manifest hook runs AFTER CAP-02 so on multi-host runs the
+        data-dir has just been proven shared: what the launcher reads here
+        is what every rank will name files against (VFY-09). Datasize also
+        calls this gate; the hook no-ops there (run/configview only).
+        """
+        super()._pre_execution_gate()
+        self._apply_datagen_manifest()
+
+    def _apply_datagen_manifest(self) -> None:
+        """Read ``<data-dir>/<model>/.mlps-datagen-manifest.json`` and fit
+        this run to the dataset it describes (storage#571 Q4, #795 follow-up).
+
+        Under ``skip_listing`` every rank reconstructs
+        ``{prefix}_{idx}_of_{TOTAL}.{ext}``; before DLIO v3.0.5 TOTAL had to
+        equal ``num_files_train``, so the run count had to EQUAL the
+        generated count. DLIO now takes ``dataset.num_files_generated`` as
+        the name total and reads only the first ``num_files_train`` files,
+        restoring "minimum <= run <= generated": one over-generated dataset
+        serves many run configurations, as directory listing always allowed.
+
+        The manifest is the only record of the generated count, so:
+
+        * manifest present, ``run <= generated`` — inject
+          ``dataset.num_files_generated`` (and ``num_subfolders_train`` when
+          the run did not set it — a layout fact, not a workload choice).
+        * ``run > generated`` — ``MANIFEST-003``: hard error carrying the
+          exact re-datagen command, or the smaller read count when the
+          generated set still meets this system's CLOSED minimum.
+        * invariant mismatch (model, record_length_bytes,
+          num_samples_per_file, format, explicit num_subfolders_train) —
+          ``MANIFEST-001``: the files on disk are not this workload's.
+        * no manifest — ``MANIFEST-000`` warning; DLIO falls back to
+          today's equality assumption.
+
+        ``--skip-validation`` (the CAP-02 escape hatch) and whatif downgrade
+        the errors to warnings. The run count itself is never changed here:
+        explicit ``--params`` > datasize minimum (``_resolve_num_files_train``),
+        and ``check_num_files_train`` still enforces ``run >= minimum``.
+        """
+        args = self.args
+        if getattr(args, 'command', None) not in ('run', 'configview'):
+            return
+        data_dir = getattr(args, 'data_dir', None)
+        if not data_dir:
+            return
+        model = args.model
+        lenient = bool(getattr(args, 'skip_validation', False)) \
+            or getattr(args, 'mode', None) == 'whatif'
+        location = datagen_manifest_location(data_dir, model)
+        dataset = self.combined_params.setdefault('dataset', {})
+        try:
+            run_count = int(dataset.get('num_files_train'))
+        except (TypeError, ValueError):
+            run_count = None
+
+        def _fail(message: str, suggestion: str, parameter: str) -> None:
+            if lenient:
+                why = '--skip-validation' if getattr(args, 'skip_validation', False) else 'whatif mode'
+                self.logger.warning(f'{message} {suggestion} Proceeding anyway ({why}).')
+                return
+            raise ConfigurationError(
+                message,
+                parameter=parameter,
+                suggestion=f'{suggestion} Or pass --skip-validation to proceed anyway.',
+                code=ErrorCode.CONFIG_INVALID_VALUE,
+            )
+
+        try:
+            manifest = read_datagen_manifest(data_dir, model)
+        except ConfigurationError as exc:
+            if not lenient:
+                raise
+            self.logger.warning(
+                f'MANIFEST-000: datagen manifest at {location!r} could not be '
+                f'read ({exc}); proceeding without it.'
+            )
+            return
+
+        if manifest is None:
+            assumed = f'{run_count:,}' if run_count is not None else 'dataset.num_files_train'
+            self.logger.warning(
+                f'MANIFEST-000: no datagen manifest at {location!r}. Cannot '
+                f'verify that the dataset matches this run; DLIO will assume '
+                f'it was generated with exactly {assumed} files '
+                f'(dataset.num_files_train). Datasets generated by this '
+                f'mlpstorage carry the manifest.'
+            )
+            return
+
+        # --- MANIFEST-001: invariants -------------------------------------
+        mismatches = []
+        if manifest.model != model:
+            mismatches.append(('model', manifest.model, model))
+        for manifest_field, run_key in (
+            ('record_length_bytes', 'record_length_bytes'),
+            ('num_samples_per_file', 'num_samples_per_file'),
+            ('dataset_format', 'format'),
+        ):
+            recorded = getattr(manifest, manifest_field)
+            current = dataset.get(run_key)
+            if recorded is None or current is None:
+                continue
+            if str(recorded) != str(current):
+                mismatches.append((run_key, recorded, current))
+        explicit_subfolders = self.params_dict.get('dataset.num_subfolders_train')
+        if manifest.num_subfolders_train is not None and explicit_subfolders is not None:
+            try:
+                explicit_subfolders = int(explicit_subfolders)
+            except (TypeError, ValueError):
+                explicit_subfolders = None
+            if explicit_subfolders is not None \
+                    and explicit_subfolders != manifest.num_subfolders_train:
+                mismatches.append(('num_subfolders_train',
+                                   manifest.num_subfolders_train, explicit_subfolders))
+        if mismatches:
+            detail = '; '.join(
+                f'{key}: generated with {recorded!r}, this run has {current!r}'
+                for key, recorded, current in mismatches
+            )
+            _fail(
+                f'MANIFEST-001: the dataset under {data_dir!r} was not generated '
+                f'for this workload — {detail} (manifest {location}).',
+                'Regenerate the dataset for this model/config, or point '
+                '--data-dir at the matching dataset.',
+                'dataset',
+            )
+
+        # --- MANIFEST-003: count ------------------------------------------
+        generated = manifest.num_files_train
+        model_dir = os.path.dirname(location)
+        if run_count is not None and run_count > generated:
+            hint = self.generate_datagen_benchmark_command(
+                run_count, manifest.num_subfolders_train or 0)
+            minimum = _datasize_minimum(self)
+            suggestion = (
+                f'Regenerate with at least {run_count:,} files — remove '
+                f'{model_dir!r} first (datagen refuses to overwrite), then '
+                f'run:\n  {hint}\n(adjust --hosts/--num-processes to the '
+                f'generation cluster).'
+            )
+            if minimum is not None and generated >= minimum:
+                suggestion += (
+                    f' Or read only the generated files — {generated:,} still '
+                    f'meets this system\'s {minimum:,}-file minimum: add '
+                    f'--params dataset.num_files_train={generated}.'
+                )
+            _fail(
+                f'MANIFEST-003: this run reads dataset.num_files_train='
+                f'{run_count:,} files but the dataset under {data_dir!r} was '
+                f'generated with {generated:,} (manifest {location}).',
+                suggestion,
+                'dataset.num_files_train',
+            )
+            return
+
+        # --- inject ---------------------------------------------------------
+        explicit_generated = self.params_dict.get('dataset.num_files_generated')
+        if explicit_generated is not None:
+            try:
+                keep = int(explicit_generated)
+            except (TypeError, ValueError):
+                keep = explicit_generated
+            if keep != generated:
+                self.logger.warning(
+                    f'--params dataset.num_files_generated={explicit_generated} '
+                    f'overrides the manifest ({generated:,} files generated); '
+                    f'keeping the explicit value.'
+                )
+            dataset['num_files_generated'] = keep
+        else:
+            self.params_dict['dataset.num_files_generated'] = generated
+            dataset['num_files_generated'] = generated
+
+        if manifest.num_subfolders_train and explicit_subfolders is None \
+                and 'dataset.num_subfolders_train' not in self.params_dict:
+            self.params_dict['dataset.num_subfolders_train'] = manifest.num_subfolders_train
+            dataset['num_subfolders_train'] = manifest.num_subfolders_train
+
+        reads = f'{run_count:,}' if run_count is not None else 'dataset.num_files_train'
+        self.logger.info(
+            f'Datagen manifest {location}: dataset generated with '
+            f'{generated:,} files; this run reads the first {reads} '
+            f'(dataset.num_files_generated={generated:,}).'
+        )
 
     def add_datadir_param(self):
         # Detect storage mode set by _apply_object_storage_params or _apply_odirect_params.
