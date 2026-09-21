@@ -24,7 +24,7 @@ SYNOPSIS
   mlpstorage <closed|open|whatif> checkpointing <command> <file|object> [OPTIONS]
   mlpstorage <closed|open|whatif> vectordb <command> <file|object> [OPTIONS]
   mlpstorage <closed|open|whatif> kvcache <command> [OPTIONS]
-  mlpstorage (reports|history|runs|lockfile|version) [subcommand] [OPTIONS]
+  mlpstorage (reports|history|runs|lockfile|config|version) [subcommand] [OPTIONS]
   mlpstorage init <orgname> [results-dir]
   mlpstorage validate <submission-dir> [OPTIONS]
   mlpstorage rules-coverage [--rules-md PATH]
@@ -128,6 +128,12 @@ mlpstorage
 │
 ├── init <orgname> [results-dir]                Pin orgname to a results-dir (default ~/mlpstorage-results)
 │                                                and record it as the default for every later command
+│
+├── config                                ← manage the per-user config file (~/.config/mlpstorage/config.yaml)
+│   ├── show                                     {CONFIG_SHOW}
+│   ├── set <key> <value>...                     {CONFIG_SET}
+│   ├── unset <key>                              {CONFIG_UNSET}
+│   └── path                                     {CONFIG_PATH}
 │
 ├── validate <submission-dir>                    {VALIDATE}
 │
@@ -744,6 +750,43 @@ INIT
     (parent must exist). Idempotent when the sentinel already pins the same
     orgname (the default is re-recorded, which is how you switch trees);
     refuses to overwrite a sentinel that pins a different orgname.
+
+──────────────────────────────────────────────────────────────────
+
+CONFIG_SHOW
+  Optional:
+    --json                          The same report as one JSON object
+  Prints the per-user config file path, then every key the file may carry
+  (results_dir, systemname, data_dir, checkpoint_folder, hosts, mpi_bin,
+  mpi_btl, oversubscribe, allow_run_as_root, mpi_params, dlio_bin_path,
+  exec_type, color, stream_log_level) with its value or [unset]. A set
+  MLPSTORAGE_* env var is named next to the key it outranks. A workload
+  key in the file is flagged REJECTED (every other command fails until it
+  is removed); a key no command knows is flagged ignored.
+
+CONFIG_SET
+  Required (positional):
+    key                             One of the keys CONFIG_SHOW lists
+    values                          One value; several (or one comma-separated
+                                    value for hosts) store a list; true/false for
+                                    oversubscribe and allow_run_as_root
+  The value is type- and choice-checked exactly as the flag would be
+  (`mpi_bin mpi` is refused, `mpi_bin mpiexec` stored). A workload-selecting
+  key (model, accelerator_type, ...) or an unknown key is an error. Other keys
+  in the file are kept.
+
+CONFIG_UNSET
+  Required (positional):
+    key                             Key to remove; any key, so a stray workload
+                                    key can be cleared
+  Removing results_dir prints how to supply one from then on.
+
+CONFIG_PATH
+  No flags.  Prints the per-user config file path
+  ($XDG_CONFIG_HOME/mlpstorage/config.yaml, else ~/.config/mlpstorage/config.yaml).
+  `config` never needs a results-dir, skips the tier resolver every other
+  command runs at parse time (so it works on a file that resolver refuses),
+  and is not recorded in history.
 """
 
 # HELP_ALL_TEXT is composed from three pieces so that SYNOPSIS_TEXT can be
@@ -843,6 +886,11 @@ def get_context_help_tokens(argv: list) -> 'str | None':
 
     if t0 == 'init':
         return None  # leaf — fall through to argparse (positionals <orgname> <results-dir> required)
+
+    if t0 == 'config':
+        if n == 1:
+            return 'next: show | set | unset | path'
+        return None  # leaf
 
     # ── Three-mode benchmark branch ──────────────────────────────────────────
     if t0 not in _MODES:

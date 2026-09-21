@@ -40,6 +40,7 @@ from mlpstorage_py.cli import (
     add_lockfile_arguments,
     add_init_arguments,
     add_runs_arguments,
+    add_config_arguments,
     add_version_arguments,
     add_validate_arguments,
     add_rules_coverage_arguments,
@@ -163,6 +164,11 @@ def build_parser():
         description="Initialize a results-dir with the mlperf-results.yaml sentinel",
         help="Pin orgname to a results-dir",
     )
+    config_parser = top.add_parser(
+        "config",
+        description="Show or edit the per-user config file (~/.config/mlpstorage/config.yaml)",
+        help="Manage the per-user config file",
+    )
     version_parser = top.add_parser("version", description="Print the mlpstorage package version", help="Show installed package version and exit")
     validate_parser = top.add_parser(
         "validate",
@@ -179,6 +185,7 @@ def build_parser():
     add_runs_arguments(runs_parser)
     add_lockfile_arguments(lockfile_parser)
     add_init_arguments(init_parser)
+    add_config_arguments(config_parser)
     add_version_arguments(version_parser)
     add_validate_arguments(validate_parser)
     add_rules_coverage_arguments(rules_coverage_parser)
@@ -235,7 +242,11 @@ def parse_arguments():
     # flag > --config-file YAML > MLPSTORAGE_* env var > ~/.config/mlpstorage/
     # config.yaml > argparse default (cli/config_layers.py). Records
     # ``config_sources`` so main can say where each value came from.
-    apply_config_layers(parsed_args, argv)
+    # ``config`` manages that file and must work on one the resolver
+    # refuses (a workload key in it is a hard error there); it is the
+    # one mode that skips the layers.
+    if parsed_args.mode != "config":
+        apply_config_layers(parsed_args, argv)
 
     # File-mode --data-dir is enforced here, after the layers, so any tier
     # (--config-file, MLPSTORAGE_DATA_DIR, the per-user file) can satisfy it.
