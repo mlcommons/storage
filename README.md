@@ -350,6 +350,20 @@ The same sequence on an S3-compatible object backend swaps `file` → `object`
 on every storage-touching command and supplies the endpoint/bucket env vars
 described in [docs/OBJECT_STORAGE_GUIDE.md](docs/OBJECT_STORAGE_GUIDE.md).
 
+Step 2 leaves `<data-dir>/<model>/.mlps-datagen-manifest.json` describing what
+it generated (model, file count, samples per file, record length, layout,
+rules edition). Steps 3 and 4 read it and fit the run to the dataset: the
+generated count is passed to DLIO as `dataset.num_files_generated`, so a run
+may read fewer files than were generated (minimum ≤ run ≤ generated) and one
+large dataset serves several cluster sizes. A run the dataset cannot serve
+stops before DLIO launches with a stable finding ID -- `MANIFEST-001` (the
+dataset was generated for a different workload) or `MANIFEST-003` (more files
+requested than generated; the message carries the exact `datagen` command to
+fix it) -- and a dataset without a manifest only draws the `MANIFEST-000`
+warning. `mlpstorage validate` never reads `--data-dir`, so the manifest has
+no effect on submission validation. Full detail in
+[ManPage.md](ManPage.md) → DATA DIRECTORY → "The datagen manifest".
+
 ### Storage Backend Selection (file | object)
 
 The `training`, `checkpointing`, and `vectordb` workloads require you to
