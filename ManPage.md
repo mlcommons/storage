@@ -398,7 +398,7 @@ The results directory accumulates every artifact produced by `mlpstorage` as eac
 │               └── <benchmark-specific tail>
 ```
 
-Every `closed`/`open` `datasize`, `datagen` or `run` first captures the running source tree into `code-images/` (or reuses the image whose hash matches) and writes a `.mlps-code-image` pointer into the run leaf. Trees written by the v3.0 release hold that pool at `<results-dir>/<orgname>/` instead; the next capture into such a tree moves it into `code-images/`, and `mlpstorage validate` reads both layouts.
+Every `closed`/`open` `datasize`, `datagen` or `run` first captures the running source tree into `code-images/` (or reuses the image whose hash matches) and writes a `.mlps-code-image` pointer into the run leaf. A changed source tree is never a rejection: it is captured as a new `code-<hash8>/` beside the existing images, so iterating on the source between runs is supported. Trees written by the v3.0 release hold that pool at `<results-dir>/<orgname>/` instead; the next capture into such a tree moves it into `code-images/`, and `mlpstorage validate` reads both layouts. The hash, the exclusion set and the `.code-hash.json` schema are defined in Rules.md §2.1.6.
 
 Every `run` adds a timestamped directory under its benchmark-specific tail and receives a small stable ID in `.mlps/runs.jsonl`. `mlpstorage runs list` shows them with their status; `mlpstorage runs rm` moves unwanted ones into `.mlps/trash/` (restore by moving the leaf back), and `mlpstorage runs purge` deletes the trash. A leaf removed by hand simply disappears from the list; its ID is never reused. History records remain in `.mlps/history`.
 
@@ -512,7 +512,7 @@ This framing applies uniformly to every per-benchmark metric column `reportgen` 
 
 ## VALIDATOR
 
-`mlpstorage` ships a layered validation system whose ultimate authority is `Rules.md` in the repository root.
+`mlpstorage` ships a layered validation system whose ultimate authority is `Rules.md` in the repository root. `mlpstorage validate` checks a package against every rule there, prints a message for each rule the package violates, and continues past each failure so that one report lists everything wrong with the package; the package passes only when no rule is violated.
 
 ### Architecture
 
@@ -1091,6 +1091,8 @@ mlpstorage validate <submission-dir> [--submitters <list>]
 - **`--skip-output-file`** — do not emit per-submission log files alongside the CSV.
 - **`--reference-checksum <md5>`** — override the bundled `REFERENCE_CHECKSUMS` used for the `code/` tree MD5 check.
 
+For every code image in the pool, `validate` recomputes the tree hash over the captured copy and compares it with the `hash` recorded in `.code-hash.json` (Rules.md §2.1.6); a mismatch is a §2.1.6 violation. For CLOSED submissions it then compares that hash with the pinned digest of the sanctioned release (`REFERENCE_CHECKSUMS`, or the `--reference-checksum` value) for Rules.md §3.6.1.
+
 There is no edition flag. Each submission is checked with the parameters of the rules edition its `submission.yaml` declares (`rules_edition`), read from the `checker:` block of that edition in `mlpstorage_py/rules/editions.yaml` -- the required leaf contents, the minimum AU per training model (3.3.2), the Table 2 CLOSED process counts and checkpoint sizes, the Table 3 simulated accelerator memory (4.3.4) and the KVCache 6.3.2.1 sequence locks; a submission without a manifest is checked under the current edition. A manifest declaring an edition the table lists without a `checker:` block (a historical round checked by its own tool) fails EDN-04 and that submission's workload checks are skipped. A rule whose logic changed between editions is bound per edition in the checker source (`@rule(..., since=, until=)`, a half-open range), so only the checks bound to that edition run; the others are skipped at debug level.
 
 Exit status: `0` if all submissions pass, `1` if any rule violation is detected.
@@ -1162,7 +1164,7 @@ The same preflight bypass also fires for HPE/Cray PALS `mpiexec` when any `PALS_
 
 ### Storage-backend
 
-The following table is anchored on s3dlio v0.9.112, the floor pinned in `pyproject.toml` (`S3DLIO_PINNED_VERSION` in `config.py` tracks it). The defaults for `S3DLIO_PUT_VERIFY` and `S3DLIO_MPU_PUT_VERIFY` changed from `true` to `false` in v0.9.106; behavior may differ on earlier versions. Defaults are quoted from s3dlio's own `docs/Environment_Variables.md` at that tag — re-verify them whenever the floor moves. For cloud-specific credential and endpoint env vars consumed by s3dlio for Azure or GCS backends, see s3dlio's [Environment_Variables.md](https://github.com/mlcommons/s3dlio/blob/main/docs/Environment_Variables.md).
+Rules.md §1.2 requires any of these variables that was set during a timed run to be declared in the run's configuration file; a run with an undeclared one is OPEN-only. At run start, when `STORAGE_LIBRARY` is `s3dlio`, `mlpstorage` logs a warning for every high-risk variable in this table that is set, naming the variable and pointing back here. The following table is anchored on s3dlio v0.9.112, the floor pinned in `pyproject.toml` (`S3DLIO_PINNED_VERSION` in `config.py` tracks it). The defaults for `S3DLIO_PUT_VERIFY` and `S3DLIO_MPU_PUT_VERIFY` changed from `true` to `false` in v0.9.106; behavior may differ on earlier versions. Defaults are quoted from s3dlio's own `docs/Environment_Variables.md` at that tag — re-verify them whenever the floor moves. For cloud-specific credential and endpoint env vars consumed by s3dlio for Azure or GCS backends, see s3dlio's [Environment_Variables.md](https://github.com/mlcommons/s3dlio/blob/main/docs/Environment_Variables.md).
 
 | Env var | Read by | Default when unset | Notes |
 |---|---|---|---|

@@ -26,8 +26,9 @@ Covered here:
   no ``config`` or a non-string edition means the current edition;
 - the shipped check classes have no conflicting bindings for any edition
   in the table;
-- README, ManPage and Rules.md say only the checks bound to the declared
-  edition run.
+- README and ManPage say only the checks bound to the declared edition
+  run; Rules.md states the same gate declaratively (only the rules bound
+  to that edition apply).
 """
 
 from __future__ import annotations
@@ -55,6 +56,9 @@ from mlpstorage_py.submission_checker.rule_registry import (
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DOC_PHRASE = "only the checks bound to that edition run"
+# Rules.md is declarative (no run-time tool behaviour); it states the same
+# gate as a predicate on the submission.
+RULES_PHRASE = "only the rules bound to that edition apply"
 
 
 # ---------------------------------------------------------------------------
@@ -499,10 +503,15 @@ class TestShippedClasses:
 # ---------------------------------------------------------------------------
 
 class TestDocs:
-    @pytest.mark.parametrize("doc", ["README.md", "ManPage.md", "Rules.md"])
+    @pytest.mark.parametrize("doc", ["README.md", "ManPage.md"])
     def test_docs_say_only_the_declared_editions_checks_run(self, doc):
         text = (PROJECT_ROOT / doc).read_text(encoding="utf-8")
         assert DOC_PHRASE in text, f"{doc} does not say '{DOC_PHRASE}'"
+
+    def test_rules_md_states_the_gate_declaratively(self):
+        text = (PROJECT_ROOT / "Rules.md").read_text(encoding="utf-8")
+        assert RULES_PHRASE in text, f"Rules.md does not say '{RULES_PHRASE}'"
+        assert DOC_PHRASE not in text, "Rules.md describes tool behaviour"
 
     def test_registry_docstring_documents_the_gate(self):
         import mlpstorage_py.submission_checker.rule_registry as reg
