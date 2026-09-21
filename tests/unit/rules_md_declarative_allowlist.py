@@ -19,11 +19,8 @@ Regenerate the current-hits literal with:
 # Baseline recorded 2026-09-21 (Rules.md as of #874): 64 hits in 36 blocks.
 # Sweep B2 §1+§2 (2026-09-21): 51 hits in 29 blocks.
 # Sweep B2 §3 (2026-09-21): 41 hits in 22 blocks.
+# Sweep B2 §4 (2026-09-21): 33 hits in 18 blocks.
 ALLOWLIST: dict[str, set[str]] = {
-    "4.3.4": {"rationale_word", "tool_behaviour"},
-    "4.3.5": {"rationale_word", "tool_behaviour"},
-    "4.4.2": {"intent_phrase", "tool_behaviour"},
-    "4.7.1": {"code_reference", "intent_phrase"},
     "5.4.1": {"intent_phrase"},
     "5.4.2": {"intent_phrase", "tool_behaviour"},
     "5.6. VDB OPEN versus CLOSED Options (prose)": {"code_constant", "code_reference"},
