@@ -192,7 +192,10 @@ smaller than what was generated and `dataset.num_subfolders_train` no longer has
 be repeated on the `run` command line -- the manifest supplies it. A run asking for
 more files than were generated, or for a different model / record length / format,
 stops with `MANIFEST-003` / `MANIFEST-001` before DLIO launches; a prefix without a
-manifest draws the `MANIFEST-000` warning and DLIO assumes the counts match. See
+manifest draws the `MANIFEST-000` warning and DLIO assumes the counts match. The
+run copies the manifest it read into its results leaf (`datagen-manifest.json`),
+which is what `validate` links the run to its `datagen` leaf through -- the
+validator never touches the bucket. See
 [ManPage.md](../ManPage.md) → DATA DIRECTORY → "The datagen manifest".
 
 ## Switching Libraries For Comparison Runs
