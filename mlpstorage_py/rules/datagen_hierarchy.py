@@ -23,10 +23,15 @@ the file-set contract is enforced from every call site (submission checker,
 run-checker, reportgen) without drift.
 
 The manifest at ``<data-dir>/<model>/.mlps-datagen-manifest.json`` is the
-self-describing record a future ``training run`` command will read to compare
-its requested workload size against the dataset the operator generated. The
-schema is intentionally minimal — only the three DLIO knobs that determine
-whether a run's request fits the dataset, plus provenance fields for audit.
+self-describing record ``training run`` / ``configview`` read at start
+(``TrainingBenchmark._apply_datagen_manifest``) to compare the requested
+workload against the dataset the operator generated. Schema v1: the three
+DLIO knobs that decide whether a run fits the dataset (``num_files_train``,
+``num_samples_per_file``, ``record_length_bytes``), provenance fields for
+audit, and — additive, same schema version — the layout/invariant fields
+the run side needs to reproduce the generated names under ``skip_listing``:
+``num_subfolders_train``, ``dataset_format``, ``rules_edition``. Readers
+tolerate their absence (manifests written before the extension).
 
 Whatif exemption
 ----------------
@@ -40,6 +45,7 @@ before committing to a closed/open submission.
 
 from __future__ import annotations
 
+import dataclasses
 import datetime
 import json
 import os
@@ -50,7 +56,7 @@ from urllib.parse import urlparse
 import s3dlio
 
 from mlpstorage_py import __version__ as _MLPSTORAGE_VERSION
-from mlpstorage_py.config import MODELS
+from mlpstorage_py.config import MODELS, RULES_EDITION
 from mlpstorage_py.errors import ConfigurationError, ErrorCode
 from mlpstorage_py.editions import checker_parameters, current_edition
 
@@ -416,10 +422,10 @@ def write_datagen_manifest(
     """Write the self-describing manifest for a completed datagen run.
 
     Emits ``<data-dir>/<model>/.mlps-datagen-manifest.json`` with the
-    schema documented in this module's docstring. A future
-    ``training run`` command will read this file to compare its
-    requested workload size against what the dataset actually
-    supports.
+    schema documented in this module's docstring. ``training run`` /
+    ``configview`` read it back (:func:`read_datagen_manifest`) to
+    compare the requested workload against what the dataset actually
+    supports and to tell DLIO the generated file count.
 
     Args:
         data_dir: The ``--data-dir`` path the operator passed to
@@ -427,8 +433,9 @@ def write_datagen_manifest(
         model: The training model name (drives the per-model subdir).
         dataset_params: A dict with (at minimum) the three keys
             ``num_files_train``, ``num_samples_per_file``, and
-            ``record_length_bytes``. Extra keys are ignored — the
-            manifest schema is intentionally tight.
+            ``record_length_bytes``. ``num_subfolders_train`` (default
+            0, DLIO's own default) and ``format`` are recorded when
+            present; every other key is ignored.
         source_datagen_result_dir: Absolute path to the datagen leaf
             under ``--results-dir``. Written as-is for provenance.
         now: Injectable clock for tests. Defaults to
@@ -464,6 +471,18 @@ def write_datagen_manifest(
     # format is unambiguous across parsers.
     created_at = now.strftime("%Y-%m-%dT%H:%M:%SZ")
 
+    try:
+        num_subfolders_train = int(dataset_params.get("num_subfolders_train") or 0)
+    except (TypeError, ValueError) as e:
+        raise ConfigurationError(
+            f"Datagen manifest cannot be written — dataset.num_subfolders_train "
+            f"is not an integer: {dataset_params.get('num_subfolders_train')!r}.",
+            parameter="dataset.num_subfolders_train",
+            actual=dataset_params.get("num_subfolders_train"),
+            code=ErrorCode.CONFIG_INVALID_VALUE,
+        ) from e
+    dataset_format = dataset_params.get("format")
+
     manifest = {
         "schema_version": DATAGEN_MANIFEST_SCHEMA_VERSION,
         "model": model,
@@ -473,6 +492,12 @@ def write_datagen_manifest(
         "created_at": created_at,
         "mlpstorage_version": _MLPSTORAGE_VERSION,
         "source_datagen_result_dir": source_datagen_result_dir,
+        # Additive v1 fields (storage#571 Q4 reader): the layout the run
+        # must reproduce under skip_listing, the format invariant, and the
+        # rules edition the dataset was generated under.
+        "num_subfolders_train": num_subfolders_train,
+        "dataset_format": None if dataset_format is None else str(dataset_format),
+        "rules_edition": RULES_EDITION,
     }
     payload = json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8")
 
@@ -504,3 +529,185 @@ def write_datagen_manifest(
     with open(manifest_path, "wb") as f:
         f.write(payload)
     return manifest_path
+
+
+# --------------------------------------------------------------------------- #
+# read_datagen_manifest                                                       #
+# --------------------------------------------------------------------------- #
+
+
+@dataclasses.dataclass(frozen=True)
+class DatagenManifest:
+    """A parsed ``.mlps-datagen-manifest.json`` (schema v1).
+
+    ``num_subfolders_train`` / ``dataset_format`` / ``rules_edition`` are
+    ``None`` for manifests written before the additive extension; the
+    run-side check skips the invariants it cannot see.
+    """
+
+    location: str
+    schema_version: int
+    model: str
+    num_files_train: int
+    num_samples_per_file: int
+    record_length_bytes: int
+    created_at: Optional[str] = None
+    mlpstorage_version: Optional[str] = None
+    source_datagen_result_dir: Optional[str] = None
+    num_subfolders_train: Optional[int] = None
+    dataset_format: Optional[str] = None
+    rules_edition: Optional[str] = None
+
+
+_MANIFEST_REQUIRED_KEYS = (
+    "schema_version", "model", "num_files_train", "num_samples_per_file",
+    "record_length_bytes",
+)
+
+
+def datagen_manifest_location(data_dir: str, model: str) -> str:
+    """Path (local) or URI (object storage) of the manifest for ``model``."""
+    if _is_object_uri(data_dir):
+        return _join_model_location(data_dir, model) + "/" + DATAGEN_MANIFEST_FILENAME
+    return os.path.join(data_dir, model, DATAGEN_MANIFEST_FILENAME)
+
+
+def _parse_datagen_manifest(raw: bytes, location: str) -> DatagenManifest:
+    """Decode + validate a manifest body. Loud on anything malformed."""
+    try:
+        data = json.loads(bytes(raw).decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as e:
+        raise ConfigurationError(
+            f"Datagen manifest at {location!r} is not valid JSON: {e}.",
+            parameter="data_dir",
+            actual=location,
+            suggestion=(
+                "The dataset's provenance record is corrupt. Regenerate the "
+                "dataset, or pass --skip-validation to run without the "
+                "manifest check."
+            ),
+            code=ErrorCode.CONFIG_PARSE_ERROR,
+        ) from e
+
+    if not isinstance(data, dict):
+        raise ConfigurationError(
+            f"Datagen manifest at {location!r} must be a JSON object, got "
+            f"{type(data).__name__}.",
+            parameter="data_dir",
+            actual=location,
+            code=ErrorCode.CONFIG_PARSE_ERROR,
+        )
+
+    missing = [k for k in _MANIFEST_REQUIRED_KEYS if k not in data]
+    if missing:
+        raise ConfigurationError(
+            f"Datagen manifest at {location!r} is missing required key(s): "
+            f"{missing}.",
+            parameter="data_dir",
+            expected=list(_MANIFEST_REQUIRED_KEYS),
+            actual=sorted(data.keys()),
+            code=ErrorCode.CONFIG_MISSING_REQUIRED,
+        )
+
+    def _int(key: str, required: bool) -> Optional[int]:
+        value = data.get(key)
+        if value is None and not required:
+            return None
+        try:
+            return int(value)
+        except (TypeError, ValueError) as e:
+            raise ConfigurationError(
+                f"Datagen manifest at {location!r}: {key} must be an "
+                f"integer, got {value!r}.",
+                parameter=key,
+                actual=value,
+                code=ErrorCode.CONFIG_PARSE_ERROR,
+            ) from e
+
+    schema_version = _int("schema_version", required=True)
+    if schema_version != DATAGEN_MANIFEST_SCHEMA_VERSION:
+        raise ConfigurationError(
+            f"Datagen manifest at {location!r} has schema_version "
+            f"{schema_version}; this mlpstorage reads schema_version "
+            f"{DATAGEN_MANIFEST_SCHEMA_VERSION}.",
+            parameter="schema_version",
+            expected=DATAGEN_MANIFEST_SCHEMA_VERSION,
+            actual=schema_version,
+            suggestion="Upgrade mlpstorage, or regenerate the dataset with this version.",
+            code=ErrorCode.CONFIG_INCOMPATIBLE,
+        )
+
+    def _opt_str(key: str) -> Optional[str]:
+        value = data.get(key)
+        return None if value is None else str(value)
+
+    return DatagenManifest(
+        location=location,
+        schema_version=schema_version,
+        model=str(data["model"]),
+        num_files_train=_int("num_files_train", required=True),
+        num_samples_per_file=_int("num_samples_per_file", required=True),
+        record_length_bytes=_int("record_length_bytes", required=True),
+        created_at=_opt_str("created_at"),
+        mlpstorage_version=_opt_str("mlpstorage_version"),
+        source_datagen_result_dir=_opt_str("source_datagen_result_dir"),
+        num_subfolders_train=_int("num_subfolders_train", required=False),
+        dataset_format=_opt_str("dataset_format"),
+        rules_edition=_opt_str("rules_edition"),
+    )
+
+
+def read_datagen_manifest(data_dir: str, model: str) -> Optional[DatagenManifest]:
+    """Read ``<data-dir>/<model>/.mlps-datagen-manifest.json`` if present.
+
+    Returns ``None`` when no manifest exists (the caller decides how loud
+    to be about that — a missing manifest is a warning, not an error).
+    A manifest that exists but cannot be read or parsed raises
+    ``ConfigurationError``: silence there would hide a real problem.
+
+    Object storage (``s3://``, ``gs://``, ``az://``, ``direct://``): one
+    ``s3dlio.exists`` (HEAD) tells "absent" from "read failed", then a
+    single ``s3dlio.get``. No retry — the eventual-consistency window is
+    dwarfed by the human latency between ``datagen`` and ``run``. Any
+    s3dlio exception fails safe as an error (same policy as
+    :func:`assert_data_dir_hierarchy_absent`).
+    """
+    location = datagen_manifest_location(data_dir, model)
+
+    if _is_object_uri(data_dir):
+        try:
+            present = s3dlio.exists(location)
+        except Exception as e:
+            raise ConfigurationError(
+                f"Cannot check for the datagen manifest at {location!r}: {e}. "
+                f"Refusing to guess whether the dataset has a manifest.",
+                parameter="data_dir",
+                actual=location,
+                code=ErrorCode.CONFIG_INVALID_VALUE,
+            ) from e
+        if not present:
+            return None
+        try:
+            raw = s3dlio.get(location)
+        except Exception as e:
+            raise ConfigurationError(
+                f"Failed to read the datagen manifest at {location!r}: {e}.",
+                parameter="data_dir",
+                actual=location,
+                code=ErrorCode.CONFIG_INVALID_VALUE,
+            ) from e
+        return _parse_datagen_manifest(raw, location)
+
+    if not os.path.exists(location):
+        return None
+    try:
+        with open(location, "rb") as f:
+            raw = f.read()
+    except OSError as e:
+        raise ConfigurationError(
+            f"Cannot read the datagen manifest at {location!r}: {e}.",
+            parameter="data_dir",
+            actual=location,
+            code=ErrorCode.CONFIG_INVALID_VALUE,
+        ) from e
+    return _parse_datagen_manifest(raw, location)

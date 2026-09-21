@@ -62,6 +62,12 @@ class TrainingRunRulesChecker(RunRulesChecker):
         # _apply_skip_listing_params (#483)
         'dataset.skip_listing',
         'dataset.listing_validation_interval',
+        # _apply_datagen_manifest (storage#571 Q4): the GENERATED file count
+        # read from <data-dir>/<model>/.mlps-datagen-manifest.json, so DLIO
+        # v3.0.5+ reconstructs "_of_{generated}" names while reading only
+        # num_files_train files. Never user-typed; num_files_train itself
+        # stays the CLOSED_ALLOWED read count.
+        'dataset.num_files_generated',
         # add_datadir_param — derived from --data-dir + model
         'dataset.data_folder',
         # _apply_object_storage_params — derived from --object + BUCKET / env
