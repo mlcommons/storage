@@ -1,4 +1,4 @@
-# MLPerf™ Storage V2.0 Benchmark Validation Rules
+# MLPerf™ Storage V3.0 Benchmark Validation Rules
 ——————————————————————————————————————————
 
 # Table of Contents
