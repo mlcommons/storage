@@ -213,6 +213,10 @@ class SubmissionReadiness:
     paperwork: Dict[Tuple[str, str], Paperwork] = field(default_factory=dict)
     tree_problems: List[Finding] = field(default_factory=list)
     warnings: List[Finding] = field(default_factory=list)
+    #: Every checker error that counts against the package (nothing under
+    #: ``whatif/``), whether or not the table carries it: ``submit`` refuses
+    #: while this is non-empty, exactly as ``validate`` would exit 1.
+    errors: List[Finding] = field(default_factory=list)
 
     @property
     def package_results(self) -> List[ResultReadiness]:
@@ -229,11 +233,13 @@ class SubmissionReadiness:
     @property
     def submittable(self) -> bool:
         rows = self.package_results
-        return bool(rows) and not self.tree_problems and all(r.submit == SUBMIT_READY for r in rows)
+        return (bool(rows) and not self.tree_problems and not self.errors
+                and all(r.submit == SUBMIT_READY for r in rows))
 
     def to_dict(self) -> dict:
         return {"results_dir": self.results_dir, "orgname": self.orgname,
                 "rules_edition": self.edition, "submittable": self.submittable,
+                "checker_errors": len(self.errors),
                 "results": [r.to_dict() for r in self.results],
                 "paperwork": [p.to_dict() for _k, p in sorted(self.paperwork.items())],
                 "tree_problems": [f.to_dict() for f in self.tree_problems],
@@ -499,8 +505,13 @@ def _score(result: ResultReadiness, metadata_by_id: Dict[int, dict]) -> None:
         n = len(extra)
         parts.append(f"{n} extra run{'s' if n != 1 else ''} ({', '.join(str(r.id) for r in extra)}); "
                      f"keep exactly {result.required} ({_rm_hint(r.id for r in extra)})")
+    # A workload-level finding the checker repeats per run (six runs, six
+    # identical 3.1.1 lines) reads as one clause with a count.
+    seen: Dict[str, int] = {}
     for f in result.problems:
-        parts.append(f.short())
+        seen[f.short()] = seen.get(f.short(), 0) + 1
+    for text, n in seen.items():
+        parts.append(text if n == 1 else f"{text} (x{n})")
 
     if result.division == _WHATIF:
         result.submit = SUBMIT_NA
@@ -550,11 +561,13 @@ def _runs_per_result(edition: str) -> Dict[str, int]:
     return dict(params.runs_per_result) if params is not None else {}
 
 
-def evaluate(results_dir: str) -> SubmissionReadiness:
+def evaluate(results_dir: str, findings: Optional[List[Finding]] = None) -> SubmissionReadiness:
     """Score every result in an initialized results-dir.
 
-    Raises ``ResultsDirNotInitializedError`` when the directory carries no
-    ``mlperf-results.yaml`` sentinel.
+    ``findings`` are the checker's, already collected (``submit`` runs the
+    checker once and scores from the same list); by default they are
+    collected here. Raises ``ResultsDirNotInitializedError`` when the
+    directory carries no ``mlperf-results.yaml`` sentinel.
     """
     root = os.path.abspath(results_dir)
     orgname = resolve_orgname(root)
@@ -606,7 +619,9 @@ def evaluate(results_dir: str) -> SubmissionReadiness:
         leaf_by_timestamp.setdefault(leaf.rsplit("/", 1)[1], []).append(leaf)
 
     # The checker's findings, attributed.
-    for f in collect_findings(root):
+    if findings is None:
+        findings = collect_findings(root)
+    for f in findings:
         parts = _relative_parts(root, f.path)
         if parts is None and _TIMESTAMP_RE.match(f.path.strip()):
             # 2.1.18 / 2.1.24 name the bare timestamp directory; unique
@@ -621,6 +636,7 @@ def evaluate(results_dir: str) -> SubmissionReadiness:
             continue
         if f.level != "error":
             continue
+        sub.errors.append(f)
         if f.rule_id in COUNT_RULES or f.rule_id in ROLLUP_RULES:
             continue
         attributed = False

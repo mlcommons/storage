@@ -26,6 +26,7 @@ SYNOPSIS
   mlpstorage <closed|open|whatif> kvcache <command> [OPTIONS]
   mlpstorage (reports|history|runs|lockfile|config|version) [subcommand] [OPTIONS]
   mlpstorage status [OPTIONS]
+  mlpstorage submit [--dry-run] [--out PATH]
   mlpstorage init <orgname> [results-dir]
   mlpstorage validate <submission-dir> [OPTIONS]
   mlpstorage rules-coverage [--rules-md PATH]
@@ -124,6 +125,8 @@ mlpstorage
 │   └── gc                                       {RUNS_GC}
 │
 ├── status                                {STATUS}  ← one row per result: RUNS n/m, SUBMIT, NOTE
+│
+├── submit                                {SUBMIT}  ← check, package, record; --dry-run checks only
 │
 ├── lockfile
 │   ├── generate                                 {LF_GENERATE}
@@ -718,6 +721,24 @@ STATUS
   result a `run` just added to, once the run has finished (not under --quiet).
   Scored by the checker behind `mlpstorage validate`; always exits 0.
 
+SUBMIT
+  Optional:
+    --results-dir/-rd PATH          Tree to package (resolved as for RUNS_LIST)
+    --dry-run                       Check and describe the package; write nothing
+    --out PATH                      Where to write the package: a directory, or a .tar.gz
+                                    file path (default <results-dir>/.mlps/packages/
+                                    <org>-<edition>-<YYYYMMDD_HHMMSS>.tar.gz)
+  Regenerates the rollup tables (`reports reportgen`), runs the checker behind
+  `mlpstorage validate` once, prints the `status` table and refuses (exit 1)
+  while any error remains: short or invalid results, paperwork, tree problems,
+  or a checker error the table does not carry. Warnings never block; whatif
+  results are never packaged. On a pass it writes <org>/{closed,open}/<org>/**
+  plus the code images those leaves point at, under <org>/code-images/, as a
+  gzipped tarball with a .sha256 and a .manifest.json (per-file inventory)
+  beside it, appends a line to <results-dir>/.mlps/submissions.jsonl and prints
+  the manual upload instructions (the MLCommons submission UI; each upload
+  replaces the last). Exit 0 on a pass or a clean dry run.
+
 ──────────────────────────────────────────────────────────────────
 
 LF_GENERATE
@@ -878,7 +899,7 @@ def get_context_help_tokens(argv: list) -> 'str | None':
 
     # Root — no tokens
     if n == 0:
-        return 'next: closed | open | whatif | init | reports | history | runs | status | lockfile | version | validate | rules-coverage'
+        return 'next: closed | open | whatif | init | reports | history | runs | status | submit | lockfile | version | validate | rules-coverage'
 
     t0 = argv[0]
 
@@ -899,6 +920,9 @@ def get_context_help_tokens(argv: list) -> 'str | None':
         return None  # leaf
 
     if t0 == 'status':
+        return None  # leaf — fall through to argparse
+
+    if t0 == 'submit':
         return None  # leaf — fall through to argparse
 
     if t0 == 'lockfile':

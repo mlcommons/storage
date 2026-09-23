@@ -206,7 +206,7 @@ class TestStatusTable:
         assert len(nxt) == 1 and nxt[0] == _lines(out)[-1]
         assert "mlpstorage status --runs" in nxt[0]
 
-    def test_all_ready_points_at_validation(self, rd, scripted, capsys):
+    def test_all_ready_points_at_submit_dry_run(self, rd, scripted, capsys):
         _training(rd, "unet3d", 6)
         _system(rd, "closed", SYS)
         scripted([])
@@ -217,7 +217,7 @@ class TestStatusTable:
         assert "1 of 1 result ready" in out
         assert "Paperwork" not in out
         nxt = [l for l in _lines(out) if l.startswith("Next:")][0]
-        assert "mlpstorage validate" in nxt
+        assert "mlpstorage submit --dry-run" in nxt
 
     def test_paperwork_only_next_says_fill_it_in(self, rd, scripted, capsys):
         _training(rd, "unet3d", 6)

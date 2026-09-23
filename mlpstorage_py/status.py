@@ -176,13 +176,14 @@ def _next_line(sub: SubmissionReadiness, results: Sequence[ResultReadiness]) -> 
         return f"Next: mlpstorage validate {sub.results_dir}   (the tree problems above, in full)"
     if SUBMIT_PAPERWORK in tokens:
         return "Next: fill in the paperwork above, then mlpstorage status"
-    return f"Next: mlpstorage validate {sub.results_dir}"
+    return "Next: mlpstorage submit --dry-run"
 
 
 def render(sub: SubmissionReadiness, results: Optional[Sequence[ResultReadiness]] = None, *,
-           show_runs: bool = False) -> List[str]:
+           show_runs: bool = False, next_line: bool = True) -> List[str]:
     """The ``status`` text for ``results`` (default: every result of
-    ``sub``), as lines without trailing newlines."""
+    ``sub``), as lines without trailing newlines. ``submit`` renders the
+    same table and supplies its own "Next:" line (``next_line=False``)."""
     if results is None:
         results = sub.results
     by_division: Dict[str, List[ResultReadiness]] = {}
@@ -206,7 +207,8 @@ def render(sub: SubmissionReadiness, results: Optional[Sequence[ResultReadiness]
     if sub.warnings:
         lines.append(f"{_plural(len(sub.warnings), 'warning')} from the checker do not block a "
                      f"submission; mlpstorage validate {sub.results_dir} lists them.")
-    lines.append(_next_line(sub, results))
+    if next_line:
+        lines.append(_next_line(sub, results))
     return lines
 
 

@@ -523,6 +523,16 @@ def _main_impl():
         from mlpstorage_py.status import run_status_command
         return run_status_command(args, results_dir, logger)
 
+    if args.mode == "submit":
+        # Check, package and record the tree for upload (Rules.md 1.3
+        # "submission"); recorded in history like any other writer.
+        if hist is None:
+            raise _results_dir_required_error(
+                "`mlpstorage submit` packages an initialized results-dir", results_dir
+            )
+        from mlpstorage_py.submit import run_submit_command
+        return run_submit_command(args, results_dir, logger)
+
     if args.mode == 'history':
         if hist is None:
             raise _results_dir_required_error(
