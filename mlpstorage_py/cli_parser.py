@@ -40,6 +40,7 @@ from mlpstorage_py.cli import (
     add_lockfile_arguments,
     add_init_arguments,
     add_runs_arguments,
+    add_status_arguments,
     add_config_arguments,
     add_version_arguments,
     add_validate_arguments,
@@ -158,6 +159,12 @@ def build_parser():
         description="List, inspect and remove the runs recorded in a results-dir",
         help="Manage the runs in a results-dir",
     )
+    status_parser = top.add_parser(
+        "status",
+        description="Per-result submission readiness of a results-dir: runs counted, "
+                    "SUBMIT token, paperwork still to do",
+        help="Show what stands between each result and a submission",
+    )
     lockfile_parser = top.add_parser("lockfile", help="Generate and verify package lockfiles")
     init_parser = top.add_parser(
         "init",
@@ -183,6 +190,7 @@ def build_parser():
     add_reports_arguments(reports_parser)
     add_history_arguments(history_parser)
     add_runs_arguments(runs_parser)
+    add_status_arguments(status_parser)
     add_lockfile_arguments(lockfile_parser)
     add_init_arguments(init_parser)
     add_config_arguments(config_parser)

@@ -458,6 +458,19 @@ def _rm_hint(ids: Iterable[int]) -> str:
     return "mlpstorage runs rm " + " ".join(str(i) for i in ids)
 
 
+def _by_reason(runs: List[RunReadiness]) -> List[Tuple[List[int], str]]:
+    """Runs grouped by identical reason, in first-seen order, so six runs
+    missing the same log read as one clause with one ``runs rm`` hint."""
+    groups: Dict[str, List[int]] = {}
+    for run in runs:
+        groups.setdefault(run.reason, []).append(run.id)
+    return [(ids, reason) for reason, ids in groups.items()]
+
+
+def _runs_label(ids: List[int]) -> str:
+    return f"run {ids[0]}" if len(ids) == 1 else "runs " + ", ".join(str(i) for i in ids)
+
+
 def _score(result: ResultReadiness, metadata_by_id: Dict[int, dict]) -> None:
     """The SUBMIT token and NOTE of a result from its runs, problems and
     paperwork."""
@@ -476,10 +489,12 @@ def _score(result: ResultReadiness, metadata_by_id: Dict[int, dict]) -> None:
     failed = [r for r in result.runs if r.status == RUN_FAILED]
     invalid = [r for r in result.runs if r.status == RUN_INVALID]
     extra = [r for r in result.runs if r.status == RUN_EXTRA]
-    for run in failed:
-        parts.append(f"run {run.id} failed ({run.reason}); remove it ({_rm_hint([run.id])})")
-    for run in invalid:
-        parts.append(f"run {run.id} invalid: {run.reason}; remove or redo it ({_rm_hint([run.id])})")
+    for ids, reason in _by_reason(failed):
+        parts.append(f"{_runs_label(ids)} failed ({reason}); remove "
+                     f"{'it' if len(ids) == 1 else 'them'} ({_rm_hint(ids)})")
+    for ids, reason in _by_reason(invalid):
+        parts.append(f"{_runs_label(ids)} invalid: {reason}; remove or redo "
+                     f"{'it' if len(ids) == 1 else 'them'} ({_rm_hint(ids)})")
     if extra:
         n = len(extra)
         parts.append(f"{n} extra run{'s' if n != 1 else ''} ({', '.join(str(r.id) for r in extra)}); "
@@ -663,15 +678,36 @@ def evaluate(results_dir: str) -> SubmissionReadiness:
     return sub
 
 
-def evaluate_result(results_dir: str, leaf_path: str) -> Optional[ResultReadiness]:
-    """The result that the run leaf ``leaf_path`` belongs to, scored, or
-    ``None`` when the leaf is not a run of the results-dir."""
-    root = os.path.abspath(results_dir)
-    parts = _relative_parts(root, leaf_path)
-    leaf = _leaf_of(parts) if parts else None
-    if leaf is None:
-        return None
-    for result in evaluate(results_dir).results:
+def leaf_key(results_dir: str, path: str) -> Optional[str]:
+    """The results-dir-relative run leaf that ``path`` is, or lies inside,
+    or ``None`` when it is not under a canonical leaf of the tree."""
+    parts = _relative_parts(os.path.abspath(results_dir), path)
+    return _leaf_of(parts) if parts else None
+
+
+def result_for_leaf(sub: SubmissionReadiness, leaf: str) -> Optional[ResultReadiness]:
+    """The scored result holding the run ``leaf`` (results-dir relative)."""
+    for result in sub.results:
         if any(run.leaf == leaf for run in result.runs):
             return result
     return None
+
+
+def evaluate_result(results_dir: str, leaf_path: str) -> Optional[ResultReadiness]:
+    """The result that the run leaf ``leaf_path`` belongs to, scored, or
+    ``None`` when the leaf is not a run of the results-dir."""
+    leaf = leaf_key(results_dir, leaf_path)
+    if leaf is None:
+        return None
+    return result_for_leaf(evaluate(results_dir), leaf)
+
+
+def run_tokens(sub: SubmissionReadiness) -> Dict[str, str]:
+    """Per-run token by leaf, as ``mlpstorage runs list`` shows it: the run's
+    status (``ok`` / ``failed`` / ``running`` / ``invalid`` / ``extra``), or
+    ``-`` for a ``whatif`` run, which no package ever carries."""
+    out: Dict[str, str] = {}
+    for result in sub.results:
+        for run in result.runs:
+            out[run.leaf] = SUBMIT_NA if result.division == _WHATIF else run.status
+    return out

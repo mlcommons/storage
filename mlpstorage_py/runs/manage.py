@@ -195,8 +195,25 @@ def _matches_filters(row: dict, args) -> bool:
 # list
 # ---------------------------------------------------------------------------
 
+def _run_tokens(results_dir: str, logger) -> Optional[Dict[str, str]]:
+    """Per-run readiness token by leaf (``ok`` / ``failed`` / ``running`` /
+    ``invalid`` / ``extra``, ``-`` for whatif), from the same evaluator
+    ``mlpstorage status`` prints; ``None`` when the evaluator fails, so the
+    listing (what ``rm`` acts on) stays usable (an empty map is a tree
+    without run leaves)."""
+    from mlpstorage_py.readiness import evaluate, run_tokens
+    try:
+        return dict(run_tokens(evaluate(results_dir)))
+    except Exception as exc:  # noqa: BLE001 -- listing must not depend on the checker
+        logger.warning(f"Could not evaluate submission readiness for the SUBMIT column: {exc}")
+        return None
+
+
 def _cmd_list(args, results_dir: str, logger) -> int:
     rows = [_describe(results_dir, r) for r in sync(results_dir)]
+    tokens = _run_tokens(results_dir, logger)
+    for row in rows:
+        row["submit"] = tokens.get(row["leaf"]) if tokens is not None else None
     rows = [row for row in rows if _matches_filters(row, args)]
     if getattr(args, "json", False):
         print(json.dumps(rows, indent=2))
@@ -204,11 +221,12 @@ def _cmd_list(args, results_dir: str, logger) -> int:
     if not rows:
         print(f"No runs in {results_dir}.")
         return EXIT_CODE.SUCCESS
-    headers = ["ID", "STATUS", "MODE", "SYSTEM", "BENCHMARK", "MODEL", "COMMAND", "STARTED", "CODE", "SIZE"]
+    headers = ["ID", "STATUS", "SUBMIT", "MODE", "SYSTEM", "BENCHMARK", "MODEL", "COMMAND", "STARTED", "CODE", "SIZE"]
+    unknown = "?" if tokens is None else "-"
     table = []
     for row in rows:
         table.append([
-            str(row["id"]), row["status"], row["mode"], row["systemname"],
+            str(row["id"]), row["status"], row["submit"] or unknown, row["mode"], row["systemname"],
             row["benchmark"], row["model"], row["command"],
             _started_display(RunRecord(id=row["id"], leaf=row["leaf"], registered_at="")),
             row["code_image"] or "-", _human_size(row["size_bytes"]),
