@@ -13,17 +13,24 @@ jobs:
       fail-fast: false
       matrix:
         python-version: ['3.12']
-        # Two parallel groups sized for GitHub's 2-vcpu runners:
-        #   - kvcache runs alone (its suite dominates wallclock)
-        #   - the other three run sequentially in the second group
+        # Two parallel groups, balanced by measured wall-clock (2026-09-23):
+        #   - kvcache (238 tests averaging 0.5s of allocation setup each) plus
+        #     the four real-mpirun probe tests (a fixed ~10s quiesce window
+        #     each, 35% of the main suite when run serially);
+        #   - the main suite minus those four, then the package and vdb suites.
+        # Every suite that has more than a few seconds of work runs under
+        # pytest-xdist (`-n auto`: one worker per runner vCPU). Both heavy
+        # suites were verified xdist-clean; the main suite drops from ~175s
+        # serial to ~30s at four workers, kvcache from ~100s to ~40s.
         group:
           - name: kvcache
             commands: |
-              uv run pytest kv_cache_benchmark/tests
+              uv run pytest kv_cache_benchmark/tests -n auto
+              uv run pytest tests/integration/test_shared_fs_probe_real_mpi.py -n auto
           - name: others
             commands: |
-              uv run pytest tests
-              uv run pytest mlpstorage_py/tests
+              uv run pytest tests -n auto --ignore=tests/integration/test_shared_fs_probe_real_mpi.py
+              uv run pytest mlpstorage_py/tests -n auto
               uv run pytest vdb_benchmark/tests
     name: test (${{ matrix.python-version }}, ${{ matrix.group.name }})
 
@@ -72,6 +79,8 @@ jobs:
     # both have a top-level package named `tests` whose conftest.py modules
     # collide under pytest's rootdir-relative import (ImportPathMismatchError).
     # Each suite's pyproject defines its own `slow` marker and `-m 'not slow'`
-    # default, so subprocess-level invocation is correct.
+    # default, so subprocess-level invocation is correct. The real-mpirun file
+    # is --ignore'd in `others` only because `kvcache` runs it explicitly:
+    # every test still runs exactly once per workflow run.
     - name: Run ${{ matrix.group.name }} test suite(s)
       run: ${{ matrix.group.commands }}
