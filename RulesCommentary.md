@@ -52,6 +52,53 @@ PINNING describe the resolution and the layout it writes.
 
 ---
 
+## 1.3 runResultSubmission
+
+### Why
+
+Before this rule the document used "run" for a *timestamp directory*, for
+the set of them under a workload, and for a whole submission, and the tool's
+output did the same; a submitter reading "3 of 5 runs" could not tell which
+was meant.  Three nouns at three levels remove the ambiguity: a *run* is what
+one `mlpstorage ... run` invocation produces and what `mlpstorage runs`
+manages by ID; a *result* is what one row of `results.csv` is computed from
+(and therefore the unit that can be complete or short); a *submission* is
+what one submitter uploads.  The accelerator is part of a result's identity
+even though it is not a directory level: 2.1.17 requires exactly six
+timestamp directories under one workload's "run" phase, so runs for two
+accelerators cannot share a workload directory in a valid package, and
+`results.csv` carries one row per accelerator.
+
+The count of runs per complete result is data in the editions table rather
+than a number in each rule so that a later edition can change one benchmark's
+count (or add a benchmark) without rewording §2, §5 or §6, and so that the
+validator's 2.1.17 / 5.3.1 checks and the tool's per-result readiness view
+read the same value.  Checkpointing counts *phases*, not directories, because
+4.7.1 accepts one combined invocation or two phase invocations as the same
+complete result.
+
+### How the value is produced
+
+`mlpstorage` assigns every run a ledger ID when it reserves the leaf
+(ManPage.md → `mlpstorage runs`).  The result a run belongs to is derived
+from the leaf's path (division, system name, benchmark, workload) and from
+the `accelerator` its `*_metadata.json` records.
+
+### Implementation
+
+- `mlpstorage_py/rules/editions.yaml` (`checker.runs_per_result`) and
+  `mlpstorage_py/editions.py` -- the per-benchmark count and its validation
+  (keys are exactly the edition's workload families; positive integers).
+- `mlpstorage_py/submission_checker/checks/directory_checks.py` (2.1.17) and
+  `vdb_checks.py` (5.3.1) -- the validator's counts, read through
+  `Config.get_runs_per_result`.
+- `mlpstorage_py/readiness.py` -- groups a results-dir's runs into results and
+  scores each against the count.
+- `tests/unit/test_readiness.py` -- pins the table value, the vocabulary and
+  the grouping.
+
+---
+
 ## 2.1.2 topLevelSubdirectories
 
 ### Why

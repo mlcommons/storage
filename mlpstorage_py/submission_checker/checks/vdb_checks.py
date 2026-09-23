@@ -439,8 +439,10 @@ class VdbCheck(BaseCheck):
 
     @rule("5.3.1", "vdbRunCount")
     def vdb_run_count(self):
-        """Verify exactly five timestamp directories under <leaf>/run/.
-        (Rules.md 5.3.1; Phase 4 D-04: count applies to run/, not datagen/.)
+        """Verify exactly ``runs_per_result.vector_database`` timestamp directories
+        under <leaf>/run/ (Rules.md 5.3.1; edition 3.0: five; the count is the
+        edition's, read from the rules editions table through ``Config``).
+        Phase 4 D-04: the count applies to run/, not datagen/.
         """
         valid = True
         if self.mode != "vector_database":
@@ -454,11 +456,12 @@ class VdbCheck(BaseCheck):
             d for d in os.listdir(self.run_path)
             if os.path.isdir(os.path.join(self.run_path, d)) and not d.startswith(".")
         ]
-        if len(timestamps) != 5:
+        required = self.config.get_runs_per_result("vector_database")
+        if len(timestamps) != required:
             self.log_violation(
                 "5.3.1", "vdbRunCount", self.run_path,
-                "vdbRunCount: expected exactly 5 run timestamp directories under %s, found %d",
-                self.run_path, len(timestamps),
+                "vdbRunCount: expected exactly %d run timestamp directories under %s, found %d",
+                required, self.run_path, len(timestamps),
             )
             valid = False
 

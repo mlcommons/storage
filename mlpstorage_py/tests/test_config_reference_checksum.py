@@ -1,7 +1,9 @@
 #!/usr/bin/env python3
 """
-Tests for REFERENCE_CHECKSUMS, RUN_TIMESTAMP_COUNT, MD5_EXCLUDE_PREFIXES,
-and MD5_EXCLUDE_FILENAMES constants in constants.py.
+Tests for REFERENCE_CHECKSUMS, MD5_EXCLUDE_PREFIXES and MD5_EXCLUDE_FILENAMES
+constants in constants.py (the former RUN_TIMESTAMP_COUNT lives in the rules
+editions table as ``checker.runs_per_result.training`` since status-and-submit
+PR 1; see test_directory_check_run_timestamps.py).
 
 Covers D-09, D-13, D-22 from the phase context. The Config.get_reference_checksum
 precedence tests (D-10, D-12) were removed in Phase 8 (D-88); per-image
@@ -13,7 +15,6 @@ Run with:
 
 from mlpstorage_py.submission_checker.constants import (
     REFERENCE_CHECKSUMS,
-    RUN_TIMESTAMP_COUNT,
     MD5_EXCLUDE_PREFIXES,
     MD5_EXCLUDE_FILENAMES,
 )
@@ -25,10 +26,6 @@ class TestConstantsImport:
     def test_reference_checksums_structure(self):
         """REFERENCE_CHECKSUMS must be a dict with v2.0, v3.0, default keys all None."""
         assert REFERENCE_CHECKSUMS == {"v2.0": None, "v3.0": None, "default": None}
-
-    def test_run_timestamp_count_value(self):
-        """RUN_TIMESTAMP_COUNT must equal 6 (1 warm-up + 5 measured per Rules.md 2.1.17)."""
-        assert RUN_TIMESTAMP_COUNT == 6
 
     def test_md5_exclude_prefixes_membership(self):
         """MD5_EXCLUDE_PREFIXES must be a tuple containing all required directory prefixes (D-13)."""

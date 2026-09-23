@@ -22,7 +22,8 @@ An edition's **checker parameters** (``checker:``) are what ``validate`` needs
 to check a submission of that edition: the required files and folders of
 every datagen / run / checkpoint leaf, the Rules.md 3.3.2 AU minimum per
 training model, the Table 2 CLOSED process counts and checkpoint sizes, the
-Table 3 simulated-accelerator memory and the 6.3.2.1 KVCache sequence locks.
+Table 3 simulated-accelerator memory, the 6.3.2.1 KVCache sequence locks and
+the runs one complete result holds per workload family (Rules.md 1.3).
 Only an edition this tool can check carries them; ``Config`` is built from
 them, once tree-wide for the current edition and once per submission from
 the edition its ``submission.yaml`` declares. There is no reviewer-side
@@ -63,7 +64,7 @@ _CHECKER_REGEX_FIELDS = ("datagen_required_files", "run_required_files", "checkp
 # The edition-varying values (design D-16): mappings keyed by model or
 # accelerator name exactly as ``workloads:`` spells them.
 CHECKER_VALUE_FIELDS = ("training_au_thresholds", "closed_mpi_processes", "checkpoint_size_gb",
-                        "accelerator_memory_gb", "kvcache_closed_sequence")
+                        "accelerator_memory_gb", "kvcache_closed_sequence", "runs_per_result")
 CHECKER_FIELDS = CHECKER_LIST_FIELDS + CHECKER_VALUE_FIELDS
 KVCACHE_SEQUENCE_KEYS = ("seed", "trials", "inter_option_delay_s")
 
@@ -98,6 +99,9 @@ class CheckerParameters:
     accelerator_memory_gb: Dict[str, float]
     #: Rules.md 6.3.2.1 -- ``seed`` / ``trials`` / ``inter_option_delay_s`` of a CLOSED kv_cache run.
     kvcache_closed_sequence: Dict[str, int]
+    #: Rules.md 1.3 -- the runs one complete result holds, per workload family
+    #: (2.1.17 training, 4.7.1 checkpointing phases, 5.3.1 vector_database, kv_cache).
+    runs_per_result: Dict[str, int]
 
 
 @dataclass(frozen=True)
@@ -388,6 +392,8 @@ def _parse_checker(eid: str, raw: Any, where: str) -> Optional[CheckerParameters
     values["accelerator_memory_gb"] = _parse_value_map(eid, "accelerator_memory_gb",
                                                        raw["accelerator_memory_gb"], where)
     values["kvcache_closed_sequence"] = _parse_kvcache_sequence(eid, raw["kvcache_closed_sequence"], where)
+    values["runs_per_result"] = _parse_value_map(eid, "runs_per_result", raw["runs_per_result"], where,
+                                                 integer=True)
     return CheckerParameters(**values)
 
 
@@ -410,6 +416,10 @@ def _check_values_against_workloads(edition: Edition, where: str) -> None:
     missing = sorted(set(edition.accelerators()) - set(c.accelerator_memory_gb))
     _require(not missing,
              f"{where}: edition {eid}: checker.accelerator_memory_gb lacks the workload accelerator(s) {missing}")
+    families = set(fam for fams in edition.workloads.values() for fam in fams)
+    _require(set(c.runs_per_result) == families,
+             f"{where}: edition {eid}: checker.runs_per_result must name exactly the edition's workload "
+             f"families {sorted(families)}, got {sorted(c.runs_per_result)}")
 
 
 def _parse_class(raw: Any, editions: Dict[str, Edition], allowlists: Dict[str, Any],

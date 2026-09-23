@@ -102,7 +102,9 @@ class TestTable:
 
     def test_the_five_names_are_checker_fields(self):
         from mlpstorage_py.editions import CHECKER_FIELDS, CHECKER_VALUE_FIELDS, CheckerParameters
-        assert set(CHECKER_VALUE_FIELDS) == set(V30_VALUES)
+        # runs_per_result joined the value fields later (status-and-submit
+        # PR 1; pinned in test_readiness.py)
+        assert set(CHECKER_VALUE_FIELDS) == set(V30_VALUES) | {"runs_per_result"}
         assert set(CHECKER_VALUE_FIELDS) <= set(CHECKER_FIELDS)
         assert set(CHECKER_FIELDS) <= {f.name for f in dataclasses.fields(CheckerParameters)}
 

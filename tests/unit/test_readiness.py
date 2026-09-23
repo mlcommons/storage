@@ -405,7 +405,7 @@ class TestResultsAndRuns:
         assert len(extras) == 1 and not extras[0].counted
         # the newest run is the extra one; the six oldest form the result
         assert extras[0].leaf.endswith(_ts(6))
-        assert row.submit == "short"
+        assert row.submit == "invalid"
         assert "1 extra run" in row.note
 
     def test_running_leaf_is_neither_counted_nor_failed(self, rd, scripted):
@@ -529,7 +529,7 @@ class TestCheckpointingPhases:
         row = _row(_evaluate(rd), benchmark="checkpointing", model="llama3-8b")
         assert (row.have, row.required) == (2, 2)
         assert [r.status for r in row.runs] == ["ok", "extra", "extra"]
-        assert row.submit == "short"
+        assert row.submit == "invalid"
         assert "2 extra run" in row.note
 
 
@@ -828,22 +828,37 @@ class TestRealValidator:
         assert sub.total_results >= 2
 
     def test_dod_tree_results(self, tmp_path, xdg):
+        """The definition-of-done "good" fixture is known-noisy under
+        ``validate`` (its run leaves carry no DLIO log files and the tree has
+        no code-image pool): the evaluator must say exactly that -- every run
+        invalid under the leaf-files rules, the missing pool at tree level --
+        rather than count the leaves as ok."""
         from mlpstorage_py.readiness import evaluate
         sub = evaluate(_dod_tree(tmp_path))
         train = _row(sub, benchmark="training", model="unet3d", system="acme-storage-v1")
-        assert (train.have, train.required) == (6, 6)
+        assert train.required == 6 and len(train.runs) == 6
+        assert all(r.status == "invalid" and "[2.1.19]" in r.reason for r in train.runs)
+        assert (train.have, train.submit) == (0, "short")
         ckpt = _row(sub, benchmark="checkpointing", model="llama3-8b", system="acme-storage-v1")
-        assert (ckpt.have, ckpt.required) == (2, 2)
-        assert [r.status for r in ckpt.runs] == ["ok", "extra"]
+        assert ckpt.required == 2 and len(ckpt.runs) == 2
+        assert all(r.status == "invalid" and "2.1.25" in {p.rule_id for p in r.problems}
+                   for r in ckpt.runs)
+        assert "CHECK-01" in {f.rule_id for f in sub.tree_problems}
+        # 2.1.18 names the bare timestamp directory; unique in the tree, it
+        # lands on the run rather than at tree level
+        assert "2.1.18" not in {f.rule_id for f in sub.tree_problems}
+        assert any("2.1.18" in {p.rule_id for p in r.problems} for r in train.runs)
 
     def test_missing_pdf_is_paperwork(self, tmp_path, xdg):
         from mlpstorage_py.readiness import evaluate
         sub = evaluate(_dod_tree(tmp_path, missing_systems_pdf=True))
         pw = sub.paperwork[("closed", "acme-storage-v1")]
-        assert pw.pdf_missing
+        assert pw.pdf_missing and not pw.yaml_missing
+        assert pw.items() == ["systems/acme-storage-v1.pdf missing"]
         train = _row(sub, benchmark="training", model="unet3d", system="acme-storage-v1")
-        assert train.submit == "paperwork"
-        assert "acme-storage-v1.pdf missing" in train.note
+        assert train.system_paperwork is pw
+        # the runs are invalid on this fixture, so short wins over paperwork
+        assert train.submit == "short"
 
     def test_schema_error_is_a_blank_field(self, tmp_path, xdg):
         from mlpstorage_py.readiness import evaluate

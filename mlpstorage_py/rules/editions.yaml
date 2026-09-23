@@ -14,8 +14,9 @@
 #            every datagen / run / checkpoint leaf, the Rules.md 3.3.2 AU
 #            minimum per training model, the Table 2 CLOSED process counts
 #            and checkpoint sizes, the Table 3 simulated-accelerator memory
-#            and the 6.3.2.1 KVCache sequence locks. Only an edition THIS tool
-#            can check carries one; an edition without it is checked by the
+#            and the 6.3.2.1 KVCache sequence locks, and the runs one complete
+#            result holds per workload family (Rules.md 1.3). Only an edition
+#            THIS tool can check carries one; an edition without it is checked by the
 #            tool its `tool:` line names, and a submission.yaml declaring it
 #            fails EDN-04. The current edition must carry one (tested). The
 #            `mlpstorage` runtime reads the current edition's block for the
@@ -225,6 +226,19 @@ editions:
         seed: 42
         trials: 3
         inter_option_delay_s: 90
+      # Rules.md 1.3: the runs one complete *result* holds, per workload
+      # family. training: the timestamp directories of the "run" phase
+      # (2.1.17: 1 warm-up + 5 measured); checkpointing: the two phases of
+      # 4.7.1 (write, read -- one combined invocation supplies both);
+      # vector_database: the "run" timestamp directories (5.3.1); kv_cache:
+      # CLOSED sequence runs (6.3.2.1 runs every Option and trial in one).
+      # `validate` reads 2.1.17 / 5.3.1 from here; `status` prints RUNS n/m
+      # against it.
+      runs_per_result:
+        training: 6
+        checkpointing: 2
+        vector_database: 5
+        kv_cache: 1
     # Every DLIO commit a sanctioned v3.0 CLOSED row ran on (walked from the
     # frozen tree's code images; 13 leaves whose image was built from a local
     # DLIO checkout record no commit and cannot be listed).
