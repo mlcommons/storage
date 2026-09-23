@@ -80,15 +80,21 @@ def _table_rows(out: str):
     return rows
 
 
-def _systems_finding(division, name, loc):
+def _systems_finding(rd, division, name, loc):
     return ("error", "2.1.7", "systemYamlValid",
-            f"{division}/{ORG}/systems/{name}.yaml", f"{loc}: Field required")
+            os.path.join(rd, division, ORG, "systems", f"{name}.yaml"), f"{loc}: Field required")
 
 
-def _pdf_finding(division, name):
+def _pdf_finding(rd, division, name):
     return ("error", "2.1.8", "systemPdfPresent",
-            f"{division}/{ORG}/systems/{name}.yaml",
+            os.path.join(rd, division, ORG, "systems", f"{name}.yaml"),
             f"{division}/{ORG}/systems/{name}.yaml has no matching {name}.pdf")
+
+
+def _failed_id(rd):
+    """The ledger ID of the failed retinanet run in ``two_results``."""
+    from mlpstorage_py.runs.ledger import sync
+    return next(r.id for r in sync(rd) if r.leaf.endswith(_ts(5)))
 
 
 @pytest.fixture
@@ -100,9 +106,9 @@ def two_results(rd, scripted):
     _leaf(rd, f"closed/{ORG}/results/{SYS}/training/retinanet/run/{_ts(5)}", exit_status=6, summary=False)
     _system(rd, "closed", SYS, pdf=False)
     scripted([
-        _systems_finding("closed", SYS, "system_under_test -> vendor"),
-        _systems_finding("closed", SYS, "system_under_test -> product"),
-        _pdf_finding("closed", SYS),
+        _systems_finding(rd, "closed", SYS, "system_under_test -> vendor"),
+        _systems_finding(rd, "closed", SYS, "system_under_test -> product"),
+        _pdf_finding(rd, "closed", SYS),
     ])
     return rd
 
@@ -174,7 +180,8 @@ class TestStatusTable:
         unet = next(l for l in body if "unet3d" in l)
         assert retina.split()[:6] == [SYS, "training", "retinanet", "b200", "2/6", "short"]
         assert "4 more runs needed" in retina
-        assert "run 9 failed" in retina and "mlpstorage runs rm 9" in retina
+        failed = _failed_id(two_results)
+        assert f"run {failed} failed" in retina and f"mlpstorage runs rm {failed}" in retina
         assert unet.split()[:6] == [SYS, "training", "unet3d", "b200", "6/6", "paperwork"]
 
     def test_paperwork_note_is_short_and_footer_carries_it_once(self, two_results, capsys):
@@ -207,7 +214,7 @@ class TestStatusTable:
         out = capsys.readouterr().out
         row = next(l for l in _lines(out) if l.startswith(SYS))
         assert row.split()[:6] == [SYS, "training", "unet3d", "b200", "6/6", "ready"]
-        assert "1 of 1 results ready" in out
+        assert "1 of 1 result ready" in out
         assert "Paperwork" not in out
         nxt = [l for l in _lines(out) if l.startswith("Next:")][0]
         assert "mlpstorage validate" in nxt
@@ -215,7 +222,7 @@ class TestStatusTable:
     def test_paperwork_only_next_says_fill_it_in(self, rd, scripted, capsys):
         _training(rd, "unet3d", 6)
         _system(rd, "closed", SYS, pdf=False)
-        scripted([_pdf_finding("closed", SYS)])
+        scripted([_pdf_finding(rd, "closed", SYS)])
         _main(["status", "-rd", rd])
         out = capsys.readouterr().out
         nxt = [l for l in _lines(out) if l.startswith("Next:")][0]
@@ -234,7 +241,7 @@ class TestStatusTable:
         assert "1 result" in whatif_hdr and "never packaged" in whatif_hdr
         whatif_row = lines[lines.index(whatif_hdr) + 3]
         assert whatif_row.split()[:6] == [SYS, "training", "unet3d", "b200", "1/6", "-"]
-        assert "1 of 1 results ready" in out  # whatif never counts
+        assert "1 of 1 result ready" in out  # whatif never counts
 
     def test_open_division_gets_its_own_header(self, rd, scripted, capsys):
         _training(rd, "unet3d", 6)
@@ -302,10 +309,10 @@ class TestStatusRuns:
         assert run_header.startswith("  ") and run_header.split() == ["ID", "STATUS", "STARTED", "COUNTED", "NOTE"]
         run_rows = [l for l in lines if l.startswith("  ") and l.split() and l.split()[0].isdigit()]
         assert len(run_rows) == 9
-        failed = next(l for l in run_rows if l.split()[0] == "9")
+        failed = next(l for l in run_rows if l.split()[0] == str(_failed_id(two_results)))
         assert failed.split()[1] == "failed" and failed.split()[4] == "-"
         assert "exit status 6" in failed
-        counted = [l for l in run_rows if l.split()[3] == "yes"]
+        counted = [l for l in run_rows if l.split()[4] == "yes"]
         assert len(counted) == 8
         first = run_rows[0].split()
         assert first[1] == "ok" and first[2] == "2026-09-01" and first[3] == "10:00:00"
@@ -329,7 +336,7 @@ class TestStatusRuns:
         _main(["status", "--runs", "-rd", rd])
         lines = _lines(capsys.readouterr().out)
         extra = next(l for l in lines if l.startswith("  ") and " extra " in l)
-        assert extra.split()[3] == "-" and "beyond the 6 runs" in extra
+        assert extra.split()[4] == "-" and "beyond the 6 runs" in extra
 
 
 class TestStatusFilters:
@@ -457,7 +464,7 @@ class TestPostRunStatus:
         rows = [l for l in lines if l.startswith("sys-1")]
         assert len(rows) == 1
         assert rows[0].split()[:6] == ["sys-1", "training", "unet3d", "b200", "1/6", "short"]
-        assert "run 3 failed" in rows[0]
+        assert "run 3 failed" in rows[0]  # LEAF_TRAIN_RUN_2, exit status 6
         assert any(l.startswith("Next:") for l in lines)
         assert "milvus" not in out  # other results of the tree are not printed
 
@@ -518,7 +525,7 @@ class TestRunsListToken:
         assert by_id["1"][1:3] == ["complete", "-"]          # datagen: no result
         assert by_id["2"][1:3] == ["complete", "ok"]
         assert by_id["3"][1:3] == ["failed", "failed"]
-        assert by_id["4"][1:3] == ["complete", "ok"]         # open checkpointing
+        assert by_id["4"][1:3] == ["complete", "extra"]      # open checkpointing, no phase counts in its metadata
         assert by_id["5"][1:3] == ["complete", "ok"]
         assert by_id["6"][1:3] == ["incomplete", "-"]        # whatif: never packaged
 
@@ -527,7 +534,8 @@ class TestRunsListToken:
         assert _main(["runs", "list", "--json"]) == EXIT_CODE.SUCCESS
         data = {d["id"]: d for d in json.loads(capsys.readouterr().out)}
         assert data[2]["submit"] == "ok" and data[3]["submit"] == "failed"
-        assert data[1]["submit"] is None and data[6]["submit"] is None
+        assert data[1]["submit"] is None   # datagen leaf: no result
+        assert data[6]["submit"] == "-"    # whatif run: never packaged
 
     def test_extra_and_invalid_tokens(self, tree, scripted, capsys):
         from tests.unit.test_runs_management import _make_leaf
@@ -538,7 +546,20 @@ class TestRunsListToken:
         _main(["runs", "list", "--json", "--model", "unet3d", "--status", "complete"])
         data = {d["leaf"]: d["submit"] for d in json.loads(capsys.readouterr().out)}
         assert data[LEAF_TRAIN_RUN] == "invalid"
-        assert sorted(data.values()).count("extra") == 2
+        assert [v for v in data.values() if v].count("extra") == 1  # 7 ok runs, 6 counted
+
+    def test_datagen_only_tree_shows_dash_not_question_mark(self, tmp_path, xdg, scripted, capsys):
+        from tests.unit.test_runs_management import LEAF_TRAIN_DATAGEN, _make_leaf
+        from mlpstorage_py.results_dir.user_config import record_results_dir
+        rd = str(tmp_path / "dg")
+        os.makedirs(rd)
+        write_sentinel(rd, ORG)
+        record_results_dir(rd)
+        _make_leaf(rd, LEAF_TRAIN_DATAGEN, summary=False, pointer=HASH_A)
+        scripted([])
+        assert _main(["runs", "list"]) == EXIT_CODE.SUCCESS
+        lines = [l for l in _lines(capsys.readouterr().out) if l]
+        assert len(lines) == 2 and lines[1].split()[2] == "-"
 
     def test_evaluator_failure_leaves_the_listing_usable(self, tree, capsys, caplog, monkeypatch):
         import logging
@@ -568,6 +589,18 @@ class TestReadinessHelpers:
         _training(rd, "unet3d", 1, division="whatif")
         scripted([])
         assert list(run_tokens(evaluate(rd)).values()) == ["-"]
+
+    def test_same_reason_runs_share_one_note_clause(self, rd, scripted):
+        from mlpstorage_py.readiness import evaluate
+        _training(rd, "unet3d", 6)
+        _system(rd, "closed", SYS)
+        leaves = [f"{rd}/closed/{ORG}/results/{SYS}/training/unet3d/run/{_ts(i)}" for i in range(6)]
+        scripted([("error", "2.1.19", "trainingRunFiles", leaf, "training_run.stdout.log not found")
+                  for leaf in leaves[:3]])
+        row = evaluate(rd).results[0]
+        assert row.submit == "short" and row.have == 3
+        assert row.note.count("invalid") == 1
+        assert "runs 1, 2, 3 invalid: [2.1.19] training_run.stdout.log not found; remove or redo them (mlpstorage runs rm 1 2 3)" in row.note
 
     def test_leaf_key(self, two_results):
         from mlpstorage_py.readiness import leaf_key

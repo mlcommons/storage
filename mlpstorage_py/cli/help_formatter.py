@@ -25,6 +25,7 @@ SYNOPSIS
   mlpstorage <closed|open|whatif> vectordb <command> <file|object> [OPTIONS]
   mlpstorage <closed|open|whatif> kvcache <command> [OPTIONS]
   mlpstorage (reports|history|runs|lockfile|config|version) [subcommand] [OPTIONS]
+  mlpstorage status [OPTIONS]
   mlpstorage init <orgname> [results-dir]
   mlpstorage validate <submission-dir> [OPTIONS]
   mlpstorage rules-coverage [--rules-md PATH]
@@ -121,6 +122,8 @@ mlpstorage
 │   ├── rm [<id>...]                             {RUNS_RM}
 │   ├── purge                                    {RUNS_PURGE}
 │   └── gc                                       {RUNS_GC}
+│
+├── status                                {STATUS}  ← one row per result: RUNS n/m, SUBMIT, NOTE
 │
 ├── lockfile
 │   ├── generate                                 {LF_GENERATE}
@@ -653,6 +656,8 @@ RUNS_LIST
     --status {complete,failed,incomplete}
                                     Only runs in this state
     --json                          JSON array instead of a table
+  SUBMIT is the run's readiness token from `mlpstorage status --runs` (ok, failed,
+  running, invalid, extra; `-` for whatif and non-run leaves).
   Every canonical run leaf gets a small stable ID in <results-dir>/.mlps/runs.jsonl;
   leaves removed by hand disappear from the list and their IDs are never reused.
 
@@ -689,6 +694,29 @@ RUNS_GC
     --yes/-y                        Skip the confirmation (required when stdin is not a terminal)
   Moves code-image pool directories that no run leaf (in the tree or its trash)
   points at into the trash — the CHECK-03 orphans `mlpstorage validate` reports.
+
+──────────────────────────────────────────────────────────────────
+
+STATUS
+  Optional:
+    --results-dir/-rd PATH          Tree to score (resolved as for RUNS_LIST)
+    --mode {closed,open,whatif}     Only results from this submission mode
+    --benchmark {training,checkpointing,vectordb,kvcache}
+                                    Only results of this benchmark
+    --model NAME                    Only results of this model (vectordb: <engine>/<index>)
+    --systemname/-sn NAME           Only results from this system-under-test
+    --submit {short,invalid,paperwork,ready}
+                                    Only results with this SUBMIT token
+    --runs                          Expand each result into its runs (ID, STATUS, STARTED, COUNTED)
+    --json                          JSON instead of a table
+  One row per result (Rules.md 1.3: the runs of one division/system/benchmark/
+  model/accelerator that become one results-table row). RUNS is n/m with m from
+  the rules edition's runs_per_result; SUBMIT is short > invalid > paperwork >
+  ready (`-` for whatif); NOTE says why. Paperwork (blank system-YAML fields,
+  missing systems/<name>.pdf, unresolvable code image) is listed once per system
+  in the footer and never stops a run. The same table is printed for the
+  result a `run` just added to, once the run has finished (not under --quiet).
+  Scored by the checker behind `mlpstorage validate`; always exits 0.
 
 ──────────────────────────────────────────────────────────────────
 
@@ -850,7 +878,7 @@ def get_context_help_tokens(argv: list) -> 'str | None':
 
     # Root — no tokens
     if n == 0:
-        return 'next: closed | open | whatif | init | reports | history | runs | lockfile | version | validate | rules-coverage'
+        return 'next: closed | open | whatif | init | reports | history | runs | status | lockfile | version | validate | rules-coverage'
 
     t0 = argv[0]
 
@@ -869,6 +897,9 @@ def get_context_help_tokens(argv: list) -> 'str | None':
         if n == 1:
             return 'next: list | show | rm | purge | gc'
         return None  # leaf
+
+    if t0 == 'status':
+        return None  # leaf — fall through to argparse
 
     if t0 == 'lockfile':
         if n == 1:

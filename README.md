@@ -430,6 +430,7 @@ These siblings of the benchmark modes are not gated by `closed`/`open`/`whatif`:
 | `mlpstorage runs list [--status failed ...]` | List every run in the results-dir with a stable ID, its status (`complete`/`failed`/`incomplete`), code image and size. |
 | `mlpstorage runs show <id>` | Inspect one run: identity, metadata excerpt, code-image pointer resolution, files. |
 | `mlpstorage runs rm <id>... \| --status failed \| --older-than 7d` | Move runs into `<results-dir>/.mlps/trash/` (restore by moving them back). |
+| `mlpstorage status [--runs] [--submit short]` | One row per result: runs counted vs. the edition's requirement, SUBMIT token (`short`/`invalid`/`paperwork`/`ready`), what to do next. Also printed after every `run`. |
 | `mlpstorage runs purge` / `mlpstorage runs gc` | Delete the trash for good / trash code-image pool directories no run points at. |
 | `mlpstorage lockfile generate` | Produce a reproducible Python dependency lockfile from `pyproject.toml`. Used by submitters who must publish the exact dependency set they tested with. |
 | `mlpstorage lockfile verify` | Verify the currently installed environment matches a lockfile. Benchmark `run` commands can also gate on this with `--verify-lockfile PATH`. |

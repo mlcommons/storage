@@ -61,6 +61,7 @@ mlpstorage closed kvcache run ...          # KV cache (no file|object; model fix
 mlpstorage reports reportgen ...           # Generate submission reports
 mlpstorage history show/rerun ...          # Command history
 mlpstorage runs list/show/rm/purge/gc ...  # Manage the runs in a results-dir
+mlpstorage status [--runs] [--json] ...    # Per-result readiness: RUNS n/m, SUBMIT token, paperwork
 mlpstorage init <orgname> <results-dir>    # Pin orgname to a results-dir
 mlpstorage config show/set/unset/path      # Manage ~/.config/mlpstorage/config.yaml
 mlpstorage validate <submission-dir>       # Rules.md submission checker

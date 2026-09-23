@@ -16,7 +16,9 @@ from mlpstorage_py.runs.ledger import MODES, STATUSES
 BENCHMARK_CHOICES = ("training", "checkpointing", "vectordb", "kvcache")
 
 
-def _add_selection_filters(parser, *, with_status=True):
+def add_selection_filters(parser, *, with_status=True):
+    """The ``runs list`` selection flags; ``status`` reuses them without
+    ``--status`` (a per-run ledger state, not a per-result token)."""
     parser.add_argument(
         "--mode",
         dest="mode_filter",
@@ -59,7 +61,7 @@ def add_runs_arguments(parser):
         help="List the runs in the results-dir with their IDs and status",
     )
     add_results_dir_argument(list_parser)
-    _add_selection_filters(list_parser)
+    add_selection_filters(list_parser)
     list_parser.add_argument(
         "--json",
         action="store_true",

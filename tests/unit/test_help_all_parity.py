@@ -118,6 +118,7 @@ _SPECIAL_BLOCKS = {
     ('runs', 'rm'): 'RUNS_RM',
     ('runs', 'purge'): 'RUNS_PURGE',
     ('runs', 'gc'): 'RUNS_GC',
+    ('status',): 'STATUS',
     ('config', 'show'): 'CONFIG_SHOW',
     ('config', 'set'): 'CONFIG_SET',
     ('config', 'unset'): 'CONFIG_UNSET',

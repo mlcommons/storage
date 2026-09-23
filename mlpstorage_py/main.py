@@ -303,6 +303,17 @@ def run_benchmark(args, run_datetime):
         if run_logs is not None:
             run_logs.detach()
 
+    # The run is over and its metadata written: say where its result now
+    # stands (RUNS n/m, SUBMIT token, paperwork). Printed after DLIO's
+    # output has finished, never for datagen/datasize/configview, never
+    # under --quiet, and never able to change ret_code.
+    results_dir = getattr(args, 'results_dir', None)
+    leaf = getattr(benchmark, 'run_result_output', None)
+    if (getattr(args, 'command', None) == 'run' and not getattr(args, 'quiet', False)
+            and results_dir and leaf):
+        from mlpstorage_py.status import print_post_run_status
+        print_post_run_status(results_dir, leaf, logger)
+
     return ret_code
 
 
@@ -455,7 +466,7 @@ def _main_impl():
         logger.status(f"results-dir: {results_dir} (from {results_dir_source})")
         if os.path.isfile(os.path.join(results_dir, MLPERF_RESULTS_FILENAME)):
             hist = HistoryTracker(history_file=history_file_for(results_dir), logger=logger)
-            if args.mode not in ("history", "runs"):
+            if args.mode not in ("history", "runs", "status"):
                 hist.add_entry(sys.argv, datetime_str=datetime_str)
     # ...and which other flags the two config files filled in.
     from_override = keys_from(args, SOURCE_CONFIG_FILE_FLAG)
@@ -501,6 +512,16 @@ def _main_impl():
             )
         from mlpstorage_py.runs.manage import run_runs_command
         return run_runs_command(args, results_dir, logger)
+
+    if args.mode == "status":
+        # Per-result readiness of the tree (Rules.md 1.3); read-only,
+        # not recorded in history, same initialized-tree requirement.
+        if hist is None:
+            raise _results_dir_required_error(
+                "`mlpstorage status` scores <results-dir>/.mlps/runs.jsonl", results_dir
+            )
+        from mlpstorage_py.status import run_status_command
+        return run_status_command(args, results_dir, logger)
 
     if args.mode == 'history':
         if hist is None:
