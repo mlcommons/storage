@@ -228,14 +228,17 @@ class DirectoryCheck(BaseCheck):
     def run_files_timestamp_check(self):
         """
         Check that all run_files have timestamps matching format "YYYYMMDD_HHmmss"
-        and that there are exactly RUN_TIMESTAMP_COUNT of them.
+        and that there are exactly ``runs_per_result.training`` of them.
 
-        Per Rules.md 2.1.17 (runTimestamps): exactly 6 timestamp directories are
-        required — 1 warm-up run plus 5 measured runs.
+        Per Rules.md 2.1.17 (runTimestamps): exactly ``runs_per_result.training``
+        timestamp directories are required (edition 3.0: 6 -- 1 warm-up run
+        plus 5 measured runs); the count is the edition's, read from the
+        rules editions table through ``Config``.
         """
         valid = True
         timestamp_pattern = r"^\d{8}_\d{6}$"
         timestamps = []
+        required = self.config.get_runs_per_result("training")
 
         for _, _, timestamp in self.submissions_logs.run_files:
             timestamps.append(timestamp)
@@ -247,11 +250,11 @@ class DirectoryCheck(BaseCheck):
                 )
                 valid = False
 
-        if len(timestamps) != RUN_TIMESTAMP_COUNT:
+        if len(timestamps) != required:
             self.log_violation(
                 "2.1.17", "runTimestamps", self.run_path,
                 "Expected %d run files, but found %d. Timestamps: %s",
-                RUN_TIMESTAMP_COUNT,
+                required,
                 len(timestamps),
                 timestamps,
             )

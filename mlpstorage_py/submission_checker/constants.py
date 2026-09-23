@@ -48,9 +48,6 @@ REFERENCE_CHECKSUMS: dict[str, str | None] = {
     "default": None,
 }
 
-# Rules.md 2.1.17 runTimestamps — exactly 6 (1 warm-up + 5 measured)
-RUN_TIMESTAMP_COUNT = 6
-
 # Directory-name prefixes excluded from the code-tree MD5 (Rules.md 2.1.6).
 # Match is against POSIX-joined relative paths with a trailing slash so that
 # `.gitignore` (file) does not collide with `.git/` (directory prefix).

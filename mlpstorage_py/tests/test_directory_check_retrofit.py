@@ -237,9 +237,10 @@ class TestBehaviorPreservation_2_1_17_RunTimestamps:
         """
         check = DirectoryCheck.__new__(DirectoryCheck)
         check.log = mock_logger
+        check.config = Config(submitters=None)
         check.run_path = "/test/run"
         submissions_logs = MagicMock()
-        # 5 valid timestamps — fails the count gate (RUN_TIMESTAMP_COUNT=6)
+        # 5 valid timestamps — fails the count gate (runs_per_result.training=6)
         submissions_logs.run_files = [
             (None, None, f"20260101_12000{i}") for i in range(5)
         ]

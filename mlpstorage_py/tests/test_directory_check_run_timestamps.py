@@ -1,14 +1,16 @@
 #!/usr/bin/env python3
 """
 Regression tests for BUG-04: DirectoryCheck.run_files_timestamp_check must
-require exactly RUN_TIMESTAMP_COUNT (=6) run-file timestamps — 1 warm-up + 5
-measured — per Rules.md 2.1.17 (runTimestamps).
+require exactly ``runs_per_result.training`` run-file timestamps (edition
+3.0: 6 — 1 warm-up + 5 measured) per Rules.md 2.1.17 (runTimestamps).
 
 Pins:
   * The stale `# v2.0 only 5 required` comment is gone.
-  * The inline literal `6` has been replaced with the named constant
-    `RUN_TIMESTAMP_COUNT` (so the magic-number anti-pattern PITFALLS.md #8
-    flagged can't regress).
+  * The inline literal `6` is gone: the count is the rules edition's, read
+    from the editions table through ``Config.get_runs_per_result`` (the
+    former ``RUN_TIMESTAMP_COUNT`` constant is retired; status-and-submit
+    PR 1), so the magic-number anti-pattern PITFALLS.md #8 flagged can't
+    regress.
   * The docstring cites Rules.md 2.1.17 and the warm-up + measured semantic.
   * The invalid-timestamp-format check still flags malformed entries.
 
@@ -21,9 +23,8 @@ from unittest.mock import MagicMock
 
 import pytest
 
-import mlpstorage_py.submission_checker.checks.directory_checks as dc_mod
 from mlpstorage_py.submission_checker.checks.directory_checks import DirectoryCheck
-from mlpstorage_py.submission_checker.constants import RUN_TIMESTAMP_COUNT
+from mlpstorage_py.submission_checker.configuration.configuration import Config
 
 
 class CapturingLogger:
@@ -62,12 +63,14 @@ def mock_logger():
 def _make_check(timestamps, log):
     """Build a DirectoryCheck without invoking __init__ (which requires a
     real SubmissionLogs + filesystem path). Set only the attributes
-    run_files_timestamp_check actually touches: self.log,
+    run_files_timestamp_check actually touches: self.log, self.config (a
+    real current-edition Config, for the 2.1.17 count),
     self.submissions_logs.run_files, and self.run_path (used by
     log_violation after the Phase 3 retrofit).
     """
     check = DirectoryCheck.__new__(DirectoryCheck)
     check.log = log
+    check.config = Config(submitters=None)
     check.run_path = "/test/run"
     submissions_logs = MagicMock()
     submissions_logs.run_files = [
@@ -96,7 +99,7 @@ class TestRunFilesTimestampCount:
         assert result is False, "5 timestamps must NOT pass the count check"
         assert mock_logger.errors, "expected an error to be logged for wrong count"
         joined = " ".join(mock_logger.errors)
-        assert "6" in joined, f"expected '6' (RUN_TIMESTAMP_COUNT) in error; got: {joined!r}"
+        assert "6" in joined, f"expected '6' (runs_per_result.training) in error; got: {joined!r}"
         assert "5" in joined, f"expected '5' (actual count) in error; got: {joined!r}"
 
     def test_six_timestamps_passes_with_no_error(self, mock_logger):
@@ -108,20 +111,20 @@ class TestRunFilesTimestampCount:
             f"expected no errors for the happy path; got: {mock_logger.errors!r}"
         )
 
-    def test_count_is_driven_by_constant_not_inline_literal(self, monkeypatch, mock_logger):
-        """Monkeypatching RUN_TIMESTAMP_COUNT in the directory_checks module must
-        change the accepted count. If the check still used inline `6`, this would
-        fail — proving the magic-number anti-pattern is gone.
+    def test_count_is_driven_by_the_edition_not_inline_literal(self, monkeypatch, mock_logger):
+        """A Config whose edition asks for 7 must change the accepted count.
+        If the check still used inline `6`, this would fail — proving the
+        magic-number anti-pattern is gone.
         """
-        monkeypatch.setattr(dc_mod, "RUN_TIMESTAMP_COUNT", 7)
         check = _make_check(_ts(7), mock_logger)
+        monkeypatch.setattr(check.config, "get_runs_per_result", lambda family: 7)
         result = check.run_files_timestamp_check()
         assert result is True, (
-            "with RUN_TIMESTAMP_COUNT monkeypatched to 7, a 7-timestamp fixture "
+            "with runs_per_result.training at 7, a 7-timestamp fixture "
             "must pass — proving the inline `6` was removed"
         )
         assert mock_logger.errors == [], (
-            f"expected no errors when count matches patched constant; got: {mock_logger.errors!r}"
+            f"expected no errors when count matches the edition's; got: {mock_logger.errors!r}"
         )
 
 
@@ -155,6 +158,9 @@ class TestRunFilesTimestampFormat:
         )
 
 
-def test_run_timestamp_count_constant_value():
-    """Sanity: the constant Plan 02 added is 6 (1 warm-up + 5 measured)."""
-    assert RUN_TIMESTAMP_COUNT == 6
+def test_run_timestamp_count_edition_value():
+    """Sanity: edition 3.0 asks for 6 (1 warm-up + 5 measured); the constant
+    Plan 02 added is retired in favour of the editions table."""
+    from mlpstorage_py.submission_checker import constants
+    assert Config(submitters=None).get_runs_per_result("training") == 6
+    assert not hasattr(constants, "RUN_TIMESTAMP_COUNT")

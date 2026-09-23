@@ -63,6 +63,13 @@ class Config:
         """Rules.md Table 3 for this edition: accelerator name -> memory in GB (4.3.4)."""
         return self.checker.accelerator_memory_gb
 
+    def get_runs_per_result(self, family):
+        """Rules.md 1.3: the runs one complete result of ``family`` holds in
+        this edition (2.1.17 training leaves, 4.7.1 checkpointing phases,
+        5.3.1 vector_database leaves, kv_cache sequence runs). ``KeyError``
+        for a family the edition does not sanction."""
+        return self.checker.runs_per_result[family]
+
     def get_training_au_threshold(self, model):
         """Rules.md 3.3.2 minimum mean AU for ``model`` in this edition, as a
         fraction, or ``None`` when the edition lists no minimum for it."""
