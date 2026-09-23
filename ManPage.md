@@ -16,6 +16,8 @@ mlpstorage <mode> <benchmark> [<model|index>] <command> [<storage>] --systemname
 mlpstorage reports reportgen [OPTIONS]
 mlpstorage history (show|rerun) [OPTIONS]
 mlpstorage runs (list|show|rm|purge|gc) [OPTIONS]
+mlpstorage status [OPTIONS]
+mlpstorage submit [--dry-run] [--out PATH]
 mlpstorage lockfile (generate|verify) [OPTIONS]
 mlpstorage config (show|set|unset|path) [OPTIONS]
 mlpstorage validate <submission-dir> [OPTIONS]
@@ -46,7 +48,7 @@ The suite currently includes four benchmarks:
 - **VectorDB** — Vector-database search and ingest, currently targeting Milvus across `DISKANN`, `HNSW`, and `AISAQ` index types (with `IVF_FLAT`, `IVF_SQ8`, and `FLAT` available in open/whatif).
 - **KV-Cache** — LLM inference KV-cache tiering across GPU, CPU, and NVMe, with simulated multi-tenant user load.
 
-`mlpstorage` handles cluster collection, MPI orchestration, dataset sizing, dataset generation, benchmark execution with time-series host metrics, result aggregation, history tracking, and end-to-end submission validation.
+`mlpstorage` handles cluster collection, MPI orchestration, dataset sizing, dataset generation, benchmark execution with time-series host metrics, result aggregation, history tracking, per-result submission readiness (`status`), packaging (`submit`), and end-to-end submission validation (`validate`).
 
 ### Relationship to DLIO
 
@@ -54,20 +56,24 @@ The training and checkpointing benchmarks delegate the actual I/O workload to **
 
 ### Submission Workflow
 
-A submission is a packaged directory that mirrors the `closed/` and/or `open/` hierarchy under a submitter name, containing:
+A submission is a packaged directory that mirrors the `closed/` and/or `open/` hierarchy under a submitter name (Rules.md 2.1.1, 2.1.2), containing:
 
-- `code/` — frozen snapshot of the `mlpstorage` repository used to produce the results (MD5-verified against a reference checksum in closed)
+- `code-images/` — the content-addressed pool of frozen `mlpstorage` source trees the runs were produced with (Rules.md 2.1.6); only the images the packaged runs point at travel
 - `systems/<system-name>.{yaml,pdf}` — machine-readable system description plus the human-readable companion
-- `results/<system-name>/<benchmark>/<model>/...` — per-run output trees populated by `mlpstorage`
+- `results/<system-name>/<benchmark>/<model>/...` — per-run output trees populated by `mlpstorage`, with the `results.{csv,json}` rollups and the per-organization `submission.yaml` that `reportgen` writes
+
+Rules.md 1.3 names the three units the tool reports on. A *run* is one `run` invocation: one timestamp directory, one ID in `mlpstorage runs list`. A *result* is the runs of one division, system, benchmark, model and emulated accelerator that become one `results.csv` row. A *submission* is one organization's results-dir. How many runs a complete result holds is an edition value (`runs_per_result` in the `checker:` block of `mlpstorage_py/rules/editions.yaml`; edition 3.0 asks for 6 training runs, the write and read phases of checkpointing, 5 vectordb runs and 1 kvcache run).
 
 The typical end-to-end flow is:
 
 1. Run `datasize` to learn how much storage the workload requires.
 2. Run `datagen` to materialize the dataset on the target storage.
-3. Run `run` six times for training (1 warmup + 5 measured) or as required by the benchmark.
-4. Write the system description.
-5. Run `mlpstorage validate` against the submission root.
-6. Submit the resulting package to MLCommons.
+3. Run `run` as many times as the result needs. After every run, `mlpstorage` prints the `status` row of the result the run belongs to (`RUNS n/m`, a SUBMIT token, a NOTE), so a short or invalid result is visible the moment it happens.
+4. Write the system description: fill in the blank fields of the auto-generated `systems/<system-name>.yaml` and add the `.pdf`. This is *paperwork*: it never stops a run and only blocks the upload.
+5. Run `mlpstorage status` until every result reads `ready`; its `Next:` line names the next command each time.
+6. Run `mlpstorage submit --dry-run`, then `mlpstorage submit`: the checker behind `validate` passes the tree, the package (`.tar.gz` + `.sha256` + `.manifest.json`) is written under `<results-dir>/.mlps/packages/`, and the manual upload instructions for the MLCommons submission UI are printed. Repeat whenever a result changes; each upload replaces the last.
+
+`mlpstorage validate <submission-dir>` is the reviewer's tool: the same checker over any tree, one line per violated rule. `status` and `submit` run it in-process over the submitter's own results-dir and attribute each finding to a run, a result, a system's paperwork or the tree as a whole (see OPTIONS → Status, Submit).
 
 ## DESIGN PHILOSOPHY: CORRECT BY CONSTRUCTION
 
@@ -117,6 +123,8 @@ mlpstorage
 ├── reports reportgen
 ├── history (show | rerun)
 ├── runs (list | show <id> | rm [<id>...] | purge | gc)
+├── status [--runs] [--submit <token>] [--json]
+├── submit [--dry-run] [--out PATH]
 ├── lockfile (generate | verify)
 ├── config (show | set <key> <value>... | unset <key> | path)
 ├── validate <submission-dir>
@@ -384,6 +392,8 @@ The results directory accumulates every artifact produced by `mlpstorage` as eac
 ├── .mlps/
 │   ├── history                           command history for this tree (`mlpstorage history`)
 │   ├── runs.jsonl                        run ledger: stable IDs for every run leaf (`mlpstorage runs`)
+│   ├── submissions.jsonl                 packaging ledger: one line per package `mlpstorage submit` wrote
+│   ├── packages/                         those packages (`<org>-<edition>-<ts>.tar.gz` + `.sha256` + `.manifest.json`)
 │   └── trash/<batch>/...                 leaves and pool images removed by `runs rm` / `runs gc`
 ├── code-images/                          content-addressed code-image pool, one per tree (Rules.md §2.1.6)
 │   ├── .mlps-image-pool                  marks the pool root
@@ -400,7 +410,7 @@ The results directory accumulates every artifact produced by `mlpstorage` as eac
 
 Every `closed`/`open` `datasize`, `datagen` or `run` first captures the running source tree into `code-images/` (or reuses the image whose hash matches) and writes a `.mlps-code-image` pointer into the run leaf. A changed source tree is never a rejection: it is captured as a new `code-<hash8>/` beside the existing images, so iterating on the source between runs is supported. Trees written by the v3.0 release hold that pool at `<results-dir>/<orgname>/` instead; the next capture into such a tree moves it into `code-images/`, and `mlpstorage validate` reads both layouts. The hash, the exclusion set and the `.code-hash.json` schema are defined in Rules.md §2.1.6.
 
-Every `run` adds a timestamped directory under its benchmark-specific tail and receives a small stable ID in `.mlps/runs.jsonl`. `mlpstorage runs list` shows them with their status; `mlpstorage runs rm` moves unwanted ones into `.mlps/trash/` (restore by moving the leaf back), and `mlpstorage runs purge` deletes the trash. A leaf removed by hand simply disappears from the list; its ID is never reused. History records remain in `.mlps/history`.
+Every `run` adds a timestamped directory under its benchmark-specific tail and receives a small stable ID in `.mlps/runs.jsonl`. `mlpstorage runs list` shows them with their status; `mlpstorage runs rm` moves unwanted ones into `.mlps/trash/` (restore by moving the leaf back), and `mlpstorage runs purge` deletes the trash. A leaf removed by hand simply disappears from the list; its ID is never reused. History records remain in `.mlps/history`. `mlpstorage status` groups the run leaves into results and says how far each is from an upload; `mlpstorage submit` packages the `closed/` and `open/` hierarchies under `.mlps/packages/` and records each package in `.mlps/submissions.jsonl`. Nothing under `.mlps/` is ever packaged.
 
 ### Training results
 
@@ -512,7 +522,7 @@ This framing applies uniformly to every per-benchmark metric column `reportgen` 
 
 ## VALIDATOR
 
-`mlpstorage` ships a layered validation system whose ultimate authority is `Rules.md` in the repository root. `mlpstorage validate` checks a package against every rule there, prints a message for each rule the package violates, and continues past each failure so that one report lists everything wrong with the package; the package passes only when no rule is violated.
+`mlpstorage` ships a layered validation system whose ultimate authority is `Rules.md` in the repository root. `mlpstorage validate` checks a package against every rule there, prints a message for each rule the package violates, and continues past each failure so that one report lists everything wrong with the package; the package passes only when no rule is violated. `mlpstorage status` and `mlpstorage submit` run the same checker in-process over the submitter's own results-dir and attribute each finding to a run, a result, a system's paperwork or the tree (OPTIONS → Status, Submit); there is one implementation of every rule.
 
 ### Architecture
 
@@ -580,6 +590,8 @@ Coverage audit of which Rules.md IDs have implementing checks:
 ```
 mlpstorage rules-coverage [--rules-md <path>]
 ```
+
+Submitter-side, the same checks run inside `mlpstorage status` (per-result table, exit 0) and `mlpstorage submit --dry-run` (refuses with exit 1 while any error remains).
 
 Run-rule checking happens implicitly via the per-benchmark `RunRulesChecker`. Environment validation happens automatically before every run unless `--skip-validation` is set.
 
@@ -1046,13 +1058,73 @@ mlpstorage runs gc    [--yes]
 
 Every subcommand accepts `--results-dir/-rd <path>`, resolved like everywhere else (`--results-dir` > `MLPSTORAGE_RESULTS_DIR` > the default recorded by `mlpstorage init`); the tree must be initialized. `runs` invocations are not recorded in `.mlps/history`.
 
-- **`list`** — one row per run leaf: ID, status, mode, system, benchmark, model, command, start time, code image (`code-<hash8>` from the leaf's `.mlps-code-image`), size. Status is `complete` (metadata `exit_status` 0), `failed` (non-zero), or `incomplete` (no metadata file: still running, or killed before the metadata was written). Leaves written before `exit_status` existed are judged by the presence of DLIO's `summary.json` (training/checkpointing `datagen`/`datasize` never produce one and count as complete).
+- **`list`** — one row per run leaf: ID, status, SUBMIT, mode, system, benchmark, model, command, start time, code image (`code-<hash8>` from the leaf's `.mlps-code-image`), size. Status is `complete` (metadata `exit_status` 0), `failed` (non-zero), or `incomplete` (no metadata file: still running, or killed before the metadata was written). Leaves written before `exit_status` existed are judged by the presence of DLIO's `summary.json` (training/checkpointing `datagen`/`datasize` never produce one and count as complete). SUBMIT is the run's readiness token as `mlpstorage status --runs` prints it (`ok`, `failed`, `running`, `invalid`, `extra`), `-` for a `whatif` run and for a `datasize`/`datagen` leaf (neither ever counts toward a result), or `?` with one warning when the tree could not be scored; see Status below.
   - **`--mode {closed,open,whatif}`**, **`--benchmark {training,checkpointing,vectordb,kvcache}`**, **`--model <name>`** (vectordb: `<engine>/<index>`), **`--systemname <name>`, `-sn`**, **`--status {complete,failed,incomplete}`** — narrow the list.
-  - **`--json`** — the same rows as a JSON array (fields `id`, `leaf`, `status`, `mode`, `orgname`, `systemname`, `benchmark`, `model`, `command`, `run_datetime`, `code_image`, `code_hash`, `size_bytes`, `registered_at`).
+  - **`--json`** — the same rows as a JSON array (fields `id`, `leaf`, `status`, `mode`, `orgname`, `systemname`, `benchmark`, `model`, `command`, `run_datetime`, `code_image`, `code_hash`, `size_bytes`, `registered_at`, `submit` — the token above, `null` for a non-run leaf).
 - **`show <id>`** — identity, status, size, code-image pointer resolution (names the pool directory, or says it is missing), the leaf's provenance stamp (rules edition, layout version, tool version and git SHA, DLIO version and commit, storage library, core-config hash and allowlist, and the comparability class the stamp resolves to in `mlpstorage_py/rules/editions.yaml` or `unclassified` — read from `provenance.json`, or derived at read time and labelled `derived` for a leaf written before stamping existed; a malformed stamp is labelled `MALFORMED` with the parse error), a metadata excerpt (`exit_status`, `executed_command`, `runtime`, ...) and every file in the leaf with its size.
 - **`rm`** — prints the selection and moves each leaf to `<results-dir>/.mlps/trash/<batch>/<original relative path>`, recording the move in `runs.jsonl`. Select explicitly by ID and/or narrow with **`--status`** and **`--older-than`** (`12h`, `7d`, `2w`, or a date such as `2026-09-01`); **`--keep-last N`** spares the N newest runs of the selection. Without `--yes` the command asks on a terminal and refuses otherwise. Rollup files (`results.json` / `results.csv`) above a removed leaf trigger a warning to rerun `reportgen`. The sentinel, `systems/` and the code-image pool are never touched.
 - **`purge`** — permanently deletes every batch under `.mlps/trash` (asks unless `--yes`).
 - **`gc`** — moves code-image pool directories that no run leaf points at (the CHECK-03 orphans `mlpstorage validate` reports) into the trash. Leaves sitting in the trash still count as references, so purge first, then gc.
+
+### Status
+
+```
+mlpstorage status [--mode M] [--benchmark B] [--model NAME] [--systemname NAME]
+                  [--submit {short,invalid,paperwork,ready}] [--runs] [--json]
+```
+
+The habitual command over an initialized results-dir (the "git status" of a submission): one row per *result* (Rules.md 1.3), one section per division, with the RUNS column as the headline. `--results-dir/-rd` resolves as everywhere else and the tree must be initialized. `status` is not recorded in `.mlps/history`, prints to stdout, and always exits `0`.
+
+```
+closed/Acme   rules edition 3.0   3 results, 12 runs
+
+SYSTEM        BENCHMARK      MODEL       ACCEL  RUNS  SUBMIT     NOTE
+acme-prod-v1  training       unet3d      b200   6/6   paperwork  acme-prod-v1.yaml: 6 blank fields, acme-prod-v1.pdf missing
+acme-prod-v1  training       retinanet   b200   4/6   short      2 more runs needed
+acme-prod-v1  checkpointing  llama3-70b  b200   2/2   invalid    run 11 failed (exit status 1); remove it (mlpstorage runs rm 11)
+
+0 of 3 results ready.
+Paperwork for acme-prod-v1 (closed): systems/acme-prod-v1.yaml: 6 blank fields; systems/acme-prod-v1.pdf missing
+Next: mlpstorage status --runs   (which runs count, which must go)
+```
+
+- **RUNS** — `n/m`: the counted runs over the number the rules edition asks for (`runs_per_result` in the `checker:` block of the submission's edition in `mlpstorage_py/rules/editions.yaml`; edition 3.0: training 6, checkpointing 2 — the write phase and the read phase of Rules.md 4.7.1, which one combined invocation supplies together — vectordb 5, kvcache 1). The counted set is the first `m` `ok` runs in timestamp order (checkpointing: the earliest runs that supply each phase); the rest are `extra`. The edition is the one the organization's `submission.yaml` declares, or the current edition when there is none.
+- **SUBMIT** — the result's readiness token, in precedence order: `short` (fewer counted runs than the edition asks for), `invalid` (the count is complete but a failed, invalid or extra run must be removed with `runs rm` or redone, or the checker raised an error against the workload), `paperwork` (only the system description or a code image stands between the result and an upload), `ready`. A `whatif` result shows `-`; it is never packaged.
+- **NOTE** — the reason in one line: how many runs are missing (checkpointing names the missing phase), which runs failed or are invalid and the `mlpstorage runs rm` command that removes them, which are extra, the checker findings raised against the workload (identical findings on several runs collapse into one clause with a count, `(x6)`), or — on a `paperwork` row — what is missing: the blank-field count, a missing `.pdf`, an unresolvable code image.
+- **Footer** — `n of m results ready.`; each system's paperwork once (`Paperwork for <system> (<division>): ...`) rather than once per row; any *tree problems* (checker errors attributable to no run and no system, such as a stray top-level entry — fix before submitting); a count of checker warnings (they never block; `mlpstorage validate` lists them); and a `Next:` line naming the next command: `status --runs` while a result is short or invalid, `validate <results-dir>` while tree problems remain, "fill in the paperwork" while a result waits on it, and `mlpstorage submit --dry-run` when every result is ready.
+
+The severity axis is the *stage* at which a problem is fixed, not its level. *Paperwork* — blank or invalid fields in `systems/<name>.yaml`, a missing `systems/<name>.pdf`, a leaf whose code image or provenance stamp the pool cannot resolve — is fixed by editing files, never stops a run, and blocks only `submit`. A *rerun problem* — a run that failed, one the run-time verifier or the checker found INVALID, one that qualifies for OPEN only under `closed`, an extra run beyond the edition's count — means the run must be removed or redone. Paperwork is a property of the system and never appears at run level.
+
+Every finding comes from the checker behind `mlpstorage validate`, run in-process over the results-dir; `status` never re-implements a rule. The count rules (2.1.17, 2.1.23, 5.3.1) are the RUNS column and the rollup-file rules (2.1.16, 2.1.22, RPT-01) are `submit`'s regeneration step, so neither is repeated in the NOTE.
+
+- **`--mode {closed,open,whatif}`**, **`--benchmark {training,checkpointing,vectordb,kvcache}`**, **`--model <name>`** (vectordb: `<engine>/<index>`), **`--systemname <name>`, `-sn`** — narrow the table, as for `runs list`.
+- **`--submit {short,invalid,paperwork,ready}`** — only results with this token.
+- **`--runs`** — expand each result into its runs: a second, indented header (`ID STATUS STARTED COUNTED NOTE`) and one row per run under its result. Per-run STATUS is `ok`; `failed` (non-zero `exit_status`, or no `summary.json`); `running` (no metadata yet: still running, or killed before it was written); `invalid` (the run-time verifier said INVALID, or OPEN under `closed`, or the checker raised an error against the leaf); or `extra`. COUNTED is `yes` for the runs in the counted set; NOTE is the reason.
+- **`--json`** — the readiness of the selected results as one JSON object: `results_dir`, `orgname`, `rules_edition`, `submittable`, `checker_errors`, `results` (each with `division`, `orgname`, `systemname`, `benchmark`, `model`, `accelerator`, `runs_required`, `runs_have`, `submit`, `note`, `runs` — `id`, `leaf`, `status`, `counted`, `reason`, `started`, `problems` — and the result's `problems` and `paperwork` findings), `paperwork` (per system: `division`, `systemname`, `yaml_missing`, `pdf_missing`, `blank_fields`, `other`, `items`), `tree_problems`, `warnings`. Every finding is `{level, rule_id, rule_name, path, message}`.
+
+The same table, for just the result the run belongs to, is printed after every `run` once the leaf's metadata is written (see END-OF-RUN RECAP); `runs list` carries the per-run token in its SUBMIT column.
+
+### Submit
+
+```
+mlpstorage submit [--dry-run] [--out PATH]
+```
+
+The submitter's verb over their own initialized results-dir (`--results-dir/-rd`, resolved as everywhere else): check, package, record, and say how to upload. `validate` is the reviewer's tool over an arbitrary tree; `submit` runs the same checker — never a second implementation — over the tree the sentinel names, renders a refusal as the `status` table, and writes a package on a pass. Recorded in `.mlps/history` like every other command that writes to the tree (`status` is not). Prints to stdout; the logger (stderr) carries the results-dir line, reportgen's progress and any warning.
+
+The steps, in order:
+
+1. **Regenerate the rollups.** `reports reportgen` runs in-process over the whole results-dir first — in `--dry-run` too — so that the rules about `results.{csv,json}` and `submission.yaml` (2.1.16, 2.1.22, RPT-01, PROV-02) are judged on the files the package will carry. reportgen's own report goes to the debug log; its warnings still reach stderr. A reportgen failure is a refusal (`Not submittable: the rollup tables could not be regenerated`).
+2. **Check.** One pass of the checker behind `validate`, scored per result exactly as `status` scores it. While any error remains — a short or invalid result, a system's paperwork, a tree problem, or a checker error the table does not carry (a rollup rule still failing after regeneration is listed under `Rollup tables (regenerated, still failing):`) — `submit` prints the `status` table, `Not submittable: <n results short, n invalid, n need paperwork, n tree problems>; <n> checker errors in all.` and `Next: fix the above, then mlpstorage submit --dry-run`, and exits `1`. Warnings never block. `whatif` results are never packaged and nothing the checker says about them counts; a results-dir with no `closed` or `open` results is `Nothing to submit`. There is no `--force`: a package is either what Rules.md asks for or it is not written.
+3. **Plan the package.** The tarball holds `<org>/closed/<org>/**` and `<org>/open/<org>/**` exactly as they stand (systems, results, rollups, `submission.yaml`), plus `<org>/code-images/` holding the pool marker (`.mlps-image-pool`, copied from the tree or synthesized) and only the images the packaged leaves point at (`datasize`/`datagen` leaves included), resolved against the tree-wide `code-images/` pool first and the v3.0 per-organization pool second, and placed under `code-images/` either way (Rules.md 2.1.6). The root is the organization name (Rules.md 2.1.1) and nothing else is inside: never `whatif/`, `.mlps/`, `mlperf-results.yaml` or an unreferenced pool image. A pointer no pool resolves is a refusal (`no pool image for code-<hash8>`) that points at `validate`.
+4. **`--dry-run` stops here**: `Would write <path>`, a contents line (`closed/<org>: n systems, n results, n runs; code-images: n images; n files, <size>`), exit `0`.
+5. **Write.** The gzipped tarball is written as `<path>.part` and renamed into place, with `<stem>.sha256` (`sha256sum` format, one line) and `<stem>.manifest.json` beside it. The manifest (schema `mlps-submission-package/1`) records `orgname`, `rules_edition`, `created_at`, `created_by`, `results_dir`, `package`, `sha256`, `size_bytes`, `file_count`, `divisions`, `systems` per division, `code_images`, `results` (each with `division`, `systemname`, `benchmark`, `model`, `accelerator`, `runs`, `run_ids`, `leaves`) and `files` (every member with its `path`, `size` and `sha256`). One line is appended to `<results-dir>/.mlps/submissions.jsonl` (`{"event": "packaged", "id": n, "at", "package", "sha256", "size_bytes", "file_count", "orgname", "rules_edition", "divisions", "results", "runs", "tool"}`; IDs count up per tree as in `runs.jsonl`). The package, checksum, manifest and ledger ID are printed, then the upload instructions.
+6. **Upload** is manual: the package and its `.sha256` go through the MLCommons submission UI for the round (Submission_guidelines.md §11). Every upload replaces the previous one, so `submit` is meant to be cheap to rerun whenever a result changes; the printed text is the plug-in point for an uploader once an endpoint exists.
+
+- **`--dry-run`** — regenerate the rollups, run the checker, describe the package; write no tarball and no ledger line. The regenerated rollups and `submission.yaml` do land in the tree, as `reportgen` leaves them.
+- **`--out <path>`** — where to write the package: a path ending in `.tar.gz` / `.tgz` is the tarball itself; anything else is a directory that receives `<org>-<edition>-<YYYYMMDD_HHMMSS>.tar.gz`. Default `<results-dir>/.mlps/packages/<org>-<edition>-<YYYYMMDD_HHMMSS>.tar.gz`. The sidecars always sit beside the tarball.
+
+Exit status: `0` on a pass or a clean dry run, `1` on a refusal.
 
 ### Lockfile
 
@@ -1226,10 +1298,12 @@ When an invocation logged at least one warning or error, `mlpstorage` prints a r
 
 Only the first line of each message is repeated; the full text was printed where it happened and is in `mlpstorage.errors.log`. A clean invocation prints no recap. The exit status is unaffected. Console log lines go to stderr; stdout carries only the workload's live output and machine-readable command output (`version`, `history show`), so `2>errors.txt` isolates every diagnostic line.
 
+Separately from the recap, every `run` (not `datasize`, `datagen` or `configview`) ends by printing the `mlpstorage status` table for the one result the run just joined — to stdout, after the leaf's metadata is written and its log files are closed, so it never interleaves with DLIO output and is not in `mlpstorage.log`. It is skipped under `--quiet`; when the tree cannot be scored, one warning is logged and the run's exit code stands. See OPTIONS → Status.
+
 ## EXIT STATUS
 
 - `0` — success.
-- non-zero — argument validation failed, an environment check failed, a pre-execution capacity gate raised, a system-description error raised, a benchmark subprocess returned non-zero, or `validate` found a rule violation.
+- non-zero — argument validation failed, an environment check failed, a pre-execution capacity gate raised, a system-description error raised, a benchmark subprocess returned non-zero, `validate` found a rule violation, or `submit` refused to package (`status` always exits `0`).
 
 ## ERROR CODES
 
@@ -1295,7 +1369,18 @@ mlpstorage open vectordb DISKANN run file \
     --systemname acme-vdb-lab
 ```
 
-Validate a prepared submission directory:
+Check how far the results-dir is from an upload, then package it:
+
+```
+mlpstorage status
+mlpstorage status --runs --submit invalid
+mlpstorage submit --dry-run
+mlpstorage submit
+```
+
+The last command writes `/mnt/results/.mlps/packages/Acme-3.0-<YYYYMMDD_HHMMSS>.tar.gz` with its `.sha256` and `.manifest.json`, records it in `/mnt/results/.mlps/submissions.jsonl` and prints the upload instructions.
+
+Validate a prepared submission directory (the reviewer's view of the same checker):
 
 ```
 mlpstorage validate /submissions/acme \
@@ -1317,13 +1402,15 @@ mlpstorage validate /submissions/acme \
 - `<repo>/mlpstorage_py/rules/core_config_keys.yaml` — allowlists of workload-defining DLIO keys behind the `core-config-v1` hash, one per family and revision.
 - `<repo>/mlpstorage_py/rules/editions.yaml` — the rules editions table (with each checkable edition's `checker:` parameters: the required files and folders of every leaf, the AU minimum per training model, the Table 2 CLOSED process count and checkpoint size per model, the Table 3 accelerator memory, the KVCache sequence locks and the runs per result of each benchmark (Rules.md 1.3); the `mlpstorage` runtime reads the current edition's block for its CLI choices, pre-flight gates and CLOSED defaults) and the declared comparability classes (which (edition, division, family, model, accelerator, core-config hash) tuples are the same workload; never across divisions); WG-maintained data read by `validate` (EDN-01/02/03/04, and every per-submission `Config`) and `runs show`.
 - `<results-dir>/.mlps/history` — command history consumed by `mlpstorage history`.
+- `<results-dir>/.mlps/submissions.jsonl` — packaging ledger appended by `mlpstorage submit`: one `packaged` event per package (ID, time, path, sha256, size, file count, organization, rules edition, divisions, result and run counts, tool version).
+- `<results-dir>/.mlps/packages/<org>-<edition>-<YYYYMMDD_HHMMSS>.tar.gz` (with `.sha256` and `.manifest.json` beside it) — the submission package `mlpstorage submit` writes by default (`--out` moves it): `<org>/{closed,open}/<org>/**` plus the referenced code images under `<org>/code-images/`; the manifest (schema `mlps-submission-package/1`) inventories every member with its size and digest. See OPTIONS → Submit.
 - `<results-dir>/code-images/code-<hash8>/` — content-addressed code-image pool shared by every organization and division; `<results-dir>/<orgname>/code-<hash8>/` is the v3.0 per-organization layout, still read by `mlpstorage validate`.
-- `<submission-dir>/{code-images,<mode>/<submitter>/{systems,results}}/` — submission package layout consumed by `mlpstorage validate`.
+- `<submission-dir>/{code-images,<mode>/<submitter>/{systems,results}}/` — submission package layout consumed by `mlpstorage validate`; what a `mlpstorage submit` tarball unpacks to.
 
 ## SEE ALSO
 
 - `Rules.md` — definitive rule reference.
-- `Submission_guidelines.md` — packaging and submission process.
+- `Submission_guidelines.md` — packaging and submission process (§11: the upload UI `mlpstorage submit` points at).
 - `README.md` — installation and quickstart.
 - `DEVELOPMENT.md` — contributor documentation.
 - DLIO — Deep Learning I/O benchmark (upstream workload engine).

@@ -583,3 +583,68 @@ class TestRealPipeline:
         assert _lines(out)[0].startswith("closed/Acme")
         assert os.path.isfile(os.path.join(rd, "closed", "Acme", "submission.yaml"))
         assert _packages(rd) == []
+
+
+# ===========================================================================
+# ManPage.md (status-and-submit PR 4)
+# ===========================================================================
+
+_MANPAGE = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
+                        "ManPage.md")
+
+
+def _manpage_section(text: str, heading: str) -> str:
+    """The body of the ``### <heading>`` section of ManPage.md."""
+    marker = f"\n### {heading}\n"
+    assert marker in text, f"ManPage.md has no '### {heading}' section"
+    body = text.split(marker, 1)[1]
+    return re.split(r"\n#{2,3} ", body, 1)[0]
+
+
+class TestManPage:
+    """ManPage.md is the home of ``status`` / ``submit`` behaviour (design
+    decision 4: documented there, not in Rules.md)."""
+
+    @pytest.fixture(scope="class")
+    def man(self):
+        with open(_MANPAGE, encoding="utf-8") as fh:
+            return fh.read()
+
+    def test_synopsis_and_command_tree(self, man):
+        assert "mlpstorage status [OPTIONS]" in man
+        assert "mlpstorage submit [--dry-run] [--out PATH]" in man
+        assert "├── status" in man
+        assert "├── submit" in man
+
+    def test_status_section(self, man):
+        body = _manpage_section(man, "Status")
+        for flag in ("--submit", "--runs", "--json", "--systemname", "--benchmark", "--model", "--mode"):
+            assert flag in body, flag
+        for token in ("`short`", "`invalid`", "`paperwork`", "`ready`"):
+            assert token in body, token
+        for run_token in ("`ok`", "`failed`", "`running`", "`invalid`", "`extra`"):
+            assert run_token in body, run_token
+        assert "runs_per_result" in body
+        assert "Next:" in body
+
+    def test_submit_section(self, man):
+        body = _manpage_section(man, "Submit")
+        for needle in ("--dry-run", "--out", "reportgen", ".sha256", ".manifest.json",
+                       ".mlps/submissions.jsonl", ".mlps/packages/", "code-images",
+                       "whatif", "--force", "exit"):
+            assert needle in body, needle
+
+    def test_files_entries(self, man):
+        files = man.split("\n## FILES\n", 1)[1]
+        assert "`<results-dir>/.mlps/submissions.jsonl`" in files
+        assert "`<results-dir>/.mlps/packages/" in files
+        assert "mlps-submission-package/1" in files
+
+    def test_submission_workflow_ends_in_status_and_submit(self, man):
+        workflow = man.split("\n### Submission Workflow\n", 1)[1].split("\n## ", 1)[0]
+        assert "mlpstorage status" in workflow
+        assert "mlpstorage submit" in workflow
+
+    def test_runs_list_documents_the_submit_column(self, man):
+        body = _manpage_section(man, "Runs")
+        assert "SUBMIT" in body
