@@ -49,6 +49,7 @@ from mlpstorage_py.cli.lockfile_args import add_lockfile_arguments
 from mlpstorage_py.cli.init_args import add_init_arguments
 from mlpstorage_py.cli.runs_args import add_runs_arguments
 from mlpstorage_py.cli.status_args import add_status_arguments
+from mlpstorage_py.cli.submit_args import add_submit_arguments
 from mlpstorage_py.cli.config_args import add_config_arguments
 from mlpstorage_py.cli.help_formatter import HELP_ALL_TEXT, get_context_help_tokens
 
@@ -80,6 +81,7 @@ __all__ = [
     'add_init_arguments',
     'add_runs_arguments',
     'add_status_arguments',
+    'add_submit_arguments',
     'add_config_arguments',
     'add_validate_arguments',
     'add_rules_coverage_arguments',

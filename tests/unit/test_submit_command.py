@@ -107,11 +107,14 @@ def reportgen(monkeypatch):
     calls; set ``calls.fail`` to make it raise."""
     import mlpstorage_py.submit as submit
 
-    calls: list = []
+    class Calls(list):
+        fail = False
+
+    calls = Calls()
 
     def fake(results_dir, logger):
         calls.append(("reportgen", results_dir))
-        if getattr(calls, "fail", None):
+        if calls.fail:
             raise RuntimeError("reportgen exploded")
         return []
 
@@ -504,6 +507,18 @@ class TestReadinessHooks:
         assert sub.to_dict()["checker_errors"] == 1
 
 
+    def test_repeated_workload_findings_collapse_in_the_note(self, rd, scripted):
+        import mlpstorage_py.readiness as readiness
+        _training(rd, "unet3d", 6)
+        _system(rd, "closed", SYS)
+        workload = os.path.join(rd, "closed", ORG, "results", SYS, "training", "unet3d")
+        scripted([("error", "3.1.1", "datasetParams", workload, "dataset parameters not found")] * 6
+                 + [("error", "3.1.2", "recordLength", workload, "record length is 0")])
+        note = readiness.evaluate(rd).results[0].note
+        assert note.count("[3.1.1]") == 1 and "(x6)" in note
+        assert "[3.1.2] record length is 0" in note and "(x1)" not in note
+
+
 # ===========================================================================
 # status: the Next line
 # ===========================================================================
@@ -564,5 +579,7 @@ class TestRealPipeline:
         out = capsys.readouterr().out
         assert any(l.startswith("Not submittable") for l in _lines(out))
         assert "CHECK-01" in out
+        assert "SKIPPED RUN DIRECTORIES" not in out   # reportgen's own report stays off stdout
+        assert _lines(out)[0].startswith("closed/Acme")
         assert os.path.isfile(os.path.join(rd, "closed", "Acme", "submission.yaml"))
         assert _packages(rd) == []

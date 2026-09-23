@@ -62,6 +62,7 @@ mlpstorage reports reportgen ...           # Generate submission reports
 mlpstorage history show/rerun ...          # Command history
 mlpstorage runs list/show/rm/purge/gc ...  # Manage the runs in a results-dir
 mlpstorage status [--runs] [--json] ...    # Per-result readiness: RUNS n/m, SUBMIT token, paperwork
+mlpstorage submit [--dry-run] [--out PATH] # Check, package (tar.gz+sha256+manifest), record, upload instructions
 mlpstorage init <orgname> <results-dir>    # Pin orgname to a results-dir
 mlpstorage config show/set/unset/path      # Manage ~/.config/mlpstorage/config.yaml
 mlpstorage validate <submission-dir>       # Rules.md submission checker

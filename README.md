@@ -431,6 +431,7 @@ These siblings of the benchmark modes are not gated by `closed`/`open`/`whatif`:
 | `mlpstorage runs show <id>` | Inspect one run: identity, metadata excerpt, code-image pointer resolution, files. |
 | `mlpstorage runs rm <id>... \| --status failed \| --older-than 7d` | Move runs into `<results-dir>/.mlps/trash/` (restore by moving them back). |
 | `mlpstorage status [--runs] [--submit short]` | One row per result: runs counted vs. the edition's requirement, SUBMIT token (`short`/`invalid`/`paperwork`/`ready`), what to do next. Also printed after every `run`. |
+| `mlpstorage submit [--dry-run] [--out PATH]` | Check the results-dir with the Rules.md checker and, when every result is ready, package it (`.tar.gz` + `.sha256` + `.manifest.json`), record it in `.mlps/submissions.jsonl` and print the upload instructions. `--dry-run` checks and describes the package without writing it. |
 | `mlpstorage runs purge` / `mlpstorage runs gc` | Delete the trash for good / trash code-image pool directories no run points at. |
 | `mlpstorage lockfile generate` | Produce a reproducible Python dependency lockfile from `pyproject.toml`. Used by submitters who must publish the exact dependency set they tested with. |
 | `mlpstorage lockfile verify` | Verify the currently installed environment matches a lockfile. Benchmark `run` commands can also gate on this with `--verify-lockfile PATH`. |
