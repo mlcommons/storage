@@ -108,7 +108,27 @@ class PrefixCacheManager:
             'bytes_saved': 0
         }
 
-    def check_prefix_cache(self, request: InferenceRequest, model_config: ModelConfig) -> Tuple[Optional[PrefixCacheEntry], int]:
+    def record_prefix_result(
+        self,
+        prefix_entry: Optional[PrefixCacheEntry],
+        model_config: ModelConfig
+    ):
+        """Record prefix-cache metrics for a completed request."""
+        with self.lock:
+            if prefix_entry:
+                self.stats['prefix_hits'] += 1
+                if prefix_entry.prefix_type == PrefixType.SYSTEM_PROMPT:
+                    self.stats['system_prompt_reuse'] += 1
+                self.stats['bytes_saved'] += prefix_entry.token_count * model_config.kv_cache_size_per_token
+            else:
+                self.stats['prefix_misses'] += 1
+
+    def check_prefix_cache(
+        self,
+        request: InferenceRequest,
+        model_config: ModelConfig,
+        record_stats: bool = True
+    ) -> Tuple[Optional[PrefixCacheEntry], int]:
         """
         Checks if the beginning of a request matches a known, cached prefix.
 
@@ -119,15 +139,12 @@ class PrefixCacheManager:
         prefix_entry = self.prefix_matcher.detect_system_prompt(request.context_tokens)
 
         if prefix_entry:
-            with self.lock:
-                self.stats['prefix_hits'] += 1
-                if prefix_entry.prefix_type == PrefixType.SYSTEM_PROMPT:
-                    self.stats['system_prompt_reuse'] += 1
-                self.stats['bytes_saved'] += prefix_entry.token_count * model_config.kv_cache_size_per_token
+            if record_stats:
+                self.record_prefix_result(prefix_entry, model_config)
 
             remaining_tokens = max(0, request.context_tokens - prefix_entry.token_count)
             return prefix_entry, remaining_tokens
         else:
-            with self.lock:
-                self.stats['prefix_misses'] += 1
+            if record_stats:
+                self.record_prefix_result(None, model_config)
             return None, request.context_tokens
