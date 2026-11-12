@@ -758,7 +758,7 @@ class BenchmarkResult:
                     config_path = os.path.join(hydra_dir, config_file)
                     try:
                         with open(config_path, 'r') as f:
-                            self.hydra_configs[config_file] = yaml.load(f, Loader=yaml.Loader)
+                            self.hydra_configs[config_file] = yaml.safe_load(f)
                         self.logger.verbose(f"Loaded Hydra config from {config_path}")
                     except Exception as e:
                         self.logger.error(f"Failed to load Hydra config from {config_path}: {e}")
@@ -974,7 +974,7 @@ class DLIOResultParser:
                     config_path = os.path.join(hydra_dir, config_file)
                     try:
                         with open(config_path, 'r') as f:
-                            hydra_configs[config_file] = yaml.load(f, Loader=yaml.Loader)
+                            hydra_configs[config_file] = yaml.safe_load(f)
                     except Exception as e:
                         if self.logger:
                             self.logger.error(f"Failed to load Hydra config from {config_path}: {e}")
