@@ -312,6 +312,7 @@ class ShareGPTDatasetLoader:
         self.max_conversations = max_conversations
         self.conversations = []
         self.token_stats = {}
+        self.load_error: Optional[Exception] = None
 
         if seed:
             random.seed(seed)
@@ -322,7 +323,8 @@ class ShareGPTDatasetLoader:
     def _load_dataset(self):
         """Load and process the ShareGPT dataset."""
         if not os.path.exists(self.dataset_path):
-            logger.warning(f"Dataset not found at {self.dataset_path}")
+            self.load_error = FileNotFoundError(f"Dataset not found at {self.dataset_path}")
+            logger.warning(str(self.load_error))
             return
 
         try:
@@ -414,6 +416,7 @@ class ShareGPTDatasetLoader:
         except Exception as e:
             logger.error(f"Error loading dataset: {e}")
             self.conversations = []
+            self.load_error = e
 
     def get_random_conversation(self) -> Optional[Dict]:
         """Get a random conversation from the dataset."""

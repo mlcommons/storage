@@ -91,7 +91,13 @@ class RAGDocumentManager:
             'chunks_retrieved': 0,
         }
 
-    def ingest_document(self, doc_id: str, total_tokens: int, model_config: ModelConfig):
+    def ingest_document(
+        self,
+        doc_id: str,
+        total_tokens: int,
+        model_config: ModelConfig,
+        stop_event: Optional[threading.Event] = None
+    ):
         """
         Simulates the ingestion of a document.
         Splits it into chunks and stores the KV cache for each chunk.
@@ -114,6 +120,8 @@ class RAGDocumentManager:
         )
 
         for chunk_idx in range(num_chunks):
+            if stop_event and stop_event.is_set():
+                break
             remaining_tokens = total_tokens - chunk_idx * max_tokens_per_chunk
             chunk_tokens = min(max_tokens_per_chunk, remaining_tokens)
 
@@ -137,6 +145,9 @@ class RAGDocumentManager:
                 logger.error(f"Error ingesting chunk {chunk.chunk_id}: {exc}")
                 continue
 
+            if stop_event and stop_event.is_set():
+                break
+
             if not success:
                 logger.warning(f"Failed to allocate cache for chunk {chunk.chunk_id}.")
                 continue
@@ -145,7 +156,9 @@ class RAGDocumentManager:
             chunk.size_bytes = chunk_tokens * model_config.kv_cache_size_per_token
 
             doc.chunks.append(chunk)
-            self.chunk_index[chunk.chunk_id] = chunk
+
+        if stop_event and stop_event.is_set():
+            return None
 
         with self.lock:
             # Evict oldest documents if we've hit the limit
@@ -154,6 +167,8 @@ class RAGDocumentManager:
                     self._evict_oldest_document_unlocked()
 
             self.documents[doc_id] = doc
+            for chunk in doc.chunks:
+                self.chunk_index[chunk.chunk_id] = chunk
             self.ingestion_order.append(doc_id)
             self.stats['documents_ingested'] += 1
             self.stats['chunks_created'] += len(doc.chunks)
