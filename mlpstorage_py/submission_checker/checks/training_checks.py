@@ -9,6 +9,7 @@ from .helpers import (
     _check_filesystem_separation,
     division_of,
     _check_code_image_layered,
+    daos_storage_mismatch,
     read_fs_separation_sidecar,
 )
 
@@ -97,7 +98,7 @@ class TrainingCheck(BaseCheck):
         ])
 
     def _get_benchmark_api(self) -> str:
-        """Return 'file' or 'object' (default 'file') from the schema-validated system YAML.
+        """Return 'file', 'object' or 'daos' (default 'file') from the schema-validated system YAML.
 
         Reads self.submissions_logs.system_file (loaded by Loader at line 98).
         Returns 'file' if system_file is None or the architecture block is absent.
@@ -1151,7 +1152,8 @@ class TrainingCheck(BaseCheck):
         The CAP-03 ``fs_separation.json`` sidecar is authoritative (#601);
         the 'df' block in the run logfile (D-B1 anchored header) is the
         pre-cutover fallback. When the system YAML declares benchmark_API
-        == 'object', silent-passes per D-B7. Same filesystem, or no evidence
+        == 'object', silent-passes per D-B7; when it declares 'daos', only
+        checks that each run's recorded storage config is a DAOS one. Same filesystem, or no evidence
         at all (no sidecar and no df block — D-B8), is a hard error. (The
         v3.0 round emitted both at WARN, PRs #788 and #800; retired with
         the round.)
@@ -1164,7 +1166,23 @@ class TrainingCheck(BaseCheck):
             return valid
 
         # D-B7: object-API submissions don't use 'df'; silent-pass.
-        if self._get_benchmark_api() == "object":
+        benchmark_api = self._get_benchmark_api()
+        if benchmark_api == "object":
+            return valid
+        # DAOS (libdfs) submissions don't use 'df' either, but each run must
+        # have actually used the DAOS backend the system YAML declares.
+        if benchmark_api == "daos":
+            for summary, metadata, timestamp in self.submissions_logs.run_files:
+                if metadata is None:
+                    continue
+                reason = daos_storage_mismatch(metadata)
+                if reason:
+                    self.log_violation(
+                        "3.4.2", "trainingMlpstorageFilesystemCheck",
+                        os.path.join(self.run_path, timestamp),
+                        "benchmark_API is 'daos' but %s", reason,
+                    )
+                    valid = False
             return valid
 
         for summary, metadata, timestamp in self.submissions_logs.run_files:

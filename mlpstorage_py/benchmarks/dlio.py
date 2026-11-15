@@ -28,7 +28,7 @@ from mlpstorage_py.rules.datagen_hierarchy import (
     write_datagen_manifest,
 )
 from mlpstorage_py.utils import (read_config_from_file, create_nested_dict, update_nested_dict, generate_mpi_prefix_cmd)
-from mlpstorage_py.storage_config import resolve_object_storage_config
+from mlpstorage_py.storage_config import resolve_daos_storage_config, resolve_object_storage_config
 
 
 def _quiet_sizing_logger():
@@ -66,6 +66,42 @@ def _snapshot_datagen_manifest(benchmark, manifest, overridden) -> None:
         return
     benchmark._datagen_manifest_snapshot = DATAGEN_MANIFEST_SNAPSHOT_FILENAME
     benchmark.logger.debug(f'Datagen manifest snapshotted to {path}')
+
+
+def _uses_daos(benchmark) -> bool:
+    """True when the run's ``storage.storage_type`` resolves to ``daos``.
+
+    Dataset and checkpoint paths are then absolute paths inside a DAOS
+    container, so local filesystem probes do not apply to them. Module
+    level, like ``_datasize_minimum``, so the stub-based unit tests reach it.
+    """
+    params_dict = getattr(benchmark, 'params_dict', None) or {}
+    combined = getattr(benchmark, 'combined_params', None) or {}
+    storage_type = (
+        params_dict.get('storage.storage_type')
+        or (combined.get('storage') or {}).get('storage_type')
+    )
+    return storage_type == 'daos'
+
+
+def _daos_connection(benchmark) -> Optional[dict]:
+    """The ``{pool, container, sys_name}`` DLIO connects to, or None when
+    the run does not use DAOS."""
+    if not _uses_daos(benchmark):
+        return None
+    params_dict = getattr(benchmark, 'params_dict', None) or {}
+    combined = getattr(benchmark, 'combined_params', None) or {}
+    options = (combined.get('storage') or {}).get('storage_options') or {}
+
+    def _option(key):
+        return params_dict.get(f'storage.storage_options.{key}') or options.get(key)
+
+    return {
+        'pool': _option('pool'),
+        'container': _option('container'),
+        'sys_name': _option('sys_name'),
+    }
+
 
 def _datasize_minimum(benchmark) -> Optional[int]:
     """The CLOSED minimum ``num_files_train`` for ``benchmark``'s run cluster,
@@ -209,6 +245,9 @@ class DLIOBenchmark(Benchmark, abc.ABC):
         protocol = getattr(self.args, 'data_access_protocol', None)
         if protocol is None or protocol == 'file':
             return  # file mode or flag not supplied: nothing to do
+        if protocol == 'daos':
+            self._apply_daos_storage_params()
+            return
 
         # Load .env into the process environment.  Values already set in the shell
         # take priority (override=False is the default).
@@ -286,6 +325,82 @@ class DLIOBenchmark(Benchmark, abc.ABC):
             f'--object mode: injected storage params '
             f'(storage_type=s3, storage_root={bucket}, library={storage_library}, '
             f'uri_scheme={uri_scheme}, force_path_style={is_http_scheme and bool(endpoint_url)})'
+        )
+
+    def _apply_daos_storage_params(self):
+        """For the ``daos`` positional, load .env and inject the DLIO storage params.
+
+        The following params are injected into self.params_dict (only if not already
+        set by the user via --params; a storage.storage_type other than 'daos'
+        is rejected):
+          storage.storage_type                = 'daos'
+          storage.storage_root                = '/'
+          storage.storage_options.pool        = $DAOS_POOL
+          storage.storage_options.container   = $DAOS_CONT
+          storage.storage_options.sys_name    = $DAOS_SYS_NAME  (only when set)
+
+        The pool and the container must already exist. Dataset and checkpoint
+        paths are absolute paths inside the container. The .env file is looked
+        up in the same places as for the ``object`` positional, but it is
+        optional: the variables may come from the environment alone.
+        """
+        try:
+            from dotenv import load_dotenv
+
+            env_file_cwd = os.path.abspath('.env')
+            env_file_script = os.path.normpath(
+                os.path.join(os.path.dirname(sys.argv[0]), '..', '.env')
+            )
+            if os.path.exists(env_file_cwd):
+                self.logger.info(f'daos mode: loading settings from {env_file_cwd}')
+                load_dotenv(env_file_cwd)
+            elif os.path.exists(env_file_script):
+                self.logger.info(f'daos mode: loading settings from {env_file_script}')
+                load_dotenv(env_file_script)
+            elif load_dotenv():
+                self.logger.info('daos mode: loaded settings from .env file found by directory search')
+        except ImportError:
+            self.logger.warning(
+                'python-dotenv not installed; .env file will not be loaded automatically. '
+                'Ensure DAOS_POOL and DAOS_CONT are set in the environment.'
+            )
+
+        storage_type = self.params_dict.get('storage.storage_type')
+        if storage_type is not None and storage_type != 'daos':
+            raise ValueError(
+                'Inconsistent storage configuration: the daos positional selects '
+                f'the DAOS backend, but --params sets storage.storage_type={storage_type!r}. '
+                'Drop the storage.storage_type override or use the file or object positional.'
+            )
+
+        daos_cfg = resolve_daos_storage_config()
+        missing = [
+            env_name
+            for env_name, key in (('DAOS_POOL', 'pool'), ('DAOS_CONT', 'container'))
+            if not daos_cfg[key] and f'storage.storage_options.{key}' not in self.params_dict
+        ]
+        if missing:
+            raise ValueError(
+                f'{" and ".join(missing)} must be set for daos mode. '
+                'Set the DAOS pool and container labels (or UUIDs) in .env or export '
+                'them before running mlpstorage; the container must already exist.'
+            )
+
+        self.params_dict['storage.storage_type'] = 'daos'
+        if 'storage.storage_root' not in self.params_dict:
+            self.params_dict['storage.storage_root'] = '/'
+        if 'storage.storage_options.pool' not in self.params_dict:
+            self.params_dict['storage.storage_options.pool'] = daos_cfg['pool']
+        if 'storage.storage_options.container' not in self.params_dict:
+            self.params_dict['storage.storage_options.container'] = daos_cfg['container']
+        if daos_cfg['sys_name'] and 'storage.storage_options.sys_name' not in self.params_dict:
+            self.params_dict['storage.storage_options.sys_name'] = daos_cfg['sys_name']
+
+        self.logger.info(
+            f'daos mode: injected storage params '
+            f'(storage_type=daos, pool={self.params_dict["storage.storage_options.pool"]}, '
+            f'container={self.params_dict["storage.storage_options.container"]}, '
+            f'sys_name={self.params_dict.get("storage.storage_options.sys_name")})'
         )
 
     def _apply_odirect_params(self, storage_root=None):
@@ -871,7 +986,8 @@ class TrainingBenchmark(DLIOBenchmark):
             if self.args.command == "datagen" and self.args.mode != "whatif":
                 validate_supported_model(self.args.model, self.args.mode)
                 assert_data_dir_hierarchy_absent(
-                    self.args.data_dir, self.args.model
+                    self.args.data_dir, self.args.model,
+                    daos=_daos_connection(self),
                 )
             # The datasize command uses --data-dir and needs to generate a command that also calls --data-dir
             # The add_datadir_param would convert --data-dir to --dataset.data_folder which is invalid to
@@ -931,7 +1047,8 @@ class TrainingBenchmark(DLIOBenchmark):
         model = args.model
         lenient = bool(getattr(args, 'skip_validation', False)) \
             or getattr(args, 'mode', None) == 'whatif'
-        location = datagen_manifest_location(data_dir, model)
+        daos = _daos_connection(self)
+        location = datagen_manifest_location(data_dir, model, daos=daos)
         dataset = self.combined_params.setdefault('dataset', {})
         try:
             run_count = int(dataset.get('num_files_train'))
@@ -954,7 +1071,7 @@ class TrainingBenchmark(DLIOBenchmark):
             )
 
         try:
-            manifest = read_datagen_manifest(data_dir, model)
+            manifest = read_datagen_manifest(data_dir, model, daos=daos)
         except ConfigurationError as exc:
             if not lenient:
                 raise
@@ -1292,7 +1409,7 @@ class TrainingBenchmark(DLIOBenchmark):
         fire the A8 remote-backend escape hatch in
         ``_pre_execution_gate``. See issue #568.
         """
-        if self._is_object_storage():
+        if self._is_object_storage() or _uses_daos(self):
             return None
         return self.args.data_dir
 
@@ -1303,7 +1420,7 @@ class TrainingBenchmark(DLIOBenchmark):
         as CAP-01 — the dataset side is an s3:// URI with no local FS
         identity to probe against the local results_dir.
         """
-        if self._is_object_storage():
+        if self._is_object_storage() or _uses_daos(self):
             return None
         data_dir = getattr(self.args, "data_dir", None)
         results_dir = getattr(self.args, "results_dir", None)
@@ -1469,6 +1586,7 @@ class TrainingBenchmark(DLIOBenchmark):
             model=self.args.model,
             dataset_params=dataset_params,
             source_datagen_result_dir=self.run_result_output,
+            daos=_daos_connection(self),
         )
         self.logger.info(f'Datagen manifest written: {manifest_path}')
         return True
@@ -1677,7 +1795,7 @@ class CheckpointingBenchmark(DLIOBenchmark):
         # Object-storage runs target an s3:// URI; statvfs walks to root
         # and aborts with [E401] CAP-01: no valid parent. A8 escape hatch —
         # see issue #568.
-        if self._is_object_storage():
+        if self._is_object_storage() or _uses_daos(self):
             return None
         cf = getattr(self.args, "checkpoint_folder", None)
         if not cf:
@@ -1691,7 +1809,7 @@ class CheckpointingBenchmark(DLIOBenchmark):
         rule 4.4.2 verifies checkpoint_folder vs results_dir live on
         different filesystems. Object-storage runs skip via A8.
         """
-        if self._is_object_storage():
+        if self._is_object_storage() or _uses_daos(self):
             return None
         cf = getattr(self.args, "checkpoint_folder", None)
         results_dir = getattr(self.args, "results_dir", None)

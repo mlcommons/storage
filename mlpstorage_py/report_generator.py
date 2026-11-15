@@ -1352,9 +1352,10 @@ class ReportGenerator:
             else                                         Type += ' ' + storage_location
             Type += ' ' + product_API
 
-        ``Access Protocol`` is POSIX for a ``file`` benchmark_API and S3 for
-        an ``object`` one. ``Availability`` is title-cased for display (the
-        schema enum is lowercase, except ``RDI``). The two capacities pass
+        ``Access Protocol`` is POSIX for a ``file`` benchmark_API, DAOS
+        (libdfs) for a ``daos`` one and S3 for an ``object`` one.
+        ``Availability`` is title-cased for display (the schema enum is
+        lowercase, except ``RDI``). The two capacities pass
         straight through; ``int_client_store_tib`` is optional and expected
         to be absent for every v3.0 submitter — the column exists for v2.0
         parity.
@@ -1400,7 +1401,9 @@ class ReportGenerator:
                 "needed for the Type cell; leaving it blank.", systemname)
 
         benchmark_api = architecture.get('benchmark_API')
-        if benchmark_api is not None:
+        if benchmark_api == 'daos':
+            cells['sut_access_protocol'] = 'DAOS (libdfs)'
+        elif benchmark_api is not None:
             cells['sut_access_protocol'] = (
                 'POSIX' if benchmark_api == 'file' else 'S3'
             )

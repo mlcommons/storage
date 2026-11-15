@@ -20,8 +20,8 @@ _HEADER_TEXT = """\
 
 SYNOPSIS_TEXT = """\
 SYNOPSIS
-  mlpstorage <closed|open|whatif> training <model> <command> <file|object> [OPTIONS]
-  mlpstorage <closed|open|whatif> checkpointing <command> <file|object> [OPTIONS]
+  mlpstorage <closed|open|whatif> training <model> <command> <file|object|daos> [OPTIONS]
+  mlpstorage <closed|open|whatif> checkpointing <command> <file|object|daos> [OPTIONS]
   mlpstorage <closed|open|whatif> vectordb <command> <file|object> [OPTIONS]
   mlpstorage <closed|open|whatif> kvcache <command> [OPTIONS]
   mlpstorage (reports|history|runs|lockfile|config|version) [subcommand] [OPTIONS]
@@ -39,7 +39,9 @@ SYNOPSIS
                           vectordb --vdb-index, kvcache --model/-m
                           (open|whatif only; fixed in closed)
   <file|object>         — required storage selector for commands that touch storage
-                          (absent on datasize; absent on all kvcache commands)"""
+                          (absent on datasize; absent on all kvcache commands)
+  daos                  — training and checkpointing only: a DAOS container
+                          accessed through libdfs (DAOS_POOL, DAOS_CONT)"""
 
 _TREE_AND_BODY_TEXT = """\
 mlpstorage
@@ -48,14 +50,14 @@ mlpstorage
 │   ├── training
 │   │   └── unet3d | retinanet            ← model positional
 │   │       ├── datasize                          {TR_DATASIZE_CLOSED}
-│   │       ├── datagen    file | object           {TR_DATAGEN_CLOSED}
-│   │       ├── run        file | object           {TR_RUN_CLOSED}
-│   │       └── configview file | object           {TR_CONFIGVIEW_CLOSED}
+│   │       ├── datagen    file | object | daos    {TR_DATAGEN_CLOSED}
+│   │       ├── run        file | object | daos    {TR_RUN_CLOSED}
+│   │       └── configview file | object | daos    {TR_CONFIGVIEW_CLOSED}
 │   │
 │   ├── checkpointing                     ← model via --model/-m flag (required)
 │   │   ├── datasize                              {CK_DATASIZE_CLOSED}
-│   │   ├── run        file | object               {CK_RUN_CLOSED}
-│   │   └── configview file | object               {CK_CONFIGVIEW_CLOSED}
+│   │   ├── run        file | object | daos        {CK_RUN_CLOSED}
+│   │   └── configview file | object | daos        {CK_CONFIGVIEW_CLOSED}
 │   │
 │   ├── vectordb                          ← index via --vdb-index flag
 │   │   ├── datasize                              {VDB_DATASIZE_CLOSED}
@@ -70,14 +72,14 @@ mlpstorage
 │   ├── training
 │   │   └── unet3d | retinanet            ← model positional
 │   │       ├── datasize                          {TR_DATASIZE_OPEN}
-│   │       ├── datagen    file | object           {TR_DATAGEN_OPEN}
-│   │       ├── run        file | object           {TR_RUN_OPEN}
-│   │       └── configview file | object           {TR_CONFIGVIEW_OPEN}
+│   │       ├── datagen    file | object | daos    {TR_DATAGEN_OPEN}
+│   │       ├── run        file | object | daos    {TR_RUN_OPEN}
+│   │       └── configview file | object | daos    {TR_CONFIGVIEW_OPEN}
 │   │
 │   ├── checkpointing                     ← model via --model/-m flag (required)
 │   │   ├── datasize                              {CK_DATASIZE_OPEN}
-│   │   ├── run        file | object               {CK_RUN_OPEN}
-│   │   └── configview file | object               {CK_CONFIGVIEW_OPEN}
+│   │   ├── run        file | object | daos        {CK_RUN_OPEN}
+│   │   └── configview file | object | daos        {CK_CONFIGVIEW_OPEN}
 │   │
 │   ├── vectordb                          ← index via --vdb-index flag
 │   │   ├── datasize                              {VDB_DATASIZE_OPEN}
@@ -92,14 +94,14 @@ mlpstorage
 │   ├── training
 │   │   └── cosmoflow | resnet50 | unet3d | dlrm | retinanet | flux
 │   │       ├── datasize                          {TR_DATASIZE_WHATIF}
-│   │       ├── datagen    file | object           {TR_DATAGEN_WHATIF}
-│   │       ├── run        file | object           {TR_RUN_WHATIF}
-│   │       └── configview file | object           {TR_CONFIGVIEW_WHATIF}
+│   │       ├── datagen    file | object | daos    {TR_DATAGEN_WHATIF}
+│   │       ├── run        file | object | daos    {TR_RUN_WHATIF}
+│   │       └── configview file | object | daos    {TR_CONFIGVIEW_WHATIF}
 │   │
 │   ├── checkpointing                     ← model via --model/-m flag (required)
 │   │   ├── datasize                              {CK_DATASIZE_WHATIF}
-│   │   ├── run        file | object               {CK_RUN_WHATIF}
-│   │   └── configview file | object               {CK_CONFIGVIEW_WHATIF}
+│   │   ├── run        file | object | daos        {CK_RUN_WHATIF}
+│   │   └── configview file | object | daos        {CK_CONFIGVIEW_WHATIF}
 │   │
 │   ├── vectordb                          ← index via --vdb-index flag
 │   │   ├── datasize                              {VDB_DATASIZE_WHATIF}
@@ -233,7 +235,7 @@ TR_DATAGEN_CLOSED
     --systemname/-sn NAME           (layered; see CORE_STD)
     --data-dir/-dd PATH             (required with file storage; object mode
                                      may supply data_dir via --config-file)
-    [storage positional: file | object]
+    [storage positional: file | object | daos]
   Optional:
     --dlio-bin-path/-dp PATH
     --exec-type/-et {mpi,docker}    (default: mpi)
@@ -261,7 +263,7 @@ TR_RUN_CLOSED
     --systemname/-sn NAME           (layered; see CORE_STD)
     --data-dir/-dd PATH             (required with file storage; object mode
                                      may supply data_dir via --config-file)
-    [storage positional: file | object]
+    [storage positional: file | object | daos]
   Optional:
     --num-client-hosts/-nc N
     --dlio-bin-path/-dp PATH
@@ -292,7 +294,7 @@ TR_CONFIGVIEW_CLOSED
     --client-host-memory-in-gb/-cm N
     --results-dir/-rd PATH          (layered; see CORE_STD)
     --systemname/-sn NAME           (layered; see CORE_STD)
-    [storage positional: file | object]
+    [storage positional: file | object | daos]
   Optional:
     --data-dir/-dd PATH
     --num-client-hosts/-nc N
@@ -351,7 +353,7 @@ CK_RUN_CLOSED
     --client-host-memory-in-gb/-cm N
     --results-dir/-rd PATH          (layered; see CORE_STD)
     --systemname/-sn NAME           (layered; see CORE_STD)
-    [storage positional: file | object]
+    [storage positional: file | object | daos]
   Optional:
     --checkpoint-subset             (8B at 8 processes only; declares a Subset run)
     --exec-type/-et {mpi,docker}    (default: mpi)
@@ -394,7 +396,7 @@ CK_CONFIGVIEW_CLOSED
     --client-host-memory-in-gb/-cm N
     --results-dir/-rd PATH          (layered; see CORE_STD)
     --systemname/-sn NAME           (layered; see CORE_STD)
-    [storage positional: file | object]
+    [storage positional: file | object | daos]
   Optional:
     --exec-type/-et {mpi,docker}    (default: mpi)
     --hosts/-s HOST...              (default: 127.0.0.1)
@@ -993,7 +995,7 @@ def get_context_help_tokens(argv: list) -> 'str | None':
             return None  # unrecognised command
         if t2 in _CKPT_CMDS_WITH_STORAGE:
             if n == 3:
-                return 'next: file | object'
+                return 'next: file | object | daos'
             return None  # storage supplied → leaf
         # datasize → leaf
         return None
@@ -1024,7 +1026,7 @@ def get_context_help_tokens(argv: list) -> 'str | None':
 
         if t3 in _TRAINING_CMDS_WITH_STORAGE:
             if n == 4:
-                return 'next: file | object'
+                return 'next: file | object | daos'
             return None  # storage supplied → leaf
         # datasize → leaf
         return None

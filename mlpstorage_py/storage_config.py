@@ -146,3 +146,21 @@ def resolve_object_storage_config() -> dict:
         'aws_access_key_id_redacted': _mask_credential_id(os.environ.get('AWS_ACCESS_KEY_ID')),
         'aws_secret_access_key_redacted': _redact_secret(os.environ.get('AWS_SECRET_ACCESS_KEY')),
     }
+
+
+def resolve_daos_storage_config() -> dict:
+    """Resolve the DAOS (libdfs) connection settings from the environment.
+
+    Reads env vars at call time, like :func:`resolve_object_storage_config`.
+
+    Returns:
+        dict with keys:
+            pool (str)                — DAOS_POOL (label or UUID), default ''
+            container (str)           — DAOS_CONT (label or UUID), default ''
+            sys_name (Optional[str])  — DAOS_SYS_NAME, default None
+    """
+    return {
+        'pool': os.environ.get('DAOS_POOL', ''),
+        'container': os.environ.get('DAOS_CONT', ''),
+        'sys_name': os.environ.get('DAOS_SYS_NAME') or None,
+    }

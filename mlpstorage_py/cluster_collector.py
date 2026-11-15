@@ -1231,7 +1231,7 @@ def collect_sysctl(
 # =============================================================================
 #
 # `collect_environment()` filters `os.environ` to a prefix-or-literal allowlist
-# (D-26: BUCKET literal + AWS_*, STORAGE_*, OMPI_*, UCX_*, NCCL_* prefixes) and
+# (D-26: BUCKET literal + AWS_*, STORAGE_*, DAOS_*, OMPI_*, UCX_*, NCCL_* prefixes) and
 # dispatches AWS credential vars through the unified storage_config redactors
 # (D-23 `_mask_credential_id` for KEY_ID; D-24 `_redact_secret` for SECRET).
 # All other matching vars are emitted verbatim.
@@ -1252,6 +1252,7 @@ _ENV_LITERALS: Final[frozenset] = frozenset({"BUCKET"})
 _ENV_PREFIXES: Final[Tuple[str, ...]] = (
     "AWS_",
     "STORAGE_",
+    "DAOS_",
     "OMPI_",
     "UCX_",
     "NCCL_",
@@ -2257,7 +2258,7 @@ def collect_sysctl(proc_sys_root=_PROC_SYS_ROOT, allowlist=None):
 # so both redactors are inlined here.
 _ENV_LITERALS = ("BUCKET",)
 
-_ENV_PREFIXES = ("AWS_", "STORAGE_", "OMPI_", "UCX_", "NCCL_")
+_ENV_PREFIXES = ("AWS_", "STORAGE_", "DAOS_", "OMPI_", "UCX_", "NCCL_")
 
 # Runtime-volatile launcher metadata (mirror of module copy, see UAT Test 3
 # / LIFE-04). Must match the module-level _ENV_RUNTIME_DENYLIST byte-for-byte

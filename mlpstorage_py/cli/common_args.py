@@ -456,7 +456,7 @@ def add_mpi_arguments(parser):
     )
 
 
-def add_storage_type_arguments(parser, required=False):
+def add_storage_type_arguments(parser, required=False, allow_daos=False):
     """Add file|object storage-type positional to a subcommand parser.
 
     Registers 'data_access_protocol' as an optional positional with
@@ -470,14 +470,25 @@ def add_storage_type_arguments(parser, required=False):
     Args:
         parser: Argparse subcommand parser to add the positional to.
         required: Whether the positional is required. Defaults to False.
+        allow_daos: Also accept 'daos' (native DAOS access through libdfs).
+            Only the DLIO benchmarks (training, checkpointing) support it.
     """
+    choices = ["file", "object"]
+    help_text = "Storage access method: 'file' for POSIX filesystem, 'object' for S3-compatible object storage."
+    if allow_daos:
+        choices.append("daos")
+        help_text = (
+            "Storage access method: 'file' for POSIX filesystem, 'object' for "
+            "S3-compatible object storage, 'daos' for a DAOS container accessed "
+            "through libdfs."
+        )
     parser.add_argument(
         "data_access_protocol",
         nargs=None if required else "?",
-        choices=["file", "object"],
-        metavar="file|object",
+        choices=choices,
+        metavar="|".join(choices),
         default=None,
-        help="Storage access method: 'file' for POSIX filesystem, 'object' for S3-compatible object storage."
+        help=help_text
     )
 
 

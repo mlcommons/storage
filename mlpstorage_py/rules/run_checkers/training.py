@@ -76,6 +76,10 @@ class TrainingRunRulesChecker(RunRulesChecker):
         'storage.storage_options.storage_library',
         'storage.storage_options.uri_scheme',
         'storage.s3_force_path_style',
+        # _apply_daos_storage_params — derived from the daos positional + DAOS_POOL / DAOS_CONT / DAOS_SYS_NAME
+        'storage.storage_options.pool',
+        'storage.storage_options.container',
+        'storage.storage_options.sys_name',
         # datasize() persists this sizing output into params_dict so the
         # datasize metadata file captures the sentinel end-to-end (#760).
         # It is never user-typed via --params and has no CLOSED_ALLOWED

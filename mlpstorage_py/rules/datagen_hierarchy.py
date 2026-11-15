@@ -58,6 +58,7 @@ import dataclasses
 import datetime
 import json
 import os
+import posixpath
 import re
 from typing import Any, Dict, List, Mapping, Optional
 from urllib.parse import urlparse
@@ -181,12 +182,35 @@ def _join_model_location(data_dir: str, model: str) -> str:
     return os.path.join(data_dir, model)
 
 
+# A DAOS container is reached through libdfs, never through a local mount.
+# ``daos`` arguments below are the ``{pool, container, sys_name}`` mapping
+# the run hands DLIO; the paths are absolute paths inside the container.
+
+
+def _daos_path(data_dir: str, model: str, *names: str) -> str:
+    """Absolute path of ``<data-dir>/<model>[/names...]`` inside the container."""
+    return posixpath.normpath(posixpath.join("/", data_dir, model, *names))
+
+
+def _daos_display(daos: Mapping[str, Any], path: str) -> str:
+    """``daos://<pool>/<container><path>`` — for messages and the manifest location."""
+    return f"daos://{daos['pool']}/{daos['container']}{path}"
+
+
+def _daos_client(daos: Mapping[str, Any]):
+    from dlio_benchmark.storage.dfs_client import get_client
+
+    return get_client(daos["pool"], daos["container"], daos.get("sys_name"))
+
+
 # --------------------------------------------------------------------------- #
 # assert_data_dir_hierarchy_absent                                            #
 # --------------------------------------------------------------------------- #
 
 
-def assert_data_dir_hierarchy_absent(data_dir: str, model: str) -> None:
+def assert_data_dir_hierarchy_absent(
+    data_dir: str, model: str, daos: Optional[Mapping[str, Any]] = None
+) -> None:
     """Refuse to overwrite an existing ``<data-dir>/<model>`` tree.
 
     Rationale: a re-datagen with different ``num_samples_per_file``
@@ -209,6 +233,10 @@ def assert_data_dir_hierarchy_absent(data_dir: str, model: str) -> None:
       decision: a transient object-store error must NOT be silently
       treated as "assume empty, proceed".
 
+    - DAOS container (``daos`` given): ``stat`` and ``listdir`` through
+      libdfs on ``<data-dir>/<model>`` inside the container. Errors fail
+      safe (abort), as for object storage.
+
     Accepted states (no raise):
         - ``<data-dir>/<model>`` does not exist.
         - ``<data-dir>/<model>`` exists as an empty directory (local
@@ -220,6 +248,10 @@ def assert_data_dir_hierarchy_absent(data_dir: str, model: str) -> None:
           (local case only).
         - Object-storage LIST raises for any reason.
     """
+    if daos is not None:
+        _assert_daos_hierarchy_absent(data_dir, model, daos)
+        return
+
     model_location = _join_model_location(data_dir, model)
 
     if _is_object_uri(data_dir):
@@ -301,6 +333,57 @@ def _assert_object_hierarchy_absent(model_uri: str, model: str) -> None:
             suggestion=(
                 f"Remove the existing objects under {model_uri!r} or pass a "
                 "different --data-dir."
+            ),
+            code=ErrorCode.CONFIG_INVALID_VALUE,
+        )
+
+
+def _assert_daos_hierarchy_absent(
+    data_dir: str, model: str, daos: Mapping[str, Any]
+) -> None:
+    """DAOS half of :func:`assert_data_dir_hierarchy_absent`."""
+    path = _daos_path(data_dir, model)
+    location = _daos_display(daos, path)
+    try:
+        client = _daos_client(daos)
+        kind, _size = client.stat(path)
+        entries = client.listdir(path) if kind == "dir" else []
+    except Exception as e:
+        raise ConfigurationError(
+            f"Cannot inspect {location!r} for prior {model!r} datagen "
+            f"output: {e}. Refusing to proceed rather than silently "
+            f"assume the directory is empty.",
+            parameter="data_dir",
+            actual=location,
+            code=ErrorCode.CONFIG_INVALID_VALUE,
+        ) from e
+
+    if kind is None:
+        return
+    if kind != "dir":
+        raise ConfigurationError(
+            f"{location!r} exists and is not a directory — refusing to "
+            f"proceed with datagen.",
+            parameter="data_dir",
+            actual=location,
+            suggestion=(
+                f"Remove {path!r} from the container or pass a different "
+                "--data-dir."
+            ),
+            code=ErrorCode.CONFIG_INVALID_VALUE,
+        )
+    if entries:
+        raise ConfigurationError(
+            f"{location!r} already exists and is not empty — refusing to "
+            f"overwrite an existing {model!r} dataset. A re-datagen with "
+            f"different parameters (e.g. num_samples_per_file) may only "
+            f"partially overwrite files on filename collision, silently "
+            f"corrupting the dataset.",
+            parameter="data_dir",
+            actual=location,
+            suggestion=(
+                f"Remove {path!r} from the container or pass a different "
+                "--data-dir."
             ),
             code=ErrorCode.CONFIG_INVALID_VALUE,
         )
@@ -434,6 +517,7 @@ def write_datagen_manifest(
     dataset_params: Mapping[str, Any],
     source_datagen_result_dir: str,
     now: Optional[datetime.datetime] = None,
+    daos: Optional[Mapping[str, Any]] = None,
 ) -> str:
     """Write the self-describing manifest for a completed datagen run.
 
@@ -456,9 +540,13 @@ def write_datagen_manifest(
             under ``--results-dir``. Written as-is for provenance.
         now: Injectable clock for tests. Defaults to
             ``datetime.datetime.now(timezone.utc)``.
+        daos: ``{pool, container, sys_name}`` when ``data_dir`` is a
+            path inside a DAOS container; the manifest is then written
+            through libdfs.
 
     Returns:
-        Absolute path to the written manifest file.
+        Absolute path to the written manifest file (a ``daos://`` or
+        object-storage URI for those backends).
 
     Raises:
         ConfigurationError: If any of the three required
@@ -516,6 +604,23 @@ def write_datagen_manifest(
         "rules_edition": RULES_EDITION,
     }
     payload = json.dumps(manifest, indent=2, sort_keys=True).encode("utf-8")
+
+    if daos is not None:
+        model_path = _daos_path(data_dir, model)
+        manifest_path = _daos_path(data_dir, model, DATAGEN_MANIFEST_FILENAME)
+        location = _daos_display(daos, manifest_path)
+        try:
+            client = _daos_client(daos)
+            client.mkdir(model_path, parents=True, exist_ok=True)
+            client.write(manifest_path, payload)
+        except Exception as e:
+            raise ConfigurationError(
+                f"Failed to write datagen manifest to {location!r}: {e}.",
+                parameter="data_dir",
+                actual=location,
+                code=ErrorCode.CONFIG_INVALID_VALUE,
+            ) from e
+        return location
 
     if _is_object_uri(data_dir):
         manifest_uri = (
@@ -581,8 +686,12 @@ _MANIFEST_REQUIRED_KEYS = (
 )
 
 
-def datagen_manifest_location(data_dir: str, model: str) -> str:
-    """Path (local) or URI (object storage) of the manifest for ``model``."""
+def datagen_manifest_location(
+    data_dir: str, model: str, daos: Optional[Mapping[str, Any]] = None
+) -> str:
+    """Path (local) or URI (object storage, DAOS) of the manifest for ``model``."""
+    if daos is not None:
+        return _daos_display(daos, _daos_path(data_dir, model, DATAGEN_MANIFEST_FILENAME))
     if _is_object_uri(data_dir):
         return _join_model_location(data_dir, model) + "/" + DATAGEN_MANIFEST_FILENAME
     return os.path.join(data_dir, model, DATAGEN_MANIFEST_FILENAME)
@@ -673,7 +782,9 @@ def _parse_datagen_manifest(raw: bytes, location: str) -> DatagenManifest:
     )
 
 
-def read_datagen_manifest(data_dir: str, model: str) -> Optional[DatagenManifest]:
+def read_datagen_manifest(
+    data_dir: str, model: str, daos: Optional[Mapping[str, Any]] = None
+) -> Optional[DatagenManifest]:
     """Read ``<data-dir>/<model>/.mlps-datagen-manifest.json`` if present.
 
     Returns ``None`` when no manifest exists (the caller decides how loud
@@ -687,8 +798,37 @@ def read_datagen_manifest(data_dir: str, model: str) -> Optional[DatagenManifest
     dwarfed by the human latency between ``datagen`` and ``run``. Any
     s3dlio exception fails safe as an error (same policy as
     :func:`assert_data_dir_hierarchy_absent`).
+
+    DAOS container (``daos`` given): ``stat`` then ``read`` through libdfs,
+    with the same fail-safe policy.
     """
-    location = datagen_manifest_location(data_dir, model)
+    location = datagen_manifest_location(data_dir, model, daos=daos)
+
+    if daos is not None:
+        manifest_path = _daos_path(data_dir, model, DATAGEN_MANIFEST_FILENAME)
+        try:
+            client = _daos_client(daos)
+            kind, _size = client.stat(manifest_path)
+        except Exception as e:
+            raise ConfigurationError(
+                f"Cannot check for the datagen manifest at {location!r}: {e}. "
+                f"Refusing to guess whether the dataset has a manifest.",
+                parameter="data_dir",
+                actual=location,
+                code=ErrorCode.CONFIG_INVALID_VALUE,
+            ) from e
+        if kind is None:
+            return None
+        try:
+            raw = client.read(manifest_path)
+        except Exception as e:
+            raise ConfigurationError(
+                f"Failed to read the datagen manifest at {location!r}: {e}.",
+                parameter="data_dir",
+                actual=location,
+                code=ErrorCode.CONFIG_INVALID_VALUE,
+            ) from e
+        return _parse_datagen_manifest(raw, location)
 
     if _is_object_uri(data_dir):
         try:

@@ -30,7 +30,7 @@ The benchmark execution process requires these steps:
 > submission mode, model, and storage type. The general shape is:
 >
 > ```
-> mlpstorage <closed|open|whatif> training <model> <command> [file|object] [OPTIONS]
+> mlpstorage <closed|open|whatif> training <model> <command> [file|object|daos] [OPTIONS]
 > ```
 >
 > The `--open`, `--closed`, and `--loops` flags that appear in some historical

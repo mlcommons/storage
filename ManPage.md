@@ -31,7 +31,7 @@ Where:
 - `<benchmark>` is `training`, `checkpointing`, `vectordb`, or `kvcache`
 - `<model|index>` is required by `training` (e.g. `unet3d`), `checkpointing` (e.g. `llama3-70b`), and `vectordb` (e.g. `DISKANN`); `kvcache` takes no model positional
 - `<command>` is `datasize`, `datagen`, `run`, or `configview` (subset depending on benchmark)
-- `<storage>` is `file` or `object` — required by `datagen`, `run`, and `configview` for the benchmarks that touch storage
+- `<storage>` is `file` or `object` — required by `datagen`, `run`, and `configview` for the benchmarks that touch storage; `training` and `checkpointing` also accept `daos` (see [DAOS storage](#daos-storage))
 - `<orgname>` is the submitter / organization name pinned to the results-dir by `mlpstorage init`; `[A-Za-z0-9._-]+`, case-sensitive
 - `<name>` (for `--systemname`) is the per-run system-under-test identifier; required on every emitting subcommand (`run`, `datagen`, `configview`, `history rerun`; optional for `reportgen`), and may be supplied via the `MLPSTORAGE_SYSTEMNAME` environment variable
 
@@ -104,14 +104,14 @@ mlpstorage
 │   ├── training
 │   │   ├── unet3d | retinanet | (cosmoflow|resnet50|dlrm|flux in whatif)
 │   │   │   ├── datasize
-│   │   │   ├── datagen   (file|object)
-│   │   │   ├── run       (file|object)
-│   │   │   └── configview (file|object)
+│   │   │   ├── datagen   (file|object|daos)
+│   │   │   ├── run       (file|object|daos)
+│   │   │   └── configview (file|object|daos)
 │   ├── checkpointing
 │   │   ├── llama3-8b | llama3-70b | llama3-405b | llama3-1t
 │   │   │   ├── datasize
-│   │   │   ├── run       (file|object)
-│   │   │   └── configview (file|object)
+│   │   │   ├── run       (file|object|daos)
+│   │   │   └── configview (file|object|daos)
 │   ├── vectordb
 │   │   ├── DISKANN | HNSW | AISAQ | (IVF_FLAT|IVF_SQ8|FLAT in open/whatif)
 │   │   │   ├── datasize
@@ -320,11 +320,15 @@ The data directory is the on-storage workspace for the generated **training** da
     └── test/                       empty under v3.0 bundled workloads (see note)
 ```
 
-The `<model>/` segment is appended by `datagen` if `--data-dir` does not already end in the model name; the `train/`, `valid/`, and `test/` subdirectories are created on the local filesystem before `datagen` runs. Each rank writes into the same `train/` directory using DLIO's `{prefix}_{idx:0N}_of_{total}.{format}` naming convention — no per-rank subdirectory. Object-storage modes (`object` positional) skip the local makedirs because the path is an S3 key prefix.
+The `<model>/` segment is appended by `datagen` if `--data-dir` does not already end in the model name; the `train/`, `valid/`, and `test/` subdirectories are created on the local filesystem before `datagen` runs. Each rank writes into the same `train/` directory using DLIO's `{prefix}_{idx:0N}_of_{total}.{format}` naming convention — no per-rank subdirectory. Object-storage modes (`object` positional) skip the local makedirs because the path is an S3 key prefix; `daos` skips them too because the path is inside a DAOS container.
 
 > **Note on `valid/` and `test/`** — every bundled v3.0 training workload YAML sets `workflow.train: True` only, with no `evaluation` step and no `num_files_eval`. Both subdirectories are therefore created on disk but **not populated by `datagen` today**. They follow the conventional train/valid/test split used throughout the ML ecosystem (`valid/` for held-out evaluation files consumed during training, `test/` for a post-training generalization corpus) so the layout remains immediately recognizable and a future workload that enables `workflow.evaluation: True` writes into the path practitioners expect. Submitters can ignore the empty subdirectories; `mlpstorage validate` does not inspect `--data-dir` contents.
 
 Each `datagen` invocation should own its `--data-dir` — sharing a single `--data-dir` across multiple workloads or repeated runs is not supported. The `--data-dir` must live on the storage system under test. For closed training submissions, the generated dataset must total at least five times the client host memory (`--client-host-memory-in-gb`) to prevent the OS page cache from absorbing the workload; `datasize` exists specifically to compute and report this lower bound.
+
+### DAOS storage
+
+The `daos` storage positional (training and checkpointing) runs DLIO against a DAOS container through libdfs, without a dfuse mount. `mlpstorage` reads `DAOS_POOL`, `DAOS_CONT` and the optional `DAOS_SYS_NAME` from `.env` and the environment (see ENVIRONMENT → Storage-borrowed) and injects `storage.storage_type=daos`, `storage.storage_root=/`, `storage.storage_options.pool`, `storage.storage_options.container` and, when set, `storage.storage_options.sys_name`. `--params` may override the pool, container and system name; a `storage.storage_type` other than `daos` is rejected. The pool and the container must already exist; neither is created. `--data-dir` and `--checkpoint-folder` are absolute paths inside the container, so `datagen`'s refuse-to-overwrite check and the datagen manifest go through libdfs (the manifest location prints as `daos://<pool>/<container>/<path>`), and the pre-execution gate skips its local probes exactly as it does for `object` (it stops at `CAP-01 skipped: destination not local`). The pre-run check that the parent of `--results-dir` exists still applies. libdfs is loaded only for `daos` runs and comes from the DAOS client installation on every host.
 
 ### The datagen manifest (`.mlps-datagen-manifest.json`)
 
@@ -509,7 +513,7 @@ Every benchmark run writes:
 - **`mlpstorage.log`** — every message `mlpstorage` itself logged during the invocation, at DEBUG level with `module:line`, uncoloured. Messages emitted before the run directory existed (argument parsing, environment validation, code-image capture) are buffered and written first, so the file is complete from process start.
 - **`mlpstorage.errors.log`** — the WARNING-and-above subset of `mlpstorage.log`. An empty file means the run logged no warnings or errors. Both files live inside the run's timestamp directory and are removed with it.
 - **`fs_separation.json`** — CAP-03 filesystem-separation sidecar written before workload launch. Rank-0 probes the data/checkpoint path against the results path with `os.link()` and records the `EXDEV`/same-fs result plus real-paths, ISO-8601 timestamp, and probing host. The submission checker's rules 3.4.2 / 4.4.2 / 5.4.2 read this file as their authoritative "different filesystems" input. Absent under `--skip-fs-separation-gate`.
-- **`provenance.json`** — provenance stamp written by every `datasize` / `datagen` / `run` leaf right after `*_metadata.json` (which declares it under `"provenance_file"`). Records the rules edition the tool implements (`RULES_EDITION`, e.g. `3.0`), the layout version, the tool version, git SHA and code image, the installed DLIO version/source/commit (from the package's PEP 610 `direct_url.json`), the client storage library for `object` runs (`s3dlio`), and the `core-config-v1` hash of the workload-defining DLIO parameters with the exact keys hashed (allowlists in `mlpstorage_py/rules/core_config_keys.yaml`: `training@1`, `checkpointing@1`, `kv_cache@1` over the Table KVCache-1 Options, seed, config and forwarded flags the run recorded, `vector_database@1` over the backend, index family, dataset scale and recall target; a pre-allowlist `kv_cache` / `vector_database` leaf is rebuilt from its recorded command lines and result files, and stamps `unknown` when that is not enough). Every value has a provenance tag saying how it was obtained; undeterminable values are the string `unknown`, never null. Leaves that predate the stamp are never rewritten — `validate`, `reportgen` and `runs show` derive an equivalent stamp from the pointed-to image's `.code-hash.json` and `uv.lock` at read time. Rules.md "Provenance stamps and the submission manifest" has the schema; `validate` rules PROV-01 / PROV-02 enforce it. The stamp's rules edition, family, model, accelerator and core-config hash resolve to a **comparability class** in `mlpstorage_py/rules/editions.yaml` (Rules.md "Rules editions and comparability classes"); `validate` rules EDN-01 / EDN-02 / EDN-03 / EDN-04 check the declared edition, the class, the DLIO revision and whether this tool can check the edition at all, and `runs show` prints the class.
+- **`provenance.json`** — provenance stamp written by every `datasize` / `datagen` / `run` leaf right after `*_metadata.json` (which declares it under `"provenance_file"`). Records the rules edition the tool implements (`RULES_EDITION`, e.g. `3.0`), the layout version, the tool version, git SHA and code image, the installed DLIO version/source/commit (from the package's PEP 610 `direct_url.json`), the client storage library for `object` runs (`s3dlio`) and `daos` runs (`libdfs`, version `unknown`), and the `core-config-v1` hash of the workload-defining DLIO parameters with the exact keys hashed (allowlists in `mlpstorage_py/rules/core_config_keys.yaml`: `training@1`, `checkpointing@1`, `kv_cache@1` over the Table KVCache-1 Options, seed, config and forwarded flags the run recorded, `vector_database@1` over the backend, index family, dataset scale and recall target; a pre-allowlist `kv_cache` / `vector_database` leaf is rebuilt from its recorded command lines and result files, and stamps `unknown` when that is not enough). Every value has a provenance tag saying how it was obtained; undeterminable values are the string `unknown`, never null. Leaves that predate the stamp are never rewritten — `validate`, `reportgen` and `runs show` derive an equivalent stamp from the pointed-to image's `.code-hash.json` and `uv.lock` at read time. Rules.md "Provenance stamps and the submission manifest" has the schema; `validate` rules PROV-01 / PROV-02 enforce it. The stamp's rules edition, family, model, accelerator and core-config hash resolve to a **comparability class** in `mlpstorage_py/rules/editions.yaml` (Rules.md "Rules editions and comparability classes"); `validate` rules EDN-01 / EDN-02 / EDN-03 / EDN-04 check the declared edition, the class, the DLIO revision and whether this tool can check the edition at all, and `runs show` prints the class.
 - **`datagen-manifest.json`** — training `run` leaves only: the datagen manifest the run consumed (`<data-dir>/<model>/.mlps-datagen-manifest.json`) copied verbatim, with where and when it was read and any `MANIFEST-*` finding `--skip-validation` / `whatif` waived; declared in `*_metadata.json` under `"datagen_manifest_file"`. `validate` rule 3.3.1 links the run to its `datagen/` leaf through it (DATA DIRECTORY → "The datagen manifest"). Absent from `configview`, `datasize`, `datagen` and checkpointing leaves, and from every leaf written before the snapshot existed.
 - **`results.json`** — aggregated summary across all timestamped run directories, used by `reportgen`.
 - **Command history** is appended to `<results-dir>/.mlps/history` (consumed by `mlpstorage history`). Only invocations that resolved an initialized results-dir are recorded, so history never creates files inside a tree that `init` has not claimed.
@@ -546,7 +550,7 @@ This framing applies uniformly to every per-benchmark metric column `reportgen` 
 
    - **CAP-02 — Shared-filesystem probe.** On multi-host runs, launches `SHARED_FS_PROBE_SCRIPT` under `mpirun --tag-output` and stat's the run-uuid sentinel file from every rank. If the set of `(st_dev, st_ino)` pairs has cardinality > 1, the destination is not a shared filesystem and the probe raises `FileSystemError(code=FS_INVALID_STRUCTURE)` with a per-host/per-rank breakdown and the hint *"typically means one or more hosts have a local-disk path where a shared mount was expected."* The rank-0 result transports back via `__CAP02_RESULT_BEGIN__`/`__CAP02_RESULT_END__` stdout markers (HARDEN-02), and the `[rank,jobid]<channel>:` prefix emitted by OpenMPI 4.x is stripped via `_strip_tag_output_prefix` before JSON decode (HARDEN-04). Single-host runs skip the probe silently.
 
-   - **CAP-03 — Filesystem-separation probe.** Rank 0 calls `os.link()` between a sentinel in the data (or checkpoint) directory and a sentinel in the results directory. `EXDEV` is the unambiguous "different filesystem" signal, so the probe never has to parse `df` output. If the two paths share a filesystem, raises `FileSystemError` with `data_or_chkpt_path`, `results_path`, both real-paths, and the probing host. Regardless of outcome, the structured result is written to `<run_dir>/fs_separation.json` (see Common artifacts) so the submission checker's rules 3.4.2 / 4.4.2 / 5.4.2 read a producer-side authoritative signal instead of trying to parse `df` output from the run log. Object-storage submissions (vectordb, kvcache, training with `object`) skip the probe. `--skip-fs-separation-gate` still runs the probe and writes the sidecar but suppresses the raise, so validation-time rules still fire against the recorded telemetry.
+   - **CAP-03 — Filesystem-separation probe.** Rank 0 calls `os.link()` between a sentinel in the data (or checkpoint) directory and a sentinel in the results directory. `EXDEV` is the unambiguous "different filesystem" signal, so the probe never has to parse `df` output. If the two paths share a filesystem, raises `FileSystemError` with `data_or_chkpt_path`, `results_path`, both real-paths, and the probing host. Regardless of outcome, the structured result is written to `<run_dir>/fs_separation.json` (see Common artifacts) so the submission checker's rules 3.4.2 / 4.4.2 / 5.4.2 read a producer-side authoritative signal instead of trying to parse `df` output from the run log. Object-storage submissions (vectordb, kvcache, training with `object`) and `daos` runs skip the probe. `--skip-fs-separation-gate` still runs the probe and writes the sidecar but suppresses the raise, so validation-time rules still fire against the recorded telemetry.
 
 4. **Run-rule checkers** (`mlpstorage_py/rules/run_checkers/`).
    Per-benchmark `RunRulesChecker` classes inspect the merged DLIO configuration before execution. They enforce rules such as:
@@ -686,7 +690,7 @@ Manages the per-user config file described under ORGNAME PINNING ("The per-user 
 
 ### Training options
 
-Required positionals: `<model>` then `<command>` and, for `datagen`/`run`/`configview`, the storage protocol `<file|object>`.
+Required positionals: `<model>` then `<command>` and, for `datagen`/`run`/`configview`, the storage protocol `<file|object|daos>`.
 
 - **`--accelerator-type <type>`, `-at <type>`**
   Accelerator the workload should emulate (e.g. `h100`, `b200`, `mi355`). Determines per-accelerator access patterns and data rates. Required for `datasize`, `run`, `configview`.
@@ -755,7 +759,7 @@ Required positionals: `<model>` then `<command>` and, for `datagen`/`run`/`confi
 
 ### Checkpointing options
 
-Required positionals: `<model>` (one of `llama3-8b`, `llama3-70b`, `llama3-405b`, `llama3-1t`) then `<command>` and, for `run`/`configview`, `<file|object>`.
+Required positionals: `<model>` (one of `llama3-8b`, `llama3-70b`, `llama3-405b`, `llama3-1t`) then `<command>` and, for `run`/`configview`, `<file|object|daos>`.
 
 - **`--model <name>`, `-m <name>`**
   LLM model to emulate. The selection fixes the tensor-parallel, pipeline-parallel, and data-parallel sizes and the per-rank checkpoint footprint.
@@ -1236,6 +1240,9 @@ The same preflight bypass also fires for HPE/Cray PALS `mpiexec` when any `PALS_
 | `S3_ENDPOINT_TEMPLATE` | `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py` | [not set] | URI template for S3 endpoint construction; s3dlio endpoint fallback chain per D-08. |
 | `S3_ENDPOINT_FILE` | `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py` | [not set] | Path to a file containing S3 endpoint URIs; s3dlio endpoint fallback chain per D-08. |
 | `S3_ENDPOINT` | `mlpstorage_py/checkpointing/storage_writers/s3dlio_writer.py` | [not set] | Single S3 endpoint URI; lowest-priority entry in the s3dlio endpoint fallback chain per D-08. |
+| `DAOS_POOL` | `mlpstorage_py/storage_config.py` | [not set] | DAOS pool label or UUID for `daos` runs; required when the `daos` storage positional is selected. Injected as `storage.storage_options.pool`. |
+| `DAOS_CONT` | `mlpstorage_py/storage_config.py` | [not set] | Label or UUID of an existing DAOS container in that pool for `daos` runs; required when the `daos` storage positional is selected. Injected as `storage.storage_options.container`. |
+| `DAOS_SYS_NAME` | `mlpstorage_py/storage_config.py` | [not set] | DAOS system name for `daos` runs; the DAOS client default applies when unset. Injected as `storage.storage_options.sys_name` when set. |
 
 ### Storage-backend
 

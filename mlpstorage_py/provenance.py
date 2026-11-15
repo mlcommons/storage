@@ -10,7 +10,8 @@ that says what produced it:
 * ``tool`` — mlpstorage version, git SHA and the code image the leaf points at;
 * ``dlio`` — the DLIO package version, source URL and git commit, read from
   the installed distribution's PEP 610 ``direct_url.json``;
-* ``storage_library`` — the client library for ``object`` runs (s3dlio);
+* ``storage_library`` — the client library for ``object`` runs (s3dlio) and
+  for ``daos`` runs (libdfs, version not recorded);
 * ``core_config`` — the ``core-config-v1`` hash of the workload-defining DLIO
   parameters (allowlist in ``rules/core_config_keys.yaml``), plus the exact
   keys hashed so the value is reproducible from the leaf alone.
@@ -91,6 +92,7 @@ _MODES = ("closed", "open", "whatif")
 _FAMILIES = ("training", "checkpointing", "vector_database", "kv_cache")
 _DLIO_DIST = "dlio_benchmark"
 _S3DLIO_DIST = "s3dlio"
+_LIBDFS_NAME = "libdfs"
 
 
 class ProvenanceError(ValueError):
@@ -553,6 +555,8 @@ def _dlio_runtime() -> Tuple[Dict[str, str], str]:
 
 
 def _storage_library_runtime(data_access_protocol: Optional[str]) -> Tuple[Dict[str, str], str]:
+    if data_access_protocol == "daos":
+        return {"name": _LIBDFS_NAME, "version": UNKNOWN}, "unknown"
     if data_access_protocol != "object":
         return {"name": "none"}, "n/a"
     version = _package_version(_S3DLIO_DIST)
@@ -795,6 +799,8 @@ def derive_leaf_provenance(leaf_dir, results_root=None, log=None) -> RunProvenan
     protocol = args.get("data_access_protocol") if isinstance(args, dict) else None
     if metadata is None:
         storage_library, sl_tag = {"name": UNKNOWN, "version": UNKNOWN}, "unknown"
+    elif protocol == "daos":
+        storage_library, sl_tag = {"name": _LIBDFS_NAME, "version": UNKNOWN}, "unknown"
     elif protocol != "object":
         storage_library, sl_tag = {"name": "none"}, "n/a"
     else:

@@ -24,7 +24,7 @@ from mlpstorage_py.config import (
 )
 from mlpstorage_py.editions import checker_parameters
 from mlpstorage_py.mlps_logging import setup_logging
-from mlpstorage_py.storage_config import resolve_object_storage_config
+from mlpstorage_py.storage_config import resolve_daos_storage_config, resolve_object_storage_config
 
 logger = setup_logging("MLPerfStorage")
 
@@ -477,12 +477,25 @@ def _print_kvcache_section(args, lines: List[str]) -> None:
     _append_args(lines, args, _KVCACHE_FIELDS_UNIVERSAL)
 
 
+def _daos_effective_config(args) -> dict:
+    """DAOS pool/container/sys_name with ``--params storage.storage_options.*`` applied."""
+    config = resolve_daos_storage_config()
+    prefix = 'storage.storage_options.'
+    for item in getattr(args, 'params', None) or []:
+        key, sep, value = str(item).partition('=')
+        name = key[len(prefix):] if key.startswith(prefix) else None
+        if sep and name in config:
+            config[name] = value
+    return config
+
+
 def print_run_summary(args) -> None:
     """Print a structured table of Tier 1 CLI args and env vars via logger.status().
 
     The summary is printed immediately before benchmark execution.  When the
     data_access_protocol is 'object', a second section with S3 environment
-    variable values is appended. When the benchmark is 'vectordb' or 'kvcache',
+    variable values is appended; when it is 'daos', a section with the DAOS
+    pool, container and system name. When the benchmark is 'vectordb' or 'kvcache',
     a per-benchmark argument section is appended with the full whatif-tier
     surface plus the derived/effective values that drive the run.
 
@@ -591,6 +604,13 @@ def print_run_summary(args) -> None:
         lines.append(_row("aws_ca_bundle:",         config['aws_ca_bundle'] or '[not set]'))
         lines.append(_row("AWS_ACCESS_KEY_ID:",     config['aws_access_key_id_redacted']))
         lines.append(_row("AWS_SECRET_ACCESS_KEY:", config['aws_secret_access_key_redacted']))
+    elif getattr(args, 'data_access_protocol', None) == 'daos':
+        config = _daos_effective_config(args)
+        lines.append("")
+        lines.append("--- DAOS (libdfs) ---")
+        lines.append(_row("pool:",      config['pool'] or '[not set]'))
+        lines.append(_row("container:", config['container'] or '[not set]'))
+        lines.append(_row("sys_name:",  config['sys_name'] or '[not set]'))
 
     lines.append("")
 

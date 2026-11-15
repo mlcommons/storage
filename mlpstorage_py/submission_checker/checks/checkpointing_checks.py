@@ -11,6 +11,7 @@ from .helpers import (
     _latest_final_collection_timestamp,
     _pair_checkpoint_runs,
     _parse_iso_gap,
+    daos_storage_mismatch,
     read_fs_separation_sidecar,
 )
 
@@ -1135,7 +1136,8 @@ class CheckpointingCheck(BaseCheck):
 
         Analog of TRAIN-02 for checkpointing. Per D-B5, shares
         _check_filesystem_separation helper. Per D-B7, silent-passes when
-        benchmark_API == 'object'. Same filesystem, or no evidence at all
+        benchmark_API == 'object'; when it is 'daos', only checks that each
+        run's recorded storage config is a DAOS one. Same filesystem, or no evidence at all
         (no CAP-03 sidecar and no df block — D-B8), is a hard error. (The
         v3.0 round emitted both at WARN, PRs #788 and #800; retired with
         the round.)
@@ -1143,7 +1145,19 @@ class CheckpointingCheck(BaseCheck):
         valid = True
         if self.mode != "checkpointing":
             return valid
-        if self._get_benchmark_api() == "object":
+        benchmark_api = self._get_benchmark_api()
+        if benchmark_api == "object":
+            return valid
+        if benchmark_api == "daos":
+            for summary, metadata, timestamp in self._iter_valid_files():
+                reason = daos_storage_mismatch(metadata)
+                if reason:
+                    self.log_violation(
+                        "4.4.2", "checkpointFilesystemCheck",
+                        os.path.join(self.checkpointing_path, timestamp),
+                        "benchmark_API is 'daos' but %s", reason,
+                    )
+                    valid = False
             return valid
         for summary, metadata, timestamp in self._iter_valid_files():
             run_dir = os.path.join(self.checkpointing_path, timestamp)
