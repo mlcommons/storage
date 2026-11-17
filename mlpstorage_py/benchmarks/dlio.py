@@ -1,4 +1,5 @@
 import abc
+import json
 import os
 import os.path
 import pprint
@@ -82,6 +83,18 @@ def _uses_daos(benchmark) -> bool:
         or (combined.get('storage') or {}).get('storage_type')
     )
     return storage_type == 'daos'
+
+
+def _served_by_daos_stand_in(leaf_path) -> bool:
+    """True when DLIO's ``summary.json`` in the run leaf carries the
+    ``daos_test_stand_in`` mark. An absent or unreadable summary is not a
+    mark; the leaf check and ``mlpstorage validate`` report those."""
+    from mlpstorage_py.submission_checker.dlio_summary_helpers import daos_test_stand_in
+    try:
+        with open(os.path.join(leaf_path, 'summary.json'), 'r') as f:
+            return daos_test_stand_in(json.load(f))
+    except (OSError, ValueError):
+        return False
 
 
 def _daos_connection(benchmark) -> Optional[dict]:
@@ -1536,6 +1549,18 @@ class TrainingBenchmark(DLIOBenchmark):
                     f'stderr logs for the underlying failure.'
                 )
                 return EXIT_CODE.FAILURE
+            if _served_by_daos_stand_in(self.run_result_output):
+                self.logger.error(
+                    f'DLIO served this run from its local directory test '
+                    f'stand-in for storage_type daos (summary.json records '
+                    f'daos_test_stand_in; DLIO_DAOS_TEST_BACKING_DIR was set '
+                    f'for the ranks). The results under '
+                    f'"{self.run_result_output}" are not DAOS measurements '
+                    f'and cannot be submitted. Unset DLIO_DAOS_TEST_BACKING_DIR '
+                    f'and DLIO_DAOS_TEST_ALLOW_STAND_IN on every host and '
+                    f're-run.'
+                )
+                return EXIT_CODE.FAILURE
         return EXIT_CODE.SUCCESS
 
     def _post_datagen_actions(self) -> bool:
@@ -1716,6 +1741,18 @@ class CheckpointingBenchmark(DLIOBenchmark):
                     f'despite a zero exit code. This run cannot be '
                     f'submitted; re-run and inspect the DLIO stdout/'
                     f'stderr logs for the underlying failure.'
+                )
+                return EXIT_CODE.FAILURE
+            if _served_by_daos_stand_in(self.run_result_output):
+                self.logger.error(
+                    f'DLIO served this run from its local directory test '
+                    f'stand-in for storage_type daos (summary.json records '
+                    f'daos_test_stand_in; DLIO_DAOS_TEST_BACKING_DIR was set '
+                    f'for the ranks). The results under '
+                    f'"{self.run_result_output}" are not DAOS measurements '
+                    f'and cannot be submitted. Unset DLIO_DAOS_TEST_BACKING_DIR '
+                    f'and DLIO_DAOS_TEST_ALLOW_STAND_IN on every host and '
+                    f're-run.'
                 )
                 return EXIT_CODE.FAILURE
         return EXIT_CODE.SUCCESS

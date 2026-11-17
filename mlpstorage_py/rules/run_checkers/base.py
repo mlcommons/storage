@@ -7,7 +7,11 @@ RunRulesCheckers validate individual benchmark runs for:
 - Configuration validity (allowed parameter overrides)
 """
 
+from typing import Optional
+
+from mlpstorage_py.config import PARAM_VALIDATION
 from mlpstorage_py.rules.base import RulesChecker
+from mlpstorage_py.rules.issues import Issue
 
 
 class RunRulesChecker(RulesChecker):
@@ -51,3 +55,26 @@ class RunRulesChecker(RulesChecker):
     def system_info(self):
         """Access system information."""
         return self.benchmark_run.system_info
+
+    def check_daos_test_stand_in(self) -> Optional[Issue]:
+        """Reject a run that DLIO served from its test stand-in.
+
+        DLIO marks ``summary.json`` with ``daos_test_stand_in`` when
+        ``storage_type: daos`` was served by a local directory.  Such a run
+        is INVALID in every division.  A run without a summary (before
+        execution) or of another benchmark type never carries the mark.
+        """
+        if getattr(self.benchmark_run, "daos_test_stand_in", False) is not True:
+            return None
+        return Issue(
+            validation=PARAM_VALIDATION.INVALID,
+            message=(
+                "summary.json records daos_test_stand_in: DLIO served "
+                "storage_type daos from its local directory test stand-in, "
+                "not from DAOS. The results are not storage measurements "
+                "and cannot be reported."
+            ),
+            parameter="daos_test_stand_in",
+            expected=False,
+            actual=True,
+        )

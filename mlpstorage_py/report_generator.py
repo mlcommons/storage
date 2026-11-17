@@ -60,6 +60,11 @@ _INVALID_MSG_TRAINING_COUNT = (
 _INVALID_MSG_EMPTY_METRIC = (
     "metric {key} is empty in invocation {basename}; cannot aggregate"
 )
+_INVALID_MSG_DAOS_STAND_IN = (
+    "served by DLIO's local directory test stand-in for storage_type daos "
+    "(summary.json records daos_test_stand_in), not by a storage system: "
+    "{leaves}"
+)
 
 # Issue #836 kv_cache integrity warnings. Warnings, not INVALID gates — both
 # conditions describe a row that is misleading rather than one that violates a
@@ -685,6 +690,8 @@ class ReportGenerator:
         skipped_no_model_folder = 0
         for workload_key, workload_result in self.workload_results.items():
             row = self._workload_result_to_row(workload_key, workload_result)
+            if self._withhold_stand_in_row(row, workload_result):
+                continue
             model_folder = self._model_group_folder_for_workload(workload_result)
             if model_folder is None:
                 skipped_no_model_folder += 1
@@ -852,6 +859,40 @@ class ReportGenerator:
             ", ".join(commands),
             "; ".join(p for p in leaves if p) or "(unknown)",
         )
+
+    @staticmethod
+    def _stand_in_leaves(runs) -> List[str]:
+        """Run directories in a group that DLIO marked as served by its
+        test stand-in (``summary.json`` ``daos_test_stand_in``)."""
+        runs = runs if isinstance(runs, list) else [runs]
+        return sorted(
+            str(getattr(r, 'result_dir', '') or '(unknown)')
+            for r in runs
+            if r is not None and getattr(r, 'daos_test_stand_in', False) is True
+        )
+
+    def _withhold_stand_in_row(
+        self, row: Dict[str, Any], workload_result: 'Result',
+    ) -> bool:
+        """Whether to keep a row out of every table because DLIO served one
+        of the group's runs from its test stand-in. Such a group measured
+        no storage system in any division, whatif included."""
+        leaves = self._stand_in_leaves(workload_result.benchmark_run)
+        if not leaves:
+            return False
+        self.logger.warning(
+            "reportgen: withholding %s %s row for %s from results.csv and "
+            "results.json — DLIO served the run from its local directory "
+            "test stand-in for storage_type daos (summary.json records "
+            "daos_test_stand_in), so nothing was measured on a storage "
+            "system. Run directories: %s. Re-run against DAOS or remove "
+            "them.",
+            row.get("category", "") or "?",
+            row.get("benchmark_type", "") or "?",
+            row.get("systemname", "") or "?",
+            "; ".join(leaves),
+        )
+        return True
 
     def _withhold_metricless_row(
         self, row: Dict[str, Any], workload_result: 'Result',
@@ -3489,6 +3530,16 @@ class ReportGenerator:
                 # is a simulation, not a submission; INVALID semantics
                 # don't apply.
                 invalid_messages: List[str] = []
+                # A run DLIO served from its test stand-in measured no
+                # storage system. Unlike the rules-strict gates below,
+                # this also applies to whatif: no division publishes it.
+                stand_in_leaves = self._stand_in_leaves(runs)
+                if stand_in_leaves:
+                    invalid_messages.append(
+                        _INVALID_MSG_DAOS_STAND_IN.format(
+                            leaves=", ".join(stand_in_leaves)
+                        )
+                    )
                 # Issue #717: the D-26/D-27 (training) rules-strict
                 # gates encode Rules.md invariants that apply to the
                 # ``run`` command only — ``datagen`` legitimately

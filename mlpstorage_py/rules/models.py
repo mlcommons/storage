@@ -126,6 +126,9 @@ class BenchmarkRunData:
     # and the summary end; empty when no post-benchmark collection timestamp
     # is recorded.
     final_collection_time: str = ""
+    # DLIO summary.json ``daos_test_stand_in`` mark. True means DLIO served
+    # storage_type daos from its local directory test stand-in, not from DAOS.
+    daos_test_stand_in: bool = False
 
 
 @dataclass
@@ -806,6 +809,12 @@ class BenchmarkInstanceExtractor:
         )
 
 
+def _summary_stand_in(summary) -> bool:
+    # Imported lazily, like ClusterInformation.from_dlio_summary_json.
+    from mlpstorage_py.submission_checker.dlio_summary_helpers import daos_test_stand_in
+    return daos_test_stand_in(summary)
+
+
 def _filter_list_metrics(metric_block, logger=None, context: str = ""):
     """Filter a DLIO summary ``metric`` block to list-valued keys only.
 
@@ -949,6 +958,7 @@ class DLIOResultParser:
             invocation_start_time=(metadata or {}).get("invocation_start_time", ""),
             invocation_end_time=(metadata or {}).get("invocation_end_time", ""),
             final_collection_time=_compute_final_collection_time(metadata or {}, summary_end),
+            daos_test_stand_in=_summary_stand_in(summary),
         )
 
     def _load_summary(self, result_dir: str) -> Optional[Dict]:
@@ -1040,20 +1050,21 @@ class ResultFilesExtractor:
         # summary read to backfill both. Issues #618 and #733.
         end_datetime = metadata.get('end_datetime', '')
         run_metrics = metadata.get('metrics')
-        if not end_datetime or not run_metrics:
-            summary = self._load_summary(result_dir)
-            if summary:
-                if not end_datetime:
-                    end_datetime = summary.get('end_time') or summary.get('end', '')
-                if not run_metrics:
-                    # Filter to list-valued keys so _aggregate_training's
-                    # fmean(metric_list) doesn't blow up on scalars like
-                    # train_au_mean_percentage or strings like
-                    # train_au_meet_expectation. Dropped/blanked keys are
-                    # logged rather than silently discarded.
-                    run_metrics = _filter_list_metrics(
-                        summary.get('metric'), logger, context=f"{result_dir}: "
-                    )
+        # The summary is read for every run (not only when a field above is
+        # missing) because it also carries DLIO's daos_test_stand_in mark.
+        summary = self._load_summary(result_dir)
+        if summary:
+            if not end_datetime:
+                end_datetime = summary.get('end_time') or summary.get('end', '')
+            if not run_metrics:
+                # Filter to list-valued keys so _aggregate_training's
+                # fmean(metric_list) doesn't blow up on scalars like
+                # train_au_mean_percentage or strings like
+                # train_au_meet_expectation. Dropped/blanked keys are
+                # logged rather than silently discarded.
+                run_metrics = _filter_list_metrics(
+                    summary.get('metric'), logger, context=f"{result_dir}: "
+                )
 
         return BenchmarkRunData(
             benchmark_type=benchmark_type,
@@ -1072,6 +1083,7 @@ class ResultFilesExtractor:
             invocation_start_time=metadata.get('invocation_start_time', ''),
             invocation_end_time=metadata.get('invocation_end_time', ''),
             final_collection_time=_compute_final_collection_time(metadata, end_datetime),
+            daos_test_stand_in=_summary_stand_in(summary),
         )
 
     def _load_summary(self, result_dir: str) -> Optional[Dict]:
@@ -1220,6 +1232,10 @@ class BenchmarkRun:
     @property
     def accelerator(self):
         return self._data.accelerator
+
+    @property
+    def daos_test_stand_in(self):
+        return self._data.daos_test_stand_in
 
     @property
     def result_dir(self):

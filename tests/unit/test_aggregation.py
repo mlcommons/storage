@@ -137,6 +137,7 @@ def _make_run(
     command: str = "run",
     num_processes: int = 8,
     run_args: Optional[Dict[str, Any]] = None,
+    daos_test_stand_in: bool = False,
 ) -> BenchmarkRun:
     """Build a real ``BenchmarkRun`` from an in-memory ``BenchmarkRunData``.
 
@@ -158,6 +159,7 @@ def _make_run(
         result_dir=result_dir,
         accelerator=accelerator,
         run_args=run_args or {},
+        daos_test_stand_in=daos_test_stand_in,
     )
     return BenchmarkRun.from_data(data)
 
@@ -2705,6 +2707,181 @@ class TestInvalidRulesStrict:
 
         with pytest.raises(statistics.StatisticsError):
             gen._aggregate_workload_metrics(runs, warmup_set=set())
+
+
+# --------------------------------------------------------------------------- #
+# TestStandInGroupsPublishNothing — DLIO's daos_test_stand_in mark            #
+# --------------------------------------------------------------------------- #
+
+
+def _plant_stand_in_group(
+    results_root: pathlib.Path,
+    benchmark: str,
+    division: str,
+    *,
+    marked: bool,
+) -> Dict[str, Any]:
+    """Plant a canonical ``<division>/Acme/results/sys-1/...`` group and build
+    its runs. Training gets six leaves (the closed/open count gate empties
+    a smaller group by itself); checkpointing gets one. With ``marked`` the
+    last run carries DLIO's ``daos_test_stand_in`` mark.
+
+    Returns the runs, the marked leaf (or None) and the per-model folder.
+    """
+    system_dir = results_root / division / "Acme" / "results" / "sys-1"
+    runs: List[BenchmarkRun] = []
+    if benchmark == "training":
+        parent = system_dir / "training" / "unet3d" / "run"
+        timestamps = [f"20260701_10{i}000" for i in range(6)]
+        for i, ts in enumerate(timestamps):
+            leaf = _write_training_result_dir(parent, ts, io_mean_mibps=4096.0)
+            runs.append(
+                _make_run(
+                    benchmark_type=BENCHMARK_TYPES.training,
+                    model="unet3d",
+                    result_dir=leaf,
+                    metrics={
+                        "train_au_percentage": [95.0, 95.5, 95.2],
+                        "train_throughput_samples_per_second": [
+                            12500.0, 12480.0, 12510.0
+                        ],
+                    },
+                    accelerator="h100",
+                    run_datetime=ts,
+                    daos_test_stand_in=marked and i == len(timestamps) - 1,
+                )
+            )
+    else:
+        parent = system_dir / "checkpointing" / "llama3-8b"
+        ts = "20260703_100000"
+        leaf = _write_checkpointing_result_dir(
+            parent, ts,
+            write_bw=45.0, write_dur=12.0, read_bw=52.0, read_dur=9.0,
+        )
+        runs.append(
+            _make_run(
+                benchmark_type=BENCHMARK_TYPES.checkpointing,
+                model="llama3-8b",
+                result_dir=leaf,
+                metrics={},
+                parameters={"checkpoint": {"mode": "default"}},
+                accelerator=None,
+                run_datetime=ts,
+                daos_test_stand_in=marked,
+            )
+        )
+    return {
+        "runs": runs,
+        "marked_leaf": runs[-1].result_dir if marked else None,
+        "model_folder": parent,
+    }
+
+
+_STAND_IN_BW_COLUMN = {
+    "training": "Training - Read B/W (GiB/s)",
+    "checkpointing": "Checkpointing - Write B/W (GiB/s)",
+}
+
+
+def _has_measurement(row: Dict[str, Any]) -> bool:
+    """Whether a published row carries its measured bandwidth."""
+    return row.get(_STAND_IN_BW_COLUMN[row["Benchmark Type"]]) not in ("", None)
+
+
+def _rendered_warnings(gen) -> str:
+    return " ".join(
+        (call.args[0] % call.args[1:]) if len(call.args) > 1
+        else str(call.args[0] if call.args else call)
+        for call in gen.logger.warning.call_args_list
+    )
+
+
+class TestStandInGroupsPublishNothing:
+    """A group with a run DLIO served from its test stand-in (summary.json
+    ``daos_test_stand_in``) measured no storage system. It is INVALID, is
+    not aggregated, and publishes no row in any division, whatif included.
+    Each test runs an unmarked control first.
+    """
+
+    @pytest.mark.parametrize("division", ["closed", "open", "whatif"])
+    @pytest.mark.parametrize("benchmark", ["training", "checkpointing"])
+    def test_stand_in_group_publishes_no_row(self, tmp_path, benchmark, division):
+        # Control: the unmarked group publishes one measured row.
+        (tmp_path / "control").mkdir()
+        gen = _make_bare_generator(tmp_path / "control")
+        group = _plant_stand_in_group(
+            tmp_path / "control" / "results", benchmark, division, marked=False,
+        )
+        _run_process_workload_groups(gen, group["runs"])
+        assert gen.generate_reports() == 0
+        top_rows = json.loads(
+            (pathlib.Path(gen.global_summary_dir) / "results.json").read_text()
+        )
+        assert len(top_rows) == 1, f"control row missing: {top_rows}"
+        assert top_rows[0]["Division"] == division.upper()
+        assert _has_measurement(top_rows[0]), (
+            f"control row carries no measurement: {top_rows[0]}"
+        )
+
+        # Same layout, one run marked: nothing is published.
+        (tmp_path / "marked").mkdir()
+        gen = _make_bare_generator(tmp_path / "marked")
+        gen.logger.warning = MagicMock(wraps=gen.logger.warning)
+        group = _plant_stand_in_group(
+            tmp_path / "marked" / "results", benchmark, division, marked=True,
+        )
+        marked_leaf = group["marked_leaf"]
+        _run_process_workload_groups(gen, group["runs"])
+        assert gen.generate_reports() == 0
+
+        summary_dir = pathlib.Path(gen.global_summary_dir)
+        assert json.loads((summary_dir / "results.json").read_text()) == []
+        assert len((summary_dir / "results.csv").read_text().splitlines()) == 1
+        assert json.loads(
+            (group["model_folder"] / "results.json").read_text()
+        ) == []
+
+        assert len(gen.workload_results) == 1
+        result = next(iter(gen.workload_results.values()))
+        assert result.metrics == {}
+        assert result.category == PARAM_VALIDATION.INVALID
+        messages = [getattr(i, "message", "") or "" for i in result.issues]
+        assert any(
+            "daos_test_stand_in" in m and marked_leaf in m for m in messages
+        ), f"no stand-in issue naming {marked_leaf}: {messages}"
+
+        rendered = _rendered_warnings(gen)
+        assert marked_leaf in rendered, (
+            f"the withheld run directory was never named: {rendered[:600]}"
+        )
+        assert "test stand-in" in rendered
+
+    def test_stand_in_gate_skips_aggregation(self, tmp_path):
+        # Control: an unmarked whatif group is aggregated.
+        (tmp_path / "control").mkdir()
+        gen = _make_bare_generator(tmp_path / "control")
+        group = _plant_stand_in_group(
+            tmp_path / "control" / "results", "training", "whatif", marked=False,
+        )
+        with patch.object(
+            ReportGenerator, "_aggregate_workload_metrics", return_value={},
+        ) as aggregate:
+            _run_process_workload_groups(gen, group["runs"])
+        aggregate.assert_called_once()
+
+        # Marked: the direct summary reads in the aggregation are never reached.
+        (tmp_path / "marked").mkdir()
+        gen = _make_bare_generator(tmp_path / "marked")
+        group = _plant_stand_in_group(
+            tmp_path / "marked" / "results", "training", "whatif", marked=True,
+        )
+        with patch.object(
+            ReportGenerator, "_aggregate_workload_metrics", return_value={},
+        ) as aggregate:
+            _run_process_workload_groups(gen, group["runs"])
+        aggregate.assert_not_called()
+        result = next(iter(gen.workload_results.values()))
+        assert result.category == PARAM_VALIDATION.INVALID
 
 
 # --------------------------------------------------------------------------- #

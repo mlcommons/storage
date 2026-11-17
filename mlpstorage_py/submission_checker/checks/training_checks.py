@@ -2,7 +2,7 @@
 from .base import BaseCheck
 from ..constants import *
 from ..configuration.configuration import Config
-from ..dlio_summary_helpers import cluster_total_host_memory_gb
+from ..dlio_summary_helpers import cluster_total_host_memory_gb, daos_test_stand_in
 from ..loader import SubmissionLogs
 from ..rule_registry import rule
 from .helpers import (
@@ -1156,7 +1156,8 @@ class TrainingCheck(BaseCheck):
         checks that each run's recorded storage config is a DAOS one. Same filesystem, or no evidence
         at all (no sidecar and no df block — D-B8), is a hard error. (The
         v3.0 round emitted both at WARN, PRs #788 and #800; retired with
-        the round.)
+        the round.) A run whose summary.json carries DLIO's
+        daos_test_stand_in mark is a hard error whatever benchmark_API says.
 
         TRAIN-02 implementation: replaces stub body with _check_filesystem_separation
         helper call (from checks/helpers.py, shipped in Plan 02-01).
@@ -1164,6 +1165,19 @@ class TrainingCheck(BaseCheck):
         valid = True
         if self.mode != "training":
             return valid
+
+        # A run DLIO served from its test stand-in measured no storage
+        # system, whatever benchmark_API the system YAML declares.
+        for summary, _metadata, timestamp in self.submissions_logs.run_files:
+            if daos_test_stand_in(summary):
+                self.log_violation(
+                    "3.4.2", "trainingMlpstorageFilesystemCheck",
+                    os.path.join(self.run_path, timestamp),
+                    "summary.json records daos_test_stand_in: the run was "
+                    "served by DLIO's local directory test stand-in, not by "
+                    "the storage system, and cannot be submitted",
+                )
+                valid = False
 
         # D-B7: object-API submissions don't use 'df'; silent-pass.
         benchmark_api = self._get_benchmark_api()

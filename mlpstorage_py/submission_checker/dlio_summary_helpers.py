@@ -1,7 +1,8 @@
 """Helpers for interpreting DLIO ``summary.json`` fields that the raw
 array shape makes error-prone.
 
-Currently limited to ``host_memory_GB``. DLIO populates that field via
+Currently limited to ``host_memory_GB`` and the ``daos_test_stand_in``
+mark (see ``daos_test_stand_in``). DLIO populates ``host_memory_GB`` via
 an MPI ``SUM``-Reduce keyed on ``self.MPI.node()`` — one slot per
 "node index", filled once per host by that host's local-rank-0. On
 multi-rank-per-host clusters where ``self.MPI.node()`` does not
@@ -83,3 +84,14 @@ def per_host_memory_gb(summary: Mapping[str, Any]) -> Optional[float]:
     if num_hosts <= 0:
         return None
     return total / num_hosts
+
+
+def daos_test_stand_in(summary: Any) -> bool:
+    """True when DLIO marked the run as served by its test stand-in.
+
+    DLIO sets the top-level ``daos_test_stand_in`` field only when
+    ``storage_type: daos`` was served by a local directory instead of DAOS.
+    Such a run measured no storage system.  Anything that is not a mapping
+    counts as unmarked.
+    """
+    return isinstance(summary, Mapping) and bool(summary.get("daos_test_stand_in"))

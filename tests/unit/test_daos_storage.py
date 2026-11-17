@@ -15,6 +15,9 @@ Covers:
     and the results-dir check still runs.
   - Datagen hierarchy and manifest go through the DFS client.
   - Cluster collector, provenance, run summary and report label.
+  - Runs that DLIO served from its test stand-in (``summary.json``
+    ``daos_test_stand_in``): INVALID in the run checker and the verifier,
+    and ``closed``/``open`` ``run`` fails while ``whatif`` does not.
 
 The DFS client lives in the DLIO package
 (``dlio_benchmark.storage.dfs_client.get_client``); every test that reaches
@@ -628,3 +631,179 @@ class TestDaosReporting:
         from mlpstorage_py.system_description.schema_validator import BenchmarkAPI
 
         assert BenchmarkAPI('daos') is BenchmarkAPI.daos
+
+
+# ---------------------------------------------------------------------------
+# Runs served by DLIO's test stand-in
+# ---------------------------------------------------------------------------
+
+def _stand_in_run_data(benchmark_type=None, **overrides):
+    from mlpstorage_py.config import BENCHMARK_TYPES
+    from mlpstorage_py.rules.models import BenchmarkRunData
+
+    if benchmark_type is None:
+        benchmark_type = BENCHMARK_TYPES.training
+    if benchmark_type == BENCHMARK_TYPES.checkpointing:
+        base = dict(
+            model="llama3-8b",
+            num_processes=8,
+            parameters={},
+        )
+    else:
+        base = dict(
+            model="unet3d",
+            num_processes=1,
+            parameters={
+                "dataset": {"num_files_train": 1000},
+                "reader": {"read_threads": 1},
+            },
+        )
+    base.update(
+        benchmark_type=benchmark_type,
+        command="run",
+        run_datetime="20261115_120000",
+        override_parameters={},
+        result_dir="/results/run/20261115_120000",
+    )
+    base.update(overrides)
+    return BenchmarkRunData(**base)
+
+
+def _stand_in_leaf(tmp_path, summary):
+    import json
+
+    leaf = tmp_path / "run" / "20261115_120000"
+    leaf.mkdir(parents=True)
+    (leaf / "summary.json").write_text(json.dumps(summary))
+    return leaf
+
+
+def _stand_in_bench(cls, leaf, mode):
+    bm = MagicMock(spec=cls)
+    bm.args = SimpleNamespace(command="run", mode=mode)
+    if cls is TrainingBenchmark:
+        bm.command_method_map = {"run": MagicMock()}
+    bm.logger = MagicMock()
+    bm.run_result_output = str(leaf)
+    bm._last_command_rc = 0
+    return bm
+
+
+def _assert_command_ran(cls, bm):
+    if cls is TrainingBenchmark:
+        bm.command_method_map["run"].assert_called_once()
+    else:
+        bm.execute_command.assert_called_once()
+
+
+_LEAF_CHECKS = [
+    (TrainingBenchmark, "validate_run_leaf"),
+    (CheckpointingBenchmark, "validate_checkpoint_leaf"),
+]
+
+
+class TestDaosStandInResults:
+
+    def test_run_checker_marks_stand_in_run_invalid(self):
+        from mlpstorage_py.config import BENCHMARK_TYPES, PARAM_VALIDATION
+        from mlpstorage_py.rules.models import BenchmarkRun
+        from mlpstorage_py.rules.run_checkers.checkpointing import CheckpointingRunRulesChecker
+        from mlpstorage_py.rules.run_checkers.training import TrainingRunRulesChecker
+
+        logger = MagicMock()
+        cases = [
+            (TrainingRunRulesChecker,
+             _stand_in_run_data(daos_test_stand_in=True)),
+            # An OPEN-only override does not turn the mark into OPEN.
+            (TrainingRunRulesChecker,
+             _stand_in_run_data(daos_test_stand_in=True,
+                                override_parameters={"dataset.format": "npy"})),
+            (CheckpointingRunRulesChecker,
+             _stand_in_run_data(BENCHMARK_TYPES.checkpointing, daos_test_stand_in=True)),
+        ]
+        for checker_cls, data in cases:
+            run = BenchmarkRun.from_data(data, logger)
+            assert run.daos_test_stand_in is True
+            issue = checker_cls(run, logger=logger).check_daos_test_stand_in()
+            assert issue.validation == PARAM_VALIDATION.INVALID
+            assert issue.parameter == "daos_test_stand_in"
+            assert issue.severity == "error"
+
+    def test_run_checker_passes_unmarked_run(self):
+        from mlpstorage_py.config import BENCHMARK_TYPES
+        from mlpstorage_py.rules.models import BenchmarkRun
+        from mlpstorage_py.rules.run_checkers.checkpointing import CheckpointingRunRulesChecker
+        from mlpstorage_py.rules.run_checkers.training import TrainingRunRulesChecker
+
+        logger = MagicMock()
+        for checker_cls, data in (
+            (TrainingRunRulesChecker, _stand_in_run_data()),
+            (CheckpointingRunRulesChecker,
+             _stand_in_run_data(BENCHMARK_TYPES.checkpointing)),
+        ):
+            run = BenchmarkRun.from_data(data, logger)
+            assert run.daos_test_stand_in is False
+            checker = checker_cls(run, logger=logger)
+            assert checker.check_daos_test_stand_in() is None
+            assert "check_daos_test_stand_in" in [m.__name__ for m in checker.check_methods]
+
+    def test_verifier_reports_invalid_for_stand_in_run(self):
+        from mlpstorage_py.config import BENCHMARK_TYPES, PARAM_VALIDATION
+        from mlpstorage_py.rules.models import BenchmarkRun
+        from mlpstorage_py.rules.verifier import BenchmarkVerifier
+
+        logger = MagicMock()
+
+        # Control: the same CLOSED run without the mark is CLOSED.
+        run = BenchmarkRun.from_data(
+            _stand_in_run_data(BENCHMARK_TYPES.checkpointing), logger)
+        verifier = BenchmarkVerifier(run, logger=logger)
+        assert verifier.verify() == PARAM_VALIDATION.CLOSED
+
+        run = BenchmarkRun.from_data(
+            _stand_in_run_data(BENCHMARK_TYPES.checkpointing, daos_test_stand_in=True),
+            logger)
+        verifier = BenchmarkVerifier(run, logger=logger)
+        assert verifier.verify() == PARAM_VALIDATION.INVALID
+        invalid = [i for i in verifier.issues if i.validation == PARAM_VALIDATION.INVALID]
+        assert len(invalid) == 1
+        assert invalid[0].parameter == "daos_test_stand_in"
+
+        # An OPEN-only process count (16 for llama3-8b) stays INVALID, not OPEN.
+        run = BenchmarkRun.from_data(
+            _stand_in_run_data(BENCHMARK_TYPES.checkpointing, num_processes=16,
+                               daos_test_stand_in=True),
+            logger)
+        verifier = BenchmarkVerifier(run, logger=logger)
+        assert verifier.verify() == PARAM_VALIDATION.INVALID
+        assert any(i.validation == PARAM_VALIDATION.OPEN for i in verifier.issues)
+        invalid = [i for i in verifier.issues if i.validation == PARAM_VALIDATION.INVALID]
+        assert [i.parameter for i in invalid] == ["daos_test_stand_in"]
+
+    @pytest.mark.parametrize("mode", ["closed", "open"])
+    @pytest.mark.parametrize("cls, leaf_check", _LEAF_CHECKS)
+    def test_run_fails_for_stand_in_summary(self, tmp_path, cls, leaf_check, mode):
+        from mlpstorage_py.config import EXIT_CODE
+
+        leaf = _stand_in_leaf(tmp_path, {"daos_test_stand_in": True})
+        bm = _stand_in_bench(cls, leaf, mode)
+        with patch(f"mlpstorage_py.benchmarks.dlio.{leaf_check}", return_value=[]):
+            assert cls._run(bm) == EXIT_CODE.FAILURE
+        _assert_command_ran(cls, bm)
+        assert any("daos_test_stand_in" in str(c) for c in bm.logger.error.call_args_list)
+
+    @pytest.mark.parametrize("cls, leaf_check", _LEAF_CHECKS)
+    def test_run_passes_without_mark_and_in_whatif(self, tmp_path, cls, leaf_check):
+        from mlpstorage_py.config import EXIT_CODE
+
+        for mode, summary in (
+            ("closed", {}),
+            ("open", {}),
+            ("whatif", {"daos_test_stand_in": True}),
+        ):
+            leaf = _stand_in_leaf(tmp_path / mode, summary)
+            bm = _stand_in_bench(cls, leaf, mode)
+            with patch(f"mlpstorage_py.benchmarks.dlio.{leaf_check}", return_value=[]):
+                assert cls._run(bm) == EXIT_CODE.SUCCESS
+            _assert_command_ran(cls, bm)
+            bm.logger.error.assert_not_called()

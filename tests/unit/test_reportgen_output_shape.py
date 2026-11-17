@@ -387,6 +387,37 @@ class TestWhatifCategoryValue:
                     f"gates. Issues: {issue_text}"
                 )
 
+    def test_whatif_stand_in_run_publishes_no_row(self, tmp_path):
+        """A whatif run DLIO served from its test stand-in (summary.json
+        ``daos_test_stand_in``) publishes no row, from files on disk through
+        extractor, gate and tables. ``test_whatif_row_emits_category_whatif``
+        above is the unmarked control on the same fixture."""
+        fixture_src = _FIXTURES_ROOT / "whatif"
+        results_root = tmp_path / "results_dir"
+        results_root.mkdir()
+        shutil.copytree(fixture_src, results_root / "whatif")
+
+        summaries = sorted((results_root / "whatif").glob(
+            "training/unet3d/run/*/summary.json"))
+        assert summaries, "whatif fixture has no run summary.json"
+        summary = json.loads(summaries[0].read_text())
+        summary["daos_test_stand_in"] = True
+        summaries[0].write_text(json.dumps(summary))
+
+        gen = ReportGenerator(
+            str(results_root), args=Namespace(debug=False),
+            validate_structure=False,
+        )
+        rc = gen.generate_reports()
+        assert rc == 0, f"generate_reports returned non-zero exit code {rc}"
+
+        top_json = pathlib.Path(gen.global_summary_dir) / "results.json"
+        rows = json.loads(top_json.read_text())
+        whatif_rows = [r for r in rows if r.get('Division') == 'WHATIF']
+        assert whatif_rows == [], (
+            f"a whatif group with a stand-in run published a row: {whatif_rows}"
+        )
+
 
 # --------------------------------------------------------------------------- #
 # TestMultiOrgnameCollection — D-08                                           #
