@@ -57,6 +57,7 @@ from __future__ import annotations
 import dataclasses
 import datetime
 import json
+import logging
 import os
 import posixpath
 import re
@@ -69,6 +70,8 @@ from mlpstorage_py import __version__ as _MLPSTORAGE_VERSION
 from mlpstorage_py.config import MODELS, RULES_EDITION
 from mlpstorage_py.errors import ConfigurationError, ErrorCode
 from mlpstorage_py.editions import checker_parameters, current_edition
+
+logger = logging.getLogger(__name__)
 
 
 DATAGEN_MANIFEST_FILENAME = ".mlps-datagen-manifest.json"
@@ -198,8 +201,15 @@ def _daos_display(daos: Mapping[str, Any], path: str) -> str:
 
 
 def _daos_client(daos: Mapping[str, Any]):
-    from dlio_benchmark.storage.dfs_client import get_client
+    from dlio_benchmark.storage.dfs_client import get_client, stand_in_dir
 
+    backing = stand_in_dir()
+    if backing is not None:
+        logger.warning(
+            f"The DAOS test stand-in directory {backing!r} serves the datagen "
+            f"manifest and overwrite checks instead of DAOS. Results from "
+            f"such runs are not valid for submission."
+        )
     return get_client(daos["pool"], daos["container"], daos.get("sys_name"))
 
 

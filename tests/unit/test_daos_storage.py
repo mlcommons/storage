@@ -104,6 +104,20 @@ class _MemDfsClient:
         self.dirs.discard(path)
 
 
+STAND_IN_BACKING_ENV = 'DLIO_DAOS_TEST_BACKING_DIR'
+STAND_IN_ALLOW_ENV = 'DLIO_DAOS_TEST_ALLOW_STAND_IN'
+
+
+def _stub_stand_in_dir():
+    """Same rule as dlio_benchmark.storage.dfs_client.stand_in_dir."""
+    backing = os.environ.get(STAND_IN_BACKING_ENV) or None
+    if backing is None:
+        return None
+    if os.environ.get(STAND_IN_ALLOW_ENV) != '1':
+        raise RuntimeError(f'{STAND_IN_BACKING_ENV} is set but {STAND_IN_ALLOW_ENV}=1 is not')
+    return backing
+
+
 @pytest.fixture
 def dfs_stub(monkeypatch):
     """Install a stub ``dlio_benchmark.storage.dfs_client`` module."""
@@ -116,6 +130,7 @@ def dfs_stub(monkeypatch):
 
     module = types.ModuleType(DFS_CLIENT_MODULE)
     module.get_client = get_client
+    module.stand_in_dir = _stub_stand_in_dir
     monkeypatch.setitem(sys.modules, DFS_CLIENT_MODULE, module)
     client.get_client_calls = calls
     return client
@@ -494,10 +509,29 @@ class TestDaosManifest:
             raise OSError(2, 'pool not found')
 
         module.get_client = get_client
+        module.stand_in_dir = _stub_stand_in_dir
         monkeypatch.setitem(sys.modules, DFS_CLIENT_MODULE, module)
         with pytest.raises(ConfigurationError) as exc_info:
             assert_data_dir_hierarchy_absent('/mlperf/data', 'unet3d', daos=DAOS_TARGET)
         assert 'pool not found' in str(exc_info.value)
+
+    def test_hierarchy_check_warns_when_stand_in_serves_it(
+            self, dfs_stub, monkeypatch, tmp_path):
+        from mlpstorage_py.rules import datagen_hierarchy
+
+        monkeypatch.setenv(STAND_IN_BACKING_ENV, str(tmp_path))
+        monkeypatch.setenv(STAND_IN_ALLOW_ENV, '1')
+        logger = MagicMock()
+        monkeypatch.setattr(datagen_hierarchy, 'logger', logger)
+
+        datagen_hierarchy.assert_data_dir_hierarchy_absent(
+            '/mlperf/data', 'unet3d', daos=DAOS_TARGET)
+
+        assert logger.warning.call_count == 1
+        message = logger.warning.call_args[0][0]
+        assert 'stand-in' in message
+        assert str(tmp_path) in message
+        assert 'not valid for submission' in message
 
     def test_training_datagen_uses_container_paths(self, dfs_stub, daos_env, tmp_path):
         """TrainingBenchmark(datagen, daos): injected params, container-side
