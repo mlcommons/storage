@@ -188,6 +188,23 @@ def _is_object_storage(args) -> bool:
     return False
 
 
+def _is_daos_storage(args) -> bool:
+    """Return True if args select a DAOS container accessed through libdfs.
+
+    Dataset and checkpoint paths are then paths inside the container, not
+    local paths; the results directory and config file stay local.
+    """
+    if getattr(args, 'data_access_protocol', None) == 'daos':
+        return True
+    params = getattr(args, 'params', None) or []
+    for p in params:
+        if '=' in p:
+            k, v = p.split('=', 1)
+            if k.strip() == 'storage.storage_type' and v.strip() == 'daos':
+                return True
+    return False
+
+
 def _validate_paths(args) -> List[Exception]:
     """
     Validate file system paths exist and are accessible.
@@ -204,9 +221,10 @@ def _validate_paths(args) -> List[Exception]:
     # Skip all filesystem path checks for object storage (S3/minio/etc.)
     if _is_object_storage(args):
         return errors
+    is_daos = _is_daos_storage(args)
 
     # Validate data directory for run commands
-    if command == 'run':
+    if command == 'run' and not is_daos:
         data_dir = getattr(args, 'data_dir', None)
         if data_dir and not os.path.exists(data_dir):
             errors.append(FileSystemError(
@@ -219,7 +237,7 @@ def _validate_paths(args) -> List[Exception]:
 
     # Validate checkpoint directory exists or can be created
     checkpoint_dir = getattr(args, 'checkpoint_folder', None)
-    if checkpoint_dir:
+    if checkpoint_dir and not is_daos:
         parent_dir = os.path.dirname(checkpoint_dir)
         if parent_dir and not os.path.exists(parent_dir):
             errors.append(FileSystemError(

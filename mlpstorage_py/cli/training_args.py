@@ -257,7 +257,7 @@ def _add_training_core_args(parser, command, accel_choices):
 
     # Storage type positional for datagen, run, configview — NOT datasize
     if command in ("datagen", "run", "configview"):
-        add_storage_type_arguments(parser, required=True)
+        add_storage_type_arguments(parser, required=True, allow_daos=True)
 
 
 def _add_training_open_args(parser, command):
@@ -306,7 +306,7 @@ def validate_training_arguments(args):
     # earlier in cli_parser.parse_arguments via parser.error(). Message text is
     # the D-02 verbatim template (Phase 5 D-02 / D-07) — do NOT paraphrase; it
     # is pinned by loud-error tests.
-    if command in ('datagen', 'run') and protocol == 'object' and not getattr(args, 'data_dir', None):
+    if command in ('datagen', 'run') and protocol in ('object', 'daos') and not getattr(args, 'data_dir', None):
         print(
             f"error: --data-dir/-dd is required: pass it on the command line or set MLPSTORAGE_DATA_DIR",
             file=sys.stderr,

@@ -412,6 +412,19 @@ class TestDLIOResultParser:
             "A13: the drop diagnostic must not warn per run"
         )
 
+    def test_parse_reads_stand_in_mark(self, mock_logger, training_result_dir):
+        """DLIO's ``daos_test_stand_in`` summary mark reaches BenchmarkRunData
+        on the parser path; an unmarked summary leaves it False."""
+        parser = DLIOResultParser(logger=mock_logger)
+        assert parser.parse(str(training_result_dir)).daos_test_stand_in is False
+
+        summary_path = training_result_dir / "summary.json"
+        summary = json.loads(summary_path.read_text())
+        summary["daos_test_stand_in"] = True
+        summary_path.write_text(json.dumps(summary))
+
+        assert parser.parse(str(training_result_dir)).daos_test_stand_in is True
+
 
 class TestResultFilesExtractor:
     """Tests for ResultFilesExtractor class."""
@@ -738,6 +751,54 @@ class TestResultFilesExtractor:
         assert not mock_logger.warning.called, (
             "A13: the collapse diagnostic must not warn per run"
         )
+
+    def test_from_metadata_reads_stand_in_mark(self, mock_logger, tmp_path):
+        """The summary is read even when metadata already carries
+        end_datetime and metrics, so DLIO's ``daos_test_stand_in`` mark is
+        never missed; explicit metadata metrics still win."""
+        result_dir = tmp_path / "training_run"
+        result_dir.mkdir()
+
+        metadata = {
+            "benchmark_type": "training",
+            "model": "unet3d",
+            "command": "run",
+            "run_datetime": "20260701_100000",
+            "end_datetime": "20260701_101500",
+            "num_processes": 8,
+            "parameters": {"dataset": {"num_files_train": 400}},
+            "metrics": {"train_au_percentage": [96.1, 95.8, 96.4]},
+        }
+        with open(result_dir / "training_20260701_100000_metadata.json", 'w') as f:
+            json.dump(metadata, f)
+        with open(result_dir / "summary.json", 'w') as f:
+            json.dump({"daos_test_stand_in": True}, f)
+
+        extractor = ResultFilesExtractor()
+        result = extractor._from_metadata(metadata, str(result_dir))
+
+        assert result.daos_test_stand_in is True
+        assert result.metrics == {"train_au_percentage": [96.1, 95.8, 96.4]}
+        assert result.end_datetime == "20260701_101500"
+
+    def test_from_metadata_without_summary_is_unmarked(self, mock_logger, tmp_path):
+        """No summary.json -> the run carries no stand-in mark."""
+        result_dir = tmp_path / "training_run"
+        result_dir.mkdir()
+
+        metadata = {
+            "benchmark_type": "training",
+            "model": "unet3d",
+            "command": "run",
+            "run_datetime": "20260701_100000",
+            "num_processes": 8,
+            "parameters": {},
+        }
+
+        extractor = ResultFilesExtractor()
+        result = extractor._from_metadata(metadata, str(result_dir))
+
+        assert result.daos_test_stand_in is False
 
 
 class TestExtractorIntegration:

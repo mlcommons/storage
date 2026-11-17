@@ -109,6 +109,26 @@ def read_fs_separation_sidecar(run_dir: str) -> dict | None:
         return None
 
 
+def daos_storage_mismatch(metadata: dict) -> str | None:
+    """Describe why a run's recorded storage config is not a DAOS run.
+
+    Reads the effective ``parameters['storage']`` block of the run
+    metadata. Returns ``None`` when ``storage_type`` is ``daos`` and both
+    ``storage_options.pool`` and ``storage_options.container`` are
+    non-empty; otherwise returns a short reason string.
+    """
+    storage = (metadata.get("parameters") or {}).get("storage") or {}
+    storage_type = storage.get("storage_type")
+    if storage_type != "daos":
+        return f"storage.storage_type is {storage_type!r}, expected 'daos'"
+    options = storage.get("storage_options") or {}
+    missing = [f"storage.storage_options.{key}"
+               for key in ("pool", "container") if not options.get(key)]
+    if missing:
+        return " and ".join(missing) + " not recorded"
+    return None
+
+
 # ---------------------------------------------------------------------------
 # df header regex (D-B1, locked)
 # ---------------------------------------------------------------------------

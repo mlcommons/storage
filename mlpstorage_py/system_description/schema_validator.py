@@ -40,6 +40,7 @@ class StorageLocation(str, Enum):
 class BenchmarkAPI(str, Enum):
     file   = 'file'
     object = 'object'
+    daos   = 'daos'
 
 
 class ProductAPI(str, Enum):

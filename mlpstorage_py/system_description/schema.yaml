@@ -21,7 +21,7 @@ system_under_test:
             # For example: an NFS box would be a "remote", "file", "file", "open_source", "in_box" solution
             # For example: Lustre would be a "remote", "file", "file", "closed_source", "installable" solution
             storage_location:       enum( 'remote', 'local', 'remote_and_local' )
-            benchmark_API:          enum( 'file', 'object' )            # what the benchmark uses
+            benchmark_API:          enum( 'file', 'object', 'daos' )    # what the benchmark uses
             product_API:            enum( 'file', 'object', 'block' )   # What the product supports
             client_footprint:       enum( 'open_source', 'closed_source', 'n/a' )
             client_installation:    enum( 'in_box', 'installable', 'n/a' )

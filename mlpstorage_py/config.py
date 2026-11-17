@@ -251,6 +251,9 @@ MANPAGE_ENV_VAR_TIERS = {
     'S3_ENDPOINT_TEMPLATE': 'storage-borrowed',
     'S3_ENDPOINT_FILE': 'storage-borrowed',
     'S3_ENDPOINT': 'storage-borrowed',
+    'DAOS_POOL': 'storage-borrowed',                  # daos positional: pool label or UUID (storage_config.resolve_daos_storage_config).
+    'DAOS_CONT': 'storage-borrowed',                  # daos positional: container label or UUID.
+    'DAOS_SYS_NAME': 'storage-borrowed',              # daos positional: optional DAOS system name.
 
     # -- Internal-write (1 primary) --
     'DLIO_DROP_CACHES_TIMEOUT': 'internal-write',     # write site at benchmarks/dlio.py:768; also read via `in os.environ` at dlio.py:735.

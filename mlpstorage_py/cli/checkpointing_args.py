@@ -145,7 +145,7 @@ def _add_checkpointing_core_args(parser, command, accel_choices):
 
     # Storage type positional for run and configview — NOT datasize
     if command in ("run", "configview"):
-        add_storage_type_arguments(parser, required=True)
+        add_storage_type_arguments(parser, required=True, allow_daos=True)
 
     # --o-direct: available for run and configview (not datasize).
     # Routes all checkpoint I/O through s3dlio's direct:// URI scheme with

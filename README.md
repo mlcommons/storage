@@ -382,6 +382,7 @@ the leaf command. Exactly one of the following is required:
 |---|---|---|
 | `file` | POSIX/parallel filesystem (local, NFS, Lustre, GPFS, WekaFS, etc.) accessed via the data / checkpoint-folder path. | Block storage, file storage, parallel filesystem submissions. |
 | `object` | S3-compatible object store, accessed via one of the three supported object-store libraries (see [docs/OBJECT_STORAGE_GUIDE.md](docs/OBJECT_STORAGE_GUIDE.md) and `tests/README.md`). | Object-storage submissions. Requires endpoint/bucket env vars. |
+| `daos` | DAOS container accessed through libdfs, with no dfuse mount (`training` and `checkpointing` only). The pool and container come from `DAOS_POOL` / `DAOS_CONT` (optional `DAOS_SYS_NAME`); see [ManPage.md](ManPage.md) → DATA DIRECTORY → "DAOS storage". | DAOS submissions using the native DAOS API. Requires the DAOS client libraries on every host and an existing container. |
 
 The selector is absent on commands that don't touch storage:
 - `training/<model>/datasize` — sizing only.
